@@ -22,3 +22,21 @@ python -m grc
 
 ## Current Status
 Currently, the project is only a port of GNURadio Companion (v3.10.12.0)
+
+
+## Wanted API
+1. Resources
+- List available blocks
+- List block params
+
+- List current blocks
+- List current connections
+
+2. Tools
+- Add block
+- Remove block
+- Set block params
+- Add connection
+- Remove connection
+
+-[ ] use pydantic

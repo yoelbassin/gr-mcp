@@ -69,6 +69,71 @@ log = logging.getLogger('grc')
 # The default console logging should be WARNING
 log.setLevel(logging.DEBUG)
 
+def run_api(args, log):
+
+    from .core.platform import Platform
+    from .core.FlowGraph import FlowGraph
+
+    platform = Platform(
+        version=gr.version(),
+        version_parts=(gr.major_version(), gr.api_version(), gr.minor_version()),
+        prefs=gr.prefs(),
+        # install_prefix=gr.prefix()
+    )
+    platform.build_library()
+
+
+    from .mcp.mcp import CoreMiddleware
+    mcp = CoreMiddleware(platform, "")
+
+    from fastmcp import FastMCP
+
+    app = FastMCP("Demo 🚀")
+
+    app.tool()(mcp.list_all_blocks)
+    app.tool()(mcp.list_block_input_data)
+    app.tool()(mcp.list_block_output_data)
+    app.tool()(mcp.list_block_parameters_data)
+
+    app.tool()(mcp.get_placed_blocks)
+    app.tool()(mcp.get_placed_connections)
+    app.tool()(mcp.get_placed_block_params)
+
+    app.tool()(mcp.validate_block)
+    app.tool()(mcp.validate_connection)
+    app.tool()(mcp.validate_flowgraph)
+    app.tool()(mcp.get_all_errors)
+
+    app.tool()(mcp.add_block)
+    app.tool()(mcp.remove_block)
+    app.tool()(mcp.connect_blocks)
+    app.tool()(mcp.update_block_params)
+
+    app.tool()(mcp.save_flowgraph)
+
+
+    app.run(transport='sse')
+
+
+    # print(mcp.flowgraph_blocks())
+    # print(mcp.flowgraph_connections())
+    # initial_state = platform.parse_flow_graph("")
+    # fg = FlowGraph(platform)
+    # fg.import_data(initial_state)
+    # source = fg.new_block('analog_const_source_x')
+    # source.params['id'].set_value('test1')
+    # sink = fg.new_block('virtual_sink')
+    # sink.params['id'].set_value('test2')
+    # conn = fg.connect(source.sources[0], sink.sinks[0])
+    # platform.save_flow_graph('test.grc', fg)
+    
+    # mcp.add_block('analog_const_source_x')
+    # mcp.add_block('virtual_sink')
+    # mcp.connect_blocks('analog_const_source_x_0', 0, 'virtual_sink_0', 0)
+
+    
+
+
 
 def run_gtk(args, log):
     ''' Runs the GTK version of GNU Radio Companion '''
@@ -182,7 +247,6 @@ def run_qt(args, log):
         install_prefix=gr.prefix()
     )
     model.build_library()
-
     # Launch GRC
     app = grc.Application(settings, model, args.flow_graphs)
     sys.exit(app.run())
@@ -285,6 +349,8 @@ def main():
                                      help="GNU Radio Companion (QT)")
     gui_group_exclusive.add_argument("--gtk", dest='framework', action='store_const', const='gtk',
                                      help="GNU Radio Companion (GTK)")
+    gui_group_exclusive.add_argument("--api", dest='framework', action='store_const', const='api',
+                                     help="GNU Radio Companion (API)")
 
     # Default options if not already set with add_argument()
     args = parser.parse_args()
@@ -316,6 +382,8 @@ def main():
         run_qt(args, log)
     elif args.framework == 'gtk':
         run_gtk(args, log)
+    elif args.framework == 'api':
+        run_api(args, log)
     else:  # args.framework == None
         if grc_version_from_config == 'grc_qt':
             run_qt(args, log)
