@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any, Dict
+
 from gnuradio.grc.core.blocks.block import Block
 
 from gnuradio_mcp.models import SINK, SOURCE, ParamModel, PortModel
@@ -13,8 +15,14 @@ class BlockMiddleware:
     def name(self) -> str:
         return self._block.name
 
-    # TODO: Check if rewrite is needed
+    def set_param(self, param_name: str, param_value: Any):
+        self._block.params[param_name].set_value(param_value)
 
+    def set_params(self, params: Dict[str, Any]):
+        for param_name, param_value in params.items():
+            self.set_param(param_name, param_value)
+
+    # TODO: Check if rewrite is needed
     @property
     def params(self) -> list[ParamModel]:
         return [ParamModel.from_param(param) for param in self._block.params.values()]

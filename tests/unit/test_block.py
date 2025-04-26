@@ -34,6 +34,16 @@ def test_block_middleware_sources(block_middleware: BlockMiddleware):
     check_port_models(block_middleware.sources, block_middleware._block.sources, SOURCE)
 
 
+def test_block_middleware_set_param(block_middleware: BlockMiddleware):
+    block_middleware.set_param("id", "my_custom_block_name")
+    assert block_middleware._block.params["id"].get_value() == "my_custom_block_name"
+
+
+def test_block_middleware_set_params(block_middleware: BlockMiddleware):
+    block_middleware.set_params({"id": "my_custom_block_name"})
+    assert block_middleware._block.params["id"].get_value() == "my_custom_block_name"
+
+
 def check_param_models(block: Block, params: list[ParamModel]):
     assert params
     assert len(params) == len(block.params)
