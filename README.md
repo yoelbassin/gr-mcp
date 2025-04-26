@@ -15,28 +15,13 @@ pip install -e .
 ```
 we use the `--system-site-packages` flag since GNURadio installs the `gnuradio` python package globally.
 
-Run using
-```bash
-python -m grc
-```
-
 ## Current Status
-Currently, the project is only a port of GNURadio Companion (v3.10.12.0)
+Rewriting the server using `gnuradio.grc` library. Currently using GNURadio Companion (v3.10.12.0).
 
-
-## Wanted API
-1. Resources
-- List available blocks
-- List block params
-
-- List current blocks
-- List current connections
-
-2. Tools
-- Add block
-- Remove block
-- Set block params
-- Add connection
-- Remove connection
-
--[ ] use pydantic
+## TODO:
+- Add flowgraph save
+- Add elements validation
+- Add errors check
+- Build MCP interface
+- [Optional] Build REST interface
+- Implement usage of Python Block
