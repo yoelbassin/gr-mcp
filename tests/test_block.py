@@ -17,8 +17,8 @@ def flowgraph_middleware(platform: Platform):
 
 @pytest.fixture
 def block(flowgraph_middleware: FlowGraphMiddleware, block_key: str):
-    flowgraph_middleware.add_block(block_key, block_key)
-    return flowgraph_middleware._flowgraph.get_block(block_key)
+    block_name = flowgraph_middleware.add_block(block_key)
+    return flowgraph_middleware._flowgraph.get_block(block_name)
 
 
 def test_block_middleware_params(block: Block):
