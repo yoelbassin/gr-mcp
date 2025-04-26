@@ -10,30 +10,28 @@ from gnuradio_mcp.models import SINK, SOURCE, ParamModel
 
 
 @pytest.fixture
-def flowgraph_middleware(platform: Platform):
+def flowgraph_middleware(platform: Platform) -> FlowGraphMiddleware:
     flowgraph = platform.make_flow_graph("")
     return FlowGraphMiddleware(flowgraph)
 
 
 @pytest.fixture
-def block(flowgraph_middleware: FlowGraphMiddleware, block_key: str):
-    block_name = flowgraph_middleware.add_block(block_key)
-    return flowgraph_middleware._flowgraph.get_block(block_name)
+def block_middleware(
+    flowgraph_middleware: FlowGraphMiddleware, block_key: str
+) -> BlockMiddleware:
+    return flowgraph_middleware.add_block(block_key)
 
 
-def test_block_middleware_params(block: Block):
-    middleware = BlockMiddleware(block)
-    check_param_models(block, middleware.params)
+def test_block_middleware_params(block_middleware: BlockMiddleware):
+    check_param_models(block_middleware._block, block_middleware.params)
 
 
-def test_block_middleware_sinks(block: Block):
-    middleware = BlockMiddleware(block)
-    check_port_models(middleware.sinks, block.sinks, SINK)
+def test_block_middleware_sinks(block_middleware: BlockMiddleware):
+    check_port_models(block_middleware.sinks, block_middleware._block.sinks, SINK)
 
 
-def test_block_middleware_sources(block: Block):
-    middleware = BlockMiddleware(block)
-    check_port_models(middleware.sources, block.sources, SOURCE)
+def test_block_middleware_sources(block_middleware: BlockMiddleware):
+    check_port_models(block_middleware.sources, block_middleware._block.sources, SOURCE)
 
 
 def check_param_models(block: Block, params: list[ParamModel]):
@@ -51,7 +49,7 @@ def check_port_models(port_models, ports, direction):
     assert isinstance(port_models, list)
     assert len(port_models) == len(ports)
     for model, port in zip(port_models, ports):
-        assert model.key == port.key
+        assert model.key == int(port.key)
         assert model.name == port.name
         assert model.dtype == port.dtype
         assert model.direction == direction
