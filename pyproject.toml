@@ -18,6 +18,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest >= 7.0",
+    "pre-commit"
 ]
 
 [tool.ruff]

@@ -1,9 +1,9 @@
-from typing import List
+from __future__ import annotations
+
 import pytest
-from gnuradio.grc.core.platform import Platform
 from gnuradio.grc.core.blocks.block import Block
-from gnuradio.grc.core.FlowGraph import FlowGraph
-from gnuradio import gr
+from gnuradio.grc.core.platform import Platform
+
 from gnuradio_mcp.middlewares.block import BlockMiddleware
 from gnuradio_mcp.middlewares.flowgraph import FlowGraphMiddleware
 from gnuradio_mcp.models import SINK, SOURCE, ParamModel
@@ -36,7 +36,7 @@ def test_block_middleware_sources(block: Block):
     check_port_models(middleware.sources, block.sources, SOURCE)
 
 
-def check_param_models(block: Block, params: List[ParamModel]):
+def check_param_models(block: Block, params: list[ParamModel]):
     assert params
     assert len(params) == len(block.params)
     for param in params:

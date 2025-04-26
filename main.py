@@ -1,14 +1,13 @@
-import logging
-import logging.handlers
-import platform
-import sys
-from pathlib import Path
+from __future__ import annotations
 
+import sys
+
+from gnuradio_mcp.middlewares.platform import PlatformMiddleware
 
 # Load GNU Radio
 try:
     from gnuradio import gr
-except ImportError as ex:
+except ImportError:
     # Throw a new exception with more information
     print(
         "Cannot find GNU Radio! (Have you sourced the environment file?)",
@@ -18,7 +17,6 @@ except ImportError as ex:
     raise Exception("Cannot find GNU Radio!") from None
 
 from gnuradio.grc.core.platform import Platform
-from gnuradio.grc.core.FlowGraph import FlowGraph
 
 platform = Platform(
     version=gr.version(),
@@ -28,7 +26,6 @@ platform = Platform(
 )
 platform.build_library()
 
-from gnuradio_mcp.middlewares.platform import PlatformMiddleware
 
 platform_middleware = PlatformMiddleware(platform)
 

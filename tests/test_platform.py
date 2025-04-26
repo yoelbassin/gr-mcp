@@ -1,8 +1,9 @@
-import pytest
-from gnuradio_mcp.middlewares.platform import BlockModel, PlatformMiddleware
+from __future__ import annotations
+
 from gnuradio.grc.core.blocks.block import Block
 from gnuradio.grc.core.platform import Platform
-from gnuradio import gr
+
+from gnuradio_mcp.middlewares.platform import BlockModel, PlatformMiddleware
 
 
 def test_block_model_from_block(platform: Platform):

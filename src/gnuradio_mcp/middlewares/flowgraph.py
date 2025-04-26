@@ -1,5 +1,7 @@
-from typing import List, Optional
+from __future__ import annotations
+
 from gnuradio.grc.core.FlowGraph import FlowGraph
+
 from gnuradio_mcp.middlewares.block import BlockMiddleware
 from gnuradio_mcp.models import BlockModel
 
@@ -9,7 +11,7 @@ class FlowGraphMiddleware:
         self._flowgraph = flowgraph
 
     @property
-    def blocks(self) -> List[BlockModel]:
+    def blocks(self) -> list[BlockModel]:
         return [
             BlockModel(key=block.key, label=block.label)
             for block in self._flowgraph.blocks
