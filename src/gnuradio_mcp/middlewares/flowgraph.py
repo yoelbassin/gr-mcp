@@ -15,6 +15,11 @@ class FlowGraphMiddleware:
             for block in self._flowgraph.blocks
         ]
     
-    def add_block(self, key: str, name) -> None:
-        block = self._flowgraph.new_block(key)
-        block.params["id"].set_value(name)
+    def add_block(self, block_type: str, block_name: str) -> None:
+        block = self._flowgraph.new_block(block_type)
+        block.params["id"].set_value(block_name)
+
+
+    def remove_block(self, block_name: str) -> None:
+        block = self._flowgraph.get_block(block_name)
+        self._flowgraph.remove_element(block)
