@@ -11,9 +11,10 @@ class ElementMiddleware:
     def _rewrite(self):
         self._element.rewrite()
 
-    def validate(self):
+    def validate(self) -> bool:
         self._rewrite()
         self._element.validate()
+        return self._element.is_valid()
 
     def get_all_errors(self) -> list[ErrorModel]:
         self.validate()

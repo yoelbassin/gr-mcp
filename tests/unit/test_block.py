@@ -75,7 +75,7 @@ def check_port_models(port_models, ports, direction):
     assert isinstance(port_models, list)
     assert len(port_models) == len(ports)
     for model, port in zip(port_models, ports):
-        assert model.key == int(port.key)
+        assert model.key == port.key
         assert model.name == port.name
         assert model.dtype == port.dtype
         assert model.direction == direction

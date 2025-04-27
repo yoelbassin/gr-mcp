@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Literal, get_args
+from typing import Any, Literal, Type, get_args
 
 from gnuradio.grc.core.blocks.block import Block
 from gnuradio.grc.core.Connection import Connection
@@ -9,13 +9,22 @@ from gnuradio.grc.core.ports.port import Port
 from pydantic import BaseModel
 
 
+class BlockTypeModel(BaseModel):
+    label: str
+    key: str
+
+    @classmethod
+    def from_block_type(cls, block: Type[Block]) -> BlockTypeModel:
+        return cls(label=block.label, key=block.key)
+
+
 class BlockModel(BaseModel):
     label: str
     key: str
 
     @classmethod
     def from_block(cls, block: Block) -> BlockModel:
-        return cls(label=block.label, key=block.key)
+        return cls(label=block.label, key=block.name)
 
 
 class ParamModel(BaseModel):
@@ -42,7 +51,7 @@ SINK, SOURCE = get_args(DirectionType)
 
 class PortModel(BaseModel):
     parent: str
-    key: int
+    key: str
     name: str
     dtype: str
     direction: DirectionType
@@ -59,7 +68,7 @@ class PortModel(BaseModel):
             raise ValueError("Currently not supporting named ports")
         return cls(
             parent=port.parent.name,
-            key=int(port.key),
+            key=port.key,
             name=port.name,
             dtype=port.dtype,
             direction=direction,
