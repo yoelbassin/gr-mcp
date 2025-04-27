@@ -3,17 +3,16 @@ from __future__ import annotations
 from typing import Generator
 
 import pytest
-from gnuradio.grc.core.platform import Platform
 
 from gnuradio_mcp.middlewares.block import BlockMiddleware
 from gnuradio_mcp.middlewares.flowgraph import FlowGraphMiddleware
-from gnuradio_mcp.models import BlockModel, ConnectionModel
+from gnuradio_mcp.middlewares.platform import PlatformMiddleware
+from gnuradio_mcp.models import BlockModel, ConnectionModel, ErrorModel
 
 
 @pytest.fixture
-def flowgraph_middleware(platform: Platform):
-    flowgraph = platform.make_flow_graph("")
-    return FlowGraphMiddleware(flowgraph)
+def flowgraph_middleware(platform_middleware: PlatformMiddleware):
+    return platform_middleware.make_flowgraph()
 
 
 @pytest.fixture
@@ -67,6 +66,11 @@ def test_block_unique_names_for_same_type(
     assert first_block.name != second_block.name
 
 
+def test_block_default_name(flowgraph_middleware: FlowGraphMiddleware, block_key: str):
+    block = flowgraph_middleware.add_block(block_key)
+    assert block_key in block.name
+
+
 @pytest.mark.parametrize(
     "block_key, sinks_number, sources_number",
     [("blocks_add_xx", 2, 1), ("blocks_copy", 1, 1), ("blocks_selector", 2, 2)],
@@ -107,6 +111,12 @@ def test_block_disconnection(flowgraph_middleware: FlowGraphMiddleware, block_ke
         )
 
     assert len(flowgraph_middleware.get_connections()) == 0
+
+
+def test_default_flowgraph_errors(flowgraph_middleware: FlowGraphMiddleware):
+    for error in flowgraph_middleware.get_all_errors():
+        assert isinstance(error, ErrorModel)
+    assert len(flowgraph_middleware.get_all_errors()) == 0
 
 
 def util_iter_possible_connections(

@@ -2,15 +2,15 @@ from __future__ import annotations
 
 from gnuradio.grc.core.platform import Platform
 
+from gnuradio_mcp.middlewares.base import ElementMiddleware
 from gnuradio_mcp.middlewares.flowgraph import FlowGraphMiddleware
 from gnuradio_mcp.models import BlockModel
 
 
-class PlatformMiddleware:
+class PlatformMiddleware(ElementMiddleware):
     def __init__(self, platform: Platform):
-        self._platform = platform
-        flowgraph = self._platform.make_flow_graph("")
-        self._flowgraph_mw = FlowGraphMiddleware(flowgraph)
+        super().__init__(platform)
+        self._platform = self._element
 
     @property
     def blocks(self) -> list[BlockModel]:
@@ -18,6 +18,5 @@ class PlatformMiddleware:
             BlockModel.from_block(block) for block in self._platform.blocks.values()
         ]
 
-    @property
-    def flowgraph(self) -> FlowGraphMiddleware:
-        return self._flowgraph_mw
+    def make_flowgraph(self, filepath: str = "") -> FlowGraphMiddleware:
+        return FlowGraphMiddleware.from_file(self, filepath)

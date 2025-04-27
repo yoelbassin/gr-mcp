@@ -1,19 +1,34 @@
 from __future__ import annotations
 
-from typing import Dict, Optional
+from typing import TYPE_CHECKING, Optional, Set
 
 from gnuradio.grc.core.blocks.block import Block
 from gnuradio.grc.core.FlowGraph import FlowGraph
 
+from gnuradio_mcp.middlewares.base import ElementMiddleware
 from gnuradio_mcp.middlewares.block import BlockMiddleware
-from gnuradio_mcp.models import BlockModel, ConnectionModel, PortModel
+from gnuradio_mcp.models import SINK, SOURCE, BlockModel, ConnectionModel, PortModel
 from gnuradio_mcp.utils import get_unique_id
 
+if TYPE_CHECKING:
+    from gnuradio_mcp.middlewares.platform import PlatformMiddleware
 
-class FlowGraphMiddleware:
+
+def get_port_from_port_model(flowgraph, port_model: PortModel) -> Block:
+    block_from_port_model = flowgraph.get_block(port_model.parent)
+    if port_model.direction == SOURCE:
+        return block_from_port_model.sources[port_model.key]
+    elif port_model.direction == SINK:
+        return block_from_port_model.sinks[port_model.key]
+    else:
+        raise ValueError(f"Invalid port direction: {port_model.direction}")
+
+
+class FlowGraphMiddleware(ElementMiddleware):
     def __init__(self, flowgraph: FlowGraph):
-        self._flowgraph = flowgraph
-        self._blocks: Dict[str, BlockMiddleware] = {}
+        super().__init__(flowgraph)
+        self._flowgraph = self._element
+        self._blocks: Set[BlockMiddleware] = set()
 
     @property
     def blocks(self) -> list[BlockModel]:
@@ -25,39 +40,34 @@ class FlowGraphMiddleware:
     def add_block(
         self, block_type: str, block_name: Optional[str] = None
     ) -> BlockMiddleware:
-        block_name = block_name or get_unique_id(self._flowgraph.blocks)
+        block_name = block_name or get_unique_id(self._flowgraph.blocks, block_type)
         block = self._flowgraph.new_block(block_type)
-        block.params["id"].set_value(block_name)
-        self._blocks[block_name] = BlockMiddleware(block)
-        return self._blocks[block_name]
+        assert block is not None, f"Failed to create block: {block_type}"
+        block_middleware = BlockMiddleware(block)
+        block_middleware.name = block_name
+        self._blocks.add(block_middleware)
+        return block_middleware
 
     def remove_block(self, block_name: str) -> None:
-        block = self._flowgraph.get_block(block_name)
-        self._flowgraph.remove_element(block)
-        del self._blocks[block_name]
+        block_middleware = self.get_block(block_name)
+        self._flowgraph.remove_element(block_middleware._block)
+        self._blocks.remove(block_middleware)
 
     def get_block(self, block_name: str) -> BlockMiddleware:
-        # TODO: Check if calling two times you get different results
-        return self._blocks[block_name]
+        return next(block for block in self._blocks if block.name == block_name)
 
     def connect_blocks(
         self, src_port_model: PortModel, dst_port_model: PortModel
     ) -> None:
-        def get_block_by_port_model(port_model: PortModel) -> Block:
-            return self._flowgraph.get_block(port_model.parent)
-
-        src_port = get_block_by_port_model(src_port_model).sources[src_port_model.key]
-        dst_port = get_block_by_port_model(dst_port_model).sinks[dst_port_model.key]
+        src_port = get_port_from_port_model(self._flowgraph, src_port_model)
+        dst_port = get_port_from_port_model(self._flowgraph, dst_port_model)
         self._flowgraph.connect(src_port, dst_port)
 
     def disconnect_blocks(
         self, src_port_model: PortModel, dst_port_model: PortModel
     ) -> None:
-        def get_block_by_port_model(port_model: PortModel) -> Block:
-            return self._flowgraph.get_block(port_model.parent)
-
-        src_port = get_block_by_port_model(src_port_model).sources[src_port_model.key]
-        dst_port = get_block_by_port_model(dst_port_model).sinks[dst_port_model.key]
+        src_port = get_port_from_port_model(self._flowgraph, src_port_model)
+        dst_port = get_port_from_port_model(self._flowgraph, dst_port_model)
         self._flowgraph.disconnect(src_port, dst_port)
 
     def get_connections(self) -> list[ConnectionModel]:
@@ -65,3 +75,12 @@ class FlowGraphMiddleware:
             ConnectionModel.from_connection(connection)
             for connection in self._flowgraph.connections
         ]
+
+    @classmethod
+    def from_file(
+        cls, platform: "PlatformMiddleware", filepath: str = ""
+    ) -> FlowGraphMiddleware:
+        initial_state = platform._platform.parse_flow_graph(filepath)
+        flowgraph = FlowGraph(platform._platform)
+        flowgraph.import_data(initial_state)
+        return cls(flowgraph)

@@ -4,16 +4,22 @@ from typing import Any, Dict
 
 from gnuradio.grc.core.blocks.block import Block
 
+from gnuradio_mcp.middlewares.base import ElementMiddleware
 from gnuradio_mcp.models import SINK, SOURCE, ParamModel, PortModel
 
 
-class BlockMiddleware:
+class BlockMiddleware(ElementMiddleware):
     def __init__(self, block: Block):
-        self._block = block
+        super().__init__(block)
+        self._block = self._element
 
     @property
     def name(self) -> str:
         return self._block.name
+
+    @name.setter
+    def name(self, name: str):
+        self._block.params["id"].set_value(name)
 
     def set_param(self, param_name: str, param_value: Any):
         self._block.params[param_name].set_value(param_value)
@@ -50,6 +56,3 @@ class BlockMiddleware:
             except ValueError:
                 pass
         return ports
-
-    def _rewrite(self):
-        self._block.rewrite()

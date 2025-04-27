@@ -6,7 +6,7 @@ from gnuradio.grc.core.platform import Platform
 
 from gnuradio_mcp.middlewares.block import BlockMiddleware
 from gnuradio_mcp.middlewares.flowgraph import FlowGraphMiddleware
-from gnuradio_mcp.models import SINK, SOURCE, ParamModel
+from gnuradio_mcp.models import SINK, SOURCE, ErrorModel, ParamModel
 
 
 @pytest.fixture
@@ -42,6 +42,22 @@ def test_block_middleware_set_param(block_middleware: BlockMiddleware):
 def test_block_middleware_set_params(block_middleware: BlockMiddleware):
     block_middleware.set_params({"id": "my_custom_block_name"})
     assert block_middleware._block.params["id"].get_value() == "my_custom_block_name"
+
+
+@pytest.mark.parametrize(
+    "block_key, initial_errors_number", [("blocks_add_xx", 3), ("blocks_copy", 2)]
+)
+def test_block_errors(
+    flowgraph_middleware: FlowGraphMiddleware,
+    block_key: str,
+    initial_errors_number: int,
+):
+    block_middleware = flowgraph_middleware.add_block(block_key)
+    for error in block_middleware.get_all_errors():
+        assert isinstance(error, ErrorModel)
+    assert len(block_middleware.get_all_errors()) == initial_errors_number
+    # Call again to check that the errors are not duplicated
+    assert len(block_middleware.get_all_errors()) == initial_errors_number
 
 
 def check_param_models(block: Block, params: list[ParamModel]):

@@ -22,11 +22,12 @@ platform = Platform(
     version=gr.version(),
     version_parts=(gr.major_version(), gr.api_version(), gr.minor_version()),
     prefs=gr.prefs(),
-    # install_prefix=gr.prefix()
 )
 platform.build_library()
 
 
 platform_middleware = PlatformMiddleware(platform)
-
-print(platform_middleware.blocks)
+flowgraph_mw = platform_middleware.make_flowgraph()
+flowgraph_mw.add_block("blocks_add_xx")
+for error in flowgraph_mw.get_all_errors():
+    print(error)

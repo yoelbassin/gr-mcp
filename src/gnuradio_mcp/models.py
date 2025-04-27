@@ -77,3 +77,9 @@ class ConnectionModel(BaseModel):
             source=PortModel.from_port(connection.source_port),
             sink=PortModel.from_port(connection.sink_port),
         )
+
+
+class ErrorModel(BaseModel):
+    type: str
+    key: BaseModel
+    message: str

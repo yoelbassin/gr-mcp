@@ -4,6 +4,8 @@ import pytest
 from gnuradio import gr
 from gnuradio.grc.core.platform import Platform
 
+from gnuradio_mcp.middlewares.platform import PlatformMiddleware
+
 
 @pytest.fixture(scope="module")
 def platform() -> Platform:
@@ -18,6 +20,11 @@ def platform() -> Platform:
     )
     platform.build_library()
     return platform
+
+
+@pytest.fixture(scope="module")
+def platform_middleware(platform: Platform) -> PlatformMiddleware:
+    return PlatformMiddleware(platform)
 
 
 @pytest.fixture(params=[1, 2, 10])  # Arbitrary number of blocks to test
