@@ -1,5 +1,5 @@
 # GNURadio MCP Server
-The goal of this project is allowing LLMs to create GNURadio Flowcharts for GNURadio Companion.
+The goal of this project is allowing LLMs to create GNURadio Flowcharts for GNURadio Companion. The MCP server works by creating a flowchart and saving it as a `.grc` file that can be opened in gnuradio-companion.
 
 ## Installation
 
@@ -15,13 +15,19 @@ pip install -e .
 ```
 we use the `--system-site-packages` flag since GNURadio installs the `gnuradio` python package globally.
 
-## Current Status
-Rewriting the server using `gnuradio.grc` library. Currently using GNURadio Companion (v3.10.12.0).
+Currently, you can run the MCP server located on `main.py`
+```
+python main.py
+```
 
-## TODO:
-- Add flowgraph save
-- Add elements validation
-- Add errors check
-- Build MCP interface
-- [Optional] Build REST interface
-- Implement usage of Python Block
+and add the GnuradioMCP server to your LLM using
+```
+  "mcpServers": {
+    "GnuradioMCP": {
+      "url": "http://localhost:8000/sse"
+    }
+  }
+```
+
+## Current Status
+In development, basic server have been created. Currently using GNURadio Companion (v3.10.12.0).
