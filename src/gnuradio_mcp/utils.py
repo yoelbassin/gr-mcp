@@ -8,8 +8,11 @@ from gnuradio.grc.core.ports.port import Port
 from pydantic import BaseModel
 
 from gnuradio_mcp.models import (
+    SINK,
+    SOURCE,
     BlockModel,
     ConnectionModel,
+    DirectionType,
     ErrorModel,
     ParamModel,
     PortModel,
@@ -47,4 +50,30 @@ def format_error_message(elem, msg) -> ErrorModel:
         type=type(model).__name__,
         key=model,  # type: ignore
         message=msg,
+    )
+
+
+def get_port_by_key_in_port_list(port_list: list[Port], key: str) -> Block:
+    for port in port_list:
+        if port.key == key:
+            return port
+    raise ValueError(f"Port not found: {key}")
+
+
+def get_port_by_key(
+    flowgraph, block_name: str, port_name: str, direction: DirectionType
+) -> Port:
+    block = flowgraph.get_block(block_name)
+    if direction == SOURCE:
+        return get_port_by_key_in_port_list(block.sources, port_name)
+    elif direction == SINK:
+        return get_port_by_key_in_port_list(block.sinks, port_name)
+    else:
+        raise ValueError(f"Invalid port direction: {direction}")
+
+
+def get_port_from_port_model(flowgraph, port_model: PortModel) -> Port:
+    block_from_port_model = flowgraph.get_block(port_model.parent)
+    return get_port_by_key(
+        flowgraph, block_from_port_model.name, port_model.key, port_model.direction
     )

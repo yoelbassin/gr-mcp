@@ -5,38 +5,18 @@ from typing import TYPE_CHECKING, Optional
 
 from gnuradio.grc.core.blocks.block import Block
 from gnuradio.grc.core.FlowGraph import FlowGraph
-from gnuradio.grc.core.ports.port import Port
 
 from gnuradio_mcp.middlewares.base import ElementMiddleware
 from gnuradio_mcp.middlewares.block import BlockMiddleware
-from gnuradio_mcp.models import SINK, SOURCE, BlockModel, ConnectionModel, PortModel
-from gnuradio_mcp.utils import get_unique_id
+from gnuradio_mcp.models import (
+    BlockModel,
+    ConnectionModel,
+    PortModel,
+)
+from gnuradio_mcp.utils import get_port_from_port_model, get_unique_id
 
 if TYPE_CHECKING:
     from gnuradio_mcp.middlewares.platform import PlatformMiddleware
-
-
-def get_port_from_port_model_in_port_list(
-    port_list: list[Port], port_model: PortModel
-) -> Block:
-    for port in port_list:
-        if port.key == port_model.key:
-            return port
-    raise ValueError(f"Port not found: {port_model.key}")
-
-
-def get_port_from_port_model(flowgraph, port_model: PortModel) -> Port:
-    block_from_port_model = flowgraph.get_block(port_model.parent)
-    if port_model.direction == SOURCE:
-        return get_port_from_port_model_in_port_list(
-            block_from_port_model.sources, port_model
-        )
-    elif port_model.direction == SINK:
-        return get_port_from_port_model_in_port_list(
-            block_from_port_model.sinks, port_model
-        )
-    else:
-        raise ValueError(f"Invalid port direction: {port_model.direction}")
 
 
 def set_block_name(block: Block, name: str):

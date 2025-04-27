@@ -1,22 +1,15 @@
 from __future__ import annotations
 
-import sys
+from fastmcp import FastMCP
 
 from gnuradio_mcp.middlewares.platform import PlatformMiddleware
+from gnuradio_mcp.providers.mcp import McpPlatformProvider
 
-# Load GNU Radio
 try:
     from gnuradio import gr
+    from gnuradio.grc.core.platform import Platform
 except ImportError:
-    # Throw a new exception with more information
-    print(
-        "Cannot find GNU Radio! (Have you sourced the environment file?)",
-        file=sys.stderr,
-    )
-    # Throw the new exception
     raise Exception("Cannot find GNU Radio!") from None
-
-from gnuradio.grc.core.platform import Platform
 
 platform = Platform(
     version=gr.version(),
@@ -25,9 +18,10 @@ platform = Platform(
 )
 platform.build_library()
 
+app: FastMCP = FastMCP(
+    "GNU Radio MCP", description="Provide a MCP interface to GNU Radio"
+)
 
-platform_middleware = PlatformMiddleware(platform)
-flowgraph_mw = platform_middleware.make_flowgraph()
-flowgraph_mw.add_block("blocks_add_xx")
-for error in flowgraph_mw.get_all_errors():
-    print(error)
+McpPlatformProvider.from_platform_middleware(app, PlatformMiddleware(platform))
+
+app.run(transport="sse")
