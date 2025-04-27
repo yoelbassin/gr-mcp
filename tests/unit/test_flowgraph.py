@@ -66,8 +66,17 @@ def test_block_unique_names_for_same_type(
 
 
 def test_block_default_name(flowgraph_middleware: FlowGraphMiddleware, block_key: str):
-    block = flowgraph_middleware.add_block(block_key)
-    assert block_key in block.name
+    block_model = flowgraph_middleware.add_block(block_key)
+    assert block_key in block_model.name
+
+
+def test_remove_existing_block(flowgraph_middleware: FlowGraphMiddleware):
+    DEFAULT_VARIABLE_BLOCK_NAME = "samp_rate"
+    flowgraph_middleware.remove_block(DEFAULT_VARIABLE_BLOCK_NAME)
+    assert not any(
+        block.name == DEFAULT_VARIABLE_BLOCK_NAME
+        for block in flowgraph_middleware.blocks
+    )
 
 
 @pytest.mark.parametrize(
@@ -80,11 +89,11 @@ def test_block_connections(
     sources_number: int,
     sinks_number: int,
 ):
-    source_block = flowgraph_middleware.add_block(block_key)
-    dest_block = flowgraph_middleware.add_block(block_key)
+    source_block, dest_block = create_and_connect_blocks(
+        flowgraph_middleware, block_key, block_key
+    )
 
     for connection in util_iter_possible_connections(source_block, dest_block):
-        flowgraph_middleware.connect_blocks(connection.source, connection.sink)
         connections = flowgraph_middleware.get_connections()
         assert any(
             c.source.key == connection.source.key and c.sink.key == connection.sink.key
@@ -95,11 +104,9 @@ def test_block_connections(
 
 
 def test_block_disconnection(flowgraph_middleware: FlowGraphMiddleware, block_key: str):
-    source_block = flowgraph_middleware.add_block(block_key)
-    dest_block = flowgraph_middleware.add_block(block_key)
-
-    for connection in util_iter_possible_connections(source_block, dest_block):
-        flowgraph_middleware.connect_blocks(connection.source, connection.sink)
+    source_block, dest_block = create_and_connect_blocks(
+        flowgraph_middleware, block_key, block_key
+    )
 
     for connection in util_iter_possible_connections(source_block, dest_block):
         flowgraph_middleware.disconnect_blocks(connection.source, connection.sink)
@@ -116,6 +123,23 @@ def test_default_flowgraph_errors(flowgraph_middleware: FlowGraphMiddleware):
     for error in flowgraph_middleware.get_all_errors():
         assert isinstance(error, ErrorModel)
     assert len(flowgraph_middleware.get_all_errors()) == 0
+
+
+def create_and_connect_blocks(
+    flowgraph_middleware: FlowGraphMiddleware,
+    source_block_key: str,
+    dest_block_key: str,
+):
+    source_block_model = flowgraph_middleware.add_block(source_block_key)
+    dest_block_model = flowgraph_middleware.add_block(dest_block_key)
+
+    source_block = flowgraph_middleware.get_block(source_block_model.name)
+    dest_block = flowgraph_middleware.get_block(dest_block_model.name)
+
+    for connection in util_iter_possible_connections(source_block, dest_block):
+        flowgraph_middleware.connect_blocks(connection.source, connection.sink)
+
+    return source_block, dest_block
 
 
 def util_iter_possible_connections(

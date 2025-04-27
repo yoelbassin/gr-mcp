@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Optional, Set
+from functools import lru_cache
+from typing import TYPE_CHECKING, Optional
 
 from gnuradio.grc.core.blocks.block import Block
 from gnuradio.grc.core.FlowGraph import FlowGraph
@@ -24,7 +25,7 @@ def get_port_from_port_model_in_port_list(
     raise ValueError(f"Port not found: {port_model.key}")
 
 
-def get_port_from_port_model(flowgraph, port_model: PortModel) -> Block:
+def get_port_from_port_model(flowgraph, port_model: PortModel) -> Port:
     block_from_port_model = flowgraph.get_block(port_model.parent)
     if port_model.direction == SOURCE:
         return get_port_from_port_model_in_port_list(
@@ -38,11 +39,14 @@ def get_port_from_port_model(flowgraph, port_model: PortModel) -> Block:
         raise ValueError(f"Invalid port direction: {port_model.direction}")
 
 
+def set_block_name(block: Block, name: str):
+    block.params["id"].set_value(name)
+
+
 class FlowGraphMiddleware(ElementMiddleware):
     def __init__(self, flowgraph: FlowGraph):
         super().__init__(flowgraph)
         self._flowgraph = self._element
-        self._blocks: Set[BlockMiddleware] = set()
 
     @property
     def blocks(self) -> list[BlockModel]:
@@ -50,22 +54,22 @@ class FlowGraphMiddleware(ElementMiddleware):
 
     def add_block(
         self, block_type: str, block_name: Optional[str] = None
-    ) -> BlockMiddleware:
+    ) -> BlockModel:
         block_name = block_name or get_unique_id(self._flowgraph.blocks, block_type)
         block = self._flowgraph.new_block(block_type)
         assert block is not None, f"Failed to create block: {block_type}"
-        block_middleware = BlockMiddleware(block)
-        block_middleware.name = block_name
-        self._blocks.add(block_middleware)
-        return block_middleware
+        set_block_name(block, block_name)
+        return BlockModel.from_block(block)
 
     def remove_block(self, block_name: str) -> None:
         block_middleware = self.get_block(block_name)
         self._flowgraph.remove_element(block_middleware._block)
-        self._blocks.remove(block_middleware)
 
+    @lru_cache(maxsize=None)
     def get_block(self, block_name: str) -> BlockMiddleware:
-        return next(block for block in self._blocks if block.name == block_name)
+        return BlockMiddleware(
+            next(block for block in self._flowgraph.blocks if block.name == block_name)
+        )
 
     def connect_blocks(
         self, src_port_model: PortModel, dst_port_model: PortModel

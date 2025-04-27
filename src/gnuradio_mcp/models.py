@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from typing import Any, Literal, Type, get_args
+from typing import Any, Literal, Protocol, Type, get_args
 
 from gnuradio.grc.core.blocks.block import Block
 from gnuradio.grc.core.Connection import Connection
 from gnuradio.grc.core.params.param import Param
 from gnuradio.grc.core.ports.port import Port
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 
 class BlockTypeModel(BaseModel):
@@ -18,6 +18,11 @@ class BlockTypeModel(BaseModel):
         return cls(label=block.label, key=block.key)
 
 
+class KeyedModel(Protocol):
+    def to_key(self) -> str:
+        ...
+
+
 class BlockModel(BaseModel):
     label: str
     name: str
@@ -25,6 +30,9 @@ class BlockModel(BaseModel):
     @classmethod
     def from_block(cls, block: Block) -> BlockModel:
         return cls(label=block.label, name=block.name)
+
+    def to_key(self) -> str:
+        return f"{self.label}:{self.name}"
 
 
 class ParamModel(BaseModel):
@@ -44,6 +52,9 @@ class ParamModel(BaseModel):
             value=param.get_value(),
         )
 
+    def to_key(self) -> str:
+        return f"{self.parent}:{self.key}"
+
 
 DirectionType = Literal["sink", "source"]
 SINK, SOURCE = get_args(DirectionType)
@@ -56,6 +67,7 @@ class PortModel(BaseModel):
     dtype: str
     direction: DirectionType
     optional: bool = False
+    hidden: bool = False
 
     @classmethod
     def from_port(
@@ -64,8 +76,6 @@ class PortModel(BaseModel):
         direction: DirectionType | None = None,
     ) -> PortModel:
         direction = direction or port._dir
-        if not port.key.isnumeric():
-            raise ValueError("Currently not supporting named ports")
         return cls(
             parent=port.parent.name,
             key=port.key,
@@ -73,7 +83,11 @@ class PortModel(BaseModel):
             dtype=port.dtype,
             direction=direction,
             optional=port.optional,
+            hidden=port.hidden,
         )
+
+    def to_key(self) -> str:
+        return f"{self.parent}:{self.direction}[{self.key}]"
 
 
 class ConnectionModel(BaseModel):
@@ -87,8 +101,16 @@ class ConnectionModel(BaseModel):
             sink=PortModel.from_port(connection.sink_port),
         )
 
+    def to_key(self) -> str:
+        return f"{self.source.to_key()}-{self.sink.to_key()}"
+
 
 class ErrorModel(BaseModel):
     type: str
-    key: BaseModel
+    key: str
     message: str
+
+    @field_validator("key", mode="before")
+    @classmethod
+    def transform_key(cls, v: KeyedModel) -> str:
+        return v.to_key()

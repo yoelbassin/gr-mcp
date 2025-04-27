@@ -45,6 +45,6 @@ def format_error_message(elem, msg) -> ErrorModel:
             raise ValueError(f"Unsupported element type: {type(elem)}")
     return ErrorModel(
         type=type(model).__name__,
-        key=model,
+        key=model,  # type: ignore
         message=msg,
     )

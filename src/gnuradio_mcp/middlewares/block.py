@@ -38,11 +38,9 @@ class BlockMiddleware(ElementMiddleware):
         self._rewrite()
         ports = []
         for port in self._block.sinks:
-            try:
-                port_model = PortModel.from_port(port, SINK)
+            port_model = PortModel.from_port(port, SINK)
+            if not port_model.hidden:
                 ports.append(port_model)
-            except ValueError:
-                pass
         return ports
 
     @property
@@ -50,9 +48,7 @@ class BlockMiddleware(ElementMiddleware):
         self._rewrite()
         ports = []
         for port in self._block.sources:
-            try:
-                port_model = PortModel.from_port(port, SOURCE)
+            port_model = PortModel.from_port(port, SOURCE)
+            if not port_model.hidden:
                 ports.append(port_model)
-            except ValueError:
-                pass
         return ports

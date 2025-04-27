@@ -19,7 +19,8 @@ def flowgraph_middleware(platform: Platform) -> FlowGraphMiddleware:
 def block_middleware(
     flowgraph_middleware: FlowGraphMiddleware, block_key: str
 ) -> BlockMiddleware:
-    return flowgraph_middleware.add_block(block_key)
+    block_model = flowgraph_middleware.add_block(block_key)
+    return flowgraph_middleware.get_block(block_model.name)
 
 
 def test_block_middleware_params(block_middleware: BlockMiddleware):
@@ -52,7 +53,8 @@ def test_block_errors(
     block_key: str,
     initial_errors_number: int,
 ):
-    block_middleware = flowgraph_middleware.add_block(block_key)
+    block_model = flowgraph_middleware.add_block(block_key)
+    block_middleware = flowgraph_middleware.get_block(block_model.name)
     for error in block_middleware.get_all_errors():
         assert isinstance(error, ErrorModel)
     assert len(block_middleware.get_all_errors()) == initial_errors_number
