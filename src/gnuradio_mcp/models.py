@@ -20,11 +20,11 @@ class BlockTypeModel(BaseModel):
 
 class BlockModel(BaseModel):
     label: str
-    key: str
+    name: str
 
     @classmethod
     def from_block(cls, block: Block) -> BlockModel:
-        return cls(label=block.label, key=block.name)
+        return cls(label=block.label, name=block.name)
 
 
 class ParamModel(BaseModel):

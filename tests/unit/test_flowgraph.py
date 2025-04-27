@@ -18,8 +18,7 @@ def flowgraph_middleware(platform_middleware: PlatformMiddleware):
 @pytest.fixture
 def initial_blocks(flowgraph_middleware: FlowGraphMiddleware):
     return [
-        BlockModel(key=block.key, label=block.label)
-        for block in flowgraph_middleware._flowgraph.blocks
+        BlockModel.from_block(block) for block in flowgraph_middleware._flowgraph.blocks
     ]
 
 
@@ -34,7 +33,7 @@ def test_flowgraph_block_addition_and_removal(
 
     blocks = flowgraph_middleware.blocks
     assert all(b in blocks for b in initial_blocks)
-    assert any(b.key == block_key for b in blocks)
+    assert any(b.name == explicit_name for b in blocks)
 
     flowgraph_middleware.remove_block(explicit_name)
 

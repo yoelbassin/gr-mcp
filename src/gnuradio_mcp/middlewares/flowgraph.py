@@ -46,10 +46,7 @@ class FlowGraphMiddleware(ElementMiddleware):
 
     @property
     def blocks(self) -> list[BlockModel]:
-        return [
-            BlockModel(key=block.key, label=block.label)
-            for block in self._flowgraph.blocks
-        ]
+        return [BlockModel.from_block(block) for block in self._flowgraph.blocks]
 
     def add_block(
         self, block_type: str, block_name: Optional[str] = None
