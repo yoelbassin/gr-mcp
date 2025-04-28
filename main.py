@@ -24,4 +24,5 @@ app: FastMCP = FastMCP(
 
 McpPlatformProvider.from_platform_middleware(app, PlatformMiddleware(platform))
 
-app.run(transport="sse")
+if __name__ == "__main__":
+    app.run()

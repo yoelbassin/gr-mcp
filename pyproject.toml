@@ -9,7 +9,10 @@ description = "A FastMCP server for gnuradio."
 requires-python = ">=3.13"
 dependencies = [
     "pydantic",
-    "fastmcp"
+    "fastmcp",
+    # for gnuradio
+    "mako",
+    "pyyaml",
 ]
 
 [project.optional-dependencies]

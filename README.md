@@ -26,39 +26,42 @@
 ### Requirements
 - Python >= 3.13
 - GNURadio (Tested with GNURadio Companion v3.10.12.0)
-
-### Installation
-1. [**Install GNURadio**](https://wiki.gnuradio.org/index.php/InstallingGR)
-
-2. **Set up a Python virtual environment**
-   ```bash
-   python3.13 -m venv --system-site-packages venv
-   source venv/bin/activate
-   pip install -e .
-   ```
-   > The `--system-site-packages` flag is required because GNURadio installs the `gnuradio` Python package globally.
+- UV
 
 ### Usage
-
-Start the MCP server:
+1. **Clone the repository**
 ```bash
-python main.py
+git clone https://github.com/yoelbassin/gnuradioMCP
 ```
 
-Connect your LLM or automation tool with:
+2. [**Install GNURadio**](https://wiki.gnuradio.org/index.php/InstallingGR)
+
+3. **Set up a UV environment**
+```bash
+cd gnuradioMCP
+uv venv --system-site-packages
+```
+   > The `--system-site-packages` flag is required because GNURadio installs the `gnuradio` Python package globally.
+
+4. **Add the MCP server configuration to your client configuration.** For example, for Claude Desktop or Cursor:
 ```json
 "mcpServers": {
-  "GnuradioMCP": {
-    "url": "http://localhost:8000/sse"
+    "GnuradioMCP": {
+      "command": "uv",
+      "args": [
+        "--directory",
+        "/path/to/gnuradioMCP",
+        "run",
+        "main.py"
+      ]
+    }
   }
-}
 ```
-
 
 ## Development
 Install development dependencies and run tests with:
 ```bash
-pip install -e .[dev]
+pip install -e ".[dev]"
 pytest
 ```
 
