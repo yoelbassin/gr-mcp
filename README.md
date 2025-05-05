@@ -1,4 +1,4 @@
-# GNURadio MCP Server
+# GR-MCP: A gnuradio MCP Server
 
 [![Python Version](https://img.shields.io/badge/python-3.13%2B-blue.svg)](https://www.python.org/downloads/release/python-3130/)
 
@@ -31,14 +31,14 @@
 ### Usage
 1. **Clone the repository**
 ```bash
-git clone https://github.com/yoelbassin/gnuradioMCP
+git clone https://github.com/yoelbassin/gr-mcp
 ```
 
 2. [**Install GNURadio**](https://wiki.gnuradio.org/index.php/InstallingGR)
 
 3. **Set up a UV environment**
 ```bash
-cd gnuradioMCP
+cd gr-mcp
 uv venv --system-site-packages
 ```
    > The `--system-site-packages` flag is required because GNURadio installs the `gnuradio` Python package globally.
@@ -46,11 +46,11 @@ uv venv --system-site-packages
 4. **Add the MCP server configuration to your client configuration.** For example, for Claude Desktop or Cursor:
 ```json
 "mcpServers": {
-    "GnuradioMCP": {
+    "gr-mcp": {
       "command": "uv",
       "args": [
         "--directory",
-        "/path/to/gnuradioMCP",
+        "/path/to/gr-mcp",
         "run",
         "main.py"
       ]
