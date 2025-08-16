@@ -2,6 +2,8 @@
 
 [![Python Version](https://img.shields.io/badge/python-3.13%2B-blue.svg)](https://www.python.org/downloads/release/python-3130/)
 
+[![Trust Score](https://archestra.ai/mcp-catalog/api/badge/quality/yoelbassin/gnuradioMCP)](https://archestra.ai/mcp-catalog/yoelbassin__gnuradiomcp)
+
 
 **GNURadio MCP Server** is a modern, extensible Machine Control Protocol (MCP) server for [GNURadio](https://www.gnuradio.org/), enabling programmatic, automated, and AI-driven creation of GNURadio flowgraphs. Designed for seamless integration with Large Language Models (LLMs), automation frameworks, and custom clients, it empowers you to generate `.grc` files and control SDR workflows at scale.
 
