@@ -18,9 +18,7 @@ platform = Platform(
 )
 platform.build_library()
 
-app: FastMCP = FastMCP(
-    "GNU Radio MCP", instructions="Provide a MCP interface to GNU Radio"
-)
+app: FastMCP = FastMCP("GNU Radio MCP", instructions="Create GNU Radio flowgraphs")
 
 McpPlatformProvider.from_platform_middleware(app, PlatformMiddleware(platform))
 
