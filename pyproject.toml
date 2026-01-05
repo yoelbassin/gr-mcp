@@ -18,9 +18,11 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest >= 7.0",
+    "pytest-asyncio",
     "pre-commit"
 ]
 
 [tool.pytest.ini_options]
 # Tell pytest where to find the package
-pythonpath = ["src"]
+pythonpath = ["src", "."]
+asyncio_mode = "auto"
