@@ -1,53 +1,53 @@
-# GR-MCP: A gnuradio MCP Server
+# GNU Radio MCP Server (`gr-mcp`)
 
 [![Python Version](https://img.shields.io/badge/python-3.13%2B-blue.svg)](https://www.python.org/downloads/release/python-3130/)
-
 [![Trust Score](https://archestra.ai/mcp-catalog/api/badge/quality/yoelbassin/gnuradioMCP)](https://archestra.ai/mcp-catalog/yoelbassin__gnuradiomcp)
 
+`gr-mcp` is an MCP server that exposes GNU Radio flowgraph operations as tools for AI assistants and automation clients. It is built on FastMCP and designed for programmatic SDR workflow generation, editing, validation, and export.
 
-**GNURadio MCP Server** is a modern, extensible Machine Control Protocol (MCP) server for [GNURadio](https://www.gnuradio.org/), enabling programmatic, automated, and AI-driven creation of GNURadio flowgraphs. Designed for seamless integration with Large Language Models (LLMs), automation frameworks, and custom clients, it empowers you to generate `.grc` files and control SDR workflows at scale.
+## What It Provides
 
-> **Why GNURadio MCP Server?**
-> - Automate SDR workflows and flowgraph generation
-> - Integrate with LLMs, bots, and custom tools
-> - Build, modify, and validate flowgraphs programmatically
-> - Save time and reduce manual errors in SDR prototyping
+- Discovery of available GNU Radio blocks
+- Programmatic block creation and removal
+- Block parameter read/write operations
+- Connection and disconnection between blocks
+- Flowgraph validation and error inspection
+- Flowgraph persistence to `.grc`
 
+## Requirements
 
-## Features
-- 🌐 **MCP API**: Exposes a robust MCP interface for GNURadio
-- 🛠️ **Programmatic Flowgraph Creation**: Build, edit, and save `.grc` files from code or automation
-- 🤖 **LLM & Automation Ready**: Designed for AI and automation integration
-- 🧩 **Extensible**: Modular architecture for easy extension and customization
-- 📝 **Example Flowgraphs**: Includes ready-to-use `.grc` examples in the `misc/` directory
-- 🧪 **Tested**: Comprehensive unit tests with `pytest`
+- Python `>=3.13`
+- [GNU Radio](https://www.gnuradio.org/) installed and available to Python (tested with GNU Radio Companion `3.10.12.0`)
+- [`uv`](https://docs.astral.sh/uv/)
 
+## Installation
 
-## Quickstart
+1. Clone the repository:
 
-### Requirements
-- Python >= 3.13
-- GNURadio (Tested with GNURadio Companion v3.10.12.0)
-- UV
-
-### Usage
-1. **Clone the repository**
 ```bash
 git clone https://github.com/yoelbassin/gr-mcp
+cd gr-mcp
 ```
 
-2. [**Install GNURadio**](https://wiki.gnuradio.org/index.php/InstallingGR)
+2. Install GNU Radio if it is not already installed:
 
-3. **Set up a UV environment**
+- [GNU Radio installation guide](https://wiki.gnuradio.org/index.php/InstallingGR)
+
+3. Create a virtual environment that can see system GNU Radio packages:
+
 ```bash
-cd gr-mcp
 uv venv --system-site-packages
 ```
-   > The `--system-site-packages` flag is required because GNURadio installs the `gnuradio` Python package globally.
 
-4. **Add the MCP server configuration to your client configuration.** For example, for Claude Desktop or Cursor:
+The `--system-site-packages` flag is required because GNU Radio is commonly installed as a system-level Python package.
+
+## Run with an MCP Client
+
+Add `gr-mcp` to your MCP client configuration (for example, Cursor or Claude Desktop):
+
 ```json
-"mcpServers": {
+{
+  "mcpServers": {
     "gr-mcp": {
       "command": "uv",
       "args": [
@@ -58,15 +58,18 @@ uv venv --system-site-packages
       ]
     }
   }
+}
 ```
 
 ## Development
-Install development dependencies and run tests with:
+
+Install development dependencies and run tests:
+
 ```bash
 pip install -e ".[dev]"
 pytest
 ```
 
-
 ## Project Status
-**In active development.** Core server functionality is available, but the API and features are evolving. Your feedback and contributions are highly valued!
+
+This project is under active development. Core functionality is available, and interfaces may evolve as the server matures.
