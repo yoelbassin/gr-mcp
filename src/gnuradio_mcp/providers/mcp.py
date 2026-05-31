@@ -26,6 +26,7 @@ class McpPlatformProvider:
         self._mcp_instance.tool(self._platform_provider.get_all_errors)
         self._mcp_instance.tool(self._platform_provider.save_flowgraph)
         self._mcp_instance.tool(self._platform_provider.get_all_available_blocks)
+        self._mcp_instance.tool(self._platform_provider.execute_flowgraph)
 
     @property
     def app(self) -> FastMCP:

@@ -1,6 +1,6 @@
 {
   "name": "gr-mcp",
-  "description": "GNU Radio flowgraph tools — create, edit, connect, validate, and save .grc flowgraphs programmatically",
+  "description": "GNU Radio flowgraph tools — create, edit, connect, validate, execute, and save .grc flowgraphs programmatically",
   "version": "0.1.0",
   "author": {
     "name": "Yoel Bassin"

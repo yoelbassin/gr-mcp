@@ -1,10 +1,10 @@
 ---
-description: Build, edit, validate, and save GNU Radio flowgraphs using the gr-mcp tools. Use when the user wants to create or modify a GNU Radio signal processing pipeline.
+description: Build, edit, validate, execute, and save GNU Radio flowgraphs using the gr-mcp tools. Use when the user wants to create, modify, or run a GNU Radio signal processing pipeline.
 ---
 
 # GNU Radio Flowgraph Assistant
 
-You have access to a live GNU Radio environment via the gr-mcp tools. Use them to build and manipulate flowgraphs programmatically.
+You have access to a live GNU Radio environment via the gr-mcp tools. Use them to build, manipulate, and execute flowgraphs programmatically.
 
 ## Core Concepts
 
@@ -21,7 +21,9 @@ You have access to a live GNU Radio environment via the gr-mcp tools. Use them t
 4. **Inspect ports** before connecting: `get_block_sources`, `get_block_sinks`
 5. **Connect** blocks: `connect_blocks` (provide both block names and port keys)
 6. **Validate**: `validate_flowgraph` — then `get_all_errors` if it fails
-7. **Save**: `save_flowgraph` with a `.grc` filepath
+7. **Execute**: `execute_flowgraph` — runs the flowgraph and returns stdout/stderr/exit code
+8. **Iterate**: adjust parameters or structure based on output, then re-execute
+9. **Save**: `save_flowgraph` with a `.grc` filepath
 
 ## Tool Reference
 
@@ -41,7 +43,19 @@ You have access to a live GNU Radio environment via the gr-mcp tools. Use them t
 | `validate_block(block_name)` | Validate a single block |
 | `validate_flowgraph` | Validate the entire flowgraph |
 | `get_all_errors` | Get all current validation errors |
+| `execute_flowgraph(timeout_seconds)` | Compile and run the flowgraph; returns stdout, stderr, exit code, compile errors, and whether it timed out |
 | `save_flowgraph(filepath)` | Save to a `.grc` file |
+
+## Interpreting `execute_flowgraph` Results
+
+| Result | Meaning |
+|--------|---------|
+| `compiled=False` | `grcc` failed — check `compile_errors` for block or connection issues |
+| `compiled=True, timed_out=True` | Flowgraph ran until the timeout — normal for infinite pipelines (no terminating block) |
+| `compiled=True, exit_code=0` | Flowgraph ran and exited cleanly |
+| `compiled=True, exit_code≠0` | Runtime error — check `stderr` |
+
+To produce finite, analyzable output: add a `blocks_head` block to limit samples, or use `blocks_message_debug` to print values to stdout.
 
 ## Important Rules
 
@@ -50,3 +64,4 @@ You have access to a live GNU Radio environment via the gr-mcp tools. Use them t
 - Use `get_all_available_blocks` to find the exact `key` for a block type before calling `make_block`.
 - After setting params, re-validate to catch type or range errors early.
 - When the user asks to "build" something, complete the full workflow through save unless told otherwise.
+- When iterating with `execute_flowgraph`, always `validate_flowgraph` first — compile errors are harder to read than validation errors.

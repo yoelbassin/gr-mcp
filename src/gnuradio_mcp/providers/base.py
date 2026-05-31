@@ -8,6 +8,7 @@ from gnuradio_mcp.models import (
     BlockTypeModel,
     ConnectionModel,
     ErrorModel,
+    ExecutionResultModel,
     ParamModel,
     PortModel,
 )
@@ -101,3 +102,63 @@ class PlatformProvider:
     def save_flowgraph(self, filepath: str) -> bool:
         self._platform_mw.save_flowgraph(filepath, self._flowgraph_mw)
         return True
+
+    ##############################################
+    # Execution
+    ##############################################
+
+    def execute_flowgraph(self, timeout_seconds: int = 30) -> ExecutionResultModel:
+        import subprocess
+        import tempfile
+        import time
+        from pathlib import Path
+
+        start = time.time()
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            grc_path = str(Path(tmp_dir) / "flowgraph.grc")
+            self._platform_mw.save_flowgraph(grc_path, self._flowgraph_mw)
+
+            compile_result = subprocess.run(
+                ["grcc", "-o", tmp_dir, grc_path],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            if compile_result.returncode != 0:
+                return ExecutionResultModel(
+                    compiled=False,
+                    compile_errors=compile_result.stderr,
+                    stdout="",
+                    stderr="",
+                    exit_code=None,
+                    timed_out=False,
+                    duration_seconds=time.time() - start,
+                )
+
+            py_file = Path(tmp_dir) / "flowgraph.py"
+            try:
+                run_result = subprocess.run(
+                    ["python3", str(py_file)],
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout_seconds,
+                )
+                return ExecutionResultModel(
+                    compiled=True,
+                    compile_errors="",
+                    stdout=run_result.stdout,
+                    stderr=run_result.stderr,
+                    exit_code=run_result.returncode,
+                    timed_out=False,
+                    duration_seconds=time.time() - start,
+                )
+            except subprocess.TimeoutExpired as e:
+                return ExecutionResultModel(
+                    compiled=True,
+                    compile_errors="",
+                    stdout=e.stdout or "",
+                    stderr=e.stderr or "",
+                    exit_code=None,
+                    timed_out=True,
+                    duration_seconds=time.time() - start,
+                )
