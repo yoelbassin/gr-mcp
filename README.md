@@ -33,13 +33,22 @@ cd gr-mcp
 
 - [GNU Radio installation guide](https://wiki.gnuradio.org/index.php/InstallingGR)
 
-3. Create a virtual environment that can see system GNU Radio packages:
+3. Create a virtual environment:
 
 ```bash
-uv venv --system-site-packages
+uv venv
 ```
 
-The `--system-site-packages` flag is required because GNU Radio is commonly installed as a system-level Python package.
+## Install as a Claude Code Plugin
+
+The easiest way to use `gr-mcp` with Claude Code is as a plugin. It handles MCP server setup automatically.
+
+```
+/plugin marketplace add yoelbassin/gr-mcp
+/plugin install gr-mcp@gr-mcp
+```
+
+GNU Radio must be installed on your system before installing the plugin.
 
 ## Run with an MCP Client
 

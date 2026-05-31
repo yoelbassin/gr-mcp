@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "gr-mcp": {
+      "command": "uv",
+      "args": [
+        "--directory",
+        "${CLAUDE_PLUGIN_ROOT}",
+        "run",
+        "main.py"
+      ]
+    }
+  }
+}

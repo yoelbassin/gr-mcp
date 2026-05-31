@@ -1,5 +1,27 @@
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
+
+# uv's isolated venv can't see system site-packages where GNU Radio lives.
+# Fall back to the base Python (which can) to locate and inject the gnuradio path.
+try:
+    import gnuradio  # noqa: F401
+except ImportError:
+    _base_python = os.path.join(sys.base_prefix, "bin", "python3")
+    result = subprocess.run(
+        [
+            _base_python,
+            "-c",
+            "import gnuradio,os;p=os.path.dirname;" "print(p(p(gnuradio.__file__)))",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode == 0 and (site := result.stdout.strip()):
+        sys.path.insert(0, site)
+
 from fastmcp import FastMCP
 
 from gnuradio_mcp.middlewares.platform import PlatformMiddleware
