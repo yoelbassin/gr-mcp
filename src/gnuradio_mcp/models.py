@@ -19,8 +19,7 @@ class BlockTypeModel(BaseModel):
 
 
 class KeyedModel(Protocol):
-    def to_key(self) -> str:
-        ...
+    def to_key(self) -> str: ...
 
 
 class BlockModel(BaseModel):
@@ -114,3 +113,13 @@ class ErrorModel(BaseModel):
     @classmethod
     def transform_key(cls, v: KeyedModel) -> str:
         return v.to_key()
+
+
+class ExecutionResultModel(BaseModel):
+    compiled: bool
+    compile_errors: str
+    stdout: str
+    stderr: str
+    exit_code: int | None
+    timed_out: bool
+    duration_seconds: float
