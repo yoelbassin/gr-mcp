@@ -1,0 +1,13 @@
+{
+  "name": "gr-mcp",
+  "owner": {
+    "name": "Yoel Bassin"
+  },
+  "plugins": [
+    {
+      "name": "gr-mcp",
+      "source": "./",
+      "description": "GNU Radio flowgraph tools — create, edit, connect, validate, and save .grc flowgraphs programmatically"
+    }
+  ]
+}
