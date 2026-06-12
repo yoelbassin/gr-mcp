@@ -17,9 +17,10 @@ def _base(path: Path) -> Path:
 
 
 def write_capture(
-    samples: np.ndarray, path: Path, center_freq: float, sample_rate: float
+    samples: np.ndarray, path: Path | str, center_freq: float, sample_rate: float
 ) -> CaptureRef:
     """Write complex64 samples as a SigMF pair; `path` may omit the extension."""
+    path = Path(path)
     base = _base(path)
     base.parent.mkdir(parents=True, exist_ok=True)
     data_path = base.with_name(base.name + ".sigmf-data")
@@ -37,7 +38,7 @@ def write_capture(
         "captures": [{"core:sample_start": 0, "core:frequency": center_freq}],
         "annotations": [],
     }
-    meta_path.write_text(json.dumps(meta, indent=2))
+    meta_path.write_text(json.dumps(meta, indent=2), encoding="utf-8")
 
     return CaptureRef(
         path=data_path,
@@ -47,16 +48,19 @@ def write_capture(
     )
 
 
-def read_capture(path: Path) -> tuple[np.ndarray, CaptureRef]:
+def read_capture(path: Path | str) -> tuple[np.ndarray, CaptureRef]:
     """Read a SigMF pair; `path` may be the data file, meta file, or base."""
     base = _base(Path(path))
     data_path = base.with_name(base.name + ".sigmf-data")
     meta_path = base.with_name(base.name + ".sigmf-meta")
 
-    meta = json.loads(meta_path.read_text())
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
     datatype = meta["global"]["core:datatype"]
     if datatype != "cf32_le":
         raise ValueError(f"unsupported SigMF datatype: {datatype}")
+
+    if not meta.get("captures"):
+        raise ValueError("SigMF meta has no captures")
 
     samples = np.fromfile(data_path, dtype=np.complex64)
     ref = CaptureRef(

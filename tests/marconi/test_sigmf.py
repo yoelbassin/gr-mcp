@@ -32,6 +32,10 @@ def test_meta_is_valid_sigmf(tmp_path: Path, make_iq) -> None:
 def test_read_accepts_meta_or_base_path(tmp_path: Path, make_iq) -> None:
     samples = make_iq([])
     write_capture(samples, tmp_path / "cap", center_freq=0.0, sample_rate=1e6)
-    for p in (tmp_path / "cap.sigmf-meta", tmp_path / "cap"):
+    for p in (
+        tmp_path / "cap.sigmf-meta",
+        tmp_path / "cap",
+        tmp_path / "cap.sigmf-data",
+    ):
         loaded, ref = read_capture(p)
         assert ref.num_samples == len(samples)
