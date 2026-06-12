@@ -10,15 +10,12 @@ from marconi.models import (
     SignalMeasurement,
     SignalPeak,
 )
-
-
-def _read_samples(capture: CaptureRef) -> np.ndarray:
-    return np.fromfile(capture.path, dtype=np.complex64)
+from marconi.sigmf import read_samples
 
 
 def _welch(capture: CaptureRef, nperseg: int = 4096) -> tuple[np.ndarray, np.ndarray]:
     """Two-sided Welch PSD in dB, freqs absolute (Hz), ascending."""
-    x = _read_samples(capture)
+    x = read_samples(capture)
     if len(x) < 2:
         raise ValueError(f"capture too short for analysis: {len(x)} sample(s)")
     nperseg = min(nperseg, len(x))
@@ -159,7 +156,7 @@ def detect_bursts(
     - Bursts that dip below the threshold mid-burst are reported as separate
       bursts — there is no gap bridging.
     """
-    x = _read_samples(capture)
+    x = read_samples(capture)
     if len(x) < 2:
         raise ValueError(f"capture too short for analysis: {len(x)} sample(s)")
     fs = capture.sample_rate

@@ -23,8 +23,7 @@ def load_capture(
     name = path.name
 
     if name.endswith((".sigmf-data", ".sigmf-meta")):
-        _, ref = sigmf.read_capture(path)
-        return ref
+        return sigmf.read_meta(path)
 
     if name.endswith(".cf32"):
         if sample_rate is None:

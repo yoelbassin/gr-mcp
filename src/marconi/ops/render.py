@@ -6,7 +6,8 @@ import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 
 from marconi.models import CaptureRef, RenderResult  # noqa: E402
-from marconi.ops.analyze import _read_samples, psd  # noqa: E402
+from marconi.ops.analyze import psd  # noqa: E402
+from marconi.sigmf import read_samples  # noqa: E402
 from marconi.workspace import Workspace  # noqa: E402
 
 
@@ -27,7 +28,7 @@ def spectrogram(
     name: str = "spectrogram",
     nfft: int = 1024,
 ) -> RenderResult:
-    x = _read_samples(capture)
+    x = read_samples(capture)
     fig, ax = plt.subplots(figsize=(10, 6))
     spec, freqs, t, im = ax.specgram(
         x,
@@ -66,7 +67,7 @@ def constellation(
     name: str = "constellation",
     max_points: int = 5000,
 ) -> RenderResult:
-    x = _read_samples(capture)
+    x = read_samples(capture)
     if len(x) > max_points:
         idx = np.random.default_rng(0).choice(len(x), max_points, replace=False)
         pts = x[idx]
