@@ -55,3 +55,17 @@ def test_load_stereo_wav_as_iq(tmp_path: Path) -> None:
     assert len(loaded) == 4800
     # normalized to <= 1.0 magnitude
     assert np.abs(loaded).max() <= 1.0
+
+
+def test_load_wav_int16_full_scale_negative(tmp_path: Path) -> None:
+    """int16 minimum value (-32768) must map to exactly -1.0, not -1.00003."""
+    ws = Workspace(tmp_path / "project")
+    rate = 8000
+    # One stereo sample with the most-negative int16 value in the I channel.
+    data = np.array([[np.iinfo(np.int16).min, 0]], dtype=np.int16)
+    wav = tmp_path / "fullscale.wav"
+    wavfile.write(wav, rate, data)
+
+    ref = load_capture(wav, ws)
+    loaded, _ = read_capture(ref.path)
+    assert np.abs(loaded).max() <= 1.0

@@ -33,16 +33,21 @@ def load_capture(
         return sigmf.write_capture(
             samples,
             workspace.new_capture_path(path.stem),
-            center_freq=center_freq or 0.0,
+            center_freq=center_freq if center_freq is not None else 0.0,
             sample_rate=sample_rate,
         )
 
     if name.endswith(".wav"):
         rate, data = wavfile.read(path)
         if np.issubdtype(data.dtype, np.integer):
-            data = data.astype(np.float32) / np.iinfo(data.dtype).max
+            # Divide by -iinfo.min (e.g. 32768 for int16) for symmetric
+            # normalization so the full negative range maps to exactly -1.0.
+            data = data.astype(np.float32) / (-np.iinfo(data.dtype).min)
         else:
+            # Float WAVs are assumed to be already in [-1, 1] per convention
+            # and are not rescaled.
             data = data.astype(np.float32)
+        # Only the first two channels are used as I and Q; extras are ignored.
         if data.ndim == 2 and data.shape[1] >= 2:
             samples = (data[:, 0] + 1j * data[:, 1]).astype(np.complex64)
         else:
@@ -50,7 +55,7 @@ def load_capture(
         return sigmf.write_capture(
             samples,
             workspace.new_capture_path(path.stem),
-            center_freq=center_freq or 0.0,
+            center_freq=center_freq if center_freq is not None else 0.0,
             sample_rate=float(sample_rate or rate),
         )
 
