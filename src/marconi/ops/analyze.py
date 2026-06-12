@@ -97,7 +97,7 @@ def find_signals(
             # Dominant peak at the low-frequency edge: shift the high-edge bins
             # down by one sample-rate period.
             m_freqs = np.concatenate(
-                [freqs[first_g], freqs[last_g] - capture.sample_rate]
+                [freqs[last_g] - capture.sample_rate, freqs[first_g]]
             )
         m_indices = np.concatenate([last_g, first_g])
         merged = (m_indices, m_freqs, p_db[m_indices])

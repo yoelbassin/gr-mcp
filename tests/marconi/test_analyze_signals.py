@@ -44,5 +44,28 @@ def test_tone_near_nyquist_single_signal(tmp_path: Path, make_iq) -> None:
         len(signals) == 1
     ), f"expected 1 signal for near-Nyquist tone, got {len(signals)}: {signals}"
     assert (
-        abs(signals[0].center_freq - 100.499e6) < 3e3
-    ), f"center_freq {signals[0].center_freq:.1f} Hz not within 3 kHz of 100.499 MHz"
+        abs(signals[0].center_freq - 100.499e6) < 1e3
+    ), f"center_freq {signals[0].center_freq:.1f} Hz not within 1 kHz of 100.499 MHz"
+
+
+def test_tone_near_negative_nyquist_single_signal(tmp_path: Path, make_iq) -> None:
+    """A tone at -499 kHz (near -fs/2) must be reported as exactly one signal.
+
+    This exercises the else branch of the wrap-around merge, where the dominant
+    peak is at the low-frequency edge (first_g).  The misalignment bug produced
+    a wildly wrong center frequency before the fix.
+    """
+    ref = write_capture(
+        make_iq([(-499e3, 1.0)]),
+        tmp_path / "cap",
+        center_freq=100e6,
+        sample_rate=1e6,
+    )
+    signals = find_signals(ref)
+    assert len(signals) == 1, (
+        f"expected 1 signal for near-negative-Nyquist tone, "
+        f"got {len(signals)}: {signals}"
+    )
+    assert (
+        abs(signals[0].center_freq - 99.501e6) < 1e3
+    ), f"center_freq {signals[0].center_freq:.1f} Hz not within 1 kHz of 99.501 MHz"
