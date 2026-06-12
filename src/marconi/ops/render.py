@@ -14,8 +14,10 @@ def _save(
     fig: "plt.Figure", workspace: Workspace, name: str, kind: str
 ) -> RenderResult:
     out = workspace.new_render_path(name)
-    fig.savefig(out, dpi=100, bbox_inches="tight")
-    plt.close(fig)
+    try:
+        fig.savefig(out, dpi=100, bbox_inches="tight")
+    finally:
+        plt.close(fig)
     return RenderResult(path=out, kind=kind)
 
 
@@ -27,13 +29,14 @@ def spectrogram(
 ) -> RenderResult:
     x = _read_samples(capture)
     fig, ax = plt.subplots(figsize=(10, 6))
-    ax.specgram(
+    spec, freqs, t, im = ax.specgram(
         x,
         NFFT=min(nfft, len(x)),
         Fs=capture.sample_rate,
         Fc=capture.center_freq,
         noverlap=min(nfft, len(x)) // 2,
     )
+    fig.colorbar(im, ax=ax, label="Power (dB)")
     ax.set_xlabel("Time (s)")
     ax.set_ylabel("Frequency (Hz)")
     ax.set_title(f"Spectrogram @ {capture.center_freq/1e6:.3f} MHz")
@@ -64,8 +67,11 @@ def constellation(
     max_points: int = 5000,
 ) -> RenderResult:
     x = _read_samples(capture)
-    step = max(1, len(x) // max_points)
-    pts = x[::step]
+    if len(x) > max_points:
+        idx = np.random.default_rng(0).choice(len(x), max_points, replace=False)
+        pts = x[idx]
+    else:
+        pts = x
     fig, ax = plt.subplots(figsize=(6, 6))
     ax.scatter(pts.real, pts.imag, s=2, alpha=0.4)
     ax.set_xlabel("I")
