@@ -25,6 +25,9 @@ dev = [
     "pre-commit"
 ]
 
+[tool.setuptools.packages.find]
+where = ["src"]
+
 [tool.pytest.ini_options]
 # Tell pytest where to find the package
 pythonpath = ["src", "."]

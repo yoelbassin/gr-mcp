@@ -156,8 +156,14 @@ class PlatformProvider:
                 return ExecutionResultModel(
                     compiled=True,
                     compile_errors="",
-                    stdout=e.stdout or "",
-                    stderr=e.stderr or "",
+                    stdout=(
+                        e.stdout.decode() if isinstance(e.stdout, bytes) else e.stdout
+                    )
+                    or "",
+                    stderr=(
+                        e.stderr.decode() if isinstance(e.stderr, bytes) else e.stderr
+                    )
+                    or "",
                     exit_code=None,
                     timed_out=True,
                     duration_seconds=time.time() - start,
