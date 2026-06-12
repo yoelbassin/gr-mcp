@@ -1,3 +1,4 @@
+from glob import escape as glob_escape
 from pathlib import Path
 
 
@@ -18,10 +19,24 @@ class Workspace:
 
     @staticmethod
     def _dedupe(directory: Path, stem: str, probe_suffix: str, suffix: str) -> Path:
+        """Return a collision-free path under *directory*.
+
+        Two checks per candidate:
+        - *probe* — ``glob(escaped_candidate + probe_suffix + "*")`` catches any
+          sidecar files that share the same base name (e.g. ``.sigmf-meta`` /
+          ``.sigmf-data`` for SigMF pairs, or a bare ``.yaml`` alongside others).
+        - *exact* — ``(directory / (candidate + suffix)).exists()`` catches the
+          primary output file itself when *probe_suffix == suffix*.
+
+        ``glob_escape`` is applied to the candidate before globbing so that names
+        containing glob metacharacters (e.g. ``ISM[2.4GHz]``) are treated as
+        literals rather than patterns.
+        """
         candidate = stem
         i = 0
         while (
-            list(directory.glob(candidate + probe_suffix + "*"))
+            next(directory.glob(glob_escape(candidate) + probe_suffix + "*"), None)
+            is not None
             or (directory / (candidate + suffix)).exists()
         ):
             i += 1
