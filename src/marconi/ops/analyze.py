@@ -1,5 +1,6 @@
 import numpy as np
 from scipy import signal as sp_signal
+from scipy.ndimage import uniform_filter1d
 
 from marconi.models import (
     Burst,
@@ -146,17 +147,26 @@ def detect_bursts(
 ) -> list[Burst]:
     """Detect on/off bursts from the smoothed power envelope.
 
-    The threshold is median + threshold_db; an always-on signal therefore
-    yields no bursts (its median power IS the signal).
+    The noise floor is estimated as the 25th-percentile of the envelope power
+    in dB; the detection threshold is ``floor + threshold_db``.
+
+    Properties and limitations:
+    - An always-on signal yields no bursts: when the envelope is flat the
+      25th-percentile equals the signal level, placing the threshold above
+      every sample.
+    - Detection is valid for duty cycles below ~75%; above that the 25th
+      percentile may fall inside a burst, raising the threshold.
+    - Bursts that dip below the threshold mid-burst are reported as separate
+      bursts — there is no gap bridging.
     """
     x = _read_samples(capture)
     if len(x) < 2:
         raise ValueError(f"capture too short for analysis: {len(x)} sample(s)")
     fs = capture.sample_rate
     win = max(1, int(window * fs))
-    power = np.convolve(np.abs(x) ** 2, np.ones(win) / win, mode="same")
+    power = uniform_filter1d(np.abs(x) ** 2, size=win, mode="nearest")
     p_db = 10 * np.log10(power + 1e-30)
-    threshold = float(np.median(p_db)) + threshold_db
+    threshold = float(np.percentile(p_db, 25)) + threshold_db
 
     above = np.where(p_db > threshold)[0]
     if len(above) == 0:
