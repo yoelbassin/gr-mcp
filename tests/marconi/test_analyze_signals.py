@@ -24,3 +24,25 @@ def test_finds_two_tones(tmp_path: Path, make_iq) -> None:
 def test_pure_noise_finds_nothing(tmp_path: Path, make_iq) -> None:
     ref = write_capture(make_iq([]), tmp_path / "cap", center_freq=0.0, sample_rate=1e6)
     assert find_signals(ref) == []
+
+
+def test_tone_near_nyquist_single_signal(tmp_path: Path, make_iq) -> None:
+    """A tone at +499 kHz (near fs/2) must be reported as exactly one signal.
+
+    Spectral leakage wraps power across the ±fs/2 boundary, which previously
+    split the tone into two groups (one at array index 0, one at index N-1).
+    The merged signal's center should be within 3 kHz of the true frequency.
+    """
+    ref = write_capture(
+        make_iq([(499e3, 1.0)]),
+        tmp_path / "cap",
+        center_freq=100e6,
+        sample_rate=1e6,
+    )
+    signals = find_signals(ref)
+    assert (
+        len(signals) == 1
+    ), f"expected 1 signal for near-Nyquist tone, got {len(signals)}: {signals}"
+    assert (
+        abs(signals[0].center_freq - 100.499e6) < 3e3
+    ), f"center_freq {signals[0].center_freq:.1f} Hz not within 3 kHz of 100.499 MHz"

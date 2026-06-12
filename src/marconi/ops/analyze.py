@@ -50,7 +50,23 @@ def find_signals(
     min_bandwidth: float = 500.0,
     nperseg: int = 4096,
 ) -> list[DetectedSignal]:
-    """Segment the PSD into contiguous regions above the noise floor."""
+    """Segment the PSD into contiguous regions above the noise floor.
+
+    Each detected signal's ``bandwidth`` is the threshold-crossing extent —
+    the span of PSD bins that exceed ``noise_floor + threshold_db`` — NOT a
+    -3 dB bandwidth or 99%-power OBW.
+
+    ``snr_db`` is the signal's peak power relative to the global median noise
+    floor (i.e. ``peak_power_db - median(psd_db)``).
+
+    Wrap-around handling: a tone near ±fs/2 can straddle the cyclic edge of
+    the shifted PSD array, producing one above-threshold group that touches
+    index 0 and another that touches index N-1.  When that pattern is
+    detected the two groups are merged into one before computing per-signal
+    statistics.  The power-weighted center frequency is computed with the
+    minority-side bins "unwrapped" by ±sample_rate so the reported center
+    lands near the true tone frequency rather than averaging the two edges.
+    """
     freqs, p_db = _welch(capture, nperseg)
     noise_floor = float(np.median(p_db))
     bin_bw = float(freqs[1] - freqs[0])
@@ -62,14 +78,41 @@ def find_signals(
     splits = np.where(np.diff(above) > 1)[0]
     groups = np.split(above, splits + 1)
 
+    # Wrap-around merge: a tone near ±fs/2 produces one group touching index 0
+    # and one touching index N-1.  Detect this and merge them, unwrapping the
+    # minority-side frequencies so the power-weighted centroid is correct.
+    N = len(p_db)
+    merged: tuple[np.ndarray, np.ndarray, np.ndarray] | None = None
+    if len(groups) >= 2 and int(groups[0][0]) == 0 and int(groups[-1][-1]) == N - 1:
+        first_g, last_g = groups[0], groups[-1]
+        groups = groups[1:-1]  # remaining interior groups (may be empty)
+        if p_db[last_g].max() >= p_db[first_g].max():
+            # Dominant peak at the high-frequency edge: shift the low-edge bins
+            # up by one sample-rate period so they are contiguous with the
+            # high-edge bins in frequency.
+            m_freqs = np.concatenate(
+                [freqs[last_g], freqs[first_g] + capture.sample_rate]
+            )
+        else:
+            # Dominant peak at the low-frequency edge: shift the high-edge bins
+            # down by one sample-rate period.
+            m_freqs = np.concatenate(
+                [freqs[first_g], freqs[last_g] - capture.sample_rate]
+            )
+        m_indices = np.concatenate([last_g, first_g])
+        merged = (m_indices, m_freqs, p_db[m_indices])
+
     signals = []
-    for g in groups:
-        bandwidth = len(g) * bin_bw
+
+    def _append_signal(
+        g_indices: np.ndarray, g_freqs: np.ndarray, g_pdb: np.ndarray
+    ) -> None:
+        bandwidth = len(g_indices) * bin_bw
         if bandwidth < min_bandwidth:
-            continue
-        p_lin = 10 ** (p_db[g] / 10)
-        center = float(np.sum(freqs[g] * p_lin) / np.sum(p_lin))
-        peak_db = float(p_db[g].max())
+            return
+        p_lin = 10 ** (g_pdb / 10)
+        center = float(np.sum(g_freqs * p_lin) / np.sum(p_lin))
+        peak_db = float(g_pdb.max())
         signals.append(
             DetectedSignal(
                 center_freq=center,
@@ -78,5 +121,12 @@ def find_signals(
                 snr_db=peak_db - noise_floor,
             )
         )
+
+    if merged is not None:
+        _append_signal(*merged)
+
+    for g in groups:
+        _append_signal(g, freqs[g], p_db[g])
+
     signals.sort(key=lambda s: s.peak_power_db, reverse=True)
     return signals
