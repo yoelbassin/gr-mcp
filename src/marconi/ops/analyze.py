@@ -2,6 +2,7 @@ import numpy as np
 from scipy import signal as sp_signal
 
 from marconi.models import (
+    Burst,
     CaptureRef,
     DetectedSignal,
     PSDResult,
@@ -136,6 +137,47 @@ def find_signals(
 
     signals.sort(key=lambda s: s.peak_power_db, reverse=True)
     return signals
+
+
+def detect_bursts(
+    capture: CaptureRef,
+    window: float = 1e-3,
+    threshold_db: float = 6.0,
+) -> list[Burst]:
+    """Detect on/off bursts from the smoothed power envelope.
+
+    The threshold is median + threshold_db; an always-on signal therefore
+    yields no bursts (its median power IS the signal).
+    """
+    x = _read_samples(capture)
+    if len(x) < 2:
+        raise ValueError(f"capture too short for analysis: {len(x)} sample(s)")
+    fs = capture.sample_rate
+    win = max(1, int(window * fs))
+    power = np.convolve(np.abs(x) ** 2, np.ones(win) / win, mode="same")
+    p_db = 10 * np.log10(power + 1e-30)
+    threshold = float(np.median(p_db)) + threshold_db
+
+    above = np.where(p_db > threshold)[0]
+    if len(above) == 0:
+        return []
+
+    splits = np.where(np.diff(above) > 1)[0]
+    groups = np.split(above, splits + 1)
+
+    bursts = []
+    for g in groups:
+        duration = len(g) / fs
+        if duration < 2 * window:
+            continue
+        bursts.append(
+            Burst(
+                start_time=float(g[0] / fs),
+                duration=float(duration),
+                mean_power_db=float(np.mean(p_db[g])),
+            )
+        )
+    return bursts
 
 
 def measure(
