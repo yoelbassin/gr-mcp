@@ -148,6 +148,10 @@ def measure(
 
     occupied_bw_99 is the 99% power containment bandwidth within the
     window; snr_db is peak power relative to the global median noise floor.
+
+    A noise-only window returns snr_db ≈ 3 dB at default parameters (max of
+    many chi-squared bins vs the median floor); treat a signal as reliably
+    present only above ~8 dB.
     """
     freqs, p_db = _welch(capture, nperseg)
     noise_floor = float(np.median(p_db))
@@ -164,7 +168,7 @@ def measure(
     total = float(np.sum(p_lin))
 
     csum = np.cumsum(p_lin) / total
-    lo = float(f_sel[int(np.searchsorted(csum, 0.005))])
+    lo = float(f_sel[min(int(np.searchsorted(csum, 0.005)), len(f_sel) - 1)])
     hi = float(f_sel[min(int(np.searchsorted(csum, 0.995)), len(f_sel) - 1)])
 
     bin_bw = float(freqs[1] - freqs[0])

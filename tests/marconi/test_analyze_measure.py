@@ -28,3 +28,6 @@ def test_measure_uses_search_window(tmp_path: Path, make_iq) -> None:
     )
     m = measure(ref, center_freq=100.1e6, search_bandwidth=100e3)
     assert abs(m.center_freq - 100.1e6) < 1e3
+    assert m.snr_db > 20
+    m2 = measure(ref, center_freq=99.8e6, search_bandwidth=100e3)
+    assert m2.power_db > m.power_db
