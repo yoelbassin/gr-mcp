@@ -1,7 +1,13 @@
 import numpy as np
 from scipy import signal as sp_signal
 
-from marconi.models import CaptureRef, DetectedSignal, PSDResult, SignalPeak
+from marconi.models import (
+    CaptureRef,
+    DetectedSignal,
+    PSDResult,
+    SignalMeasurement,
+    SignalPeak,
+)
 
 
 def _read_samples(capture: CaptureRef) -> np.ndarray:
@@ -130,3 +136,41 @@ def find_signals(
 
     signals.sort(key=lambda s: s.peak_power_db, reverse=True)
     return signals
+
+
+def measure(
+    capture: CaptureRef,
+    center_freq: float,
+    search_bandwidth: float = 200e3,
+    nperseg: int = 4096,
+) -> SignalMeasurement:
+    """Measure the signal nearest center_freq within the search window.
+
+    occupied_bw_99 is the 99% power containment bandwidth within the
+    window; snr_db is peak power relative to the global median noise floor.
+    """
+    freqs, p_db = _welch(capture, nperseg)
+    noise_floor = float(np.median(p_db))
+
+    sel = (freqs >= center_freq - search_bandwidth / 2) & (
+        freqs <= center_freq + search_bandwidth / 2
+    )
+    if not np.any(sel):
+        raise ValueError("search window is outside the capture's spectrum")
+
+    f_sel = freqs[sel]
+    p_sel_db = p_db[sel]
+    p_lin = 10 ** (p_sel_db / 10)
+    total = float(np.sum(p_lin))
+
+    csum = np.cumsum(p_lin) / total
+    lo = float(f_sel[int(np.searchsorted(csum, 0.005))])
+    hi = float(f_sel[min(int(np.searchsorted(csum, 0.995)), len(f_sel) - 1)])
+
+    bin_bw = float(freqs[1] - freqs[0])
+    return SignalMeasurement(
+        center_freq=float(f_sel[int(np.argmax(p_sel_db))]),
+        occupied_bw_99=hi - lo,
+        power_db=10 * float(np.log10(total * bin_bw + 1e-30)),
+        snr_db=float(p_sel_db.max()) - noise_floor,
+    )
