@@ -23,6 +23,19 @@ def test_psd_finds_tone_at_absolute_freq(tmp_path: Path, make_iq) -> None:
     assert strongest.power_db > result.noise_floor_db + 20
 
 
+def test_psd_rejects_empty_capture(tmp_path: Path) -> None:
+    import pytest
+
+    ref = write_capture(
+        np.array([], dtype=np.complex64),
+        tmp_path / "empty",
+        center_freq=433e6,
+        sample_rate=1e6,
+    )
+    with pytest.raises(ValueError, match="too short"):
+        psd(ref)
+
+
 def test_psd_noise_floor_sane(tmp_path: Path, make_iq) -> None:
     ref = write_capture(
         make_iq([], noise_amplitude=0.01),

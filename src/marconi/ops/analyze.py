@@ -11,6 +11,8 @@ def _read_samples(capture: CaptureRef) -> np.ndarray:
 def _welch(capture: CaptureRef, nperseg: int = 4096) -> tuple[np.ndarray, np.ndarray]:
     """Two-sided Welch PSD in dB, freqs absolute (Hz), ascending."""
     x = _read_samples(capture)
+    if len(x) < 2:
+        raise ValueError(f"capture too short for analysis: {len(x)} sample(s)")
     nperseg = min(nperseg, len(x))
     freqs, p = sp_signal.welch(
         x,
