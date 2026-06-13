@@ -1,84 +1,63 @@
-# GNU Radio MCP Server (`gr-mcp`)
+# Marconi 🤖
 
-[![Python Version](https://img.shields.io/badge/python-3.13%2B-blue.svg)](https://www.python.org/downloads/release/python-3130/)
-[![Trust Score](https://archestra.ai/mcp-catalog/api/badge/quality/yoelbassin/gnuradioMCP)](https://archestra.ai/mcp-catalog/yoelbassin__gnuradiomcp)
+```
+        o)))
+        |
+    .-------.
+    | o   o |
+    |   v   |
+    '-------'
 
-`gr-mcp` is an MCP server that exposes GNU Radio flowgraph operations as tools for AI assistants and automation clients. It is built on FastMCP and designed for programmatic SDR workflow generation, editing, validation, and export.
+    Hi! I'm Marco.
+```
 
-## What It Provides
+LLM-driven RF for Claude Code. Describe what you want on the air and I survey the
+spectrum, build and run the receiver, look at the signal, and leave a reproducible
+RF project behind — SigMF captures, YAML pipelines, and `.grc` flowgraphs you own.
 
-- Discovery of available GNU Radio blocks
-- Programmatic block creation and removal
-- Block parameter read/write operations
-- Connection and disconnection between blocks
-- Flowgraph validation and error inspection
-- Flowgraph persistence to `.grc`
+> Early development — v1.0 is simulation-only (no hardware yet). See `ROADMAP.md`.
+
+> Proviously known as GNURadio/GR-MCP.
 
 ## Requirements
 
-- Python `>=3.13`
-- [GNU Radio](https://www.gnuradio.org/) installed and available to Python (tested with GNU Radio Companion `3.10.12.0`)
-- [`uv`](https://docs.astral.sh/uv/)
+- [`uv`](https://docs.astral.sh/uv/) and Python ≥ 3.13
+- [GNU Radio](https://www.gnuradio.org/) 3.10+ installed system-wide (conda-forge,
+  your distro's package manager, or Homebrew) — needed to run pipelines and
+  simulate. Analyzing existing IQ files doesn't require it.
 
-## Installation
+## Install
 
-1. Clone the repository:
-
-```bash
-git clone https://github.com/yoelbassin/gr-mcp
-cd gr-mcp
-```
-
-2. Install GNU Radio if it is not already installed:
-
-- [GNU Radio installation guide](https://wiki.gnuradio.org/index.php/InstallingGR)
-
-3. Create a virtual environment:
-
-```bash
-uv venv
-```
-
-## Install as a Claude Code Plugin
-
-The easiest way to use `gr-mcp` with Claude Code is as a plugin. It handles MCP server setup automatically.
+In Claude Code:
 
 ```
 /plugin marketplace add yoelbassin/gr-mcp
-/plugin install gr-mcp@gr-mcp
+/plugin install marconi
 ```
 
-GNU Radio must be installed on your system before installing the plugin.
+That's it — `uv` starts the MCP server on first use and loads the skills. Nothing
+else to configure.
 
-## Run with an MCP Client
+## Use it
 
-Add `gr-mcp` to your MCP client configuration (for example, Cursor or Claude Desktop):
+Ask in plain language:
 
-```json
-{
-  "mcpServers": {
-    "gr-mcp": {
-      "command": "uv",
-      "args": [
-        "--directory",
-        "/path/to/gr-mcp",
-        "run",
-        "main.py"
-      ]
-    }
-  }
-}
-```
+> "Simulate an FM station at 100.3 MHz and build me a receiver."
 
-## Development
+> "Here's a capture, `mystery.wav` — survey what's on the air, then decode the strongest carrier."
 
-Install development dependencies and run tests:
+I pick the right skill and drive the workflow end to end:
 
-```bash
-pip install -e ".[dev]"
-pytest
-```
+- **survey-spectrum** — what's present (PSD, signal detection, spectrogram)
+- **simulate-scene** — register a simulated device from a description
+- **build-receiver** — channelize, demodulate, validate, run, verify, save
+- **debug-no-signal** — locate the fault when a receiver outputs nothing
+- **tx-experiment** — closed-loop transmit-then-receive in simulation
+- **escape-hatch** — drop to the Python library when no tool fits
 
-## Project Status
+Artifacts land under `artifacts/` in the server's working directory; set
+`MARCONI_WORKSPACE` to put them elsewhere.
 
-This project is under active development. Core functionality is available, and interfaces may evolve as the server matures.
+## License
+
+[GPL-3.0-or-later](LICENSE).

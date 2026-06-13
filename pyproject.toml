@@ -3,26 +3,46 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "gnuradio-mcp"
+name = "marconi"
 version = "0.1.0"
-description = "A FastMCP server for gnuradio."
+description = "LLM-driven RF control and analysis — an engine-agnostic operations layer with a GNU Radio backend."
+license = { text = "GPL-3.0-or-later" }
 requires-python = ">=3.13"
 dependencies = [
     "pydantic",
-    "fastmcp",
-    # for gnuradio
-    "mako",
     "pyyaml",
+    "numpy>=2.4.6",
+    "scipy>=1.17.1",
+    "matplotlib>=3.11.0",
 ]
 
 [project.optional-dependencies]
+mcp = ["fastmcp>=2.0"]
 dev = [
     "pytest >= 7.0",
     "pytest-asyncio",
-    "pre-commit"
+    "pre-commit",
+    "marconi[mcp]",
 ]
 
+[project.scripts]
+marconi-mcp = "marconi.mcp.server:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.isort]
+profile = "black"
+
+[tool.mypy]
+ignore_missing_imports = true
+explicit_package_bases = true
+mypy_path = "src"
+
 [tool.pytest.ini_options]
-# Tell pytest where to find the package
+# src on the path so `import marconi` resolves without an install step
 pythonpath = ["src", "."]
+# tests/marconi/ mirrors src/marconi/ (ops/ mcp/ backends/); tests/plugin/ holds
+# the Layer-3 (skills + manifests) tests. One root so a bare `pytest` finds both.
+testpaths = ["tests"]
 asyncio_mode = "auto"
