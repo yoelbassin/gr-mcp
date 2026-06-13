@@ -18,12 +18,23 @@ from marconi.sigmf import read_samples
 # this much, so co-equal edge tones stay separate.
 _WRAP_MERGE_MIN_ASYMMETRY_DB = 12.0
 
+# Added before log10 so an empty/zero PSD bin yields a large negative dB value
+# rather than -inf.
+_LOG_FLOOR = 1e-30
 
-def _welch(capture: CaptureRef, nperseg: int = 4096) -> tuple[np.ndarray, np.ndarray]:
-    """Two-sided Welch PSD in dB, freqs absolute (Hz), ascending."""
+
+def _read_for_analysis(capture: CaptureRef) -> np.ndarray:
+    """Read a capture's samples, requiring the 2 minimum that spectral and
+    envelope analysis need."""
     x = read_samples(capture)
     if len(x) < 2:
         raise ValueError(f"capture too short for analysis: {len(x)} sample(s)")
+    return x
+
+
+def _welch(capture: CaptureRef, nperseg: int = 4096) -> tuple[np.ndarray, np.ndarray]:
+    """Two-sided Welch PSD in dB, freqs absolute (Hz), ascending."""
+    x = _read_for_analysis(capture)
     nperseg = min(nperseg, len(x))
     freqs, p = sp_signal.welch(
         x,
@@ -33,7 +44,7 @@ def _welch(capture: CaptureRef, nperseg: int = 4096) -> tuple[np.ndarray, np.nda
         detrend=False,
     )
     freqs = np.fft.fftshift(freqs) + capture.center_freq
-    p_db = 10 * np.log10(np.fft.fftshift(p) + 1e-30)
+    p_db = 10 * np.log10(np.fft.fftshift(p) + _LOG_FLOOR)
     return freqs, p_db
 
 
@@ -174,13 +185,11 @@ def detect_bursts(
     - Bursts that dip below the threshold mid-burst are reported as separate
       bursts — there is no gap bridging.
     """
-    x = read_samples(capture)
-    if len(x) < 2:
-        raise ValueError(f"capture too short for analysis: {len(x)} sample(s)")
+    x = _read_for_analysis(capture)
     fs = capture.sample_rate
     win = max(1, int(window * fs))
     power = uniform_filter1d(np.abs(x) ** 2, size=win, mode="nearest")
-    p_db = 10 * np.log10(power + 1e-30)
+    p_db = 10 * np.log10(power + _LOG_FLOOR)
     threshold = float(np.percentile(p_db, 25)) + threshold_db
 
     above = np.where(p_db > threshold)[0]
@@ -242,6 +251,6 @@ def measure(
     return SignalMeasurement(
         center_freq=float(f_sel[int(np.argmax(p_sel_db))]),
         occupied_bw_99=hi - lo,
-        power_db=10 * float(np.log10(total * bin_bw + 1e-30)),
+        power_db=10 * float(np.log10(total * bin_bw + _LOG_FLOOR)),
         snr_db=float(p_sel_db.max()) - noise_floor,
     )
