@@ -73,4 +73,4 @@ demod) grows deliberately via the roadmap, not under demo pressure.
 ## Development workflow
 
 - TDD, frequent commits. Pre-commit hooks (black, isort, flake8, mypy) run on commit; if they reformat, `git add -u` and re-commit.
-- v1.0 is **simulation-only** (no hardware). Hardware receive (v1.1) and transmit (v1.2) are additive behind the same device/backend interfaces — no workflow or skill changes.
+- v1.0 is **simulation-only** (no hardware). Next is digital decode (v1.1, pure-software); hardware receive (v1.2) and transmit (later) are additive behind the same device/backend interfaces — no workflow or skill changes. See `ROADMAP.md` for the north star and current sequencing.
