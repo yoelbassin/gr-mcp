@@ -1,13 +1,13 @@
 {
-  "name": "gr-mcp",
+  "name": "marconi",
   "owner": {
     "name": "Yoel Bassin"
   },
   "plugins": [
     {
-      "name": "gr-mcp",
+      "name": "marconi",
       "source": "./",
-      "description": "GNU Radio flowgraph tools — create, edit, connect, validate, execute, and save .grc flowgraphs programmatically"
+      "description": "LLM-driven RF control and analysis — \"Claude Code for RF\"."
     }
   ]
 }
