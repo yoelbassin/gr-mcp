@@ -8,7 +8,7 @@ in an in-process history for observability and artifact recall."""
 from __future__ import annotations
 
 from marconi.devices import add_simulated_device, clear_devices
-from marconi.models import RunResult
+from marconi.models import RunRecord, RunResult
 from marconi.specs import load_scene
 from marconi.workspace import Workspace
 
@@ -16,7 +16,7 @@ from marconi.workspace import Workspace
 class ServerState:
     def __init__(self, workspace: Workspace) -> None:
         self.workspace = workspace
-        self.runs: list[dict] = []
+        self.runs: list[RunRecord] = []
         self._run_counter = 0
         self._load_persisted_devices()
 
@@ -30,19 +30,19 @@ class ServerState:
         for path in sorted(scenes_dir.glob("*.yaml")):
             add_simulated_device(path.stem, load_scene(path))
 
-    def next_run_id(self) -> str:
+    def _next_run_id(self) -> str:
         self._run_counter += 1
         return f"run-{self._run_counter}"
 
-    def record_run(self, run_id: str, pipeline_name: str, result: RunResult) -> dict:
-        rec = {
-            "run_id": run_id,
-            "pipeline": pipeline_name,
-            "status": result.status,
-            "elapsed_seconds": result.elapsed_seconds,
-            "artifacts": [str(p) for p in result.artifacts],
-            "error": result.error,
-        }
+    def record_run(self, pipeline_name: str, result: RunResult) -> RunRecord:
+        rec = RunRecord(
+            run_id=self._next_run_id(),
+            pipeline=pipeline_name,
+            status=result.status,
+            elapsed_seconds=result.elapsed_seconds,
+            artifacts=[str(p) for p in result.artifacts],
+            error=result.error,
+        )
         self.runs.append(rec)
         return rec
 

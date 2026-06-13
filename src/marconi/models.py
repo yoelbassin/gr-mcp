@@ -154,3 +154,16 @@ class RunResult(BaseModel):
     elapsed_seconds: float
     artifacts: list[Path] = []
     error: str | None = None
+
+
+class RunRecord(BaseModel):
+    """A pipeline run's history entry: its run_id and pipeline name plus the
+    flattened RunResult. This is the shape run_pipeline returns and list_runs
+    lists (artifacts as workspace path strings)."""
+
+    run_id: str
+    pipeline: str
+    status: str
+    elapsed_seconds: float
+    artifacts: list[str] = []
+    error: str | None = None

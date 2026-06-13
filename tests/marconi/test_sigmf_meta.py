@@ -2,7 +2,7 @@ from pathlib import Path
 
 import numpy as np
 
-from marconi.sigmf import read_meta, read_samples, write_capture, write_meta_for
+from marconi.sigmf import read_meta, read_samples, write_capture, write_meta
 
 
 def test_read_meta_does_not_read_samples(tmp_path: Path, make_iq) -> None:
@@ -22,7 +22,7 @@ def test_write_meta_for_existing_raw_file(tmp_path: Path, make_iq) -> None:
     samples = make_iq([])
     data_path = tmp_path / "x.sigmf-data"
     samples.tofile(data_path)
-    ref = write_meta_for(data_path, center_freq=433e6, sample_rate=1e6)
+    ref = write_meta(data_path, center_freq=433e6, sample_rate=1e6)
     assert ref.path == data_path
     assert ref.num_samples == len(samples)
     assert read_meta(data_path) == ref

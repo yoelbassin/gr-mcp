@@ -60,3 +60,9 @@ class Workspace:
         """Collision-free .grc path under pipelines/ — never overwrites a
         flowgraph the user may have hand-tweaked in GNU Radio Companion."""
         return self._dedupe(self._subdir("pipelines"), name, ".grc", ".grc")
+
+    def scene_file(self, device_id: str) -> Path:
+        """The canonical (deterministic, not deduped) scene path for a device —
+        scenes/<device_id>.yaml. Keyed on the id so re-registering overwrites
+        the same file; this is the one place the convention lives."""
+        return self._subdir("scenes") / f"{device_id}.yaml"

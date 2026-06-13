@@ -7,7 +7,7 @@ the pipeline's sample_rate at build time.
 
 from dataclasses import dataclass, field
 
-from marconi.models import PipelineSpec, ValidationIssue
+from marconi.models import BlockSpec, PipelineSpec, ValidationIssue
 
 
 @dataclass(frozen=True)
@@ -145,10 +145,51 @@ def _check_param_type(value: object, expected: type) -> bool:
     return isinstance(value, expected)
 
 
-def validate_pipeline(spec: PipelineSpec) -> list[ValidationIssue]:
-    issues: list[ValidationIssue] = []
-    by_id: dict[str, str] = {}
+def _endpoint_def(by_id: dict[str, str], end: str) -> BlockDef | None:
+    """The BlockDef for a connection endpoint, or None if the block id is
+    unknown or its declared type isn't in the vocabulary."""
+    return VOCABULARY.get(by_id.get(end, ""))
 
+
+def _check_block_params(
+    b: BlockSpec, d: BlockDef, issues: list[ValidationIssue]
+) -> None:
+    defs = {p.name: p for p in d.params}
+    for name in b.params:
+        if name not in defs:
+            issues.append(
+                ValidationIssue(
+                    block_id=b.id,
+                    field=name,
+                    message=f"unknown parameter for {b.type}; "
+                    f"accepted: {sorted(defs) or 'none'}",
+                )
+            )
+    for p in d.params:
+        if p.required and p.name not in b.params:
+            issues.append(
+                ValidationIssue(
+                    block_id=b.id,
+                    field=p.name,
+                    message=f"required parameter missing ({p.type.__name__})",
+                )
+            )
+        elif p.name in b.params and not _check_param_type(b.params[p.name], p.type):
+            issues.append(
+                ValidationIssue(
+                    block_id=b.id,
+                    field=p.name,
+                    message=f"expected {p.type.__name__}, "
+                    f"got {type(b.params[p.name]).__name__}",
+                )
+            )
+
+
+def _check_blocks(spec: PipelineSpec, issues: list[ValidationIssue]) -> dict[str, str]:
+    """Validate each block's type and params; return {block_id: type} for every
+    non-duplicate block (including unknown types, so connection checks can tell
+    'unknown block' apart from 'unknown type')."""
+    by_id: dict[str, str] = {}
     for b in spec.blocks:
         if b.id in by_id:
             issues.append(
@@ -166,37 +207,16 @@ def validate_pipeline(spec: PipelineSpec) -> list[ValidationIssue]:
                 )
             )
             continue
-        defs = {p.name: p for p in d.params}
-        for name in b.params:
-            if name not in defs:
-                issues.append(
-                    ValidationIssue(
-                        block_id=b.id,
-                        field=name,
-                        message=f"unknown parameter for {b.type}; "
-                        f"accepted: {sorted(defs) or 'none'}",
-                    )
-                )
-        for p in d.params:
-            if p.required and p.name not in b.params:
-                issues.append(
-                    ValidationIssue(
-                        block_id=b.id,
-                        field=p.name,
-                        message=f"required parameter missing ({p.type.__name__})",
-                    )
-                )
-            elif p.name in b.params and not _check_param_type(b.params[p.name], p.type):
-                issues.append(
-                    ValidationIssue(
-                        block_id=b.id,
-                        field=p.name,
-                        message=f"expected {p.type.__name__}, "
-                        f"got {type(b.params[p.name]).__name__}",
-                    )
-                )
+        _check_block_params(b, d, issues)
+    return by_id
 
-    connected_inputs: set[tuple[str, int]] = set()
+
+def _check_connections(
+    spec: PipelineSpec, by_id: dict[str, str], issues: list[ValidationIssue]
+) -> set[tuple[str, int]]:
+    """Validate endpoints, port ranges, double-connected inputs, and dtype
+    matches; return the set of (block_id, input_port) that got connected."""
+    connected: set[tuple[str, int]] = set()
     for c in spec.connections:
         for end in (c.src_block, c.dst_block):
             if end not in by_id:
@@ -205,68 +225,75 @@ def validate_pipeline(spec: PipelineSpec) -> list[ValidationIssue]:
                         message=f"connection references unknown block '{end}'"
                     )
                 )
-        if c.src_block in by_id and by_id[c.src_block] in VOCABULARY:
-            d = VOCABULARY[by_id[c.src_block]]
-            if c.src_port >= len(d.outputs):
-                issues.append(
-                    ValidationIssue(
-                        block_id=c.src_block,
-                        message=f"output port {c.src_port} out of range "
-                        f"({len(d.outputs)} outputs)",
-                    )
+        src_d = _endpoint_def(by_id, c.src_block)
+        dst_d = _endpoint_def(by_id, c.dst_block)
+        if src_d is not None and c.src_port >= len(src_d.outputs):
+            issues.append(
+                ValidationIssue(
+                    block_id=c.src_block,
+                    message=f"output port {c.src_port} out of range "
+                    f"({len(src_d.outputs)} outputs)",
                 )
-        if c.dst_block in by_id and by_id[c.dst_block] in VOCABULARY:
-            d = VOCABULARY[by_id[c.dst_block]]
-            if c.dst_port >= len(d.inputs):
+            )
+        if dst_d is not None:
+            if c.dst_port >= len(dst_d.inputs):
                 issues.append(
                     ValidationIssue(
                         block_id=c.dst_block,
                         message=f"input port {c.dst_port} out of range "
-                        f"({len(d.inputs)} inputs)",
+                        f"({len(dst_d.inputs)} inputs)",
                     )
                 )
             else:
                 key = (c.dst_block, c.dst_port)
-                if key in connected_inputs:
+                if key in connected:
                     issues.append(
                         ValidationIssue(
                             block_id=c.dst_block,
                             message=f"input port {c.dst_port} connected twice",
                         )
                     )
-                connected_inputs.add(key)
+                connected.add(key)
         if (
-            c.src_block in by_id
-            and c.dst_block in by_id
-            and by_id[c.src_block] in VOCABULARY
-            and by_id[c.dst_block] in VOCABULARY
+            src_d is not None
+            and dst_d is not None
+            and c.src_port < len(src_d.outputs)
+            and c.dst_port < len(dst_d.inputs)
         ):
-            src_d = VOCABULARY[by_id[c.src_block]]
-            dst_d = VOCABULARY[by_id[c.dst_block]]
-            if c.src_port < len(src_d.outputs) and c.dst_port < len(dst_d.inputs):
-                out_t = src_d.outputs[c.src_port]
-                in_t = dst_d.inputs[c.dst_port]
-                if out_t != in_t:
-                    issues.append(
-                        ValidationIssue(
-                            block_id=c.dst_block,
-                            message=f"dtype mismatch: {c.src_block} outputs "
-                            f"{_DTYPE_NAMES[out_t]} but {c.dst_block} input "
-                            f"{c.dst_port} expects {_DTYPE_NAMES[in_t]}",
-                        )
+            out_t, in_t = src_d.outputs[c.src_port], dst_d.inputs[c.dst_port]
+            if out_t != in_t:
+                issues.append(
+                    ValidationIssue(
+                        block_id=c.dst_block,
+                        message=f"dtype mismatch: {c.src_block} outputs "
+                        f"{_DTYPE_NAMES[out_t]} but {c.dst_block} input "
+                        f"{c.dst_port} expects {_DTYPE_NAMES[in_t]}",
                     )
+                )
+    return connected
 
+
+def _check_inputs_connected(
+    spec: PipelineSpec,
+    connected: set[tuple[str, int]],
+    issues: list[ValidationIssue],
+) -> None:
     for b in spec.blocks:
         d = VOCABULARY.get(b.type)
         if d is None:
             continue
         for port in range(len(d.inputs)):
-            if (b.id, port) not in connected_inputs:
+            if (b.id, port) not in connected:
                 issues.append(
                     ValidationIssue(
-                        block_id=b.id,
-                        message=f"input port {port} is not connected",
+                        block_id=b.id, message=f"input port {port} is not connected"
                     )
                 )
 
+
+def validate_pipeline(spec: PipelineSpec) -> list[ValidationIssue]:
+    issues: list[ValidationIssue] = []
+    by_id = _check_blocks(spec, issues)
+    connected = _check_connections(spec, by_id, issues)
+    _check_inputs_connected(spec, connected, issues)
     return issues

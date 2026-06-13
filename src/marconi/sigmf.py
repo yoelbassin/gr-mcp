@@ -78,7 +78,7 @@ def read_samples(capture: CaptureRef) -> np.ndarray:
     return np.fromfile(capture.path, dtype=np.complex64)
 
 
-def write_meta_for(
+def write_meta(
     data_path: Path | str, center_freq: float, sample_rate: float
 ) -> CaptureRef:
     """Create the .sigmf-meta sidecar for an existing raw cf32 data file."""

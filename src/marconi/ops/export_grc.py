@@ -6,17 +6,12 @@ Parameter values are strings because GRC evaluates them as Python.
 
 import math
 from pathlib import Path
-from typing import Any
 
 import yaml
 
 from marconi.models import BlockSpec, PipelineSpec
 from marconi.vocabulary import PipelineValidationError, validate_pipeline
 from marconi.workspace import Workspace
-
-
-def _s(v: Any) -> str:
-    return str(v)
 
 
 def _block_states(i: int) -> dict:
@@ -36,10 +31,10 @@ def _map_block(b: BlockSpec, rate: float) -> tuple[str, dict[str, str]]:
     if b.type == "tone_source":
         return "analog_sig_source_x", {
             "type": "complex",
-            "samp_rate": _s(r),
+            "samp_rate": str(r),
             "waveform": "analog.GR_COS_WAVE",
-            "freq": _s(p["freq"]),
-            "amp": _s(p.get("amplitude", 1.0)),
+            "freq": str(p["freq"]),
+            "amp": str(p.get("amplitude", 1.0)),
             "offset": "0",
             "phase": "0",
             "showports": "False",
@@ -47,10 +42,10 @@ def _map_block(b: BlockSpec, rate: float) -> tuple[str, dict[str, str]]:
     if b.type == "audio_tone_source":
         return "analog_sig_source_x", {
             "type": "float",
-            "samp_rate": _s(r),
+            "samp_rate": str(r),
             "waveform": "analog.GR_COS_WAVE",
-            "freq": _s(p["freq"]),
-            "amp": _s(p.get("amplitude", 0.5)),
+            "freq": str(p["freq"]),
+            "amp": str(p.get("amplitude", 0.5)),
             "offset": "0",
             "phase": "0",
             "showports": "False",
@@ -59,14 +54,14 @@ def _map_block(b: BlockSpec, rate: float) -> tuple[str, dict[str, str]]:
         return "analog_noise_source_x", {
             "type": "complex",
             "noise_type": "analog.GR_GAUSSIAN",
-            "amp": _s(p["amplitude"]),
-            "seed": _s(p.get("seed", 0)),
+            "amp": str(p["amplitude"]),
+            "seed": str(p.get("seed", 0)),
         }
     if b.type == "file_source":
         return "blocks_file_source", {
             "file": str(p["path"]),
             "type": "complex",
-            "repeat": _s(bool(p.get("repeat", False))),
+            "repeat": str(bool(p.get("repeat", False))),
             "vlen": "1",
             "begin_tag": "pmt.PMT_NIL",
             "offset": "0",
@@ -75,7 +70,7 @@ def _map_block(b: BlockSpec, rate: float) -> tuple[str, dict[str, str]]:
     if b.type == "head":
         return "blocks_head", {
             "type": "complex",
-            "num_items": _s(int(p["num_samples"])),
+            "num_items": str(int(p["num_samples"])),
             "vlen": "1",
         }
     if b.type == "add":
@@ -83,51 +78,51 @@ def _map_block(b: BlockSpec, rate: float) -> tuple[str, dict[str, str]]:
     if b.type == "multiply_const":
         return "blocks_multiply_const_vxx", {
             "type": "complex",
-            "const": _s(p["value"]),
+            "const": str(p["value"]),
             "vlen": "1",
         }
     if b.type == "freq_shift":
         return "blocks_rotator_cc", {
-            "phase_inc": _s(2.0 * math.pi * float(p["offset"]) / r),
+            "phase_inc": str(2.0 * math.pi * float(p["offset"]) / r),
             "tag_inc_update": "False",
         }
     if b.type == "freq_xlating_lowpass":
         taps = f"firdes.low_pass(1.0, {r}, {p['cutoff']}, {p['transition']})"
         return "freq_xlating_fir_filter_xxx", {
             "type": "ccf",
-            "decim": _s(int(p["decimation"])),
+            "decim": str(int(p["decimation"])),
             "taps": taps,
-            "center_freq": _s(p["center_offset"]),
-            "samp_rate": _s(r),
+            "center_freq": str(p["center_offset"]),
+            "samp_rate": str(r),
         }
     if b.type == "quadrature_demod":
-        return "analog_quadrature_demod_cf", {"gain": _s(p.get("gain", 1.0))}
+        return "analog_quadrature_demod_cf", {"gain": str(p.get("gain", 1.0))}
     if b.type in ("rational_resampler_f", "rational_resampler_c"):
         return "rational_resampler_xxx", {
             "type": "fff" if b.type.endswith("_f") else "ccc",
-            "interp": _s(int(p["interpolation"])),
-            "decim": _s(int(p["decimation"])),
+            "interp": str(int(p["interpolation"])),
+            "decim": str(int(p["decimation"])),
             "taps": "[]",
             "fbw": "0",
         }
     if b.type == "fm_deemphasis":
         return "analog_fm_deemph", {
-            "samp_rate": _s(r),
-            "tau": _s(p.get("tau", 75e-6)),
+            "samp_rate": str(r),
+            "tau": str(p.get("tau", 75e-6)),
         }
     if b.type == "nbfm_rx":
         return "analog_nbfm_rx", {
-            "audio_rate": _s(int(p["audio_rate"])),
-            "quad_rate": _s(int(p["quad_rate"])),
-            "tau": _s(p.get("tau", 75e-6)),
-            "max_dev": _s(p.get("max_dev", 5e3)),
+            "audio_rate": str(int(p["audio_rate"])),
+            "quad_rate": str(int(p["quad_rate"])),
+            "tau": str(p.get("tau", 75e-6)),
+            "max_dev": str(p.get("max_dev", 5e3)),
         }
     if b.type == "nbfm_tx":
         return "analog_nbfm_tx", {
-            "audio_rate": _s(int(p["audio_rate"])),
-            "quad_rate": _s(int(p["quad_rate"])),
-            "tau": _s(p.get("tau", 75e-6)),
-            "max_dev": _s(p.get("max_dev", 5e3)),
+            "audio_rate": str(int(p["audio_rate"])),
+            "quad_rate": str(int(p["quad_rate"])),
+            "tau": str(p.get("tau", 75e-6)),
+            "max_dev": str(p.get("max_dev", 5e3)),
             "fh": "-1.0",
         }
     if b.type == "file_sink":
@@ -141,7 +136,7 @@ def _map_block(b: BlockSpec, rate: float) -> tuple[str, dict[str, str]]:
         return "blocks_wavfile_sink", {
             "file": str(p["path"]),
             "nchan": "1",
-            "samp_rate": _s(int(p["sample_rate"])),
+            "samp_rate": str(int(p["sample_rate"])),
             "format": "FORMAT_WAV",
             "bits_per_sample1": "FORMAT_PCM_16",
             "append": "False",

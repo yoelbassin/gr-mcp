@@ -6,6 +6,7 @@ from marconi.models import (
     CaptureRef,
     ConnectionSpec,
     PipelineSpec,
+    SceneElement,
     SceneSpec,
 )
 from marconi.ops.pipeline import run_pipeline
@@ -13,6 +14,139 @@ from marconi.workspace import Workspace
 
 _FM_AUDIO_RATE = 25_000
 _FM_QUAD_RATE = 100_000
+
+# A scene element compiles to (blocks, connections, output_block_id) — the id
+# whose output carries that element's signal into the scene's adder tree.
+_Stage = tuple[list[BlockSpec], list[ConnectionSpec], str]
+
+
+def _tone_stage(i: int, el: SceneElement, offset: float) -> _Stage:
+    bid = f"tone{i}"
+    block = BlockSpec(
+        id=bid, type="tone_source", params={"freq": offset, "amplitude": el.amplitude}
+    )
+    return [block], [], bid
+
+
+def _noise_stage(i: int, el: SceneElement) -> _Stage:
+    bid = f"noise{i}"
+    block = BlockSpec(
+        id=bid,
+        type="noise_source",
+        params={"amplitude": el.amplitude, "seed": int(el.params.get("seed", 0))},
+    )
+    return [block], [], bid
+
+
+def _fm_tone_stage(
+    i: int, el: SceneElement, offset: float, sample_rate: float
+) -> _Stage:
+    if "mod_freq" not in el.params:
+        raise ValueError(
+            f"fm_tone element at {el.freq} Hz requires params.mod_freq "
+            "(the audio modulation frequency in Hz)"
+        )
+    if sample_rate % _FM_QUAD_RATE != 0:
+        raise ValueError(
+            f"fm_tone requires sample_rate to be a multiple of "
+            f"{_FM_QUAD_RATE}, got {sample_rate}"
+        )
+    interp = int(sample_rate // _FM_QUAD_RATE)
+    blocks = [
+        BlockSpec(
+            id=f"fmaudio{i}",
+            type="audio_tone_source",
+            params={
+                "freq": float(el.params["mod_freq"]),
+                "sample_rate": float(_FM_AUDIO_RATE),
+            },
+        ),
+        BlockSpec(
+            id=f"fmtx{i}",
+            type="nbfm_tx",
+            params={"audio_rate": _FM_AUDIO_RATE, "quad_rate": _FM_QUAD_RATE},
+        ),
+        BlockSpec(
+            id=f"fmrr{i}",
+            type="rational_resampler_c",
+            params={"interpolation": interp, "decimation": 1},
+        ),
+        BlockSpec(
+            id=f"fmamp{i}", type="multiply_const", params={"value": el.amplitude}
+        ),
+        BlockSpec(id=f"fmshift{i}", type="freq_shift", params={"offset": offset}),
+    ]
+    connections = [
+        ConnectionSpec(src_block=f"fmaudio{i}", dst_block=f"fmtx{i}"),
+        ConnectionSpec(src_block=f"fmtx{i}", dst_block=f"fmrr{i}"),
+        ConnectionSpec(src_block=f"fmrr{i}", dst_block=f"fmamp{i}"),
+        ConnectionSpec(src_block=f"fmamp{i}", dst_block=f"fmshift{i}"),
+    ]
+    return blocks, connections, f"fmshift{i}"
+
+
+def _iq_file_stage(
+    i: int, el: SceneElement, offset: float, sample_rate: float
+) -> _Stage:
+    missing = {"path", "sample_rate"} - el.params.keys()
+    if missing:
+        raise ValueError(
+            f"iq_file element requires params {sorted(missing)} "
+            "(the source file path and its sample_rate in Hz)"
+        )
+    file_rate = float(el.params["sample_rate"])
+    if file_rate != sample_rate:
+        raise ValueError(
+            f"transmit capture sample rate {file_rate} does not match "
+            f"scene render rate {sample_rate} (v1.0 requires equal rates)"
+        )
+    blocks = [
+        BlockSpec(
+            id=f"iq{i}",
+            type="file_source",
+            params={"path": str(el.params["path"]), "repeat": True},
+        ),
+        BlockSpec(
+            id=f"iqamp{i}", type="multiply_const", params={"value": el.amplitude}
+        ),
+        BlockSpec(id=f"iqshift{i}", type="freq_shift", params={"offset": offset}),
+    ]
+    connections = [
+        ConnectionSpec(src_block=f"iq{i}", dst_block=f"iqamp{i}"),
+        ConnectionSpec(src_block=f"iqamp{i}", dst_block=f"iqshift{i}"),
+    ]
+    return blocks, connections, f"iqshift{i}"
+
+
+def _element_stage(
+    i: int, el: SceneElement, offset: float, sample_rate: float
+) -> _Stage:
+    if el.kind == "tone":
+        return _tone_stage(i, el, offset)
+    if el.kind == "noise":
+        return _noise_stage(i, el)
+    if el.kind == "fm_tone":
+        return _fm_tone_stage(i, el, offset, sample_rate)
+    if el.kind == "iq_file":
+        return _iq_file_stage(i, el, offset, sample_rate)
+    raise ValueError(f"unknown scene element kind '{el.kind}'")
+
+
+def _chain_adders(outputs: list[str]) -> _Stage:
+    """Sum the element outputs through a chain of 2-input adders; return
+    (adder_blocks, connections, final_output_id)."""
+    blocks: list[BlockSpec] = []
+    connections: list[ConnectionSpec] = []
+    current = outputs[0]
+    for j, other in enumerate(outputs[1:]):
+        adder = f"sum{j}"
+        blocks.append(BlockSpec(id=adder, type="add", params={}))
+        connections += [
+            ConnectionSpec(src_block=current, dst_block=adder, dst_port=0),
+            ConnectionSpec(src_block=other, dst_block=adder, dst_port=1),
+        ]
+        current = adder
+    return blocks, connections, current
 
 
 def scene_to_pipeline(
@@ -33,129 +167,17 @@ def scene_to_pipeline(
         offset = el.freq - center_freq
         if el.kind != "noise" and abs(offset) > sample_rate * 0.45:
             continue
-
-        if el.kind == "tone":
-            bid = f"tone{i}"
-            blocks.append(
-                BlockSpec(
-                    id=bid,
-                    type="tone_source",
-                    params={"freq": offset, "amplitude": el.amplitude},
-                )
-            )
-            outputs.append(bid)
-
-        elif el.kind == "noise":
-            bid = f"noise{i}"
-            blocks.append(
-                BlockSpec(
-                    id=bid,
-                    type="noise_source",
-                    params={
-                        "amplitude": el.amplitude,
-                        "seed": int(el.params.get("seed", 0)),
-                    },
-                )
-            )
-            outputs.append(bid)
-
-        elif el.kind == "fm_tone":
-            if "mod_freq" not in el.params:
-                raise ValueError(
-                    f"fm_tone element '{el.kind}' at {el.freq} Hz requires "
-                    "params.mod_freq (the audio modulation frequency in Hz)"
-                )
-            if sample_rate % _FM_QUAD_RATE != 0:
-                raise ValueError(
-                    f"fm_tone requires sample_rate to be a multiple of "
-                    f"{_FM_QUAD_RATE}, got {sample_rate}"
-                )
-            interp = int(sample_rate // _FM_QUAD_RATE)
-            blocks += [
-                BlockSpec(
-                    id=f"fmaudio{i}",
-                    type="audio_tone_source",
-                    params={
-                        "freq": float(el.params["mod_freq"]),
-                        "sample_rate": float(_FM_AUDIO_RATE),
-                    },
-                ),
-                BlockSpec(
-                    id=f"fmtx{i}",
-                    type="nbfm_tx",
-                    params={"audio_rate": _FM_AUDIO_RATE, "quad_rate": _FM_QUAD_RATE},
-                ),
-                BlockSpec(
-                    id=f"fmrr{i}",
-                    type="rational_resampler_c",
-                    params={"interpolation": interp, "decimation": 1},
-                ),
-                BlockSpec(
-                    id=f"fmamp{i}",
-                    type="multiply_const",
-                    params={"value": el.amplitude},
-                ),
-                BlockSpec(
-                    id=f"fmshift{i}", type="freq_shift", params={"offset": offset}
-                ),
-            ]
-            connections += [
-                ConnectionSpec(src_block=f"fmaudio{i}", dst_block=f"fmtx{i}"),
-                ConnectionSpec(src_block=f"fmtx{i}", dst_block=f"fmrr{i}"),
-                ConnectionSpec(src_block=f"fmrr{i}", dst_block=f"fmamp{i}"),
-                ConnectionSpec(src_block=f"fmamp{i}", dst_block=f"fmshift{i}"),
-            ]
-            outputs.append(f"fmshift{i}")
-
-        elif el.kind == "iq_file":
-            missing = {"path", "sample_rate"} - el.params.keys()
-            if missing:
-                raise ValueError(
-                    f"iq_file element requires params {sorted(missing)} "
-                    "(the source file path and its sample_rate in Hz)"
-                )
-            file_rate = float(el.params["sample_rate"])
-            if file_rate != sample_rate:
-                raise ValueError(
-                    f"transmit capture sample rate {file_rate} does not match "
-                    f"scene render rate {sample_rate} (v1.0 requires equal rates)"
-                )
-            blocks += [
-                BlockSpec(
-                    id=f"iq{i}",
-                    type="file_source",
-                    params={"path": str(el.params["path"]), "repeat": True},
-                ),
-                BlockSpec(
-                    id=f"iqamp{i}",
-                    type="multiply_const",
-                    params={"value": el.amplitude},
-                ),
-                BlockSpec(
-                    id=f"iqshift{i}", type="freq_shift", params={"offset": offset}
-                ),
-            ]
-            connections += [
-                ConnectionSpec(src_block=f"iq{i}", dst_block=f"iqamp{i}"),
-                ConnectionSpec(src_block=f"iqamp{i}", dst_block=f"iqshift{i}"),
-            ]
-            outputs.append(f"iqshift{i}")
-
-        else:
-            raise ValueError(f"unknown scene element kind '{el.kind}'")
+        el_blocks, el_connections, output = _element_stage(i, el, offset, sample_rate)
+        blocks += el_blocks
+        connections += el_connections
+        outputs.append(output)
 
     if not outputs:
         raise ValueError("scene has no elements within the rendered band")
 
-    current = outputs[0]
-    for j, other in enumerate(outputs[1:]):
-        adder = f"sum{j}"
-        blocks.append(BlockSpec(id=adder, type="add", params={}))
-        connections += [
-            ConnectionSpec(src_block=current, dst_block=adder, dst_port=0),
-            ConnectionSpec(src_block=other, dst_block=adder, dst_port=1),
-        ]
-        current = adder
+    mix_blocks, mix_connections, mixed = _chain_adders(outputs)
+    blocks += mix_blocks
+    connections += mix_connections
 
     blocks += [
         BlockSpec(
@@ -164,7 +186,7 @@ def scene_to_pipeline(
         BlockSpec(id="sink", type="file_sink", params={"path": str(out_path)}),
     ]
     connections += [
-        ConnectionSpec(src_block=current, dst_block="head"),
+        ConnectionSpec(src_block=mixed, dst_block="head"),
         ConnectionSpec(src_block="head", dst_block="sink"),
     ]
 
@@ -192,4 +214,4 @@ def render_scene(
     result = run_pipeline(spec, timeout=timeout)
     if result.status != "ok":
         raise RuntimeError(f"scene render failed ({result.status}): {result.error}")
-    return sigmf.write_meta_for(data_path, center_freq, sample_rate)
+    return sigmf.write_meta(data_path, center_freq, sample_rate)

@@ -139,6 +139,36 @@ def build_top_block(spec: PipelineSpec) -> tuple[Any, list[Path]]:
     return tb, artifacts
 
 
+def _run_with_timeout(tb: Any, timeout: float, name: str) -> tuple[bool, str | None]:
+    """Run `tb` on a daemon worker, bounded by `timeout`. Returns
+    (timed_out, failure_traceback) — failure_traceback is None on success."""
+    failure: list[str] = []
+
+    def _run() -> None:
+        try:
+            tb.run()
+        except Exception:
+            failure.append(traceback.format_exc())
+
+    worker = threading.Thread(target=_run, daemon=True)
+    worker.start()
+    worker.join(timeout)
+
+    timed_out = worker.is_alive()
+    if timed_out:
+        tb.stop()
+        tb.wait()
+        worker.join(5.0)
+        if worker.is_alive():
+            logger.warning(
+                "GNU Radio worker did not exit within the grace period after "
+                "stop(); flowgraph '%s' may be wedged.",
+                name,
+            )
+
+    return timed_out, failure[0] if failure else None
+
+
 class GnuRadioBackend(Backend):
     """GNU Radio sample engine."""
 
@@ -150,42 +180,18 @@ class GnuRadioBackend(Backend):
             tb, artifacts = build_top_block(spec)
         except BackendError as e:
             return RunResult(
-                status="error",
-                elapsed_seconds=time.monotonic() - start,
-                error=str(e),
+                status="error", elapsed_seconds=time.monotonic() - start, error=str(e)
             )
 
-        failure: list[str] = []
-
-        def _run() -> None:
-            try:
-                tb.run()
-            except Exception:
-                failure.append(traceback.format_exc())
-
-        worker = threading.Thread(target=_run, daemon=True)
-        worker.start()
-        worker.join(timeout)
-
-        timed_out = worker.is_alive()
-        if timed_out:
-            tb.stop()
-            tb.wait()
-            worker.join(5.0)
-            if worker.is_alive():
-                logger.warning(
-                    "GNU Radio worker did not exit within the grace period after "
-                    "stop(); flowgraph '%s' may be wedged.",
-                    spec.name,
-                )
-
+        timed_out, failure = _run_with_timeout(tb, timeout, spec.name)
         elapsed = time.monotonic() - start
-        if failure:
+
+        if failure is not None:
             return RunResult(
                 status="error",
                 elapsed_seconds=elapsed,
                 artifacts=artifacts,
-                error=f"flowgraph raised during run:\n{failure[0]}",
+                error=f"flowgraph raised during run:\n{failure}",
             )
         return RunResult(
             status="timeout" if timed_out else "ok",

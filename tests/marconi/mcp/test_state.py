@@ -53,15 +53,13 @@ def test_init_is_idempotent_and_authoritative(tmp_path: Path):
 
 def test_run_history(tmp_path: Path):
     state = ServerState(Workspace(tmp_path))
-    rid = state.next_run_id()
     rec = state.record_run(
-        rid,
         "fm_rx",
         RunResult(
             status="ok", elapsed_seconds=1.2, artifacts=[Path("a.wav")], error=None
         ),
     )
-    assert rec["run_id"] == rid
-    assert rec["status"] == "ok"
-    assert rec["artifacts"] == ["a.wav"]
-    assert state.runs[-1]["run_id"] == rid
+    assert rec.run_id == "run-1"
+    assert rec.status == "ok"
+    assert rec.artifacts == ["a.wav"]
+    assert state.runs[-1].run_id == "run-1"

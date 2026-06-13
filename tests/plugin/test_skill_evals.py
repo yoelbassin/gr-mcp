@@ -66,6 +66,6 @@ def test_build_receiver_anti_overfit_cw_carrier(server_state):
     # The channelized capture is at 2e6/40 = 50 kHz, centered on the carrier.
     from marconi import sigmf
 
-    sigmf.write_meta_for(chan_path, center_freq=99.5e6, sample_rate=50e3)
+    sigmf.write_meta(chan_path, center_freq=99.5e6, sample_rate=50e3)
     m = T.measure(chan_path, center_freq=99.5e6, search_bandwidth=40e3)
     assert m["snr_db"] > 8  # the carrier is clearly present at baseband

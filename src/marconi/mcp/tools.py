@@ -70,7 +70,7 @@ def simulate_scene(
         elements=[SceneElement(**e) for e in elements],
     )
     dev = marconi.add_simulated_device(device_id, scene, replace=True)
-    save_scene(scene, state.workspace.root / "scenes" / f"{device_id}.yaml")
+    save_scene(scene, state.workspace.scene_file(device_id))
     return dev.info().model_dump()
 
 
@@ -221,7 +221,7 @@ def run_pipeline(pipeline: dict, timeout: float = 30.0) -> dict:
     state = get_state()
     spec = PipelineSpec.model_validate(pipeline)
     result = marconi.run_pipeline(spec, timeout=timeout)
-    return state.record_run(state.next_run_id(), spec.name, result)
+    return state.record_run(spec.name, result).model_dump()
 
 
 @tool_error_boundary
@@ -245,7 +245,7 @@ def export_grc(pipeline: dict, name: str | None = None) -> dict:
 def list_runs() -> list[dict]:
     """The history of pipeline runs this session: each {run_id, pipeline,
     status, elapsed_seconds, artifacts, error}."""
-    return list(get_state().runs)
+    return [rec.model_dump() for rec in get_state().runs]
 
 
 @tool_error_boundary

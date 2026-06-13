@@ -55,6 +55,37 @@ def psd(capture: CaptureRef, nperseg: int = 4096) -> PSDResult:
     )
 
 
+def _merge_wrapped_edges(
+    groups: list[np.ndarray], freqs: np.ndarray, p_db: np.ndarray, sample_rate: float
+) -> tuple[list[np.ndarray], tuple[np.ndarray, np.ndarray] | None]:
+    """Merge the two edge groups of a single tone straddling ±fs/2.
+
+    When one above-threshold group touches index 0 and another touches index
+    N-1 with asymmetric peak powers (a main lobe plus its wrapped leakage), fold
+    them into one signal — unwrapping the weaker side by ±sample_rate so the
+    power-weighted centroid lands on the true frequency — and return
+    (interior_groups, (freqs, p_db) of the merged signal). Otherwise return
+    (groups, None). See find_signals for the rationale and the limitation.
+    """
+    n = len(p_db)
+    if not (
+        len(groups) >= 2 and int(groups[0][0]) == 0 and int(groups[-1][-1]) == n - 1
+    ):
+        return groups, None
+    first_g, last_g = groups[0], groups[-1]
+    first_peak, last_peak = float(p_db[first_g].max()), float(p_db[last_g].max())
+    if abs(last_peak - first_peak) < _WRAP_MERGE_MIN_ASYMMETRY_DB:
+        return groups, None
+    if last_peak >= first_peak:
+        # main lobe at the high edge: lift the low-edge bins up one fs period
+        m_freqs = np.concatenate([freqs[last_g], freqs[first_g] + sample_rate])
+    else:
+        # main lobe at the low edge: drop the high-edge bins down one fs period
+        m_freqs = np.concatenate([freqs[last_g] - sample_rate, freqs[first_g]])
+    m_indices = np.concatenate([last_g, first_g])
+    return groups[1:-1], (m_freqs, p_db[m_indices])
+
+
 def find_signals(
     capture: CaptureRef,
     threshold_db: float = 6.0,
@@ -95,43 +126,12 @@ def find_signals(
 
     splits = np.where(np.diff(above) > 1)[0]
     groups = np.split(above, splits + 1)
+    groups, merged = _merge_wrapped_edges(groups, freqs, p_db, capture.sample_rate)
 
-    # Wrap-around merge: a tone near ±fs/2 produces one group touching index 0
-    # and one touching index N-1.  Detect this and merge them, unwrapping the
-    # minority-side frequencies so the power-weighted centroid is correct.
-    N = len(p_db)
-    merged: tuple[np.ndarray, np.ndarray, np.ndarray] | None = None
-    edges_wrap = (
-        len(groups) >= 2 and int(groups[0][0]) == 0 and int(groups[-1][-1]) == N - 1
-    )
-    if edges_wrap:
-        first_g, last_g = groups[0], groups[-1]
-        first_peak, last_peak = float(p_db[first_g].max()), float(p_db[last_g].max())
-        asymmetric = abs(last_peak - first_peak) >= _WRAP_MERGE_MIN_ASYMMETRY_DB
-    if edges_wrap and asymmetric:
-        groups = groups[1:-1]  # remaining interior groups (may be empty)
-        if last_peak >= first_peak:
-            # Dominant peak at the high-frequency edge: shift the low-edge bins
-            # up by one sample-rate period so they are contiguous with the
-            # high-edge bins in frequency.
-            m_freqs = np.concatenate(
-                [freqs[last_g], freqs[first_g] + capture.sample_rate]
-            )
-        else:
-            # Dominant peak at the low-frequency edge: shift the high-edge bins
-            # down by one sample-rate period.
-            m_freqs = np.concatenate(
-                [freqs[last_g] - capture.sample_rate, freqs[first_g]]
-            )
-        m_indices = np.concatenate([last_g, first_g])
-        merged = (m_indices, m_freqs, p_db[m_indices])
+    signals: list[DetectedSignal] = []
 
-    signals = []
-
-    def _append_signal(
-        g_indices: np.ndarray, g_freqs: np.ndarray, g_pdb: np.ndarray
-    ) -> None:
-        bandwidth = len(g_indices) * bin_bw
+    def _append_signal(g_freqs: np.ndarray, g_pdb: np.ndarray) -> None:
+        bandwidth = len(g_freqs) * bin_bw
         if bandwidth < min_bandwidth:
             return
         p_lin = 10 ** (g_pdb / 10)
@@ -148,9 +148,8 @@ def find_signals(
 
     if merged is not None:
         _append_signal(*merged)
-
     for g in groups:
-        _append_signal(g, freqs[g], p_db[g])
+        _append_signal(freqs[g], p_db[g])
 
     signals.sort(key=lambda s: s.peak_power_db, reverse=True)
     return signals
