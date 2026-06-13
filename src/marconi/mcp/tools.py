@@ -177,6 +177,33 @@ def detect_bursts(
     ]
 
 
+@tool_error_boundary
+def spectrogram(capture_path: str, name: str = "spectrogram", nfft: int = 1024) -> dict:
+    """Render a spectrogram PNG into the workspace. Returns {path, kind}; read
+    the image with vision to see signals over time and frequency."""
+    return marconi.spectrogram(
+        _ref(capture_path), get_state().workspace, name=name, nfft=nfft
+    ).model_dump(mode="json")
+
+
+@tool_error_boundary
+def psd_plot(capture_path: str, name: str = "psd") -> dict:
+    """Render a PSD plot PNG (power vs frequency, noise floor, top peaks)."""
+    return marconi.psd_plot(
+        _ref(capture_path), get_state().workspace, name=name
+    ).model_dump(mode="json")
+
+
+@tool_error_boundary
+def constellation(
+    capture_path: str, name: str = "constellation", max_points: int = 5000
+) -> dict:
+    """Render an I/Q constellation PNG (useful after channelizing/demodulating)."""
+    return marconi.constellation(
+        _ref(capture_path), get_state().workspace, name=name, max_points=max_points
+    ).model_dump(mode="json")
+
+
 # Tools are added to this registry as later tasks implement them.
 TOOLS: dict[str, Callable] = {
     "list_blocks": list_blocks,
@@ -188,4 +215,7 @@ TOOLS: dict[str, Callable] = {
     "find_signals": find_signals,
     "measure": measure,
     "detect_bursts": detect_bursts,
+    "spectrogram": spectrogram,
+    "psd_plot": psd_plot,
+    "constellation": constellation,
 }
