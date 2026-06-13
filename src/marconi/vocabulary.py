@@ -291,9 +291,27 @@ def _check_inputs_connected(
                 )
 
 
+def _check_outputs_connected(spec: PipelineSpec, issues: list[ValidationIssue]) -> None:
+    fed = {(c.src_block, c.src_port) for c in spec.connections}
+    for b in spec.blocks:
+        d = VOCABULARY.get(b.type)
+        if d is None:
+            continue
+        for port in range(len(d.outputs)):
+            if (b.id, port) not in fed:
+                issues.append(
+                    ValidationIssue(
+                        block_id=b.id, message=f"output port {port} is not connected"
+                    )
+                )
+
+
 def validate_pipeline(spec: PipelineSpec) -> list[ValidationIssue]:
     issues: list[ValidationIssue] = []
+    if not spec.blocks:
+        return [ValidationIssue(message="pipeline has no blocks")]
     by_id = _check_blocks(spec, issues)
     connected = _check_connections(spec, by_id, issues)
     _check_inputs_connected(spec, connected, issues)
+    _check_outputs_connected(spec, issues)
     return issues

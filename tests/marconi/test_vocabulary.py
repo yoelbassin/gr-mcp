@@ -125,6 +125,21 @@ def test_input_connected_twice() -> None:
     assert any("connected twice" in i.message for i in issues)
 
 
+def test_unconnected_output_port() -> None:
+    p = _valid()
+    # an extra source whose output feeds nothing — a dead-end the agent should
+    # be told about (the chain it built doesn't reach this block's output).
+    p.blocks.append(BlockSpec(id="extra", type="tone_source", params={"freq": 5e3}))
+    issues = validate_pipeline(p)
+    assert any(i.block_id == "extra" and "output" in i.message for i in issues)
+
+
+def test_empty_pipeline_rejected() -> None:
+    p = PipelineSpec(sample_rate=1e6, blocks=[], connections=[])
+    issues = validate_pipeline(p)
+    assert any("no blocks" in i.message for i in issues)
+
+
 def test_vocabulary_covers_spec_minimum() -> None:
     for t in (
         "tone_source",
