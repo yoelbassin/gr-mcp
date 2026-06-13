@@ -1,4 +1,5 @@
 import json
+import tomllib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -24,3 +25,9 @@ def test_mcp_json_declares_server():
     assert "${CLAUDE_PLUGIN_ROOT}" in server["args"]
     # fastmcp is an optional extra; the plugin must launch with it
     assert "--extra" in server["args"] and "mcp" in server["args"]
+
+
+def test_plugin_version_matches_pyproject():
+    plugin = json.loads((ROOT / ".claude-plugin" / "plugin.json").read_text())
+    pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text())
+    assert plugin["version"] == pyproject["project"]["version"]
