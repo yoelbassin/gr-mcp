@@ -22,14 +22,16 @@ def transmit_capture(
     capture becomes an iq_file element of the device's scene, audible to
     subsequent captures (requires matching sample rates)."""
     dev = get_device(device) if isinstance(device, str) else device
+    # Capability before confirmation: no point asking the operator to confirm a
+    # transmission the device can't make anyway.
+    if not dev.can_tx:
+        raise TransmitForbiddenError(f"device '{dev.id}' cannot transmit")
     if config.CONFIRM_TX and not confirmed:
         raise TransmitNotConfirmedError(
             "transmission requires confirmed=True (or set "
             "marconi.config.CONFIRM_TX = False); about to transmit "
             f"{capture.path.name} at {freq/1e6:.4f} MHz on '{dev.id}'"
         )
-    if not dev.can_tx:
-        raise TransmitForbiddenError(f"device '{dev.id}' cannot transmit")
     element = SceneElement(
         kind="iq_file",
         freq=freq,

@@ -102,3 +102,16 @@ def test_transmit_to_non_tx_device_rejected(tmp_path: Path) -> None:
     payload = _make_tone_capture(ws)
     with pytest.raises(TransmitForbiddenError, match="cannot transmit"):
         transmit_capture(dev, payload, freq=433.2e6, confirmed=True)
+
+
+def test_transmit_forbidden_takes_priority_over_confirmation(tmp_path: Path) -> None:
+    # capability is checked before confirmation: a device that can't transmit is
+    # rejected as forbidden even when unconfirmed (not asked to confirm first).
+    dev = add_simulated_device(
+        "sim0", SceneSpec(elements=[SceneElement(kind="noise", amplitude=0.01)])
+    )
+    dev.can_tx = False
+    ws = Workspace(tmp_path)
+    payload = _make_tone_capture(ws)
+    with pytest.raises(TransmitForbiddenError):
+        transmit_capture(dev, payload, freq=433.2e6)  # confirmed defaults to False
