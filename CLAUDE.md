@@ -36,6 +36,11 @@ src/marconi/
     simulate.py         # scene_to_pipeline, render_scene
     transmit.py         # transmit_capture into simulated scenes
     export_grc.py       # PipelineSpec -> .grc for GNU Radio Companion
+  mcp/                  # Layer 2: thin FastMCP adapter (imports fastmcp, lazily)
+    errors.py           # exception -> structured tool-error translation
+    state.py            # ServerState: workspace + persisted devices + run history
+    tools.py            # the 19 tool functions + TOOLS registry (thin marshalling)
+    server.py           # build_server() + main() (stdio FastMCP)
 ```
 
 (Modules from `specs.py` onward are being built across Plan 2; not all exist yet at every commit.)
@@ -55,6 +60,15 @@ uv run python -c "import marconi"     # must succeed WITHOUT gnuradio on the pat
 - **Artifacts, not blobs.** Ops exchange `CaptureRef`/paths into the workspace, never raw sample arrays across the API boundary — keeps responses small and sessions reproducible.
 - **Open formats.** Captures are SigMF, pipelines/scenes are YAML, flowgraphs export to `.grc` — all usable without Marconi.
 - **TX is gated** by `marconi.config.CONFIRM_TX` (default on). It catches agent mistakes (wrong frequency/device), not licensing.
+
+## Skills authoring (the generality principle)
+
+Skills under `skills/` are the product's judgment layer. Write them to encode
+transferable *method*, not demo recipes: lead with the general decision
+framework and show a specific signal only as a worked example. The review test
+for any skill is **"could an RF engineer follow this for AM or SSB, not just
+FM?"** — if not, it's too specific. Content breadth (new modulations, digital
+demod) grows deliberately via the roadmap, not under demo pressure.
 
 ## Development workflow
 

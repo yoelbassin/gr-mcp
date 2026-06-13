@@ -53,6 +53,27 @@ for s in marconi.find_signals(cap):
     print(f"{s.center_freq/1e6:.3f} MHz  bw {s.bandwidth/1e3:.1f} kHz  SNR {s.snr_db:.0f} dB")
 ```
 
+## Use it from Claude Code
+
+Marconi ships as a Claude Code plugin: an MCP server exposing the operations as
+tools, plus skills that carry the RF workflow.
+
+```bash
+# add this repo as a plugin marketplace, then install the marconi plugin
+/plugin marketplace add yoelbassin/gr-mcp
+/plugin install marconi
+```
+
+The plugin starts the `marconi-mcp` server (via `uv run --extra mcp marconi-mcp`)
+and loads six skills: **survey-spectrum**, **build-receiver**, **debug-no-signal**,
+**simulate-scene**, **tx-experiment**, and **escape-hatch** (last resort). Ask in
+natural language — "simulate an FM station at 100.3 MHz and build me a receiver"
+— and the agent surveys, builds, runs, verifies, and leaves the pipeline/capture
+artifacts in your workspace.
+
+The MCP server's workspace is its working directory; override with the
+`MARCONI_WORKSPACE` environment variable.
+
 ## License
 
 See [LICENSE](LICENSE).
