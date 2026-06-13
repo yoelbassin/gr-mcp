@@ -113,7 +113,7 @@ def scene_to_pipeline(
                 BlockSpec(
                     id=f"iq{i}",
                     type="file_source",
-                    params={"path": str(el.params["path"])},
+                    params={"path": str(el.params["path"]), "repeat": True},
                 ),
                 BlockSpec(
                     id=f"iqamp{i}",

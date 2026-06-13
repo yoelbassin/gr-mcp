@@ -64,7 +64,7 @@ def _map_block(b: BlockSpec, rate: float) -> tuple[str, dict[str, str]]:
         return "blocks_file_source", {
             "file": str(p["path"]),
             "type": "complex",
-            "repeat": "False",
+            "repeat": _s(bool(p.get("repeat", False))),
             "vlen": "1",
             "begin_tag": "pmt.PMT_NIL",
             "offset": "0",
