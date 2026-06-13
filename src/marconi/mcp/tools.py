@@ -108,6 +108,75 @@ def capture(
     return ref.model_dump(mode="json")
 
 
+@tool_error_boundary
+def psd(capture_path: str, nperseg: int = 4096) -> dict:
+    """Power-spectral-density summary: the noise floor (dB) and the strongest
+    spectral peaks (freq Hz, power dB). The full PSD curve is intentionally
+    omitted to keep responses small — render psd_plot and read the image for
+    the shape."""
+    r = marconi.psd(_ref(capture_path), nperseg=nperseg)
+    return {
+        "noise_floor_db": r.noise_floor_db,
+        "peaks": [p.model_dump() for p in r.peaks],
+        "num_bins": len(r.freqs),
+    }
+
+
+@tool_error_boundary
+def find_signals(
+    capture_path: str,
+    threshold_db: float = 6.0,
+    min_bandwidth: float = 500.0,
+    nperseg: int = 4096,
+) -> list[dict]:
+    """Detect signals as contiguous PSD regions above the noise floor. Each:
+    center_freq, bandwidth (threshold-crossing extent), peak_power_db, snr_db.
+    Note: wideband signals (e.g. FM) with a low noise floor can fragment into
+    several detections — cross-check with measure() and a spectrogram."""
+    return [
+        s.model_dump()
+        for s in marconi.find_signals(
+            _ref(capture_path),
+            threshold_db=threshold_db,
+            min_bandwidth=min_bandwidth,
+            nperseg=nperseg,
+        )
+    ]
+
+
+@tool_error_boundary
+def measure(
+    capture_path: str,
+    center_freq: float,
+    search_bandwidth: float = 200e3,
+    nperseg: int = 4096,
+) -> dict:
+    """Measure the signal nearest center_freq within search_bandwidth:
+    center_freq, occupied_bw_99 (99% power bandwidth), power_db, snr_db. Treat a
+    signal as reliably present only above ~8 dB SNR."""
+    return marconi.measure(
+        _ref(capture_path),
+        center_freq=center_freq,
+        search_bandwidth=search_bandwidth,
+        nperseg=nperseg,
+    ).model_dump()
+
+
+@tool_error_boundary
+def detect_bursts(
+    capture_path: str, window: float = 1e-3, threshold_db: float = 6.0
+) -> list[dict]:
+    """Detect on/off bursts from the smoothed power envelope. Each: start_time,
+    duration (s), mean_power_db. An always-on signal yields no bursts; valid for
+    duty cycles below ~75%."""
+    return [
+        b.model_dump()
+        for b in marconi.detect_bursts(
+            _ref(capture_path), window=window, threshold_db=threshold_db
+        )
+    ]
+
+
 # Tools are added to this registry as later tasks implement them.
 TOOLS: dict[str, Callable] = {
     "list_blocks": list_blocks,
@@ -115,4 +184,8 @@ TOOLS: dict[str, Callable] = {
     "simulate_scene": simulate_scene,
     "load_capture": load_capture,
     "capture": capture,
+    "psd": psd,
+    "find_signals": find_signals,
+    "measure": measure,
+    "detect_bursts": detect_bursts,
 }
