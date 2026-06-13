@@ -5,6 +5,8 @@ from dataclasses import dataclass
 
 from marconi.backends import get_backend
 from marconi.models import DeviceInfo, SceneSpec
+from marconi.specs import save_scene
+from marconi.workspace import Workspace
 
 
 class DeviceNotFoundError(Exception):
@@ -39,6 +41,19 @@ def add_simulated_device(
         raise ValueError(f"device '{device_id}' already exists")
     dev = SimulatedDevice(id=device_id, scene=scene)
     _REGISTRY[device_id] = dev
+    return dev
+
+
+def register_simulated_device(
+    device_id: str, scene: SceneSpec, workspace: Workspace, replace: bool = True
+) -> SimulatedDevice:
+    """Register a simulated device and persist its scene so it survives a
+    restart (scenes/<device_id>.yaml). The durable, library-level counterpart
+    to add_simulated_device: it owns the register-and-persist policy so every
+    consumer — not just the MCP server — gets devices that reappear next
+    session."""
+    dev = add_simulated_device(device_id, scene, replace=replace)
+    save_scene(scene, workspace.scene_file(device_id))
     return dev
 
 

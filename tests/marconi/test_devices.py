@@ -9,6 +9,7 @@ from marconi.devices import (
     clear_devices,
     get_device,
     list_devices,
+    register_simulated_device,
 )
 from marconi.models import SceneElement, SceneSpec
 from marconi.ops.analyze import find_signals
@@ -64,6 +65,16 @@ def test_replace_redefines_device_scene() -> None:
 def test_unknown_device_rejected() -> None:
     with pytest.raises(DeviceNotFoundError, match="nope"):
         get_device("nope")
+
+
+def test_register_simulated_device_persists_scene(tmp_path: Path) -> None:
+    ws = Workspace(tmp_path)
+    dev = register_simulated_device("sim0", _scene(), ws)
+    assert get_device("sim0") is dev
+    assert (ws.root / "scenes" / "sim0.yaml").exists()
+    # re-registering overwrites the same scene file (replace=True default)
+    register_simulated_device("sim0", _scene(), ws)
+    assert [d.id for d in list_devices()] == ["sim0"]
 
 
 def test_capture_from_simulated_device(tmp_path: Path) -> None:

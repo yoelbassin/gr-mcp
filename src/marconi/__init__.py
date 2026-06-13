@@ -7,6 +7,7 @@ from marconi.devices import (
     clear_devices,
     get_device,
     list_devices,
+    register_simulated_device,
 )
 from marconi.models import (
     BlockSpec,
@@ -83,6 +84,7 @@ __all__ = [
     "psd",
     "psd_plot",
     "read_capture",
+    "register_simulated_device",
     "render_scene",
     "run_pipeline",
     "save_pipeline",

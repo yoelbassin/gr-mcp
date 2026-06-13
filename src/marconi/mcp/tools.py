@@ -14,13 +14,17 @@ from marconi import sigmf
 from marconi.mcp.errors import tool_error_boundary
 from marconi.mcp.state import get_state
 from marconi.models import CaptureRef, PipelineSpec, SceneElement, SceneSpec
-from marconi.specs import save_scene
 from marconi.vocabulary import VOCABULARY
 
 
 def _ref(capture_path: str) -> CaptureRef:
     """Reconstruct a CaptureRef from a capture's .sigmf-data path."""
     return sigmf.read_meta(capture_path)
+
+
+def _scene(elements: list[dict], name: str) -> SceneSpec:
+    """Build a SceneSpec from JSON-friendly element dicts."""
+    return SceneSpec(name=name, elements=[SceneElement(**e) for e in elements])
 
 
 @tool_error_boundary
@@ -64,13 +68,8 @@ def simulate_scene(
     params.mod_freq and renders only when the capture sample_rate is a multiple
     of 100000. The scene is persisted to scenes/<device_id>.yaml so the device
     survives a restart. Always include a small noise element."""
-    state = get_state()
-    scene = SceneSpec(
-        name=scene_name or device_id,
-        elements=[SceneElement(**e) for e in elements],
-    )
-    dev = marconi.add_simulated_device(device_id, scene, replace=True)
-    save_scene(scene, state.workspace.scene_file(device_id))
+    scene = _scene(elements, scene_name or device_id)
+    dev = marconi.register_simulated_device(device_id, scene, get_state().workspace)
     return dev.info().model_dump()
 
 
@@ -260,7 +259,7 @@ def render_scene(
     """Render an ad-hoc scene (inline `elements`, no device registered) to a
     capture in the workspace. Use simulate_scene + capture when you want a
     persistent device. Returns a capture reference."""
-    scene = SceneSpec(name=scene_name, elements=[SceneElement(**e) for e in elements])
+    scene = _scene(elements, scene_name)
     return marconi.render_scene(
         scene,
         center_freq=center_freq,
