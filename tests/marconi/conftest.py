@@ -3,7 +3,20 @@ from collections.abc import Callable
 import numpy as np
 import pytest
 
+from marconi.mcp.state import ServerState, reset_state, set_state
+from marconi.workspace import Workspace
+
 MakeIQ = Callable[..., np.ndarray]
+
+
+@pytest.fixture
+def server_state(tmp_path):
+    """A fresh MCP ServerState rooted at a tmp workspace (also empties the
+    global device registry via ServerState init / reset)."""
+    state = ServerState(Workspace(tmp_path))
+    set_state(state)
+    yield state
+    reset_state()
 
 
 @pytest.fixture
