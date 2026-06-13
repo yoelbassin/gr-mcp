@@ -232,7 +232,7 @@ pytestmark = pytest.mark.gnuradio
 - [ ] **Step 3: Confirm the marked count (GNU Radio present)**
 
 Run: `uv run pytest -m gnuradio --collect-only -q | tail -3`
-Expected: **22 tests** collected. Breakdown — per-test: `test_backend_gr.py` 4, `test_simulate.py` 1, `test_pipeline.py` 1, `test_end_to_end_simulation.py` 1, `test_devices.py` 1, `test_tools_pipeline.py` 1, `test_tools_devices.py` 1 (= 10); module-level: `test_transmit.py` 5, `test_e2e.py` 2, `test_tools_simulate_tx.py` 3, `test_skill_evals.py` 2 (= 12).
+Expected: **23 tests** collected. Breakdown — per-test: `test_backend_gr.py` 4, `test_simulate.py` 1, `test_pipeline.py` 1, `test_end_to_end_simulation.py` 1, `test_devices.py` 1, `test_tools_pipeline.py` 1, `test_tools_devices.py` 1, `test_block_coverage.py` 1 — `test_factories_cover_exactly_the_vocabulary` calls `_factories()` which imports GNU Radio; its sibling stays unmarked (= 11); module-level: `test_transmit.py` 5, `test_e2e.py` 2, `test_tools_simulate_tx.py` 3, `test_skill_evals.py` 2 (= 12).
 
 - [ ] **Step 4: Verify completeness — run the engine-agnostic set with GNU Radio blocked**
 
@@ -253,7 +253,7 @@ Run:
 uv run python -c "import sys; sys.modules['gnuradio']=None; import pytest; raise SystemExit(pytest.main(['-q','tests']))"
 ```
 
-Expected: PASS with **22 skipped** (reason: "GNU Radio is not installed"), zero failures. This proves a bare `pytest` is green without GNU Radio.
+Expected: PASS with **23 skipped** (reason: "GNU Radio is not installed"), zero failures. This proves a bare `pytest` is green without GNU Radio.
 
 - [ ] **Step 6: Commit**
 
@@ -526,7 +526,7 @@ git commit -m "docs: explicit plugin install command and typo fix"
 - [ ] **Step 1: Run the complete suite with GNU Radio present**
 
 Run: `uv run pytest -q`
-Expected: all tests pass (including the 22 GNU-Radio tests, since GNU Radio is installed on the dev machine).
+Expected: all tests pass (including the 23 GNU-Radio tests, since GNU Radio is installed on the dev machine).
 
 - [ ] **Step 2: Run the engine-agnostic gate exactly as CI will**
 
