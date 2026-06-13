@@ -13,7 +13,7 @@ import marconi
 from marconi import sigmf
 from marconi.mcp.errors import tool_error_boundary
 from marconi.mcp.state import get_state
-from marconi.models import CaptureRef, SceneElement, SceneSpec
+from marconi.models import CaptureRef, PipelineSpec, SceneElement, SceneSpec
 from marconi.specs import save_scene
 from marconi.vocabulary import VOCABULARY
 
@@ -204,6 +204,52 @@ def constellation(
     ).model_dump(mode="json")
 
 
+@tool_error_boundary
+def validate_pipeline(pipeline: dict) -> list[dict]:
+    """Validate a pipeline spec against the vocabulary. Returns a list of issues
+    (empty = valid); each issue names the block_id and field. Always validate
+    and fix all issues before running."""
+    spec = PipelineSpec.model_validate(pipeline)
+    return [i.model_dump() for i in marconi.validate_pipeline(spec)]
+
+
+@tool_error_boundary
+def run_pipeline(pipeline: dict, timeout: float = 30.0) -> dict:
+    """Validate then run a pipeline (blocks until it finishes or `timeout`
+    seconds elapse). Returns {run_id, pipeline, status (ok|timeout|error),
+    elapsed_seconds, artifacts, error}. Invalid specs raise a validation error."""
+    state = get_state()
+    spec = PipelineSpec.model_validate(pipeline)
+    result = marconi.run_pipeline(spec, timeout=timeout)
+    return state.record_run(state.next_run_id(), spec.name, result)
+
+
+@tool_error_boundary
+def save_pipeline(pipeline: dict) -> dict:
+    """Save a pipeline spec as YAML under workspace/pipelines/. Returns {path}."""
+    spec = PipelineSpec.model_validate(pipeline)
+    path = marconi.save_pipeline_to_workspace(spec, get_state().workspace)
+    return {"path": str(path)}
+
+
+@tool_error_boundary
+def export_grc(pipeline: dict, name: str | None = None) -> dict:
+    """Export a pipeline as a GNU Radio Companion .grc file under
+    workspace/pipelines/ so the user can open and tweak it in GRC. Returns {path}."""
+    state = get_state()
+    spec = PipelineSpec.model_validate(pipeline)
+    out = state.workspace.root / "pipelines" / f"{name or spec.name}.grc"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    return {"path": str(marconi.export_grc(spec, out))}
+
+
+@tool_error_boundary
+def list_runs() -> list[dict]:
+    """The history of pipeline runs this session: each {run_id, pipeline,
+    status, elapsed_seconds, artifacts, error}."""
+    return list(get_state().runs)
+
+
 # Tools are added to this registry as later tasks implement them.
 TOOLS: dict[str, Callable] = {
     "list_blocks": list_blocks,
@@ -218,4 +264,9 @@ TOOLS: dict[str, Callable] = {
     "spectrogram": spectrogram,
     "psd_plot": psd_plot,
     "constellation": constellation,
+    "validate_pipeline": validate_pipeline,
+    "run_pipeline": run_pipeline,
+    "save_pipeline": save_pipeline,
+    "export_grc": export_grc,
+    "list_runs": list_runs,
 }
