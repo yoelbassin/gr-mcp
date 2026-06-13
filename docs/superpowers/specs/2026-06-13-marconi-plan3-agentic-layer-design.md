@@ -56,7 +56,7 @@ discovery and run management:
 | render | `spectrogram`, `psd_plot`, `constellation` | same-named ops |
 | pipeline | `list_blocks`, `validate_pipeline`, `run_pipeline`, `save_pipeline`, `export_grc` | `vocabulary`, `validate_pipeline`, `run_pipeline`, `save_pipeline_to_workspace`, `export_grc` |
 | simulate/tx | `render_scene`, `transmit_capture` | `render_scene`, `transmit_capture` |
-| runs | `list_runs`, `stop_run` | in-process run registry (see State) |
+| runs | `list_runs` | in-process run history (see State) |
 
 Notes:
 - **No `create_pipeline` tool.** A pipeline is a `PipelineSpec` (blocks +
@@ -87,11 +87,14 @@ The `_REGISTRY` is currently process-global and ephemeral. Plan 3 adopts
   per scene. Devices become **reproducible and git-shareable** — directly serving
   the "workspace is the project" ethos. `list_devices` reflects the persisted
   scenes plus any backend-enumerated devices.
-- **Run handles are in-process session state.** A background `run_pipeline` can't
-  outlive the server process, so active runs live in an in-memory registry keyed
-  by a run id. `list_runs` reports status; `stop_run` stops one (process-level
-  kill as backstop). The existing backend timeout watchdog still bounds every
-  run.
+- **Runs are synchronous in v1.0, with an in-process history.** The GNU Radio
+  backend's `run_pipeline` blocks until the flowgraph finishes (bounded by `head`
+  blocks) or the timeout watchdog fires, so the `run_pipeline` tool blocks and
+  returns a `RunResult`. Each run is recorded in an in-process history keyed by a
+  generated run id (status, elapsed, artifacts); `list_runs` returns it for
+  observability and artifact recall. **True background runs and `stop_run` are
+  deferred to v1.x** — they are only meaningful once runs are non-blocking, which
+  short simulation runs don't need.
 
 ## Error translation
 
@@ -182,6 +185,8 @@ deleted):
 
 - Digital demodulation / ADS-B decode (v1.x — own brainstorm).
 - Hardware RX/TX (v1.1+).
+- Background (non-blocking) runs and `stop_run` (v1.x — runs are synchronous in
+  v1.0).
 - Mid-run parameter tweaking beyond run/stop (v1.x candidate).
 - `.grc` *import* (export only in v1).
 - Agent-transcript skill evals (light tool-sequence evals only for v1.0).
