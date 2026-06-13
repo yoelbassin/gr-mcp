@@ -10,7 +10,10 @@ class BackendError(Exception):
 class Backend(ABC):
     """The swap boundary: everything that moves samples or touches devices."""
 
-    name: str
+    @property
+    @abstractmethod
+    def name(self) -> str:
+        """Short backend identifier, e.g. 'gnuradio'."""
 
     @abstractmethod
     def run_pipeline(self, spec: PipelineSpec, timeout: float = 30.0) -> RunResult:
