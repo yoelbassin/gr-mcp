@@ -80,3 +80,16 @@ def test_boundary_does_not_double_wrap_tool_error():
     with pytest.raises(ToolError) as ei:
         already()
     assert str(ei.value).count("[custom]") == 1
+
+
+def test_classify_pydantic_validation_error():
+    from pydantic import ValidationError
+
+    from marconi.models import PipelineSpec
+
+    with pytest.raises(ValidationError) as ei:
+        PipelineSpec.model_validate(
+            {"name": "x"}
+        )  # missing sample_rate/blocks/connections
+    code, message = classify_error(ei.value)
+    assert code == "invalid_argument"

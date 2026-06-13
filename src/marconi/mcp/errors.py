@@ -12,6 +12,7 @@ from collections.abc import Callable
 from typing import Any, TypeVar
 
 from fastmcp.exceptions import ToolError
+from pydantic import ValidationError
 
 from marconi.backends import BackendError
 from marconi.ops.transmit import TransmitNotConfirmedError
@@ -42,6 +43,10 @@ def classify_error(exc: Exception) -> tuple[str, str]:
         return "not_found", str(exc)
     if isinstance(exc, BackendError):
         return "backend_error", str(exc)
+    if isinstance(exc, ValidationError):
+        # pydantic structural errors (malformed pipeline/scene dicts) — str(exc)
+        # lists the offending fields, which is actionable for the agent
+        return "invalid_argument", str(exc)
     if isinstance(exc, (ValueError, TypeError)):
         return "invalid_argument", str(exc)
     if isinstance(exc, RuntimeError):
