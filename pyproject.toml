@@ -3,15 +3,12 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "gnuradio-mcp"
+name = "marconi"
 version = "0.1.0"
-description = "A FastMCP server for gnuradio."
+description = "LLM-driven RF control and analysis — an engine-agnostic operations layer with a GNU Radio backend."
 requires-python = ">=3.13"
 dependencies = [
     "pydantic",
-    "fastmcp",
-    # for gnuradio
-    "mako",
     "pyyaml",
     "numpy>=2.4.6",
     "scipy>=1.17.1",
@@ -21,14 +18,12 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest >= 7.0",
-    "pytest-asyncio",
-    "pre-commit"
+    "pre-commit",
 ]
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.pytest.ini_options]
-# Tell pytest where to find the package
+# src on the path so `import marconi` resolves without an install step
 pythonpath = ["src", "."]
-asyncio_mode = "auto"
