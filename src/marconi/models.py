@@ -86,3 +86,71 @@ class RenderResult(BaseModel):
 
     path: Path
     kind: str
+
+
+class BlockSpec(BaseModel):
+    """One block instance in a pipeline; type names come from marconi.vocabulary."""
+
+    id: str
+    type: str
+    params: dict[str, float | int | str | bool] = {}
+
+
+class ConnectionSpec(BaseModel):
+    """Directed edge between block ports (port indices default to 0)."""
+
+    src_block: str
+    src_port: int = 0
+    dst_block: str
+    dst_port: int = 0
+
+
+class PipelineSpec(BaseModel):
+    """Engine-agnostic DSP graph. sample_rate in Hz is the default rate for
+    rate-dependent blocks that don't set their own."""
+
+    name: str = "pipeline"
+    sample_rate: float
+    blocks: list[BlockSpec]
+    connections: list[ConnectionSpec]
+
+
+class SceneElement(BaseModel):
+    """One emitter in a simulated RF environment. freq is the absolute Hz
+    position (ignored for kind='noise'); extra knobs go in params."""
+
+    kind: str  # tone | noise | fm_tone | iq_file
+    freq: float = 0.0
+    amplitude: float = 1.0
+    params: dict[str, float | int | str] = {}
+
+
+class SceneSpec(BaseModel):
+    """What is 'on the air' for a simulated device."""
+
+    name: str = "scene"
+    elements: list[SceneElement] = []
+
+
+class DeviceInfo(BaseModel):
+    id: str
+    kind: str  # "simulated" (hardware kinds arrive in v1.1)
+    can_tx: bool = False
+    description: str = ""
+
+
+class ValidationIssue(BaseModel):
+    """One actionable pipeline validation error, addressed to the agent."""
+
+    block_id: str | None = None
+    field: str | None = None
+    message: str
+
+
+class RunResult(BaseModel):
+    """Outcome of a pipeline run. status: ok | timeout | error."""
+
+    status: str
+    elapsed_seconds: float
+    artifacts: list[Path] = []
+    error: str | None = None
