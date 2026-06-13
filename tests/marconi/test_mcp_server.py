@@ -12,7 +12,7 @@ def test_list_blocks_tool_returns_vocabulary(server_state):
 def test_tools_registry_count():
     from marconi.mcp.tools import TOOLS
 
-    assert len(TOOLS) >= 1
+    assert len(TOOLS) == 19
     assert "list_blocks" in TOOLS
 
 
@@ -22,7 +22,7 @@ def test_build_server_registers_all_tools():
 
     mcp = build_server()
     assert mcp is not None
-    assert len(TOOLS) >= 1
+    assert len(TOOLS) == 19
 
 
 async def test_tools_listed_through_mcp_client(server_state):
@@ -35,7 +35,7 @@ async def test_tools_listed_through_mcp_client(server_state):
     async with Client(mcp) as client:
         tools = await client.list_tools()
     names = {t.name for t in tools}
-    assert set(TOOLS) <= names and "list_blocks" in names
+    assert names == set(TOOLS)
 
 
 def test_main_initializes_state_from_env(tmp_path, monkeypatch):

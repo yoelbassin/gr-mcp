@@ -250,6 +250,51 @@ def list_runs() -> list[dict]:
     return list(get_state().runs)
 
 
+@tool_error_boundary
+def render_scene(
+    elements: list[dict],
+    center_freq: float,
+    sample_rate: float,
+    duration: float,
+    scene_name: str = "scene",
+    name: str | None = None,
+) -> dict:
+    """Render an ad-hoc scene (inline `elements`, no device registered) to a
+    capture in the workspace. Use simulate_scene + capture when you want a
+    persistent device. Returns a capture reference."""
+    scene = SceneSpec(name=scene_name, elements=[SceneElement(**e) for e in elements])
+    return marconi.render_scene(
+        scene,
+        center_freq=center_freq,
+        sample_rate=sample_rate,
+        duration=duration,
+        workspace=get_state().workspace,
+        name=name,
+    ).model_dump(mode="json")
+
+
+@tool_error_boundary
+def transmit_capture(
+    device_id: str,
+    capture_path: str,
+    freq: float,
+    amplitude: float = 1.0,
+    confirmed: bool = False,
+) -> dict:
+    """Replay a capture 'on the air' into a simulated device's scene (it becomes
+    an iq_file element, audible to later captures at the SAME sample_rate).
+    Gated by CONFIRM_TX: pass confirmed=True only after checking freq and
+    device. The change is session-scoped (not re-persisted to the scene file)."""
+    el = marconi.transmit_capture(
+        device_id,
+        _ref(capture_path),
+        freq=freq,
+        amplitude=amplitude,
+        confirmed=confirmed,
+    )
+    return el.model_dump(mode="json")
+
+
 # Tools are added to this registry as later tasks implement them.
 TOOLS: dict[str, Callable] = {
     "list_blocks": list_blocks,
@@ -269,4 +314,6 @@ TOOLS: dict[str, Callable] = {
     "save_pipeline": save_pipeline,
     "export_grc": export_grc,
     "list_runs": list_runs,
+    "render_scene": render_scene,
+    "transmit_capture": transmit_capture,
 }
