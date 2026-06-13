@@ -85,14 +85,15 @@ dependencies = [
     "numpy>=2.4.6",
     "scipy>=1.17.1",
     "matplotlib>=3.11.0",
-    "fastmcp>=2.0",
 ]
 
 [project.optional-dependencies]
+mcp = ["fastmcp>=2.0"]
 dev = [
     "pytest >= 7.0",
     "pytest-asyncio",
     "pre-commit",
+    "marconi[mcp]",
 ]
 
 [project.scripts]
@@ -1513,6 +1514,8 @@ def test_mcp_json_declares_server():
     assert server["command"] == "uv"
     assert "marconi-mcp" in server["args"]
     assert "${CLAUDE_PLUGIN_ROOT}" in server["args"]
+    # fastmcp is an optional extra; the plugin must launch with it
+    assert "--extra" in server["args"] and "mcp" in server["args"]
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -1531,6 +1534,8 @@ Expected: FAIL — manifest files do not exist.
         "--directory",
         "${CLAUDE_PLUGIN_ROOT}",
         "run",
+        "--extra",
+        "mcp",
         "marconi-mcp"
       ]
     }
@@ -2046,8 +2051,8 @@ tools, plus skills that carry the RF workflow.
 /plugin install marconi
 ```
 
-The plugin starts the `marconi-mcp` server (via `uv run marconi-mcp`) and loads
-six skills: **survey-spectrum**, **build-receiver**, **debug-no-signal**,
+The plugin starts the `marconi-mcp` server (via `uv run --extra mcp marconi-mcp`)
+and loads six skills: **survey-spectrum**, **build-receiver**, **debug-no-signal**,
 **simulate-scene**, **tx-experiment**, and **escape-hatch** (last resort). Ask in
 natural language — "simulate an FM station at 100.3 MHz and build me a receiver"
 — and the agent surveys, builds, runs, verifies, and leaves the pipeline/capture

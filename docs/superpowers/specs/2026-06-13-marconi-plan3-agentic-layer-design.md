@@ -71,7 +71,10 @@ Notes:
 ### Transport & workspace
 
 - **Transport:** stdio, launched by the plugin's `.mcp.json` via
-  `uv run marconi-mcp` (a new console entry point in `pyproject.toml`).
+  `uv run --extra mcp marconi-mcp` (a new console entry point in `pyproject.toml`).
+  `fastmcp` lives in an optional `mcp` extra rather than core dependencies, so the
+  core library stays lean (the portability anchor); the `dev` extra pulls it in
+  for tests.
 - **Workspace:** the server's current working directory (the user's project
   dir), overridable with `MARCONI_WORKSPACE`. One `Workspace` instance per server
   process.
@@ -164,8 +167,9 @@ deleted):
 - `.mcp.json` — declares the `marconi` MCP server (`uv run marconi-mcp`).
 - `marketplace.json` — installable from this repo.
 - `skills/` — the six skills above.
-- `pyproject.toml` — `marconi-mcp` console entry point; re-add `fastmcp` and
-  `pytest-asyncio` (dev) dependencies dropped during the POC cleanup.
+- `pyproject.toml` — `marconi-mcp` console entry point; add an optional `mcp`
+  extra holding `fastmcp` (kept out of core deps so the library stays lean), and
+  re-add `pytest-asyncio` (dev). The `dev` extra depends on `marconi[mcp]`.
 
 ## Testing & evals
 
