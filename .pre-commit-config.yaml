@@ -8,11 +8,6 @@ repos:
     -   id: debug-statements
     -   id: name-tests-test
         args: [--pytest-test-first]
-    -   id: requirements-txt-fixer
--   repo: https://github.com/asottile/setup-cfg-fmt
-    rev: v3.2.0
-    hooks:
-    -   id: setup-cfg-fmt
 -   repo: https://github.com/pycqa/isort
     rev: 7.0.0
     hooks:
