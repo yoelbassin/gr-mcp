@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "marconi": {
+      "command": "uv",
+      "args": [
+        "--directory",
+        "${CLAUDE_PLUGIN_ROOT}",
+        "run",
+        "--extra",
+        "mcp",
+        "marconi-mcp"
+      ]
+    }
+  }
+}
