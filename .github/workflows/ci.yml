@@ -1,0 +1,81 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  core:
+    name: core — lint + engine-agnostic tests (no GNU Radio)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Sync dependencies
+        run: uv sync --extra dev
+
+      - name: Engine-isolation guard (import marconi without GNU Radio)
+        run: uv run python -c "import marconi"
+
+      - name: Cache pre-commit hooks
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pre-commit
+          key: pre-commit-${{ hashFiles('.pre-commit-config.yaml') }}
+
+      - name: Lint (pre-commit)
+        run: uv run pre-commit run --all-files
+
+      - name: Validate plugin (best-effort, non-blocking)
+        continue-on-error: true
+        run: |
+          npm install -g @anthropic-ai/claude-code
+          claude plugin validate .
+
+      - name: Tests (engine-agnostic)
+        run: uv run pytest -m "not gnuradio"
+
+  backend:
+    name: backend — full suite with GNU Radio
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash -el {0}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up GNU Radio via conda-forge
+        uses: mamba-org/setup-micromamba@v2
+        with:
+          environment-name: marconi-gr
+          condarc: |
+            channels:
+              - conda-forge
+          create-args: >-
+            python=3.13
+            gnuradio
+            numpy
+            scipy
+            matplotlib
+            pydantic
+            pyyaml
+            pytest
+            pytest-asyncio
+            pip
+
+      - name: Install pure-Python deps and marconi
+        run: |
+          pip install fastmcp
+          pip install -e . --no-deps
+
+      - name: Sanity — GNU Radio and marconi import together
+        run: python -c "import gnuradio, marconi, numpy; print('gnuradio', gnuradio.__file__)"
+
+      - name: Full test suite
+        run: pytest
