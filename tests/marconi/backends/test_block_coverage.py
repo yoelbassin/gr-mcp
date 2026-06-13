@@ -19,6 +19,10 @@ def _fill_params(block_type: str) -> dict:
     return {p.name: _DUMMY[p.type] for p in VOCABULARY[block_type].params}
 
 
+# Only the factory test needs GNU Radio: calling _factories() imports the
+# gnuradio bindings (the module-level import above is lazy, so collection is
+# safe). The .grc exporter (_map_block) is engine-agnostic, so its test below
+# runs everywhere and stays unmarked.
 @pytest.mark.gnuradio
 def test_factories_cover_exactly_the_vocabulary() -> None:
     assert set(_factories(1e6)) == set(VOCABULARY)
