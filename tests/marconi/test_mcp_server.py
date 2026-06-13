@@ -15,6 +15,7 @@ def test_base_import_does_not_load_mcp_or_fastmcp():
 
 def test_mcp_subpackage_importable():
     import marconi.mcp  # noqa: F401
+    import marconi.mcp.errors  # noqa: F401
 
 
 def test_entry_point_target_exists():
