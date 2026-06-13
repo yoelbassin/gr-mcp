@@ -6,6 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "marconi"
 version = "0.1.0"
 description = "LLM-driven RF control and analysis — an engine-agnostic operations layer with a GNU Radio backend."
+license = { text = "GPL-3.0-or-later" }
 requires-python = ">=3.13"
 dependencies = [
     "pydantic",
@@ -29,6 +30,14 @@ marconi-mcp = "marconi.mcp.server:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.isort]
+profile = "black"
+
+[tool.mypy]
+ignore_missing_imports = true
+explicit_package_bases = true
+mypy_path = "src"
 
 [tool.pytest.ini_options]
 # src on the path so `import marconi` resolves without an install step

@@ -1,5 +1,5 @@
-"""The killer demo as a test: three unknown signals — find them, identify
-the FM one, demodulate it, verify the audio."""
+"""End-to-end simulation: three unknown signals — find them, identify the FM
+one, build and run a receiver, demodulate it, verify the recovered audio."""
 
 from pathlib import Path
 

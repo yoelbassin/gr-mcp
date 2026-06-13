@@ -7,6 +7,6 @@
   },
   "repository": "https://github.com/yoelbassin/gr-mcp",
   "homepage": "https://github.com/yoelbassin/gr-mcp",
-  "license": "MIT",
+  "license": "GPL-3.0-or-later",
   "keywords": ["rf", "sdr", "gnuradio", "dsp", "signal-processing", "mcp"]
 }

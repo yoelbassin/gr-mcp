@@ -4,7 +4,7 @@
 
 Marconi lets you drive software-defined radio workflows in natural language: describe what you want, and an AI agent builds the signal chain, runs it, looks at the spectrum, and iterates — leaving behind a reproducible RF project you own (SigMF captures, YAML pipelines, exported `.grc` flowgraphs).
 
-> **Status: early development.** v1.0 is simulation-only and ships as a Python library, with a Claude Code plugin to follow. Hardware receive and transmit come after. Interfaces will change. This repository began as the `gr-mcp` proof of concept and is being rebuilt as Marconi.
+> **Status: early development.** v1.0 is simulation-only and ships as a Python library plus a Claude Code plugin (MCP server + workflow skills). Hardware receive and transmit come after — see `ROADMAP.md`. Interfaces will change. This repository began as the `gr-mcp` proof of concept and is being rebuilt as Marconi.
 
 ## What it does today
 
@@ -30,7 +30,7 @@ Marconi is an engine-agnostic operations layer (the `marconi` package) with GNU 
 ```bash
 git clone https://github.com/yoelbassin/gr-mcp
 cd gr-mcp
-uv sync
+uv sync --extra dev
 uv run pytest
 ```
 
