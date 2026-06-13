@@ -176,5 +176,5 @@ cython_debug/
 # Claude Code local state (worktrees, jobs, session data)
 .claude/
 
-# Scratch / throwaway render outputs
-t.png
+artifacts/
+assets/
