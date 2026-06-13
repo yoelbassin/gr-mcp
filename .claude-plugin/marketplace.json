@@ -1,5 +1,6 @@
 {
   "name": "marconi",
+  "description": "LLM-driven RF control and analysis for Claude Code — survey spectrum, build and run receivers, and simulate scenes through natural language.",
   "owner": {
     "name": "Yoel Bassin"
   },
