@@ -14,6 +14,8 @@ from marconi.ops.transmit import (
 )
 from marconi.workspace import Workspace
 
+pytestmark = pytest.mark.gnuradio
+
 
 @pytest.fixture(autouse=True)
 def _fresh_registry():

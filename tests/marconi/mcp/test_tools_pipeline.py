@@ -55,6 +55,7 @@ def test_run_pipeline_invalid_raises_tool_error(server_state):
     assert "[validation_error]" in str(ei.value)
 
 
+@pytest.mark.gnuradio
 def test_run_pipeline_records_history(server_state, tmp_path):
     out = str(tmp_path / "o.bin")
     result = T.run_pipeline(_tone_to_file_pipeline(out))

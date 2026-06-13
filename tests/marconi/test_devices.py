@@ -77,6 +77,7 @@ def test_register_simulated_device_persists_scene(tmp_path: Path) -> None:
     assert [d.id for d in list_devices()] == ["sim0"]
 
 
+@pytest.mark.gnuradio
 def test_capture_from_simulated_device(tmp_path: Path) -> None:
     add_simulated_device("sim0", _scene())
     ws = Workspace(tmp_path)

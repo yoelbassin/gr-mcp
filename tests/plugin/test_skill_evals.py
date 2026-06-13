@@ -1,4 +1,8 @@
+import pytest
+
 from marconi.mcp import tools as T
+
+pytestmark = pytest.mark.gnuradio
 
 
 def test_simulate_then_survey_sequence(server_state):

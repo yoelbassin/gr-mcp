@@ -81,6 +81,7 @@ def _tone_pipeline(
     )
 
 
+@pytest.mark.gnuradio
 def test_build_top_block(tmp_path) -> None:
     from marconi.backends.gnuradio_backend import build_top_block
 
@@ -90,6 +91,7 @@ def test_build_top_block(tmp_path) -> None:
     assert hasattr(tb, "run")  # it is a gr.top_block
 
 
+@pytest.mark.gnuradio
 def test_build_error_carries_block_id(tmp_path) -> None:
     from marconi.backends.base import BackendError
     from marconi.backends.gnuradio_backend import build_top_block
@@ -112,6 +114,7 @@ def test_build_error_carries_block_id(tmp_path) -> None:
         build_top_block(spec)
 
 
+@pytest.mark.gnuradio
 def test_run_pipeline_produces_analyzable_capture(tmp_path) -> None:
     """The loop closes: backend-generated samples are found by Plan-1 analysis."""
     import marconi
@@ -133,6 +136,7 @@ def test_run_pipeline_produces_analyzable_capture(tmp_path) -> None:
     assert abs(signals[0].center_freq - 433.1e6) < 2e3
 
 
+@pytest.mark.gnuradio
 def test_run_pipeline_timeout(tmp_path) -> None:
     """A never-ending flowgraph is stopped by the watchdog."""
     raw = tmp_path / "loop.cf32"

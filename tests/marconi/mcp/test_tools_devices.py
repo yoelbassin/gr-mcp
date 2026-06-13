@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from marconi.mcp import tools as T
 
 
@@ -21,6 +23,7 @@ def test_devices_persist_across_restart(server_state):
     assert any(d["id"] == "sim0" for d in T.list_devices())
 
 
+@pytest.mark.gnuradio
 def test_capture_returns_reference(server_state):
     T.simulate_scene(
         "sim0",

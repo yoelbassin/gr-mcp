@@ -5,6 +5,8 @@ from fastmcp.exceptions import ToolError
 
 from marconi.mcp import tools as T
 
+pytestmark = pytest.mark.gnuradio
+
 
 def test_render_scene_adhoc(server_state):
     ref = T.render_scene(

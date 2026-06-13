@@ -1,7 +1,10 @@
 import numpy as np
+import pytest
 from scipy.io import wavfile
 
 from marconi.mcp import tools as T
+
+pytestmark = pytest.mark.gnuradio
 
 
 def test_fm_receive_loop_through_tools(server_state, tmp_path):

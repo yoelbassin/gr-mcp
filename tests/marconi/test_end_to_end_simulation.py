@@ -45,6 +45,7 @@ def test_pipeline_api_surface() -> None:
         assert hasattr(marconi, name), name
 
 
+@pytest.mark.gnuradio
 def test_killer_demo_full_loop(tmp_path: Path) -> None:
     ws = marconi.Workspace(tmp_path)
 

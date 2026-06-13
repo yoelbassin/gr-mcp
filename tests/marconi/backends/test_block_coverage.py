@@ -3,6 +3,8 @@
 place without the others should fail here, not surface at runtime — this keeps
 the v1.1 build-out (new block types) honest across all three sites."""
 
+import pytest
+
 from marconi.backends.gnuradio_backend import _factories
 from marconi.models import BlockSpec
 from marconi.ops.export_grc import _map_block
@@ -17,6 +19,7 @@ def _fill_params(block_type: str) -> dict:
     return {p.name: _DUMMY[p.type] for p in VOCABULARY[block_type].params}
 
 
+@pytest.mark.gnuradio
 def test_factories_cover_exactly_the_vocabulary() -> None:
     assert set(_factories(1e6)) == set(VOCABULARY)
 

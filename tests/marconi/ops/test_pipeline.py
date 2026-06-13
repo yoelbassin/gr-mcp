@@ -31,6 +31,7 @@ def test_run_validates_first(tmp_path: Path) -> None:
         run_pipeline(bad)
 
 
+@pytest.mark.gnuradio
 def test_run_executes_valid_pipeline(tmp_path: Path) -> None:
     result = run_pipeline(_spec(str(tmp_path / "o.cf32")))
     assert result.status == "ok"

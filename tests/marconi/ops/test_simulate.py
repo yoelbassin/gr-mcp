@@ -75,6 +75,7 @@ def test_fm_requires_divisible_rate(tmp_path: Path) -> None:
         )
 
 
+@pytest.mark.gnuradio
 def test_render_scene_produces_findable_signals(tmp_path: Path) -> None:
     ws = Workspace(tmp_path / "project")
     ref = render_scene(
