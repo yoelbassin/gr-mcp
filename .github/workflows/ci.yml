@@ -16,6 +16,7 @@ jobs:
         uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
+          python-version: "3.13"
 
       - name: Sync dependencies
         run: uv sync --extra dev
@@ -28,6 +29,7 @@ jobs:
         with:
           path: ~/.cache/pre-commit
           key: pre-commit-${{ hashFiles('.pre-commit-config.yaml') }}
+          restore-keys: pre-commit-
 
       - name: Lint (pre-commit)
         run: uv run pre-commit run --all-files
@@ -57,6 +59,7 @@ jobs:
           condarc: |
             channels:
               - conda-forge
+          # python 3.13 has conda-forge gnuradio builds (verified); core enforces >=3.13
           create-args: >-
             python=3.13
             gnuradio
