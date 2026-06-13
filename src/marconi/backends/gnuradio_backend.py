@@ -5,6 +5,9 @@ works on machines without GNU Radio.
 """
 
 import math
+import threading
+import time
+import traceback
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -139,7 +142,48 @@ class GnuRadioBackend(Backend):
     name = "gnuradio"
 
     def run_pipeline(self, spec: PipelineSpec, timeout: float = 30.0) -> RunResult:
-        raise NotImplementedError  # Task 6
+        start = time.monotonic()
+        try:
+            tb, artifacts = build_top_block(spec)
+        except BackendError as e:
+            return RunResult(
+                status="error",
+                elapsed_seconds=time.monotonic() - start,
+                error=str(e),
+            )
+
+        failure: list[str] = []
+
+        def _run() -> None:
+            try:
+                tb.run()
+            except Exception:
+                failure.append(traceback.format_exc())
+
+        worker = threading.Thread(target=_run, daemon=True)
+        worker.start()
+        worker.join(timeout)
+
+        timed_out = worker.is_alive()
+        if timed_out:
+            tb.stop()
+            tb.wait()
+            worker.join(5.0)
+
+        elapsed = time.monotonic() - start
+        if failure:
+            return RunResult(
+                status="error",
+                elapsed_seconds=elapsed,
+                artifacts=artifacts,
+                error=f"flowgraph raised during run:\n{failure[0]}",
+            )
+        return RunResult(
+            status="timeout" if timed_out else "ok",
+            elapsed_seconds=elapsed,
+            artifacts=artifacts,
+            error="run exceeded timeout and was stopped" if timed_out else None,
+        )
 
     def enumerate_devices(self) -> list[DeviceInfo]:
         return []
