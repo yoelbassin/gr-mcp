@@ -33,4 +33,7 @@ where = ["src"]
 [tool.pytest.ini_options]
 # src on the path so `import marconi` resolves without an install step
 pythonpath = ["src", "."]
+# tests/marconi/ mirrors src/marconi/ (ops/ mcp/ backends/); tests/plugin/ holds
+# the Layer-3 (skills + manifests) tests. One root so a bare `pytest` finds both.
+testpaths = ["tests"]
 asyncio_mode = "auto"

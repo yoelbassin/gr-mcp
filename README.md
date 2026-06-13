@@ -31,7 +31,7 @@ Marconi is an engine-agnostic operations layer (the `marconi` package) with GNU 
 git clone https://github.com/yoelbassin/gr-mcp
 cd gr-mcp
 uv sync
-uv run pytest tests/marconi
+uv run pytest
 ```
 
 ```python

@@ -17,7 +17,7 @@ def _fresh_registry():
     marconi.clear_devices()
 
 
-def test_public_api_surface() -> None:
+def test_pipeline_api_surface() -> None:
     for name in (
         "PipelineSpec",
         "SceneSpec",

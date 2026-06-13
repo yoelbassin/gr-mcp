@@ -5,7 +5,7 @@ import numpy as np
 import marconi
 
 
-def test_public_api_surface() -> None:
+def test_analysis_api_surface() -> None:
     for name in (
         "Workspace",
         "CaptureRef",

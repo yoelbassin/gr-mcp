@@ -9,8 +9,8 @@ Full design: `docs/superpowers/specs/2026-06-12-marconi-design.md`. Implementati
 Three layers, strict dependency direction — each layer only knows the one below it:
 
 1. **Core package `src/marconi/` (engine-agnostic — no `gnuradio` imports).** Models, operations, analysis/rendering, the workspace, the curated block vocabulary. This is the portability anchor: a future standalone product imports it directly.
-2. **MCP server (thin adapter — Plan 3, not yet built).** One tool per operation; marshalling only, no logic.
-3. **Claude Code plugin: skills + manifests (Plan 3, not yet built).** Encodes RF workflows and judgment.
+2. **MCP server `src/marconi/mcp/` (thin adapter).** One tool per operation; marshalling only, no logic.
+3. **Claude Code plugin: skills + manifests (`skills/`, `.claude-plugin/`, `.mcp.json`).** Encodes RF workflows and judgment.
 
 The backend boundary is "moves samples or touches devices": everything under `src/marconi/backends/` may import GNU Radio; nothing else may, and even there the import is lazy (inside functions) so `import marconi` works on machines without GNU Radio.
 
@@ -43,14 +43,14 @@ src/marconi/
     server.py           # build_server() + main() (stdio FastMCP)
 ```
 
-(Modules from `specs.py` onward are being built across Plan 2; not all exist yet at every commit.)
+(All three layers are built as of v1.0; see `ROADMAP.md` for what's next.)
 
 ## Commands
 
 ```bash
 uv sync --extra dev                  # install deps
-uv run pytest tests/marconi          # the test suite
-uv run pytest tests/marconi -v
+uv run pytest                        # the test suite (tests/marconi + tests/plugin)
+uv run pytest tests/marconi/ops -v   # scope to one layer; the tree mirrors src/
 uv run python -c "import marconi"     # must succeed WITHOUT gnuradio on the path
 ```
 
