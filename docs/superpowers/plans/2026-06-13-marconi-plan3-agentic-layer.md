@@ -1,5 +1,7 @@
 # Marconi Plan 3 — Agentic Layer (MCP + Plugin + Skills) Implementation Plan
 
+> **Historical — implementation plan, since executed.** Kept for provenance; for current status and sequencing see `ROADMAP.md`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Turn the finished `marconi` library into the product an RF engineer talks to: a thin FastMCP server exposing the operations as tools, a Claude Code plugin that packages it, and six RF workflow skills carrying the judgment.

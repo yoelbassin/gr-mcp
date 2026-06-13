@@ -1,5 +1,7 @@
 # Marconi v1.0 — Plan 1 of 3: Core Package (Captures, Analysis, Rendering)
 
+> **Historical — implementation plan, since executed.** Kept for provenance. The gr-mcp POC referenced below (`src/gnuradio_mcp/`) has been removed, and v1.0 shipped 19 MCP tools and 6 skills (the ~18/5 here were estimates). For current status and sequencing, see `ROADMAP.md`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Build the engine-agnostic heart of the `marconi` package: capture models, SigMF read/write, the workspace (user project directory), `load_capture`, and the full `analyze` + `render` operation families — fully usable on any IQ file with zero GNU Radio dependency.

@@ -1,5 +1,7 @@
 # Marconi v1.0 — Plan 2 of 3: Pipelines, Backend, Simulation
 
+> **Historical — implementation plan, since executed.** Kept for provenance; for current status and sequencing see `ROADMAP.md`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make Marconi generate and run signals: engine-agnostic pipeline/scene/device models, a curated block vocabulary with validation, the backend interface, the GNU Radio backend (direct `gr.top_block` construction with bounded, timeout-supervised runs), scene rendering, SimulatedDevice + capture + transmit, and `.grc` export — culminating in the killer-demo as an automated test.

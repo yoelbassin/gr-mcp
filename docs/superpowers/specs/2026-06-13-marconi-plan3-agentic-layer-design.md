@@ -1,7 +1,7 @@
 # Marconi Plan 3 — Agentic Layer Design
 
 **Date:** 2026-06-13
-**Status:** Approved design, pre-implementation
+**Status:** Approved design — implemented in v1.0; see `ROADMAP.md` for current status.
 **Refines:** `docs/superpowers/specs/2026-06-12-marconi-design.md` (the overarching
 design). This document settles the Layer-2 (MCP) and Layer-3 (plugin/skills)
 specifics for v1.0 and reconciles the tool surface with the `marconi` library

@@ -1,7 +1,7 @@
 # Marconi — Design Spec
 
 **Date:** 2026-06-12
-**Status:** Approved design, pre-implementation
+**Status:** Approved design — implemented in v1.0. This remains the design reference; for current status and shipped counts (19 tools, 6 skills) see `ROADMAP.md`. The original gr-mcp POC has been removed.
 **Working name:** Marconi (final name/PyPI availability to be checked before first release)
 
 ## Vision
