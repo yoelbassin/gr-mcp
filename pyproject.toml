@@ -13,13 +13,18 @@ dependencies = [
     "numpy>=2.4.6",
     "scipy>=1.17.1",
     "matplotlib>=3.11.0",
+    "fastmcp>=2.0",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest >= 7.0",
+    "pytest-asyncio",
     "pre-commit",
 ]
+
+[project.scripts]
+marconi-mcp = "marconi.mcp.server:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -27,3 +32,4 @@ where = ["src"]
 [tool.pytest.ini_options]
 # src on the path so `import marconi` resolves without an install step
 pythonpath = ["src", "."]
+asyncio_mode = "auto"
