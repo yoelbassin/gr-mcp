@@ -17,7 +17,7 @@ RF project behind — SigMF captures, YAML pipelines, and `.grc` flowgraphs you 
 
 > Early development — v1.0 is simulation-only (no hardware yet). See `ROADMAP.md`.
 
-> Proviously known as GNURadio/GR-MCP.
+> Previously known as GNURadio/GR-MCP.
 
 ## Requirements
 
@@ -32,7 +32,7 @@ In Claude Code:
 
 ```
 /plugin marketplace add yoelbassin/gr-mcp
-/plugin install marconi
+/plugin install marconi@marconi
 ```
 
 That's it — `uv` starts the MCP server on first use and loads the skills. Nothing
