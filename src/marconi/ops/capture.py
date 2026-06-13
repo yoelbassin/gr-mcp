@@ -14,6 +14,21 @@ if TYPE_CHECKING:
     from marconi.devices import SimulatedDevice
 
 
+def _wav_to_unit_float(data: np.ndarray) -> np.ndarray:
+    """Normalize WAV PCM samples to float32 in [-1, 1].
+
+    scipy returns signed ints for >=16-bit PCM (centered on 0), unsigned uint8
+    for 8-bit PCM (offset-binary, centered on 2**(n-1)), and floats for float
+    WAVs (already in range by convention, so left untouched)."""
+    if np.issubdtype(data.dtype, np.unsignedinteger):
+        midpoint = (int(np.iinfo(data.dtype).max) + 1) / 2  # 128 for uint8
+        return (data.astype(np.float32) - midpoint) / midpoint
+    if np.issubdtype(data.dtype, np.signedinteger):
+        # full negative range maps to exactly -1.0 (e.g. -32768 for int16)
+        return data.astype(np.float32) / -np.iinfo(data.dtype).min
+    return data.astype(np.float32)
+
+
 def load_capture(
     path: Path | str,
     workspace: Workspace,
@@ -44,14 +59,7 @@ def load_capture(
 
     if name.endswith(".wav"):
         rate, data = wavfile.read(path)
-        if np.issubdtype(data.dtype, np.integer):
-            # Divide by -iinfo.min (e.g. 32768 for int16) for symmetric
-            # normalization so the full negative range maps to exactly -1.0.
-            data = data.astype(np.float32) / (-np.iinfo(data.dtype).min)
-        else:
-            # Float WAVs are assumed to be already in [-1, 1] per convention
-            # and are not rescaled.
-            data = data.astype(np.float32)
+        data = _wav_to_unit_float(data)
         # Only the first two channels are used as I and Q; extras are ignored.
         if data.ndim == 2 and data.shape[1] >= 2:
             samples = (data[:, 0] + 1j * data[:, 1]).astype(np.complex64)

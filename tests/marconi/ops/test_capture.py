@@ -57,6 +57,24 @@ def test_load_stereo_wav_as_iq(tmp_path: Path) -> None:
     assert np.abs(loaded).max() <= 1.0
 
 
+def test_load_wav_uint8_offset_binary(tmp_path: Path) -> None:
+    """8-bit WAV is unsigned offset-binary (centered on 128). The old code
+    divided by -iinfo.min (== 0 for uint8) -> NaN/Inf; it must now map to
+    finite [-1, 1] samples."""
+    ws = Workspace(tmp_path / "project")
+    rate = 8000
+    data = np.array([[0, 128], [255, 128]], dtype=np.uint8)
+    wav = tmp_path / "iq8.wav"
+    wavfile.write(wav, rate, data)
+
+    ref = load_capture(wav, ws)
+    loaded, _ = read_capture(ref.path)
+    assert np.all(np.isfinite(loaded))
+    assert np.abs(loaded).max() <= 1.0
+    assert abs(loaded[0].real - (-1.0)) < 1e-6  # I=0   -> -1.0
+    assert abs(loaded[0].imag - 0.0) < 1e-6  # Q=128 -> 0.0
+
+
 def test_load_wav_int16_full_scale_negative(tmp_path: Path) -> None:
     """int16 minimum value (-32768) must map to exactly -1.0, not -1.00003."""
     ws = Workspace(tmp_path / "project")
