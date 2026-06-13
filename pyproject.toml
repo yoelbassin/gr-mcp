@@ -13,14 +13,15 @@ dependencies = [
     "numpy>=2.4.6",
     "scipy>=1.17.1",
     "matplotlib>=3.11.0",
-    "fastmcp>=2.0",
 ]
 
 [project.optional-dependencies]
+mcp = ["fastmcp>=2.0"]
 dev = [
     "pytest >= 7.0",
     "pytest-asyncio",
     "pre-commit",
+    "marconi[mcp]",
 ]
 
 [project.scripts]

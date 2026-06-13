@@ -735,7 +735,6 @@ name = "marconi"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
-    { name = "fastmcp" },
     { name = "matplotlib" },
     { name = "numpy" },
     { name = "pydantic" },
@@ -745,14 +744,19 @@ dependencies = [
 
 [package.optional-dependencies]
 dev = [
+    { name = "fastmcp" },
     { name = "pre-commit" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
 ]
+mcp = [
+    { name = "fastmcp" },
+]
 
 [package.metadata]
 requires-dist = [
-    { name = "fastmcp", specifier = ">=2.0" },
+    { name = "fastmcp", marker = "extra == 'mcp'", specifier = ">=2.0" },
+    { name = "marconi", extras = ["mcp"], marker = "extra == 'dev'" },
     { name = "matplotlib", specifier = ">=3.11.0" },
     { name = "numpy", specifier = ">=2.4.6" },
     { name = "pre-commit", marker = "extra == 'dev'" },
@@ -762,7 +766,7 @@ requires-dist = [
     { name = "pyyaml" },
     { name = "scipy", specifier = ">=1.17.1" },
 ]
-provides-extras = ["dev"]
+provides-extras = ["mcp", "dev"]
 
 [[package]]
 name = "markdown-it-py"
