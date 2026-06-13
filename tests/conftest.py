@@ -9,6 +9,28 @@ from marconi.workspace import Workspace
 MakeIQ = Callable[..., np.ndarray]
 
 
+def _gnuradio_importable() -> bool:
+    try:
+        import gnuradio  # noqa: F401
+    except Exception:
+        return False
+    return True
+
+
+_GNURADIO = _gnuradio_importable()
+
+
+def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
+    """Auto-skip tests marked `gnuradio` when GNU Radio is not importable, so a
+    bare `pytest` is green on machines (and CI jobs) without a DSP runtime."""
+    if _GNURADIO:
+        return
+    skip = pytest.mark.skip(reason="GNU Radio is not installed")
+    for item in items:
+        if "gnuradio" in item.keywords:
+            item.add_marker(skip)
+
+
 @pytest.fixture
 def server_state(tmp_path):
     """A fresh MCP ServerState rooted at a tmp workspace (also empties the

@@ -46,3 +46,6 @@ pythonpath = ["src", "."]
 # the Layer-3 (skills + manifests) tests. One root so a bare `pytest` finds both.
 testpaths = ["tests"]
 asyncio_mode = "auto"
+markers = [
+    "gnuradio: test requires the GNU Radio runtime; auto-skipped when GNU Radio is not importable.",
+]
