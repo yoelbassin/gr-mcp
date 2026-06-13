@@ -55,3 +55,8 @@ class Workspace:
 
     def new_pipeline_path(self, name: str) -> Path:
         return self._dedupe(self._subdir("pipelines"), name, ".yaml", ".yaml")
+
+    def new_grc_path(self, name: str) -> Path:
+        """Collision-free .grc path under pipelines/ — never overwrites a
+        flowgraph the user may have hand-tweaked in GNU Radio Companion."""
+        return self._dedupe(self._subdir("pipelines"), name, ".grc", ".grc")

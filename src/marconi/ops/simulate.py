@@ -60,6 +60,11 @@ def scene_to_pipeline(
             outputs.append(bid)
 
         elif el.kind == "fm_tone":
+            if "mod_freq" not in el.params:
+                raise ValueError(
+                    f"fm_tone element '{el.kind}' at {el.freq} Hz requires "
+                    "params.mod_freq (the audio modulation frequency in Hz)"
+                )
             if sample_rate % _FM_QUAD_RATE != 0:
                 raise ValueError(
                     f"fm_tone requires sample_rate to be a multiple of "
@@ -103,6 +108,12 @@ def scene_to_pipeline(
             outputs.append(f"fmshift{i}")
 
         elif el.kind == "iq_file":
+            missing = {"path", "sample_rate"} - el.params.keys()
+            if missing:
+                raise ValueError(
+                    f"iq_file element requires params {sorted(missing)} "
+                    "(the source file path and its sample_rate in Hz)"
+                )
             file_rate = float(el.params["sample_rate"])
             if file_rate != sample_rate:
                 raise ValueError(

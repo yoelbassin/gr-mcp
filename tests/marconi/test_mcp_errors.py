@@ -4,7 +4,7 @@ from fastmcp.exceptions import ToolError
 from marconi.backends import BackendError
 from marconi.mcp.errors import classify_error, tool_error_boundary
 from marconi.models import ValidationIssue
-from marconi.ops.transmit import TransmitNotConfirmedError
+from marconi.ops.transmit import TransmitForbiddenError, TransmitNotConfirmedError
 from marconi.vocabulary import PipelineValidationError
 
 
@@ -24,8 +24,16 @@ def test_classify_tx_not_confirmed():
     )
 
 
-def test_classify_permission():
-    assert classify_error(PermissionError("cannot tx"))[0] == "tx_forbidden"
+def test_classify_tx_forbidden():
+    assert (
+        classify_error(TransmitForbiddenError("device 'sim0' cannot transmit"))[0]
+        == "tx_forbidden"
+    )
+
+
+def test_classify_filesystem_permission_is_not_tx_forbidden():
+    # a real OS PermissionError must NOT masquerade as tx_forbidden
+    assert classify_error(PermissionError("denied: renders/x.png"))[0] != "tx_forbidden"
 
 
 def test_classify_key_error_unwraps_quotes():

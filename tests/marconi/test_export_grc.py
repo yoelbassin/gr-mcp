@@ -6,7 +6,9 @@ import pytest
 import yaml
 
 from marconi.models import BlockSpec, ConnectionSpec, PipelineSpec
-from marconi.ops.export_grc import export_grc
+from marconi.ops.export_grc import export_grc, export_grc_to_workspace
+from marconi.vocabulary import PipelineValidationError
+from marconi.workspace import Workspace
 
 GRCC = shutil.which("grcc") or "/opt/homebrew/bin/grcc"
 
@@ -55,6 +57,30 @@ def test_export_structure(tmp_path: Path) -> None:
     ids = [b["id"] for b in doc["blocks"]]
     assert "analog_nbfm_rx" in ids and "blocks_file_source" in ids
     assert ["src", "0", "chan", "0"] in [list(c) for c in doc["connections"]]
+
+
+def test_export_validates_before_mapping(tmp_path: Path) -> None:
+    """A missing required param must raise PipelineValidationError, not a bare
+    KeyError (which the MCP boundary would mislabel [not_found])."""
+    spec = PipelineSpec(
+        name="bad",
+        sample_rate=1e6,
+        blocks=[BlockSpec(id="src", type="tone_source", params={})],  # missing freq
+        connections=[],
+    )
+    with pytest.raises(PipelineValidationError, match="freq"):
+        export_grc(spec, tmp_path / "bad.grc")
+
+
+def test_export_to_workspace_dedupes(tmp_path: Path) -> None:
+    """Re-exporting the same name never overwrites a hand-tweaked .grc."""
+    ws = Workspace(tmp_path)
+    spec = _rx_pipeline(tmp_path)
+    p1 = export_grc_to_workspace(spec, ws)
+    p2 = export_grc_to_workspace(spec, ws)
+    assert p1 != p2
+    assert p1.exists() and p2.exists()
+    assert p1.suffix == ".grc" and p2.suffix == ".grc"
 
 
 def test_exported_grc_compiles(tmp_path: Path) -> None:

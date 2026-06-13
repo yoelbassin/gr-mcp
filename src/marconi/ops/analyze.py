@@ -12,6 +12,12 @@ from marconi.models import (
 )
 from marconi.sigmf import read_samples
 
+# A tone straddling ±fs/2 shows one dominant edge (its main lobe) and one weak
+# edge (the wrapped leakage skirt); two DISTINCT tones near opposite edges show
+# comparable-power edges. Merge the wrap only when the edges differ by at least
+# this much, so co-equal edge tones stay separate.
+_WRAP_MERGE_MIN_ASYMMETRY_DB = 12.0
+
 
 def _welch(capture: CaptureRef, nperseg: int = 4096) -> tuple[np.ndarray, np.ndarray]:
     """Two-sided Welch PSD in dB, freqs absolute (Hz), ascending."""
@@ -66,11 +72,18 @@ def find_signals(
 
     Wrap-around handling: a tone near ±fs/2 can straddle the cyclic edge of
     the shifted PSD array, producing one above-threshold group that touches
-    index 0 and another that touches index N-1.  When that pattern is
-    detected the two groups are merged into one before computing per-signal
-    statistics.  The power-weighted center frequency is computed with the
-    minority-side bins "unwrapped" by ±sample_rate so the reported center
-    lands near the true tone frequency rather than averaging the two edges.
+    index 0 and another that touches index N-1.  The two are merged into one
+    signal ONLY when their peak powers differ by at least
+    ``_WRAP_MERGE_MIN_ASYMMETRY_DB`` — the asymmetry of a single tone's main
+    lobe versus its wrapped leakage skirt.  Two DISTINCT tones near opposite
+    edges have comparable-power edges and are reported separately.  On merge,
+    the power-weighted center frequency is computed with the minority-side bins
+    "unwrapped" by ±sample_rate so the reported center lands near the true tone
+    frequency rather than averaging the two edges.
+
+    Limitation: two real tones of very different amplitude near opposite edges
+    can still be merged, since that is indistinguishable from one tone plus
+    leakage in a single PSD.
     """
     freqs, p_db = _welch(capture, nperseg)
     noise_floor = float(np.median(p_db))
@@ -88,10 +101,16 @@ def find_signals(
     # minority-side frequencies so the power-weighted centroid is correct.
     N = len(p_db)
     merged: tuple[np.ndarray, np.ndarray, np.ndarray] | None = None
-    if len(groups) >= 2 and int(groups[0][0]) == 0 and int(groups[-1][-1]) == N - 1:
+    edges_wrap = (
+        len(groups) >= 2 and int(groups[0][0]) == 0 and int(groups[-1][-1]) == N - 1
+    )
+    if edges_wrap:
         first_g, last_g = groups[0], groups[-1]
+        first_peak, last_peak = float(p_db[first_g].max()), float(p_db[last_g].max())
+        asymmetric = abs(last_peak - first_peak) >= _WRAP_MERGE_MIN_ASYMMETRY_DB
+    if edges_wrap and asymmetric:
         groups = groups[1:-1]  # remaining interior groups (may be empty)
-        if p_db[last_g].max() >= p_db[first_g].max():
+        if last_peak >= first_peak:
             # Dominant peak at the high-frequency edge: shift the low-edge bins
             # up by one sample-rate period so they are contiguous with the
             # high-edge bins in frequency.

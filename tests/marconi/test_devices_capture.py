@@ -48,6 +48,18 @@ def test_duplicate_device_id_rejected() -> None:
         add_simulated_device("sim0", _scene())
 
 
+def test_replace_redefines_device_scene() -> None:
+    add_simulated_device("sim0", _scene())
+    new_scene = SceneSpec(
+        name="two_tone",
+        elements=[SceneElement(kind="tone", freq=200e6, amplitude=1.0)],
+    )
+    dev = add_simulated_device("sim0", new_scene, replace=True)
+    assert dev.scene.name == "two_tone"
+    assert get_device("sim0").scene.name == "two_tone"
+    assert [d.id for d in list_devices()] == ["sim0"]  # not duplicated
+
+
 def test_unknown_device_rejected() -> None:
     with pytest.raises(KeyError, match="nope"):
         get_device("nope")

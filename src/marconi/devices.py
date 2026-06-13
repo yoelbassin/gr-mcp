@@ -25,8 +25,13 @@ class SimulatedDevice:
 _REGISTRY: dict[str, SimulatedDevice] = {}
 
 
-def add_simulated_device(device_id: str, scene: SceneSpec) -> SimulatedDevice:
-    if device_id in _REGISTRY:
+def add_simulated_device(
+    device_id: str, scene: SceneSpec, replace: bool = False
+) -> SimulatedDevice:
+    """Register a simulated device. Raises if `device_id` already exists unless
+    `replace=True`, which redefines it (last-writer-wins) — the declarative
+    semantics the simulate_scene tool wants so a scene can be re-issued."""
+    if device_id in _REGISTRY and not replace:
         raise ValueError(f"device '{device_id}' already exists")
     dev = SimulatedDevice(id=device_id, scene=scene)
     _REGISTRY[device_id] = dev

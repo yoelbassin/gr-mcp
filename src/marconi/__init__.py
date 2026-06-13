@@ -26,11 +26,15 @@ from marconi.models import (
 )
 from marconi.ops.analyze import detect_bursts, find_signals, measure, psd
 from marconi.ops.capture import capture, load_capture
-from marconi.ops.export_grc import export_grc
+from marconi.ops.export_grc import export_grc, export_grc_to_workspace
 from marconi.ops.pipeline import run_pipeline, save_pipeline_to_workspace
 from marconi.ops.render import constellation, psd_plot, spectrogram
 from marconi.ops.simulate import render_scene, scene_to_pipeline
-from marconi.ops.transmit import TransmitNotConfirmedError, transmit_capture
+from marconi.ops.transmit import (
+    TransmitForbiddenError,
+    TransmitNotConfirmedError,
+    transmit_capture,
+)
 from marconi.sigmf import read_capture, write_capture
 from marconi.specs import load_pipeline, load_scene, save_pipeline, save_scene
 from marconi.vocabulary import VOCABULARY, PipelineValidationError, validate_pipeline
@@ -55,6 +59,7 @@ __all__ = [
     "SignalMeasurement",
     "SignalPeak",
     "SimulatedDevice",
+    "TransmitForbiddenError",
     "TransmitNotConfirmedError",
     "VOCABULARY",
     "ValidationIssue",
@@ -65,6 +70,7 @@ __all__ = [
     "constellation",
     "detect_bursts",
     "export_grc",
+    "export_grc_to_workspace",
     "find_signals",
     "get_device",
     "list_devices",

@@ -7,6 +7,10 @@ class TransmitNotConfirmedError(Exception):
     """Transmission attempted without confirmation while CONFIRM_TX is on."""
 
 
+class TransmitForbiddenError(Exception):
+    """Transmission attempted on a device whose can_tx is False."""
+
+
 def transmit_capture(
     device: SimulatedDevice | str,
     capture: CaptureRef,
@@ -25,7 +29,7 @@ def transmit_capture(
             f"{capture.path.name} at {freq/1e6:.4f} MHz on '{dev.id}'"
         )
     if not dev.can_tx:
-        raise PermissionError(f"device '{dev.id}' cannot transmit")
+        raise TransmitForbiddenError(f"device '{dev.id}' cannot transmit")
     element = SceneElement(
         kind="iq_file",
         freq=freq,

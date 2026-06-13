@@ -11,6 +11,8 @@ from typing import Any
 import yaml
 
 from marconi.models import BlockSpec, PipelineSpec
+from marconi.vocabulary import PipelineValidationError, validate_pipeline
+from marconi.workspace import Workspace
 
 
 def _s(v: Any) -> str:
@@ -148,6 +150,13 @@ def _map_block(b: BlockSpec, rate: float) -> tuple[str, dict[str, str]]:
 
 
 def export_grc(spec: PipelineSpec, path: Path | str) -> Path:
+    # Validate first (mirrors run_pipeline) so a missing required param surfaces
+    # as a PipelineValidationError, not a bare KeyError from the _map_block
+    # lookups below (which the MCP boundary would mislabel [not_found]).
+    issues = validate_pipeline(spec)
+    if issues:
+        raise PipelineValidationError(issues)
+
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -211,3 +220,11 @@ def export_grc(spec: PipelineSpec, path: Path | str) -> Path:
     }
     path.write_text(yaml.safe_dump(doc, sort_keys=False), encoding="utf-8")
     return path
+
+
+def export_grc_to_workspace(
+    spec: PipelineSpec, workspace: Workspace, name: str | None = None
+) -> Path:
+    """Export `spec` to a collision-free .grc under the workspace's pipelines/.
+    The op layer owns path construction (the MCP tool stays thin marshalling)."""
+    return export_grc(spec, workspace.new_grc_path(name or spec.name))

@@ -7,7 +7,11 @@ from marconi.models import SceneElement, SceneSpec
 from marconi.ops.analyze import find_signals
 from marconi.ops.capture import capture
 from marconi.ops.simulate import render_scene
-from marconi.ops.transmit import TransmitNotConfirmedError, transmit_capture
+from marconi.ops.transmit import (
+    TransmitForbiddenError,
+    TransmitNotConfirmedError,
+    transmit_capture,
+)
 from marconi.workspace import Workspace
 
 
@@ -96,5 +100,5 @@ def test_transmit_to_non_tx_device_rejected(tmp_path: Path) -> None:
     dev.can_tx = False
     ws = Workspace(tmp_path)
     payload = _make_tone_capture(ws)
-    with pytest.raises(PermissionError, match="cannot transmit"):
+    with pytest.raises(TransmitForbiddenError, match="cannot transmit"):
         transmit_capture(dev, payload, freq=433.2e6, confirmed=True)

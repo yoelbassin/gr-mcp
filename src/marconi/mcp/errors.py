@@ -15,7 +15,7 @@ from fastmcp.exceptions import ToolError
 from pydantic import ValidationError
 
 from marconi.backends import BackendError
-from marconi.ops.transmit import TransmitNotConfirmedError
+from marconi.ops.transmit import TransmitForbiddenError, TransmitNotConfirmedError
 from marconi.vocabulary import PipelineValidationError
 
 F = TypeVar("F", bound=Callable[..., Any])
@@ -27,9 +27,9 @@ def classify_error(exc: Exception) -> tuple[str, str]:
         return "validation_error", str(exc)
     if isinstance(exc, TransmitNotConfirmedError):
         return "tx_not_confirmed", str(exc)
-    if isinstance(exc, PermissionError):
-        # v1.0: the only PermissionError through this boundary is the transmit
-        # can_tx guard; revisit if file-I/O permission errors surface here.
+    if isinstance(exc, TransmitForbiddenError):
+        # the target device's can_tx is False — distinct from a filesystem
+        # PermissionError, which falls through to internal_error honestly.
         return "tx_forbidden", str(exc)
     if isinstance(exc, KeyError):
         # KeyError.__str__ wraps the message in repr quotes; strip a single

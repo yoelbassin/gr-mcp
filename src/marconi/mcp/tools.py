@@ -69,7 +69,7 @@ def simulate_scene(
         name=scene_name or device_id,
         elements=[SceneElement(**e) for e in elements],
     )
-    dev = marconi.add_simulated_device(device_id, scene)
+    dev = marconi.add_simulated_device(device_id, scene, replace=True)
     save_scene(scene, state.workspace.root / "scenes" / f"{device_id}.yaml")
     return dev.info().model_dump()
 
@@ -236,11 +236,9 @@ def save_pipeline(pipeline: dict) -> dict:
 def export_grc(pipeline: dict, name: str | None = None) -> dict:
     """Export a pipeline as a GNU Radio Companion .grc file under
     workspace/pipelines/ so the user can open and tweak it in GRC. Returns {path}."""
-    state = get_state()
     spec = PipelineSpec.model_validate(pipeline)
-    out = state.workspace.root / "pipelines" / f"{name or spec.name}.grc"
-    out.parent.mkdir(parents=True, exist_ok=True)
-    return {"path": str(marconi.export_grc(spec, out))}
+    path = marconi.export_grc_to_workspace(spec, get_state().workspace, name=name)
+    return {"path": str(path)}
 
 
 @tool_error_boundary
@@ -295,7 +293,7 @@ def transmit_capture(
     return el.model_dump(mode="json")
 
 
-# Tools are added to this registry as later tasks implement them.
+# The MCP surface: one entry per marconi operation.
 TOOLS: dict[str, Callable] = {
     "list_blocks": list_blocks,
     "list_devices": list_devices,
