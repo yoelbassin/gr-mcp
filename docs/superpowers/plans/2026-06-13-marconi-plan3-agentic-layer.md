@@ -260,6 +260,7 @@ from collections.abc import Callable
 from typing import Any, TypeVar
 
 from fastmcp.exceptions import ToolError
+from pydantic import ValidationError
 
 from marconi.backends import BackendError
 from marconi.ops.transmit import TransmitNotConfirmedError
@@ -275,12 +276,25 @@ def classify_error(exc: Exception) -> tuple[str, str]:
     if isinstance(exc, TransmitNotConfirmedError):
         return "tx_not_confirmed", str(exc)
     if isinstance(exc, PermissionError):
+        # v1.0: the only PermissionError through this boundary is the transmit
+        # can_tx guard; revisit if file-I/O permission errors surface here.
         return "tx_forbidden", str(exc)
     if isinstance(exc, KeyError):
-        # KeyError.__str__ wraps the message in repr-quotes; unwrap them.
-        return "not_found", str(exc).strip("'\"")
+        # KeyError.__str__ wraps the message in repr quotes; strip a single
+        # matching outer pair (str.strip would over-strip inner quotes).
+        s = str(exc)
+        if len(s) >= 2 and s[0] == s[-1] and s[0] in ("'", '"'):
+            s = s[1:-1]
+        return "not_found", s
+    if isinstance(exc, FileNotFoundError):
+        # a bad capture/file path is a common agent mistake
+        return "not_found", str(exc)
     if isinstance(exc, BackendError):
         return "backend_error", str(exc)
+    if isinstance(exc, ValidationError):
+        # pydantic structural errors (malformed pipeline/scene dicts) — str(exc)
+        # lists the offending fields, which is actionable for the agent
+        return "invalid_argument", str(exc)
     if isinstance(exc, (ValueError, TypeError)):
         return "invalid_argument", str(exc)
     if isinstance(exc, RuntimeError):
