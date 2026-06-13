@@ -14,7 +14,7 @@ When the operation tools and the block vocabulary genuinely cannot express what 
 
 ## If you must escape
 
-1. Write a Python script that `import marconi` and uses the library API directly — `Workspace`, the ops (`capture`, `find_signals`, `run_pipeline`, …), and the models. Read sample data only via `marconi.read_capture` / the library readers; stay inside the workspace.
+1. Write a Python script that `import marconi` and uses the library API directly — `Workspace`, the ops (`capture`, `find_signals`, `run_pipeline`, …), and the models. To read sample data, use `marconi.read_capture(path)` (returns `(samples, CaptureRef)`); stay inside the workspace.
 2. Run it with `uv run python <script.py>`.
 3. **Report the gap explicitly** to the user: which operation or block was missing. These gaps are the product roadmap — they're how the toolkit grows.
 4. Leave the script in the workspace. Like pipelines and scenes, it's a durable, re-runnable artifact the user owns.

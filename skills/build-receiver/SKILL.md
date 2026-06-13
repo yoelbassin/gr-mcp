@@ -32,10 +32,11 @@ Connections: src → chan → demod → audio.
 
 There is *no* demodulator here — receiving a carrier means channelizing it to baseband and confirming it:
 
-- `freq_xlating_lowpass` (narrow `cutoff`, e.g. a few kHz) → `file_sink`
-- Then `measure(channelized_capture, center_freq=0)` (or render a `spectrogram`) to confirm the carrier sits at baseband with the expected SNR.
+- `freq_xlating_lowpass` (narrow `cutoff`, e.g. a few kHz) → `file_sink` (give the sink a path ending in `.cf32`).
+- `run_pipeline`, then bridge the raw output into an analyzable capture: take the sink path from the run's `artifacts[0]` and call `load_capture(path, sample_rate=<post-decimation rate>, center_freq=<target_freq>)` (raw `.cf32` needs the sample rate supplied).
+- Then `measure(capture_path, center_freq=<target_freq>)` (or render a `spectrogram`) to confirm the carrier sits where expected with the predicted SNR.
 
-This proves the channelizer/offset logic independently of any demodulator — the same skeleton as example A with the demod stage removed.
+This proves the channelizer/offset logic independently of any demodulator — the same skeleton as example A with the demod stage removed. The run → `load_capture` → analyze bridge is general: that's how you inspect *any* pipeline's file output.
 
 ## Other modulations
 
