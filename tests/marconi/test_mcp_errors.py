@@ -31,7 +31,13 @@ def test_classify_permission():
 def test_classify_key_error_unwraps_quotes():
     code, message = classify_error(KeyError("unknown device 'sim0'"))
     assert code == "not_found"
-    assert message.startswith("unknown device")  # no leading quote
+    assert message == "unknown device 'sim0'"
+
+
+def test_classify_file_not_found():
+    code, message = classify_error(FileNotFoundError("no such file: x.sigmf-meta"))
+    assert code == "not_found"
+    assert "x.sigmf-meta" in message
 
 
 def test_classify_backend_error():

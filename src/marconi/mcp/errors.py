@@ -27,10 +27,19 @@ def classify_error(exc: Exception) -> tuple[str, str]:
     if isinstance(exc, TransmitNotConfirmedError):
         return "tx_not_confirmed", str(exc)
     if isinstance(exc, PermissionError):
+        # v1.0: the only PermissionError through this boundary is the transmit
+        # can_tx guard; revisit if file-I/O permission errors surface here.
         return "tx_forbidden", str(exc)
     if isinstance(exc, KeyError):
-        # KeyError.__str__ wraps the message in repr-quotes; unwrap them.
-        return "not_found", str(exc).strip("'\"")
+        # KeyError.__str__ wraps the message in repr quotes; strip a single
+        # matching outer pair (str.strip would over-strip inner quotes).
+        s = str(exc)
+        if len(s) >= 2 and s[0] == s[-1] and s[0] in ("'", '"'):
+            s = s[1:-1]
+        return "not_found", s
+    if isinstance(exc, FileNotFoundError):
+        # a bad capture/file path is a common agent mistake
+        return "not_found", str(exc)
     if isinstance(exc, BackendError):
         return "backend_error", str(exc)
     if isinstance(exc, (ValueError, TypeError)):
