@@ -1,4 +1,7 @@
+from __future__ import annotations
+
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 from scipy.io import wavfile
@@ -6,6 +9,9 @@ from scipy.io import wavfile
 from marconi import sigmf
 from marconi.models import CaptureRef
 from marconi.workspace import Workspace
+
+if TYPE_CHECKING:
+    from marconi.devices import SimulatedDevice
 
 
 def load_capture(
@@ -59,3 +65,29 @@ def load_capture(
         )
 
     raise ValueError(f"unsupported capture format: {name}")
+
+
+def capture(
+    device: "SimulatedDevice | str",
+    center_freq: float,
+    sample_rate: float,
+    duration: float,
+    workspace: Workspace,
+    name: str | None = None,
+) -> CaptureRef:
+    """Capture IQ from a device. v1.0: simulated devices only — renders the
+    device's scene as seen at center_freq/sample_rate."""
+    from marconi.devices import SimulatedDevice, get_device
+    from marconi.ops.simulate import render_scene
+
+    dev = get_device(device) if isinstance(device, str) else device
+    if not isinstance(dev, SimulatedDevice):
+        raise TypeError(f"unsupported device type: {type(dev).__name__}")
+    return render_scene(
+        dev.scene,
+        center_freq=center_freq,
+        sample_rate=sample_rate,
+        duration=duration,
+        workspace=workspace,
+        name=name or f"{dev.id}_capture",
+    )
