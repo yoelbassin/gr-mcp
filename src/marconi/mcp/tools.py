@@ -9,9 +9,12 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+import marconi
 from marconi import sigmf
 from marconi.mcp.errors import tool_error_boundary
-from marconi.models import CaptureRef
+from marconi.mcp.state import get_state
+from marconi.models import CaptureRef, SceneElement, SceneSpec
+from marconi.specs import save_scene
 from marconi.vocabulary import VOCABULARY
 
 
@@ -43,7 +46,73 @@ def list_blocks() -> dict:
     return out
 
 
+@tool_error_boundary
+def list_devices() -> list[dict]:
+    """List available devices: simulated devices plus any backend hardware
+    (none in v1.0). Each entry has id, kind, can_tx, description."""
+    return [d.model_dump() for d in marconi.list_devices()]
+
+
+@tool_error_boundary
+def simulate_scene(
+    device_id: str, elements: list[dict], scene_name: str | None = None
+) -> dict:
+    """Register a simulated device whose 'on-air' contents are `elements`.
+
+    Each element: {kind: tone|noise|fm_tone|iq_file, freq: Hz (absolute,
+    ignored for noise), amplitude: float, params: {...}}. fm_tone needs
+    params.mod_freq and renders only when the capture sample_rate is a multiple
+    of 100000. The scene is persisted to scenes/<device_id>.yaml so the device
+    survives a restart. Always include a small noise element."""
+    state = get_state()
+    scene = SceneSpec(
+        name=scene_name or device_id,
+        elements=[SceneElement(**e) for e in elements],
+    )
+    dev = marconi.add_simulated_device(device_id, scene)
+    save_scene(scene, state.workspace.root / "scenes" / f"{device_id}.yaml")
+    return dev.info().model_dump()
+
+
+@tool_error_boundary
+def load_capture(
+    path: str, sample_rate: float | None = None, center_freq: float | None = None
+) -> dict:
+    """Ingest an external IQ file (SigMF / .cf32 / .wav) into the workspace.
+    .cf32 requires sample_rate. Returns a capture reference."""
+    ref = marconi.load_capture(
+        path, get_state().workspace, sample_rate=sample_rate, center_freq=center_freq
+    )
+    return ref.model_dump(mode="json")
+
+
+@tool_error_boundary
+def capture(
+    device_id: str,
+    center_freq: float,
+    sample_rate: float,
+    duration: float,
+    name: str | None = None,
+) -> dict:
+    """Capture IQ from a device (v1.0: simulated) as seen at center_freq /
+    sample_rate for `duration` seconds. Returns a capture reference whose
+    'path' feeds the analyze/render tools."""
+    ref = marconi.capture(
+        device_id,
+        center_freq=center_freq,
+        sample_rate=sample_rate,
+        duration=duration,
+        workspace=get_state().workspace,
+        name=name,
+    )
+    return ref.model_dump(mode="json")
+
+
 # Tools are added to this registry as later tasks implement them.
 TOOLS: dict[str, Callable] = {
     "list_blocks": list_blocks,
+    "list_devices": list_devices,
+    "simulate_scene": simulate_scene,
+    "load_capture": load_capture,
+    "capture": capture,
 }
