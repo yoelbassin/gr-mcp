@@ -1,6 +1,9 @@
 from pathlib import Path
+from typing import Literal
 
-from pydantic import BaseModel, field_validator, model_validator
+from pydantic import BaseModel, Field, model_validator
+
+RunStatus = Literal["ok", "timeout", "error"]
 
 
 class CaptureRef(BaseModel):
@@ -11,16 +14,9 @@ class CaptureRef(BaseModel):
 
     path: Path
     center_freq: float
-    sample_rate: float
-    num_samples: int
-    datatype: str = "cf32_le"
-
-    @field_validator("sample_rate")
-    @classmethod
-    def _sample_rate_positive(cls, v: float) -> float:
-        if v <= 0:
-            raise ValueError("sample_rate must be > 0")
-        return v
+    sample_rate: float = Field(gt=0)
+    num_samples: int = Field(ge=0)
+    datatype: Literal["cf32_le"] = "cf32_le"
 
     @property
     def duration(self) -> float:
@@ -85,7 +81,7 @@ class RenderResult(BaseModel):
     """Result of a render operation (e.g. spectrogram image)."""
 
     path: Path
-    kind: str
+    kind: Literal["spectrogram", "psd", "constellation"]
 
 
 class BlockSpec(BaseModel):
@@ -100,9 +96,9 @@ class ConnectionSpec(BaseModel):
     """Directed edge between block ports (port indices default to 0)."""
 
     src_block: str
-    src_port: int = 0
+    src_port: int = Field(0, ge=0)
     dst_block: str
-    dst_port: int = 0
+    dst_port: int = Field(0, ge=0)
 
 
 class PipelineSpec(BaseModel):
@@ -110,7 +106,7 @@ class PipelineSpec(BaseModel):
     rate-dependent blocks that don't set their own."""
 
     name: str = "pipeline"
-    sample_rate: float
+    sample_rate: float = Field(gt=0)
     blocks: list[BlockSpec]
     connections: list[ConnectionSpec]
 
@@ -119,7 +115,7 @@ class SceneElement(BaseModel):
     """One emitter in a simulated RF environment. freq is the absolute Hz
     position (ignored for kind='noise'); extra knobs go in params."""
 
-    kind: str  # tone | noise | fm_tone | iq_file
+    kind: Literal["tone", "noise", "fm_tone", "iq_file"]
     freq: float = 0.0
     amplitude: float = 1.0
     params: dict[str, float | int | str] = {}
@@ -134,7 +130,7 @@ class SceneSpec(BaseModel):
 
 class DeviceInfo(BaseModel):
     id: str
-    kind: str  # "simulated" (hardware kinds arrive in v1.1)
+    kind: Literal["simulated"]  # hardware kinds arrive in v1.1
     can_tx: bool = False
     description: str = ""
 
@@ -148,9 +144,9 @@ class ValidationIssue(BaseModel):
 
 
 class RunResult(BaseModel):
-    """Outcome of a pipeline run. status: ok | timeout | error."""
+    """Outcome of a pipeline run."""
 
-    status: str
+    status: RunStatus
     elapsed_seconds: float
     artifacts: list[Path] = []
     error: str | None = None
@@ -163,7 +159,7 @@ class RunRecord(BaseModel):
 
     run_id: str
     pipeline: str
-    status: str
+    status: RunStatus
     elapsed_seconds: float
     artifacts: list[str] = []
     error: str | None = None

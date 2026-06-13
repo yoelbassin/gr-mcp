@@ -6,6 +6,18 @@ import numpy as np
 from marconi.models import CaptureRef
 
 SIGMF_VERSION = "1.0.0"
+DEFAULT_DATATYPE = "cf32_le"
+
+# SigMF datatype string -> numpy dtype. cf32_le is interleaved float32 I/Q,
+# little-endian (complex64 in LE memory layout).
+_DTYPES = {"cf32_le": np.dtype("<c8")}
+
+
+def _dtype_for(datatype: str) -> np.dtype:
+    try:
+        return _DTYPES[datatype]
+    except KeyError:
+        raise ValueError(f"unsupported SigMF datatype: {datatype}")
 
 
 def _base(path: Path) -> Path:
@@ -19,7 +31,7 @@ def _base(path: Path) -> Path:
 def _meta_dict(center_freq: float, sample_rate: float) -> dict:
     return {
         "global": {
-            "core:datatype": "cf32_le",
+            "core:datatype": DEFAULT_DATATYPE,
             "core:sample_rate": sample_rate,
             "core:version": SIGMF_VERSION,
         },
@@ -38,7 +50,7 @@ def write_capture(
     data_path = base.with_name(base.name + ".sigmf-data")
     meta_path = base.with_name(base.name + ".sigmf-meta")
 
-    samples = np.asarray(samples, dtype=np.complex64)
+    samples = np.asarray(samples, dtype=_DTYPES[DEFAULT_DATATYPE])
     samples.tofile(data_path)
 
     meta = _meta_dict(center_freq, sample_rate)
@@ -60,8 +72,7 @@ def read_meta(path: Path | str) -> CaptureRef:
 
     meta = json.loads(meta_path.read_text(encoding="utf-8"))
     datatype = meta["global"]["core:datatype"]
-    if datatype != "cf32_le":
-        raise ValueError(f"unsupported SigMF datatype: {datatype}")
+    itemsize = _dtype_for(datatype).itemsize
     if not meta.get("captures"):
         raise ValueError("SigMF meta has no captures")
 
@@ -69,13 +80,14 @@ def read_meta(path: Path | str) -> CaptureRef:
         path=data_path,
         center_freq=float(meta["captures"][0].get("core:frequency", 0.0)),
         sample_rate=float(meta["global"]["core:sample_rate"]),
-        num_samples=data_path.stat().st_size // 8,  # complex64 = 8 bytes
+        num_samples=data_path.stat().st_size // itemsize,
+        datatype=datatype,
     )
 
 
 def read_samples(capture: CaptureRef) -> np.ndarray:
     """The single reader for capture sample data."""
-    return np.fromfile(capture.path, dtype=np.complex64)
+    return np.fromfile(capture.path, dtype=_dtype_for(capture.datatype))
 
 
 def write_meta(
@@ -93,12 +105,11 @@ def write_meta(
         path=data_path,
         center_freq=center_freq,
         sample_rate=sample_rate,
-        num_samples=data_path.stat().st_size // 8,
+        num_samples=data_path.stat().st_size // _DTYPES[DEFAULT_DATATYPE].itemsize,
     )
 
 
 def read_capture(path: Path | str) -> tuple[np.ndarray, CaptureRef]:
     """Read a SigMF pair; `path` may be the data file, meta file, or base."""
     ref = read_meta(path)
-    samples = np.fromfile(ref.path, dtype=np.complex64)
-    return samples, ref
+    return read_samples(ref), ref

@@ -6,9 +6,14 @@ from pydantic import ValidationError
 from marconi.models import (
     Burst,
     CaptureRef,
+    ConnectionSpec,
     DetectedSignal,
+    DeviceInfo,
+    PipelineSpec,
     PSDResult,
     RenderResult,
+    RunResult,
+    SceneElement,
     SignalMeasurement,
     SignalPeak,
 )
@@ -89,3 +94,57 @@ def test_psd_result_mismatched_lengths_raises() -> None:
             noise_floor_db=-90.0,
             peaks=[],
         )
+
+
+def test_connection_spec_rejects_negative_ports() -> None:
+    with pytest.raises(ValidationError):
+        ConnectionSpec(src_block="a", dst_block="b", src_port=-1)
+    with pytest.raises(ValidationError):
+        ConnectionSpec(src_block="a", dst_block="b", dst_port=-1)
+
+
+def test_pipeline_spec_rejects_nonpositive_sample_rate() -> None:
+    for bad in (0, -1e6):
+        with pytest.raises(ValidationError):
+            PipelineSpec(sample_rate=bad, blocks=[], connections=[])
+
+
+def test_capture_ref_rejects_unknown_datatype() -> None:
+    with pytest.raises(ValidationError):
+        CaptureRef(
+            path=Path("captures/x.sigmf-data"),
+            center_freq=100e6,
+            sample_rate=1e6,
+            num_samples=10,
+            datatype="ci16_le",
+        )
+
+
+def test_capture_ref_rejects_negative_num_samples() -> None:
+    with pytest.raises(ValidationError):
+        CaptureRef(
+            path=Path("captures/x.sigmf-data"),
+            center_freq=100e6,
+            sample_rate=1e6,
+            num_samples=-1,
+        )
+
+
+def test_run_result_rejects_unknown_status() -> None:
+    with pytest.raises(ValidationError):
+        RunResult(status="okay", elapsed_seconds=1.0)
+
+
+def test_scene_element_rejects_unknown_kind() -> None:
+    with pytest.raises(ValidationError):
+        SceneElement(kind="qpsk", freq=100e6)
+
+
+def test_device_info_rejects_unknown_kind() -> None:
+    with pytest.raises(ValidationError):
+        DeviceInfo(id="sim0", kind="hardware")
+
+
+def test_render_result_rejects_unknown_kind() -> None:
+    with pytest.raises(ValidationError):
+        RenderResult(path=Path("out/x.png"), kind="waterfall")
