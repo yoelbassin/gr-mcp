@@ -7,6 +7,10 @@ from marconi.backends import get_backend
 from marconi.models import DeviceInfo, SceneSpec
 
 
+class DeviceNotFoundError(Exception):
+    """No device is registered under the requested id."""
+
+
 @dataclass
 class SimulatedDevice:
     id: str
@@ -41,7 +45,7 @@ def add_simulated_device(
 def get_device(device_id: str) -> SimulatedDevice:
     if device_id not in _REGISTRY:
         known = ", ".join(sorted(_REGISTRY)) or "none registered"
-        raise KeyError(f"unknown device '{device_id}' (known: {known})")
+        raise DeviceNotFoundError(f"unknown device '{device_id}' (known: {known})")
     return _REGISTRY[device_id]
 
 

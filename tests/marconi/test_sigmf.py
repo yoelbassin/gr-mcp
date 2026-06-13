@@ -2,8 +2,9 @@ import json
 from pathlib import Path
 
 import numpy as np
+import pytest
 
-from marconi.sigmf import read_capture, read_samples, write_capture
+from marconi.sigmf import read_capture, read_meta, read_samples, write_capture
 
 
 def test_write_read_roundtrip(tmp_path: Path, make_iq) -> None:
@@ -27,6 +28,15 @@ def test_meta_is_valid_sigmf(tmp_path: Path, make_iq) -> None:
     assert meta["global"]["core:datatype"] == "cf32_le"
     assert meta["global"]["core:sample_rate"] == 2e6
     assert meta["captures"][0]["core:frequency"] == 1e9
+
+
+def test_read_meta_rejects_malformed_meta(tmp_path: Path) -> None:
+    # meta missing the 'global' block -> clear ValueError, not a bare KeyError
+    # the MCP boundary would otherwise mislabel as "not_found".
+    (tmp_path / "cap.sigmf-data").write_bytes(b"")
+    (tmp_path / "cap.sigmf-meta").write_text(json.dumps({"captures": [{}]}))
+    with pytest.raises(ValueError, match="malformed SigMF metadata"):
+        read_meta(tmp_path / "cap")
 
 
 def test_read_capture_routes_through_read_samples(tmp_path: Path, make_iq) -> None:

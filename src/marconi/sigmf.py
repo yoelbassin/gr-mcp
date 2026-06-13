@@ -71,7 +71,12 @@ def read_meta(path: Path | str) -> CaptureRef:
     meta_path = base.with_name(base.name + ".sigmf-meta")
 
     meta = json.loads(meta_path.read_text(encoding="utf-8"))
-    datatype = meta["global"]["core:datatype"]
+    try:
+        glob = meta["global"]
+        datatype = glob["core:datatype"]
+        sample_rate = float(glob["core:sample_rate"])
+    except (KeyError, TypeError) as e:
+        raise ValueError(f"malformed SigMF metadata in {meta_path.name}: {e}") from e
     itemsize = _dtype_for(datatype).itemsize
     if not meta.get("captures"):
         raise ValueError("SigMF meta has no captures")
@@ -79,7 +84,7 @@ def read_meta(path: Path | str) -> CaptureRef:
     return CaptureRef(
         path=data_path,
         center_freq=float(meta["captures"][0].get("core:frequency", 0.0)),
-        sample_rate=float(meta["global"]["core:sample_rate"]),
+        sample_rate=sample_rate,
         num_samples=data_path.stat().st_size // itemsize,
         datatype=datatype,
     )

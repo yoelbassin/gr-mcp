@@ -7,10 +7,14 @@ in an in-process history for observability and artifact recall."""
 
 from __future__ import annotations
 
+import logging
+
 from marconi.devices import add_simulated_device, clear_devices
 from marconi.models import RunRecord, RunResult
 from marconi.specs import load_scene
 from marconi.workspace import Workspace
+
+logger = logging.getLogger(__name__)
 
 
 class ServerState:
@@ -28,7 +32,12 @@ class ServerState:
         if not scenes_dir.is_dir():
             return
         for path in sorted(scenes_dir.glob("*.yaml")):
-            add_simulated_device(path.stem, load_scene(path))
+            try:
+                add_simulated_device(path.stem, load_scene(path))
+            except Exception:
+                # one malformed scene (bad YAML, schema drift, partial write)
+                # must not take down the whole server — skip it and carry on.
+                logger.warning("skipping unreadable scene file %s", path, exc_info=True)
 
     def _next_run_id(self) -> str:
         self._run_counter += 1

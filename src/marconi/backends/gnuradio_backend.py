@@ -8,7 +8,6 @@ import logging
 import math
 import threading
 import time
-import traceback
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -141,14 +140,17 @@ def build_top_block(spec: PipelineSpec) -> tuple[Any, list[Path]]:
 
 def _run_with_timeout(tb: Any, timeout: float, name: str) -> tuple[bool, str | None]:
     """Run `tb` on a daemon worker, bounded by `timeout`. Returns
-    (timed_out, failure_traceback) — failure_traceback is None on success."""
+    (timed_out, failure) — failure is a concise one-line error string, or None
+    on success. The full traceback is logged server-side, never returned (it
+    would leak filesystem paths to the agent)."""
     failure: list[str] = []
 
     def _run() -> None:
         try:
             tb.run()
-        except Exception:
-            failure.append(traceback.format_exc())
+        except Exception as exc:
+            logger.exception("flowgraph '%s' raised during run", name)
+            failure.append(f"{type(exc).__name__}: {exc}")
 
     worker = threading.Thread(target=_run, daemon=True)
     worker.start()
@@ -191,7 +193,7 @@ class GnuRadioBackend(Backend):
                 status="error",
                 elapsed_seconds=elapsed,
                 artifacts=artifacts,
-                error=f"flowgraph raised during run:\n{failure}",
+                error=f"flowgraph raised during run: {failure}",
             )
         return RunResult(
             status="timeout" if timed_out else "ok",

@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 
 from marconi.devices import (
+    DeviceNotFoundError,
     SimulatedDevice,
     add_simulated_device,
     clear_devices,
@@ -61,7 +62,7 @@ def test_replace_redefines_device_scene() -> None:
 
 
 def test_unknown_device_rejected() -> None:
-    with pytest.raises(KeyError, match="nope"):
+    with pytest.raises(DeviceNotFoundError, match="nope"):
         get_device("nope")
 
 

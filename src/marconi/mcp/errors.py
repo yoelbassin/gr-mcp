@@ -15,6 +15,7 @@ from fastmcp.exceptions import ToolError
 from pydantic import ValidationError
 
 from marconi.backends import BackendError
+from marconi.devices import DeviceNotFoundError
 from marconi.ops.transmit import TransmitForbiddenError, TransmitNotConfirmedError
 from marconi.vocabulary import PipelineValidationError
 
@@ -31,13 +32,8 @@ def classify_error(exc: Exception) -> tuple[str, str]:
         # the target device's can_tx is False — distinct from a filesystem
         # PermissionError, which falls through to internal_error honestly.
         return "tx_forbidden", str(exc)
-    if isinstance(exc, KeyError):
-        # KeyError.__str__ wraps the message in repr quotes; strip a single
-        # matching outer pair (str.strip would over-strip inner quotes).
-        s = str(exc)
-        if len(s) >= 2 and s[0] == s[-1] and s[0] in ("'", '"'):
-            s = s[1:-1]
-        return "not_found", s
+    if isinstance(exc, DeviceNotFoundError):
+        return "not_found", str(exc)
     if isinstance(exc, FileNotFoundError):
         # a bad capture/file path is a common agent mistake
         return "not_found", str(exc)

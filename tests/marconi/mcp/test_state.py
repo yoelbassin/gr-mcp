@@ -51,6 +51,17 @@ def test_init_is_idempotent_and_authoritative(tmp_path: Path):
     assert ids == ["real"]
 
 
+def test_init_skips_unreadable_scene_file(tmp_path: Path):
+    # one corrupt/partial scene must not abort startup before any tool is
+    # reachable: it is skipped and the loadable devices still register.
+    scenes = tmp_path / "scenes"
+    scenes.mkdir()
+    (scenes / "broken.yaml").write_text("name: bad\nelements:\n- kind: qpsk\n")
+    save_scene(SceneSpec(name="s"), scenes / "good.yaml")
+    ServerState(Workspace(tmp_path))  # must not raise
+    assert [d.id for d in marconi.list_devices()] == ["good"]
+
+
 def test_run_history(tmp_path: Path):
     state = ServerState(Workspace(tmp_path))
     rec = state.record_run(

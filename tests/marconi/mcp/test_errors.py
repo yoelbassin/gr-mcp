@@ -2,6 +2,7 @@ import pytest
 from fastmcp.exceptions import ToolError
 
 from marconi.backends import BackendError
+from marconi.devices import DeviceNotFoundError
 from marconi.mcp.errors import classify_error, tool_error_boundary
 from marconi.models import ValidationIssue
 from marconi.ops.transmit import TransmitForbiddenError, TransmitNotConfirmedError
@@ -36,10 +37,16 @@ def test_classify_filesystem_permission_is_not_tx_forbidden():
     assert classify_error(PermissionError("denied: renders/x.png"))[0] != "tx_forbidden"
 
 
-def test_classify_key_error_unwraps_quotes():
-    code, message = classify_error(KeyError("unknown device 'sim0'"))
+def test_classify_device_not_found():
+    code, message = classify_error(DeviceNotFoundError("unknown device 'sim0'"))
     assert code == "not_found"
     assert message == "unknown device 'sim0'"
+
+
+def test_classify_bare_key_error_is_internal_not_not_found():
+    # an internal dict miss (e.g. a corrupt SigMF meta) must NOT masquerade as
+    # a missing device/file; it falls through to the honest catch-all.
+    assert classify_error(KeyError("global"))[0] == "internal_error"
 
 
 def test_classify_file_not_found():

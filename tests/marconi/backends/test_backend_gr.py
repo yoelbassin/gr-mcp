@@ -18,6 +18,25 @@ def test_gnuradio_backend_resolves() -> None:
     assert b.enumerate_devices() == []  # no hardware support in v1.0
 
 
+def test_run_failure_is_concise_not_traceback() -> None:
+    # a runtime flowgraph failure must surface a one-line, path-free message to
+    # the agent; the full traceback is logged server-side, never returned.
+    from marconi.backends.gnuradio_backend import _run_with_timeout
+
+    class _Boom:
+        def run(self) -> None:
+            raise RuntimeError("bad block parameter")
+
+        def stop(self) -> None: ...
+
+        def wait(self) -> None: ...
+
+    timed_out, failure = _run_with_timeout(_Boom(), timeout=5.0, name="t")
+    assert timed_out is False
+    assert failure == "RuntimeError: bad block parameter"
+    assert failure is not None and "Traceback" not in failure
+
+
 def _tone_pipeline(
     out_path: str, n: int = 50000, noise_amplitude: float = 0.0
 ) -> PipelineSpec:

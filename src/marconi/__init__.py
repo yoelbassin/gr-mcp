@@ -1,6 +1,7 @@
 """Marconi: LLM-driven RF control and analysis."""
 
 from marconi.devices import (
+    DeviceNotFoundError,
     SimulatedDevice,
     add_simulated_device,
     clear_devices,
@@ -49,6 +50,7 @@ __all__ = [
     "ConnectionSpec",
     "DetectedSignal",
     "DeviceInfo",
+    "DeviceNotFoundError",
     "PSDResult",
     "PipelineSpec",
     "PipelineValidationError",
