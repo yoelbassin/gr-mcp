@@ -1,9 +1,9 @@
 """Per-process server state.
 
 The workspace is the source of truth: on startup the simulated-device registry
-is rebuilt from the scene YAML files under workspace/scenes/, so devices created
-in a previous session reappear. Runs are synchronous in v1.0; each is recorded
-in an in-process history for observability and artifact recall."""
+is rebuilt from the scene YAML files under workspace/artifacts/scenes/, so
+devices created in a previous session reappear. Runs are synchronous in v1.0;
+each is recorded in an in-process history for observability and artifact recall."""
 
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ class ServerState:
         # The workspace is authoritative: clear any prior registry, then rebuild
         # from scene files (device id == scene file stem).
         clear_devices()
-        scenes_dir = self.workspace.root / "scenes"
+        scenes_dir = self.workspace.scenes_dir()
         if not scenes_dir.is_dir():
             return
         for path in sorted(scenes_dir.glob("*.yaml")):

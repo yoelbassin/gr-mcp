@@ -20,7 +20,7 @@ The backend boundary is "moves samples or touches devices": everything under `sr
 src/marconi/
   models.py             # pydantic: CaptureRef, PSD/Signal results, Pipeline/Scene/Device/Run specs
   sigmf.py              # SigMF read/write; read_samples is the single sample reader
-  workspace.py          # the user's project dir: captures/ renders/ pipelines/ scenes/
+  workspace.py          # the user's project dir: artifacts/{captures,renders,pipelines,scenes}/
   specs.py              # YAML save/load for pipelines and scenes
   vocabulary.py         # curated block vocabulary + validate_pipeline
   config.py             # CONFIRM_TX toggle

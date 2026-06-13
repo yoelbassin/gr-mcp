@@ -25,7 +25,7 @@ def test_load_raw_cf32(tmp_path: Path, make_iq) -> None:
     samples.tofile(raw)
 
     ref = load_capture(raw, ws, sample_rate=1e6, center_freq=433e6)
-    assert ref.path.is_relative_to(ws.root / "captures")
+    assert ref.path.is_relative_to(ws.root / "artifacts" / "captures")
     loaded, _ = read_capture(ref.path)
     np.testing.assert_array_equal(loaded, samples)
     assert ref.sample_rate == 1e6

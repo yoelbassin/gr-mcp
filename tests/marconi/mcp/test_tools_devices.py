@@ -7,7 +7,7 @@ def test_simulate_scene_registers_and_persists(server_state):
     info = T.simulate_scene("sim0", [{"kind": "noise", "amplitude": 0.01}])
     assert info["id"] == "sim0"
     assert info["kind"] == "simulated"
-    assert (server_state.workspace.root / "scenes" / "sim0.yaml").exists()
+    assert (server_state.workspace.root / "artifacts" / "scenes" / "sim0.yaml").exists()
     assert any(d["id"] == "sim0" for d in T.list_devices())
 
 

@@ -5,17 +5,26 @@ from pathlib import Path
 class Workspace:
     """The user's RF project directory.
 
-    Layout: captures/ renders/ pipelines/ scenes/ — created on demand.
+    Layout: artifacts/{captures,renders,pipelines,scenes}/ — created on demand.
     Artifacts are exchanged as paths into this directory, never as blobs.
     """
+
+    #: Parent folder gathering every generated subdir under the workspace root.
+    _ARTIFACTS = "artifacts"
 
     def __init__(self, root: Path | str = ".") -> None:
         self.root = Path(root)
 
-    def _subdir(self, name: str) -> Path:
-        d = self.root / name
-        d.mkdir(parents=True, exist_ok=True)
+    def _subdir(self, name: str, *, create: bool = True) -> Path:
+        d = self.root / self._ARTIFACTS / name
+        if create:
+            d.mkdir(parents=True, exist_ok=True)
         return d
+
+    def scenes_dir(self) -> Path:
+        """The scenes directory path, without creating it — for startup
+        device reload, which must not materialize an empty tree on first run."""
+        return self._subdir("scenes", create=False)
 
     @staticmethod
     def _dedupe(directory: Path, stem: str, probe_suffix: str, suffix: str) -> Path:

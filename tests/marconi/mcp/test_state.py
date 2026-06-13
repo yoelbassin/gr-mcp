@@ -30,8 +30,8 @@ def test_set_and_get_state(tmp_path: Path):
 
 
 def test_init_registers_persisted_scenes(tmp_path: Path):
-    scenes = tmp_path / "scenes"
-    scenes.mkdir()
+    scenes = tmp_path / "artifacts" / "scenes"
+    scenes.mkdir(parents=True)
     save_scene(
         SceneSpec(name="s", elements=[SceneElement(kind="noise", amplitude=0.01)]),
         scenes / "sim0.yaml",
@@ -43,8 +43,8 @@ def test_init_registers_persisted_scenes(tmp_path: Path):
 def test_init_is_idempotent_and_authoritative(tmp_path: Path):
     # stale device is cleared; workspace is the source of truth
     marconi.add_simulated_device("ghost", SceneSpec(name="g"))
-    scenes = tmp_path / "scenes"
-    scenes.mkdir()
+    scenes = tmp_path / "artifacts" / "scenes"
+    scenes.mkdir(parents=True)
     save_scene(SceneSpec(name="s"), scenes / "real.yaml")
     ServerState(Workspace(tmp_path))
     ids = sorted(d.id for d in marconi.list_devices())
@@ -54,8 +54,8 @@ def test_init_is_idempotent_and_authoritative(tmp_path: Path):
 def test_init_skips_unreadable_scene_file(tmp_path: Path):
     # one corrupt/partial scene must not abort startup before any tool is
     # reachable: it is skipped and the loadable devices still register.
-    scenes = tmp_path / "scenes"
-    scenes.mkdir()
+    scenes = tmp_path / "artifacts" / "scenes"
+    scenes.mkdir(parents=True)
     (scenes / "broken.yaml").write_text("name: bad\nelements:\n- kind: qpsk\n")
     save_scene(SceneSpec(name="s"), scenes / "good.yaml")
     ServerState(Workspace(tmp_path))  # must not raise

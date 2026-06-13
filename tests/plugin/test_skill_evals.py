@@ -36,7 +36,9 @@ def test_build_receiver_anti_overfit_cw_carrier(server_state):
     )
     cap = T.capture("sim0", center_freq=100e6, sample_rate=2e6, duration=0.1)
     # Channelize the CW carrier (offset = 99.5 - 100 = -0.5 MHz) down to baseband.
-    chan_path = str(server_state.workspace.root / "captures" / "cw_chan.sigmf-data")
+    chan_path = str(
+        server_state.workspace.root / "artifacts" / "captures" / "cw_chan.sigmf-data"
+    )
     pipeline = {
         "name": "cw_rx",
         "sample_rate": 2e6,

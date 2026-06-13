@@ -128,6 +128,6 @@ def test_killer_demo_full_loop(tmp_path: Path) -> None:
     from marconi.ops.pipeline import save_pipeline_to_workspace
 
     saved = save_pipeline_to_workspace(rx, ws)
-    grc = marconi.export_grc(rx, ws.root / "pipelines" / "fm_rx.grc")
+    grc = marconi.export_grc(rx, ws.root / "artifacts" / "pipelines" / "fm_rx.grc")
     assert saved.exists() and grc.exists()
-    assert (ws.root / "captures").is_dir()
+    assert (ws.root / "artifacts" / "captures").is_dir()

@@ -71,7 +71,7 @@ def test_register_simulated_device_persists_scene(tmp_path: Path) -> None:
     ws = Workspace(tmp_path)
     dev = register_simulated_device("sim0", _scene(), ws)
     assert get_device("sim0") is dev
-    assert (ws.root / "scenes" / "sim0.yaml").exists()
+    assert (ws.root / "artifacts" / "scenes" / "sim0.yaml").exists()
     # re-registering overwrites the same scene file (replace=True default)
     register_simulated_device("sim0", _scene(), ws)
     assert [d.id for d in list_devices()] == ["sim0"]
@@ -83,7 +83,7 @@ def test_capture_from_simulated_device(tmp_path: Path) -> None:
     ref = capture(
         "sim0", center_freq=433e6, sample_rate=1e6, duration=0.05, workspace=ws
     )
-    assert ref.path.is_relative_to(ws.root / "captures")
+    assert ref.path.is_relative_to(ws.root / "artifacts" / "captures")
     assert ref.center_freq == 433e6
     signals = find_signals(ref)
     assert len(signals) == 1

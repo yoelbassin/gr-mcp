@@ -47,5 +47,5 @@ def test_end_to_end_analysis_flow(tmp_path: Path) -> None:
     render = marconi.spectrogram(ref, ws)
     assert render.path.exists()
     # the workspace now holds a reusable RF project
-    assert (ws.root / "captures").is_dir()
-    assert (ws.root / "renders").is_dir()
+    assert (ws.root / "artifacts" / "captures").is_dir()
+    assert (ws.root / "artifacts" / "renders").is_dir()

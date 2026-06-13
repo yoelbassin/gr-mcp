@@ -40,5 +40,5 @@ def test_run_executes_valid_pipeline(tmp_path: Path) -> None:
 def test_save_pipeline_to_workspace(tmp_path: Path) -> None:
     ws = Workspace(tmp_path)
     p = save_pipeline_to_workspace(_spec("o.cf32"), ws)
-    assert p.parent == ws.root / "pipelines"
+    assert p.parent == ws.root / "artifacts" / "pipelines"
     assert p.suffix == ".yaml"
