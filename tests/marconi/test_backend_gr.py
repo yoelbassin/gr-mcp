@@ -18,15 +18,37 @@ def test_gnuradio_backend_resolves() -> None:
     assert b.enumerate_devices() == []  # no hardware support in v1.0
 
 
-def _tone_pipeline(out_path: str, n: int = 50000) -> PipelineSpec:
-    # noise_source raises the noise floor above GR's phase-accumulator spectral
-    # artifacts so that find_signals() reliably detects exactly one signal.
+def _tone_pipeline(
+    out_path: str, n: int = 50000, noise_amplitude: float = 0.0
+) -> PipelineSpec:
+    if noise_amplitude == 0.0:
+        # Pure three-block spec: tone_source → head → file_sink.
+        return PipelineSpec(
+            name="tone_to_file",
+            sample_rate=1e6,
+            blocks=[
+                BlockSpec(id="src", type="tone_source", params={"freq": 100e3}),
+                BlockSpec(id="hd", type="head", params={"num_samples": n}),
+                BlockSpec(id="snk", type="file_sink", params={"path": out_path}),
+            ],
+            connections=[
+                ConnectionSpec(src_block="src", dst_block="hd"),
+                ConnectionSpec(src_block="hd", dst_block="snk"),
+            ],
+        )
+    # A pure synthetic tone has no noise floor so find_signals() sees
+    # phase-accumulator sidebands from GR's NCO and may detect >1 signal.
+    # The closed-loop test needs a realistic noise floor: mix in noise before head.
     return PipelineSpec(
         name="tone_to_file",
         sample_rate=1e6,
         blocks=[
             BlockSpec(id="src", type="tone_source", params={"freq": 100e3}),
-            BlockSpec(id="noise", type="noise_source", params={"amplitude": 0.001}),
+            BlockSpec(
+                id="noise",
+                type="noise_source",
+                params={"amplitude": noise_amplitude},
+            ),
             BlockSpec(id="mix", type="add", params={}),
             BlockSpec(id="hd", type="head", params={"num_samples": n}),
             BlockSpec(id="snk", type="file_sink", params={"path": out_path}),
@@ -77,7 +99,9 @@ def test_run_pipeline_produces_analyzable_capture(tmp_path) -> None:
     from marconi.backends import get_backend
 
     out = tmp_path / "tone.cf32"
-    result = get_backend("gnuradio").run_pipeline(_tone_pipeline(str(out)))
+    result = get_backend("gnuradio").run_pipeline(
+        _tone_pipeline(str(out), noise_amplitude=0.001)
+    )
     assert result.status == "ok"
     assert result.artifacts == [out]
     assert result.error is None

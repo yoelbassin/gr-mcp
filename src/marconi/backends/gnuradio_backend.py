@@ -4,6 +4,7 @@ All GNU Radio imports happen inside functions so that `import marconi`
 works on machines without GNU Radio.
 """
 
+import logging
 import math
 import threading
 import time
@@ -14,6 +15,8 @@ from typing import Any
 
 from marconi.backends.base import Backend, BackendError
 from marconi.models import DeviceInfo, PipelineSpec, RunResult
+
+logger = logging.getLogger(__name__)
 
 _SINK_TYPES = {"file_sink", "wav_sink"}
 
@@ -169,6 +172,12 @@ class GnuRadioBackend(Backend):
             tb.stop()
             tb.wait()
             worker.join(5.0)
+            if worker.is_alive():
+                logger.warning(
+                    "GNU Radio worker did not exit within the grace period after "
+                    "stop(); flowgraph '%s' may be wedged.",
+                    spec.name,
+                )
 
         elapsed = time.monotonic() - start
         if failure:
