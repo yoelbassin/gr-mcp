@@ -92,6 +92,39 @@ def test_validation_error_formats_issues() -> None:
     assert "src" in str(err) and "freq" in str(err)
 
 
+def test_bool_rejected_for_numeric_param() -> None:
+    p = _valid()
+    p.blocks[1].params["num_samples"] = True  # head expects int, bool must be rejected
+    issues = validate_pipeline(p)
+    assert any(i.field == "num_samples" and "expected int" in i.message for i in issues)
+
+
+def test_port_index_out_of_range() -> None:
+    p = _valid()
+    p.connections.append(ConnectionSpec(src_block="src", dst_block="snk", dst_port=5))
+    issues = validate_pipeline(p)
+    assert any("out of range" in i.message for i in issues)
+
+
+def test_input_connected_twice() -> None:
+    p = PipelineSpec(
+        sample_rate=1e6,
+        blocks=[
+            BlockSpec(id="src1", type="tone_source", params={"freq": 100e3}),
+            BlockSpec(id="src2", type="tone_source", params={"freq": 200e3}),
+            BlockSpec(id="hd", type="head", params={"num_samples": 1000}),
+            BlockSpec(id="snk", type="file_sink", params={"path": "o.cf32"}),
+        ],
+        connections=[
+            ConnectionSpec(src_block="src1", dst_block="hd"),
+            ConnectionSpec(src_block="src2", dst_block="hd"),  # same input port 0
+            ConnectionSpec(src_block="hd", dst_block="snk"),
+        ],
+    )
+    issues = validate_pipeline(p)
+    assert any("connected twice" in i.message for i in issues)
+
+
 def test_vocabulary_covers_spec_minimum() -> None:
     for t in (
         "tone_source",
