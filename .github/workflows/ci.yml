@@ -18,6 +18,9 @@ jobs:
           enable-cache: true
           python-version: "3.13"
 
+      - name: Verify uv.lock is in sync with pyproject
+        run: uv lock --check
+
       - name: Sync dependencies
         run: uv sync --extra dev
 
