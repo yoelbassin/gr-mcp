@@ -1,48 +1,27 @@
-[build-system]
-requires = ["setuptools>=61.0"]
-build-backend = "setuptools.build_meta"
+[dependency-groups]
+dev = ["pytest>=7.0", "pytest-asyncio", "pytest-xdist", "pre-commit", "mypy"]
 
-[project]
-name = "marconi"
-version = "0.1.0"
-description = "LLM-driven RF control and analysis — an engine-agnostic operations layer with a GNU Radio backend."
-license = { text = "GPL-3.0-or-later" }
-requires-python = ">=3.13"
-dependencies = [
-    "pydantic",
-    "pyyaml",
-    "numpy>=2.4.6",
-    "scipy>=1.17.1",
-    "matplotlib>=3.11.0",
-]
+[tool.uv.workspace]
+members = ["packages/*"]
 
-[project.optional-dependencies]
-mcp = ["fastmcp>=2.0"]
-dev = [
-    "pytest >= 7.0",
-    "pytest-asyncio",
-    "pre-commit",
-    "marconi[mcp]",
-]
-
-[project.scripts]
-marconi-mcp = "marconi.mcp.server:main"
-
-[tool.setuptools.packages.find]
-where = ["src"]
+[tool.uv.sources]
+marconi-core = { workspace = true }
+marconi-phy = { workspace = true }
 
 [tool.isort]
 profile = "black"
+known_first_party = ["marconi"]
 
 [tool.mypy]
 ignore_missing_imports = true
 explicit_package_bases = true
-mypy_path = "src"
+mypy_path = "packages/marconi-core/src:packages/marconi-phy/src"
+
+[[tool.mypy.overrides]]
+module = "marconi.*"
+disallow_incomplete_defs = true
+disallow_untyped_defs = true
 
 [tool.pytest.ini_options]
-# src on the path so `import marconi` resolves without an install step
-pythonpath = ["src", "."]
-# tests/marconi/ mirrors src/marconi/ (ops/ mcp/ backends/); tests/plugin/ holds
-# the Layer-3 (skills + manifests) tests. One root so a bare `pytest` finds both.
 testpaths = ["tests"]
 asyncio_mode = "auto"
