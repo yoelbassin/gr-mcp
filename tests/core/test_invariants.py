@@ -26,7 +26,9 @@ def test_core_imports_without_gnuradio_or_fastmcp() -> None:
 
 
 def test_no_gnuradio_import_anywhere_in_core() -> None:
-    for py in CORE.rglob("*.py"):
+    py_files = list(CORE.rglob("*.py"))
+    assert py_files, f"no core source files found under {CORE}; path wrong or empty"
+    for py in py_files:
         tree = ast.parse(py.read_text())
         for node in ast.walk(tree):
             mods = (
