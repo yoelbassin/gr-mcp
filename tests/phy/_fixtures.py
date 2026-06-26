@@ -7,6 +7,7 @@ from marconi.core.descriptor import Carrier, Descriptor
 from marconi.core.levels import Level
 from marconi.core.params import StageParams
 from marconi.core.stages import DuplexStage, Stage
+from marconi.phy.backends.stub import BlockArity
 from marconi.phy.compile_context import CompileContext
 
 
@@ -105,3 +106,21 @@ def fixture_registry() -> dict[str, Stage[CompileContext]]:
         FakeSoftDemap(),
     ]
     return {s.name: s for s in stages}
+
+
+def stub_factories() -> dict[str, BlockArity]:
+    return {
+        "iq_file_source": BlockArity(0, 1),
+        "iq_file_sink": BlockArity(1, 0),
+        "bits_file_source": BlockArity(0, 1),
+        "bits_file_sink": BlockArity(1, 0),
+        "soft_bits_file_sink": BlockArity(1, 0),
+        "symbols_file_sink": BlockArity(1, 0),
+        "fake_resampler": BlockArity(1, 1),
+        "fake_demod": BlockArity(1, 1),
+        "fake_mod": BlockArity(1, 1),
+        "fake_demap": BlockArity(1, 1),
+        "fake_map": BlockArity(1, 1),
+        "fake_soft_demap": BlockArity(1, 1),
+        "fake_soft_map": BlockArity(1, 1),
+    }
