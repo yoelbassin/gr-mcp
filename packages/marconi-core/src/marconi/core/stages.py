@@ -64,9 +64,6 @@ class Stage(ABC, Generic[B]):
     def rate_factor(self, params: Mapping[str, Any]) -> float:
         return 1.0
 
-    def validate(self, idx: int, step: SpecStep, issues: list[ValidationIssue]) -> None:
-        """Cross-param rules beyond per-field constraints. Default: none."""
-
 
 class RxStage(Stage[B]):
     directions: frozenset[str] = frozenset({"rx"})
@@ -90,7 +87,6 @@ def validate_params(
     block_id: str,
     params_model: type[BaseModel],
     supplied: Mapping[str, object],
-    owner_label: str,
     out: list[ValidationIssue],
 ) -> None:
     try:
@@ -123,7 +119,7 @@ def validate_path(
                 )
             )
             continue
-        validate_params(sid, conv.params_model, step.params, conv.name, issues)
+        validate_params(sid, conv.params_model, step.params, issues)
         if idx == 0 and conv.from_level != start_level:
             issues.append(
                 ValidationIssue(

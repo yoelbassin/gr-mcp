@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import functools
 from collections.abc import Callable
-from typing import Any, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar
+
+if TYPE_CHECKING:
+    from fastmcp.exceptions import ToolError
 
 from pydantic import ValidationError
 
@@ -35,7 +38,7 @@ def classify_error(exc: Exception) -> tuple[str, str]:
     return "internal_error", f"{type(exc).__name__}: {exc}"
 
 
-def to_tool_error(exc: Exception) -> Any:
+def to_tool_error(exc: Exception) -> "ToolError":
     from fastmcp.exceptions import ToolError
 
     code, message = classify_error(exc)

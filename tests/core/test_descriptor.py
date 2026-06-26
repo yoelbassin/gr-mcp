@@ -10,7 +10,7 @@ def test_identical_descriptors_are_compatible() -> None:
 
 def test_carrier_mismatch_is_incompatible() -> None:
     hard = Descriptor(Level.BITS, "b", carrier=Carrier.HARD)
-    soft = Descriptor(Level.BITS, "f", carrier=Carrier.SOFT)
+    soft = Descriptor(Level.BITS, "b", carrier=Carrier.SOFT)
     assert not hard.compatible_with(soft)
 
 
