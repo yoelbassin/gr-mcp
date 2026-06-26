@@ -1,0 +1,37 @@
+import ast
+import subprocess
+import sys
+from pathlib import Path
+
+PHY = Path("packages/marconi-phy/src/marconi/phy")
+
+
+def test_phy_imports_without_gnuradio() -> None:
+    code = (
+        "import builtins; _imp = builtins.__import__\n"
+        "def guard(name, *a, **k):\n"
+        "    if name.split('.')[0] == 'gnuradio':\n"
+        "        raise ImportError(name)\n"
+        "    return _imp(name, *a, **k)\n"
+        "builtins.__import__ = guard\n"
+        "import marconi.phy.ir, marconi.phy.models, marconi.phy.compile_context\n"
+        "import marconi.phy.compiler\n"
+        "import marconi.phy.backends.base, marconi.phy.backends.stub\n"
+        "print('ok')\n"
+    )
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+    assert out.returncode == 0 and "ok" in out.stdout, out.stderr
+
+
+def test_no_gnuradio_import_anywhere_in_phy() -> None:
+    py_files = list(PHY.rglob("*.py"))
+    assert py_files, f"no phy source files found under {PHY}; path wrong or empty"
+    for py in py_files:
+        tree = ast.parse(py.read_text())
+        for node in ast.walk(tree):
+            mods = (
+                [a.name for a in node.names]
+                if isinstance(node, ast.Import)
+                else [node.module or ""] if isinstance(node, ast.ImportFrom) else []
+            )
+            assert not any(m.split(".")[0] == "gnuradio" for m in mods), py
