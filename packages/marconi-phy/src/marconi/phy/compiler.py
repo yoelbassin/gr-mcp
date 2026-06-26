@@ -83,21 +83,33 @@ def compile_modem(
     sink_io: Mapping[str, ParamValue],
     name: str = "pipeline",
 ) -> GrPipeline:
-    if direction != "rx":
+    if direction not in ("rx", "tx"):
         raise CompileError(f"direction must be 'rx' or 'tx', got {direction!r}")
     steps = modem.path
     n = len(steps)
     boundaries, rates = _forward_pass(steps, registry, start, sample_rate)
     ctx = CompileContext(start, sample_rate, modem.symbol_rate)
 
-    ctx.chain(_source_kind(boundaries[0]), **dict(source_io))
-    for i, step in enumerate(steps):
-        stage = _resolve(step, registry)
-        ctx.descriptor = boundaries[i]
-        ctx.rate = rates[i]
-        stage.emit_rx(ctx, step.params)
-    ctx.descriptor = boundaries[n]
-    ctx.rate = rates[n]
-    ctx.chain(_sink_kind(boundaries[n]), **dict(sink_io))
+    if direction == "rx":
+        ctx.chain(_source_kind(boundaries[0]), **dict(source_io))
+        for i, step in enumerate(steps):
+            stage = _resolve(step, registry)
+            ctx.descriptor = boundaries[i]
+            ctx.rate = rates[i]
+            stage.emit_rx(ctx, step.params)
+        ctx.descriptor = boundaries[n]
+        ctx.rate = rates[n]
+        ctx.chain(_sink_kind(boundaries[n]), **dict(sink_io))
+    else:  # tx
+        ctx.chain(_source_kind(boundaries[n]), **dict(source_io))
+        for i in range(n - 1, -1, -1):
+            step = steps[i]
+            stage = _resolve(step, registry)
+            ctx.descriptor = boundaries[i + 1]
+            ctx.rate = rates[i + 1]
+            stage.emit_tx(ctx, step.params)
+        ctx.descriptor = boundaries[0]
+        ctx.rate = rates[0]
+        ctx.chain(_sink_kind(boundaries[0]), **dict(sink_io))
 
     return ctx.build(name, sample_rate)
