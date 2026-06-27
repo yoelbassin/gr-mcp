@@ -17,6 +17,7 @@ def test_phy_imports_without_gnuradio() -> None:
         "builtins.__import__ = guard\n"
         "import marconi.phy.ir, marconi.phy.models, marconi.phy.compile_context\n"
         "import marconi.phy.compiler\n"
+        "import marconi.phy.stages\n"
         "import marconi.phy.backends.base, marconi.phy.backends.stub\n"
         "import marconi.phy.backends.gnuradio.blocks\n"
         "print('ok')\n"

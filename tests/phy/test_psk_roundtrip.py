@@ -1,3 +1,4 @@
+from math import log2
 from pathlib import Path
 
 import numpy as np
@@ -98,12 +99,13 @@ def test_psk_demod_ser0_under_impairments(order: int, tmp_path: Path) -> None:
     assert resolved_ser(rx_sym, tsi, points, order, settle=settle) == 0.0
 
 
-def test_psk_demap_clean_ber0(tmp_path: Path) -> None:
+@pytest.mark.parametrize("order", [2, 4, 8])
+def test_psk_demap_clean_ber0(order: int, tmp_path: Path) -> None:
     # BITS -> SYMBOLS -> BITS through the hard map/demap, no channel: identity.
     ensure_worker_warm()
     be = GnuRadioBackend()
-    order = 4
-    bits = np.random.default_rng(0).integers(0, 2, 4096).astype(np.uint8)
+    n_bits = _CFG[order][0]
+    bits = np.random.default_rng(0).integers(0, 2, n_bits).astype(np.uint8)
     bp = write_bits(tmp_path / "in.bits", bits)
     sym, op = tmp_path / "s.cf32", tmp_path / "out.bits"
     modem = ModemSpec(
@@ -112,5 +114,6 @@ def test_psk_demap_clean_ber0(tmp_path: Path) -> None:
     assert be.run_pipeline(_compile(modem, "tx", SYM_C, bp, sym)).status == "ok"
     assert be.run_pipeline(_compile(modem, "rx", SYM_C, sym, op)).status == "ok"
     out = read_bits(op)
-    n = (len(bits) // 2) * 2
+    k = int(log2(order))
+    n = (len(bits) // k) * k
     assert np.array_equal(out[:n], bits[:n])
