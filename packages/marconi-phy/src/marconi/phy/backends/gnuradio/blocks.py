@@ -70,6 +70,32 @@ GR_BLOCKS: dict[str, Callable[[_GrCtx, Params], Any]] = {
     "symbols_file_sink": lambda c, p: c.blocks.file_sink(
         c.gr.sizeof_short, str(p["path"]), False
     ),
+    "quadrature_demod": lambda c, p: c.analog.quadrature_demod_cf(
+        float(p["gain"])  # type: ignore[arg-type]
+    ),
+    "symbol_sync_ff": lambda c, p: c.digital.symbol_sync_ff(
+        c.digital.TED_GARDNER,
+        float(p["sps"]),  # type: ignore[arg-type]
+        float(p.get("loop_bw", 0.045)),  # type: ignore[arg-type]
+        1.0,  # damping
+        1.0,  # ted_gain
+        1.5,  # max_deviation
+        1,  # output samples per symbol
+        c.digital.constellation_bpsk().base(),
+        c.digital.IR_MMSE_8TAP,
+        128,  # n_filters
+        [],  # taps
+    ),
+    "binary_slicer": lambda c, p: c.digital.binary_slicer_fb(),
+    "chunks_to_symbols": lambda c, p: c.digital.chunks_to_symbols_bf(
+        [float(x) for x in p["symbols"]]  # type: ignore[union-attr]
+    ),
+    "repeat_f": lambda c, p: c.blocks.repeat(
+        c.gr.sizeof_float, int(p["interp"])  # type: ignore[arg-type]
+    ),
+    "frequency_modulator": lambda c, p: c.analog.frequency_modulator_fc(
+        float(p["sensitivity"])  # type: ignore[arg-type]
+    ),
 }
 
 

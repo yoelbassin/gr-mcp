@@ -25,3 +25,13 @@ def test_factories_construct_real_blocks(tmp_path: Path) -> None:
 
 def test_unknown_kind_absent() -> None:
     assert "no_such_block" not in _factories(1.0)
+
+
+def test_fsk_dsp_blocks_construct() -> None:
+    fac = _factories(4.0)
+    assert hasattr(fac["quadrature_demod"]({"gain": 0.6}), "to_basic_block")
+    assert hasattr(fac["symbol_sync_ff"]({"sps": 4.0}), "to_basic_block")
+    assert hasattr(fac["binary_slicer"]({}), "to_basic_block")
+    assert hasattr(fac["chunks_to_symbols"]({"symbols": [-1.0, 1.0]}), "to_basic_block")
+    assert hasattr(fac["repeat_f"]({"interp": 4}), "to_basic_block")
+    assert hasattr(fac["frequency_modulator"]({"sensitivity": 1.57}), "to_basic_block")
