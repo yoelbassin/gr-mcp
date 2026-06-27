@@ -30,12 +30,16 @@ def test_compiler_has_no_stage_name_literals() -> None:
 
 
 def test_compiler_does_not_compare_conv_to_a_literal() -> None:
-    # Name-independent: forbid `<expr>.conv == "..."` style coupling, which would
-    # evade the literal scan if a future regression keyed on a real stage name.
+    # Name-independent: forbid any `.conv` comparison (e.g. `step.conv == "fsk"`),
+    # which would evade the literal scan if a regression keyed on a real stage
+    # name. Walk BOTH sides so a Yoda-style `"fsk" == step.conv` is caught too.
     for path in COMPILER_FILES:
         tree = ast.parse(path.read_text())
         for node in ast.walk(tree):
-            if isinstance(node, ast.Compare) and isinstance(node.left, ast.Attribute):
-                assert (
-                    node.left.attr != "conv"
-                ), f"{path} compares a .conv attribute to a literal"
+            if not isinstance(node, ast.Compare):
+                continue
+            for operand in [node.left, *node.comparators]:
+                if isinstance(operand, ast.Attribute):
+                    assert (
+                        operand.attr != "conv"
+                    ), f"{path} uses a .conv attribute in a comparison"
