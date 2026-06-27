@@ -105,6 +105,7 @@ def validate_path(
     start_level: Level,
     entity_name: str,
     issues: list[ValidationIssue],
+    direction: str | None = None,
 ) -> None:
     prev_level = start_level
     for idx, step in enumerate(steps):
@@ -120,6 +121,14 @@ def validate_path(
             )
             continue
         validate_params(sid, conv.params_model, step.params, issues)
+        if direction is not None and direction not in conv.directions:
+            issues.append(
+                ValidationIssue(
+                    block_id=sid,
+                    message=f"{conv.name} does not support direction "
+                    f"'{direction}'; supports {sorted(conv.directions)}",
+                )
+            )
         if idx == 0 and conv.from_level != start_level:
             issues.append(
                 ValidationIssue(

@@ -6,7 +6,7 @@ from typing import Any
 from marconi.core.descriptor import Carrier, Descriptor
 from marconi.core.levels import Level
 from marconi.core.params import StageParams
-from marconi.core.stages import DuplexStage, Stage
+from marconi.core.stages import DuplexStage, RxStage, Stage
 from marconi.phy.backends.stub import BlockArity
 from marconi.phy.compile_context import CompileContext
 
@@ -96,6 +96,22 @@ class FakeSoftDemap(DuplexStage[CompileContext]):
         self, in_desc: Descriptor, params: Mapping[str, Any]
     ) -> Descriptor:
         return Descriptor(Level.BITS, "f", in_desc.layout, Carrier.SOFT)
+
+
+class RxOnlyDemod(RxStage[CompileContext]):
+    name = "rx_only_demod"
+    from_level = Level.IQ
+    to_level = Level.SYMBOLS
+    family = "general"
+    params_model = _NoParams
+
+    def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
+        b.chain("fake_demod", sps=b.sps)
+
+    def out_descriptor(
+        self, in_desc: Descriptor, params: Mapping[str, Any]
+    ) -> Descriptor:
+        return Descriptor(Level.SYMBOLS, "s", in_desc.layout, in_desc.carrier)
 
 
 def fixture_registry() -> dict[str, Stage[CompileContext]]:

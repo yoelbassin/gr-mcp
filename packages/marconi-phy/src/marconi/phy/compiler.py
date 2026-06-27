@@ -3,8 +3,9 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 
 from marconi.core.descriptor import Carrier, Descriptor
+from marconi.core.models import ValidationIssue
 from marconi.core.params import ParamValue
-from marconi.core.stages import SpecStep, Stage
+from marconi.core.stages import SpecStep, Stage, validate_path
 from marconi.phy.compile_context import CompileContext
 from marconi.phy.ir import GrPipeline
 from marconi.phy.models import ModemSpec
@@ -72,6 +73,23 @@ def _forward_pass(
     return boundaries, rates
 
 
+def _validate(
+    modem: ModemSpec,
+    registry: Mapping[str, Stage[CompileContext]],
+    start: Descriptor,
+    direction: str,
+) -> None:
+    issues: list[ValidationIssue] = []
+    validate_path(
+        modem.path, registry, start.level, "modem", issues, direction=direction
+    )
+    if issues:
+        raise CompileError(
+            "modem path invalid:\n"
+            + "\n".join(f"  {i.block_id or '<modem>'}: {i.message}" for i in issues)
+        )
+
+
 def compile_modem(
     modem: ModemSpec,
     registry: Mapping[str, Stage[CompileContext]],
@@ -85,6 +103,7 @@ def compile_modem(
 ) -> GrPipeline:
     if direction not in ("rx", "tx"):
         raise CompileError(f"direction must be 'rx' or 'tx', got {direction!r}")
+    _validate(modem, registry, start, direction)
     steps = modem.path
     n = len(steps)
     boundaries, rates = _forward_pass(steps, registry, start, sample_rate)
