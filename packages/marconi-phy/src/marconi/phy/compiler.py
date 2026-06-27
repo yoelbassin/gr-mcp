@@ -19,6 +19,7 @@ class CompileError(Exception):
 # names: this is what replaces v1's rate-by-name scan and sink-by-block-type lookup.
 _IO_BLOCKS: dict[tuple[str, Carrier], tuple[str | None, str]] = {
     ("c", Carrier.HARD): ("iq_file_source", "iq_file_sink"),
+    ("c", Carrier.SOFT): ("iq_file_source", "iq_file_sink"),
     ("s", Carrier.HARD): (None, "symbols_file_sink"),
     ("b", Carrier.HARD): ("bits_file_source", "bits_file_sink"),
     ("f", Carrier.SOFT): (None, "soft_bits_file_sink"),

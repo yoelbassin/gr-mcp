@@ -11,19 +11,38 @@ Params = dict[str, ParamValue]
 Factory = Callable[[Params], Any]
 
 
-def _modules() -> tuple[Any, Any, Any, Any, Any]:
+def _as_float(v: ParamValue) -> float:
+    if isinstance(v, bool) or not isinstance(v, (int, float)):
+        raise BackendError(f"expected a real number, got {type(v).__name__}: {v!r}")
+    return float(v)
+
+
+def _as_int(v: ParamValue) -> int:
+    if isinstance(v, bool) or not isinstance(v, (int, float)):
+        raise BackendError(f"expected an integer, got {type(v).__name__}: {v!r}")
+    return int(v)
+
+
+def _as_float_list(v: ParamValue) -> list[float]:
+    if not isinstance(v, list):
+        raise BackendError(f"expected a list of numbers, got {type(v).__name__}: {v!r}")
+    return [_as_float(x) for x in v]
+
+
+def _modules() -> tuple[Any, Any, Any, Any, Any, Any]:
     """The single gnuradio import gate. Returns (gr, blocks, analog, digital,
-    gr_filter). Called only at factory/build time, never at module import."""
+    gr_filter, firdes). Called only at factory/build time, never at module import."""
     try:
         from gnuradio import analog, blocks, digital
         from gnuradio import filter as gr_filter
         from gnuradio import gr
+        from gnuradio.filter import firdes
     except ImportError as e:  # pragma: no cover - environment-dependent
         raise BackendError(
             "GNU Radio is not importable. Install GNU Radio 3.10+ system-wide "
             "and use a `uv venv --system-site-packages` venv."
         ) from e
-    return gr, blocks, analog, digital, gr_filter
+    return gr, blocks, analog, digital, gr_filter, firdes
 
 
 @dataclass(frozen=True)
@@ -33,17 +52,19 @@ class _GrCtx:
     analog: Any
     digital: Any
     gr_filter: Any
+    firdes: Any
     rate: float
 
 
 def _make_ctx(rate: float) -> _GrCtx:
-    gr, blocks, analog, digital, gr_filter = _modules()
+    gr, blocks, analog, digital, gr_filter, firdes = _modules()
     return _GrCtx(
         gr=gr,
         blocks=blocks,
         analog=analog,
         digital=digital,
         gr_filter=gr_filter,
+        firdes=firdes,
         rate=rate,
     )
 
@@ -70,13 +91,11 @@ GR_BLOCKS: dict[str, Callable[[_GrCtx, Params], Any]] = {
     "symbols_file_sink": lambda c, p: c.blocks.file_sink(
         c.gr.sizeof_short, str(p["path"]), False
     ),
-    "quadrature_demod": lambda c, p: c.analog.quadrature_demod_cf(
-        float(p["gain"])  # type: ignore[arg-type]
-    ),
+    "quadrature_demod": lambda c, p: c.analog.quadrature_demod_cf(_as_float(p["gain"])),
     "symbol_sync_ff": lambda c, p: c.digital.symbol_sync_ff(
         c.digital.TED_GARDNER,
-        float(p["sps"]),  # type: ignore[arg-type]
-        float(p.get("loop_bw", 0.045)),  # type: ignore[arg-type]
+        _as_float(p["sps"]),
+        _as_float(p.get("loop_bw", 0.045)),
         1.0,  # damping
         1.0,  # ted_gain
         1.5,  # max_deviation
@@ -88,13 +107,11 @@ GR_BLOCKS: dict[str, Callable[[_GrCtx, Params], Any]] = {
     ),
     "binary_slicer": lambda c, p: c.digital.binary_slicer_fb(),
     "chunks_to_symbols": lambda c, p: c.digital.chunks_to_symbols_bf(
-        [float(x) for x in p["symbols"]]  # type: ignore[union-attr]
+        _as_float_list(p["symbols"])
     ),
-    "repeat_f": lambda c, p: c.blocks.repeat(
-        c.gr.sizeof_float, int(p["interp"])  # type: ignore[arg-type]
-    ),
+    "repeat_f": lambda c, p: c.blocks.repeat(c.gr.sizeof_float, _as_int(p["interp"])),
     "frequency_modulator": lambda c, p: c.analog.frequency_modulator_fc(
-        float(p["sensitivity"])  # type: ignore[arg-type]
+        _as_float(p["sensitivity"])
     ),
 }
 
