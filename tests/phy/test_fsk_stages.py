@@ -88,3 +88,44 @@ def test_tx_compiles_to_reversed_chain() -> None:
     fm = next(b for b in pipe.blocks if b.kind == "frequency_modulator")
     sens = 2 * math.pi * 1.0 / 4.0
     assert abs(fm.params["sensitivity"] - sens) < 1e-9  # type: ignore[operator]
+
+
+def test_formulas_use_iq_rate_not_sps() -> None:
+    # sample_rate=8, symbol_rate=2 -> b.rate=8 but b.sps=4 (distinct), so these
+    # assertions fail if any formula swaps b.rate <-> b.sps (rate-model invariant).
+    modem = ModemSpec(
+        symbol_rate=2.0,
+        path=[
+            ModemStep(conv="fsk", params={"deviation": 1.0}),
+            ModemStep(conv="slice"),
+        ],
+    )
+    rx = compile_modem(
+        modem,
+        stage_registry(),
+        direction="rx",
+        sample_rate=8.0,
+        start=IQ,
+        source_io={"path": "in.iq"},
+        sink_io={"path": "out.bits"},
+    )
+    qd = next(b for b in rx.blocks if b.kind == "quadrature_demod")
+    expected_gain = 8.0 / (2 * math.pi * 1.0)  # uses b.rate=8, not b.sps=4
+    assert abs(qd.params["gain"] - expected_gain) < 1e-9  # type: ignore[operator]
+    ss = next(b for b in rx.blocks if b.kind == "symbol_sync_ff")
+    assert ss.params["sps"] == 4.0  # b.sps, not b.rate=8
+
+    tx = compile_modem(
+        modem,
+        stage_registry(),
+        direction="tx",
+        sample_rate=8.0,
+        start=IQ,
+        source_io={"path": "in.bits"},
+        sink_io={"path": "out.iq"},
+    )
+    rp = next(b for b in tx.blocks if b.kind == "repeat_f")
+    assert rp.params["interp"] == 4  # b.sps=4, not b.rate=8
+    fm = next(b for b in tx.blocks if b.kind == "frequency_modulator")
+    sens = 2 * math.pi * 1.0 / 8.0  # uses b.rate=8, not b.sps=4
+    assert abs(fm.params["sensitivity"] - sens) < 1e-9  # type: ignore[operator]
