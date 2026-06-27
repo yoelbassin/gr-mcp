@@ -18,6 +18,7 @@ def test_phy_imports_without_gnuradio() -> None:
         "import marconi.phy.ir, marconi.phy.models, marconi.phy.compile_context\n"
         "import marconi.phy.compiler\n"
         "import marconi.phy.backends.base, marconi.phy.backends.stub\n"
+        "import marconi.phy.backends.gnuradio.blocks\n"
         "print('ok')\n"
     )
     out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
