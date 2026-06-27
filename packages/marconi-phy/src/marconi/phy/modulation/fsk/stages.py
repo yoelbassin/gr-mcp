@@ -16,10 +16,6 @@ class _FskParams(StageParams):
     loop_bw: float = 0.045
 
 
-class _SliceParams(StageParams):
-    pass
-
-
 class Fsk(DuplexStage[CompileContext]):
     """Binary FSK carrier stage. RX: FM discriminator + Gardner symbol timing ->
     one soft float per symbol. TX: upsample + FM modulate. The symbol-rate
@@ -54,23 +50,4 @@ class Fsk(DuplexStage[CompileContext]):
         return Descriptor(Level.SYMBOLS, "f", in_desc.layout, Carrier.SOFT)
 
 
-class Slice(DuplexStage[CompileContext]):
-    """Binary symbol<->bit decision. RX: hard-slice soft floats to bits.
-    TX: map bits to antipodal +/-1.0 symbols."""
-
-    name = "slice"
-    from_level = Level.SYMBOLS
-    to_level = Level.BITS
-    family = "general"
-    params_model = _SliceParams
-
-    def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
-        b.chain("binary_slicer")
-
-    def emit_tx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
-        b.chain("chunks_to_symbols", symbols=[-1.0, 1.0])
-
-    def out_descriptor(
-        self, in_desc: Descriptor, params: Mapping[str, Any]
-    ) -> Descriptor:
-        return Descriptor(Level.BITS, "b", in_desc.layout, Carrier.HARD)
+FSK_STAGES: tuple[type[DuplexStage[CompileContext]], ...] = (Fsk,)
