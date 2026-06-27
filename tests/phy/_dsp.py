@@ -92,6 +92,42 @@ def resolved_ser(
     return best
 
 
+def resolved_ser_hard(
+    rx_idx: np.ndarray,
+    tx_sym_idx: np.ndarray,
+    points: np.ndarray,
+    settle: int = 1500,
+    max_shift: int | None = None,
+) -> float:
+    """Minimum symbol-error rate for a HARD symbol-index stream (e.g. from
+    constellation_receiver_cb) over QAM's 4-fold (90 deg) rotational symmetry
+    x timing shifts, after discarding a `settle` acquisition prefix. A 90 deg
+    rotation relabels each index via nearest-point on the rotated constellation;
+    the true labelling is one of the four roots. The decision-directed receiver
+    leaves this discrete ambiguity (no preamble — acquisition is deferred),
+    resolved here the way resolved_ser resolves PSK's M-fold ambiguity.
+
+    `max_shift` MUST exceed `settle`: the rx is trimmed by `settle`, so a true
+    realignment needs a shift past it. It defaults to settle+700; a smaller
+    max_shift silently reads clean symbols as random."""
+    pts = np.asarray(points)
+    rx = np.asarray(rx_idx, dtype=int)[settle:]
+    tx = np.asarray(tx_sym_idx, dtype=int)
+    ms = settle + 700 if max_shift is None else max_shift
+    best = 1.0
+    for r in (1, 1j, -1, -1j):
+        relabel = nearest_syms(pts * r, pts)  # index i under a rotation by r
+        ri = relabel[rx]
+        for shift in range(min(ms, len(tx)) + 1):
+            n = min(len(ri), len(tx) - shift)
+            if n < len(ri) // 2:
+                break
+            best = min(best, float(np.mean(ri[:n] != tx[shift : shift + n])))
+            if best == 0.0:
+                return best
+    return best
+
+
 def aligned_ber(rx: np.ndarray, tx: np.ndarray, max_shift: int = 256) -> float:
     """Minimum BER of tx against rx over integer shifts 0..max_shift, requiring
     at least half of tx to overlap. Returns 0.0 on an exact (shifted) match."""
