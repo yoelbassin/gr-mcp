@@ -79,6 +79,17 @@ def _const(c: _GrCtx, scheme: str, order: int) -> Any:
         if order not in builders:
             raise BackendError(f"unsupported psk order {order}")
         return builders[order]()
+    if scheme == "qam":
+        if order == 16:
+            return c.digital.constellation_16qam()
+        if order == 64:
+            return c.digital.qam.qam_constellation(
+                constellation_points=64,
+                differential=False,
+                mod_code=c.digital.mod_codes.GRAY_CODE,
+                large_ampls_to_corners=False,
+            )
+        raise BackendError(f"unsupported qam order {order}")
     raise BackendError(f"unknown constellation scheme {scheme!r}")
 
 
@@ -151,6 +162,12 @@ GR_BLOCKS: dict[str, Callable[[_GrCtx, Params], Any]] = {
     ),
     "costas_loop_cc": lambda c, p: c.digital.costas_loop_cc(
         _as_float(p.get("loop_bw", 0.045)), _as_int(p["order"]), False
+    ),
+    "constellation_receiver_cb": lambda c, p: c.digital.constellation_receiver_cb(
+        _const(c, str(p["scheme"]), _as_int(p["order"])).base(),
+        _as_float(p.get("loop_bw", 0.04)),
+        _as_float(p.get("fmin", -0.5)),
+        _as_float(p.get("fmax", 0.5)),
     ),
     "chunks_to_symbols_bc": lambda c, p: c.digital.chunks_to_symbols_bc(
         _const(c, str(p["scheme"]), _as_int(p["order"])).points()
