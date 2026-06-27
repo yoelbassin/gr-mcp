@@ -1,7 +1,7 @@
 from pathlib import Path
 
 import numpy as np
-from phy._dsp import aligned_ber, read_bits, write_bits
+from phy._dsp import aligned_ber, channel, read_bits, write_bits
 
 from marconi.core.descriptor import Descriptor
 from marconi.core.levels import Level
@@ -59,4 +59,27 @@ def test_fsk_roundtrip_clean_ber0(tmp_path: Path) -> None:
     op = tmp_path / "out.bits"
     assert be.run_pipeline(_tx(bp, ip)).status == "ok"
     assert be.run_pipeline(_rx(ip, op)).status == "ok"
+    assert aligned_ber(read_bits(op), bits) == 0.0
+
+
+def test_fsk_roundtrip_survives_combined_impairments(tmp_path: Path) -> None:
+    ensure_worker_warm()
+    be = GnuRadioBackend()
+    bits = np.random.default_rng(3).integers(0, 2, 512).astype(np.uint8)
+    bp = write_bits(tmp_path / "in.bits", bits)
+    clean = tmp_path / "clean.iq"
+    imp = tmp_path / "imp.iq"
+    op = tmp_path / "out.bits"
+    assert be.run_pipeline(_tx(bp, clean)).status == "ok"
+    channel(
+        clean,
+        imp,
+        snr_db=20.0,
+        cfo_hz=0.25 * _DEV,
+        sto=1.5,
+        sfo_ppm=50.0,
+        sample_rate=_SR,
+        seed=7,
+    )
+    assert be.run_pipeline(_rx(imp, op)).status == "ok"
     assert aligned_ber(read_bits(op), bits) == 0.0
