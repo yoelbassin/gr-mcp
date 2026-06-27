@@ -147,6 +147,18 @@ GR_BLOCKS: dict[str, Callable[[_GrCtx, Params], Any]] = {
             _as_int(p["sps"]) * _as_int(p.get("span", 11)) + 1,
         ),
     ),
+    "freq_xlating_fir_filter_ccf": lambda c, p: c.gr_filter.freq_xlating_fir_filter_ccf(
+        _as_int(p["decim"]),
+        c.firdes.low_pass(
+            1.0,
+            _as_float(p["rate"]),
+            _as_float(p["cutoff"]),
+            _as_float(p["transition"]),
+        ),
+        _as_float(p["center"]),
+        _as_float(p["rate"]),
+    ),
+    "conjugate_cc": lambda c, p: c.blocks.conjugate_cc(),
     "symbol_sync_cc": lambda c, p: c.digital.symbol_sync_cc(
         c.digital.TED_GARDNER,
         _as_float(p["sps"]),
