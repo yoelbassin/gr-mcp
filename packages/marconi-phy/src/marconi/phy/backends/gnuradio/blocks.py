@@ -160,6 +160,10 @@ GR_BLOCKS: dict[str, Callable[[_GrCtx, Params], Any]] = {
     ),
     "pack_k_bits_bb": lambda c, p: c.blocks.pack_k_bits_bb(_as_int(p["k"])),
     "unpack_k_bits_bb": lambda c, p: c.blocks.unpack_k_bits_bb(_as_int(p["k"])),
+    "complex_to_mag": lambda c, p: c.blocks.complex_to_mag(1),
+    "multiply_const_ff": lambda c, p: c.blocks.multiply_const_ff(_as_float(p["value"])),
+    "add_const_ff": lambda c, p: c.blocks.add_const_ff(_as_float(p["value"])),
+    "float_to_complex": lambda c, p: c.blocks.float_to_complex(1),
 }
 
 
