@@ -71,13 +71,14 @@ def test_fsk_roundtrip_survives_combined_impairments(tmp_path: Path) -> None:
     imp = tmp_path / "imp.iq"
     op = tmp_path / "out.bits"
     assert be.run_pipeline(_tx(bp, clean)).status == "ok"
+    # >=244 ppm actually resamples 2048 samples; 50 ppm rounds to a no-op
     channel(
         clean,
         imp,
         snr_db=20.0,
         cfo_hz=0.25 * _DEV,
         sto=1.5,
-        sfo_ppm=50.0,
+        sfo_ppm=500.0,
         sample_rate=_SR,
         seed=7,
     )
