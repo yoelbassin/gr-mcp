@@ -69,6 +69,19 @@ def _make_ctx(rate: float) -> _GrCtx:
     )
 
 
+def _const(c: _GrCtx, scheme: str, order: int) -> Any:
+    if scheme == "psk":
+        builders = {
+            2: c.digital.constellation_bpsk,
+            4: c.digital.constellation_qpsk,
+            8: c.digital.constellation_8psk,
+        }
+        if order not in builders:
+            raise BackendError(f"unsupported psk order {order}")
+        return builders[order]()
+    raise BackendError(f"unknown constellation scheme {scheme!r}")
+
+
 # kind -> (ctx, params) -> live GR block. The ONLY GR-aware vocabulary in phy.
 GR_BLOCKS: dict[str, Callable[[_GrCtx, Params], Any]] = {
     "iq_file_source": lambda c, p: c.blocks.file_source(
@@ -113,6 +126,40 @@ GR_BLOCKS: dict[str, Callable[[_GrCtx, Params], Any]] = {
     "frequency_modulator": lambda c, p: c.analog.frequency_modulator_fc(
         _as_float(p["sensitivity"])
     ),
+    "rrc_filter_ccf": lambda c, p: c.gr_filter.interp_fir_filter_ccf(
+        _as_int(p["interpolation"]),
+        c.firdes.root_raised_cosine(
+            float(_as_int(p["interpolation"])),
+            _as_float(p["rate"]),
+            _as_float(p["rate"]) / _as_float(p["sps"]),
+            _as_float(p.get("alpha", 0.35)),
+            _as_int(p["sps"]) * _as_int(p.get("span", 11)) + 1,
+        ),
+    ),
+    "symbol_sync_cc": lambda c, p: c.digital.symbol_sync_cc(
+        c.digital.TED_GARDNER,
+        _as_float(p["sps"]),
+        _as_float(p.get("loop_bw", 0.045)),
+        1.0,  # damping
+        1.0,  # ted_gain
+        1.5,  # max_deviation
+        1,  # output sps
+        None,  # non-data-aided (Gardner): no constellation
+        c.digital.IR_MMSE_8TAP,
+        128,
+        [],
+    ),
+    "costas_loop_cc": lambda c, p: c.digital.costas_loop_cc(
+        _as_float(p.get("loop_bw", 0.045)), _as_int(p["order"]), False
+    ),
+    "chunks_to_symbols_bc": lambda c, p: c.digital.chunks_to_symbols_bc(
+        _const(c, str(p["scheme"]), _as_int(p["order"])).points()
+    ),
+    "constellation_decoder_cb": lambda c, p: c.digital.constellation_decoder_cb(
+        _const(c, str(p["scheme"]), _as_int(p["order"])).base()
+    ),
+    "pack_k_bits_bb": lambda c, p: c.blocks.pack_k_bits_bb(_as_int(p["k"])),
+    "unpack_k_bits_bb": lambda c, p: c.blocks.unpack_k_bits_bb(_as_int(p["k"])),
 }
 
 
