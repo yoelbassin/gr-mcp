@@ -39,6 +39,37 @@ def channel(
     return out_path
 
 
+def upconvert_widen(
+    in_path: Path,
+    out_path: Path,
+    *,
+    up: int,
+    offset_hz: float,
+    rate_wide: float,
+    snr_db: float | None = None,
+    seed: int = 0,
+) -> Path:
+    """Model a wideband capture: interpolate baseband IQ by `up` (to rate_wide)
+    and place the signal at +offset_hz, optionally adding power-calibrated AWGN.
+    This is the impairment `channelize` corrects — a signal off-centre in a wider
+    capture."""
+    from scipy.signal import resample_poly
+
+    x = np.fromfile(in_path, dtype=np.complex64).astype(np.complex128)
+    xw = resample_poly(x, up, 1)
+    n = np.arange(len(xw))
+    xw = xw * np.exp(2j * np.pi * offset_hz / rate_wide * n)
+    if snr_db is not None:
+        rng = np.random.default_rng(seed)
+        p = float(np.mean(np.abs(xw) ** 2)) or 1.0
+        amp = np.sqrt(p / (2 * 10 ** (snr_db / 10)))
+        xw = xw + amp * (
+            rng.standard_normal(len(xw)) + 1j * rng.standard_normal(len(xw))
+        )
+    xw.astype(np.complex64).tofile(out_path)
+    return out_path
+
+
 def write_bits(path: Path, bits: np.ndarray) -> Path:
     np.asarray(bits, dtype=np.uint8).tofile(path)
     return path
