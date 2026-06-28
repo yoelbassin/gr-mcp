@@ -5,5 +5,7 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 uv.lock
+# Binary/IQ capture data — large, not tracked
+artifacts/
 # Superpowers working scaffolding (ephemeral plans/notes; lasting facts live in docs/)
 docs/superpowers/
