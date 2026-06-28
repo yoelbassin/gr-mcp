@@ -13,7 +13,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
-from phy._dsp import read_bits, write_bits
+from phy._dsp import aligned_ber, read_bits, write_bits
 
 from marconi.phy.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
 from marconi.phy.ir import GrBlock, GrConnection, GrPipeline
@@ -103,6 +103,79 @@ def test_css_core_bits_roundtrip(tmp_path: Path) -> None:
     out = read_bits(op)
     assert len(out) == len(bits), f"length mismatch: {len(out)} != {len(bits)}"
     assert np.array_equal(out, bits), f"bits mismatch at {np.where(out != bits)}"
+
+
+def _full_chain_pipeline(
+    bits_in: Path,
+    bits_out: Path,
+    *,
+    sf: int = SF,
+    os: int = OS,
+    zp: int = ZP,
+    preamble_len: int = PREAMBLE_LEN,
+) -> GrPipeline:
+    """bits_src → css_map → chirp_mod → chirp_prepend → chirp_sync → chirp_demod
+    → css_demap → bits_sink: the full TX+RX chain in one flowgraph."""
+    bw = float(1 << sf)  # symbol_rate == 1 here, so bandwidth == 2^sf
+    return GrPipeline(
+        name="css_full_chain",
+        sample_rate=float(os * (1 << sf)),
+        blocks=[
+            GrBlock(id="src", kind="bits_file_source", params={"path": str(bits_in)}),
+            GrBlock(id="map", kind="css_map", params={"sf": sf}),
+            GrBlock(id="mod", kind="chirp_mod", params={"sf": sf, "oversample": os}),
+            GrBlock(
+                id="pre",
+                kind="chirp_prepend",
+                params={"sf": sf, "oversample": os, "preamble_len": preamble_len},
+            ),
+            GrBlock(
+                id="sync",
+                kind="chirp_sync",
+                params={
+                    "sf": sf,
+                    "oversample": os,
+                    "zero_pad": zp,
+                    "preamble_len": preamble_len,
+                    "bandwidth": bw,
+                },
+            ),
+            GrBlock(
+                id="demod",
+                kind="chirp_demod",
+                params={"sf": sf, "oversample": os, "zero_pad": zp},
+            ),
+            GrBlock(id="demap", kind="css_demap", params={"sf": sf}),
+            GrBlock(id="snk", kind="bits_file_sink", params={"path": str(bits_out)}),
+        ],
+        connections=[
+            GrConnection(src_block=a, dst_block=b)
+            for a, b in [
+                ("src", "map"),
+                ("map", "mod"),
+                ("mod", "pre"),
+                ("pre", "sync"),
+                ("sync", "demod"),
+                ("demod", "demap"),
+                ("demap", "snk"),
+            ]
+        ],
+    )
+
+
+def test_chirp_sync_clean_roundtrip(tmp_path: Path) -> None:
+    """chirp_prepend adds preamble+SFD; chirp_sync detects it, strips to payload,
+    and derotates the (zero) CFO; payload bits survive the full chain exactly.
+    The only test that exercises chirp_sync end-to-end before the Task-4 sim."""
+    ensure_worker_warm()
+    bits = np.random.default_rng(3).integers(0, 2, SF * 40).astype(np.uint8)
+    bp = write_bits(tmp_path / "in.bits", bits)
+    op = tmp_path / "out.bits"
+    be = GnuRadioBackend()
+    assert be.run_pipeline(_full_chain_pipeline(bp, op)).status == "ok"
+    out = read_bits(op)
+    assert len(out) >= len(bits) - SF  # preamble stripped, ≤1 trailing symbol lost
+    assert aligned_ber(out, bits) == 0.0
 
 
 def test_chirp_prepend_output_length(tmp_path: Path) -> None:
