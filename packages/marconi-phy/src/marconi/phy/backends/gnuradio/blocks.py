@@ -6,6 +6,10 @@ from typing import Any
 
 from marconi.core.params import ParamValue
 from marconi.phy.backends.base import BackendError
+from marconi.phy.backends.gnuradio.embedded.preamble import (
+    make_sym_acquire,
+    make_sym_prepend,
+)
 
 Params = dict[str, ParamValue]
 Factory = Callable[[Params], Any]
@@ -193,6 +197,19 @@ GR_BLOCKS: dict[str, Callable[[_GrCtx, Params], Any]] = {
     "multiply_const_ff": lambda c, p: c.blocks.multiply_const_ff(_as_float(p["value"])),
     "add_const_ff": lambda c, p: c.blocks.add_const_ff(_as_float(p["value"])),
     "float_to_complex": lambda c, p: c.blocks.float_to_complex(1),
+    "sym_prepend": lambda c, p: make_sym_prepend(
+        c.gr,
+        _as_float_list(p["preamble_i"]),
+        _as_float_list(p["preamble_q"]),
+        _as_int(p["pad_symbols"]),
+    ),
+    "sym_acquire": lambda c, p: make_sym_acquire(
+        c.gr,
+        _as_float_list(p["preamble_i"]),
+        _as_float_list(p["preamble_q"]),
+        _as_int(p["pad_symbols"]),
+        _as_float(p["threshold"]),
+    ),
 }
 
 
