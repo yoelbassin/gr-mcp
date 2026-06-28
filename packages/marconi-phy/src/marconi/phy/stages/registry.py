@@ -6,6 +6,7 @@ from marconi.phy.modulation.fsk.stages import FSK_STAGES
 from marconi.phy.modulation.ook.stages import OOK_STAGES
 from marconi.phy.modulation.psk.stages import PSK_STAGES
 from marconi.phy.modulation.qam.stages import QAM_STAGES
+from marconi.phy.stages.acquisition import ACQUISITION_STAGES
 from marconi.phy.stages.conditioning import CONDITIONING_STAGES
 from marconi.phy.stages.general import GENERAL_STAGES
 
@@ -14,6 +15,7 @@ from marconi.phy.stages.general import GENERAL_STAGES
 _GROUPS: tuple[tuple[type[Stage[CompileContext]], ...], ...] = (
     GENERAL_STAGES,
     CONDITIONING_STAGES,
+    ACQUISITION_STAGES,
     FSK_STAGES,
     PSK_STAGES,
     OOK_STAGES,
