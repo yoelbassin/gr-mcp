@@ -74,10 +74,12 @@ def make_sym_acquire(
     """RX: buffer; correlate vs the preamble; on a sharp peak lock (lag, phase),
     strip the ramp+preamble, then emit payload * exp(-j phase). Flushes the
     buffered tail at EOF (file-based pipeline: tags do not survive file_sink, so
-    the strip is physical)."""
-    pre = _complex_preamble(preamble_i, preamble_q)
-    length = len(pre)
-    min_buf = max(int(pad_symbols) + 2 * length, 4 * length)
+    the strip is physical). The preamble must be drawn from the modulation's
+    constellation so the carrier loop tracks it cleanly — an off-constellation
+    preamble is mistracked by higher-order PSK and yields a wrong phase lock."""
+    pre = _complex_preamble(preamble_i, preamble_q).astype(np.complex128)
+    n = len(pre)
+    min_buf = max(int(pad_symbols) + 2 * n, 4 * n)
 
     class _SymAcquire(gr.basic_block):
         def __init__(self) -> None:
@@ -104,19 +106,16 @@ def make_sym_acquire(
             if not self._locked:
                 if len(self._buf) < min_buf:
                     return 0
-                seg = self._buf
+                seg = self._buf.astype(np.complex128)
                 corr = np.array(
-                    [
-                        np.vdot(pre, seg[lag : lag + length])
-                        for lag in range(len(seg) - length)
-                    ]
+                    [np.vdot(pre, seg[lag : lag + n]) for lag in range(len(seg) - n)]
                 )
                 k = int(np.argmax(np.abs(corr)))
                 if np.abs(corr[k]) / (float(np.mean(np.abs(corr))) + 1e-9) < threshold:
                     return 0
                 self._locked = True
                 self._phase = float(np.angle(corr[k]))
-                self._buf = self._buf[k + length :]
+                self._buf = self._buf[k + n :]
             out = output_items[0]
             m = min(len(out), len(self._buf))
             if m:

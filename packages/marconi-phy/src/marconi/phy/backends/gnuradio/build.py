@@ -39,4 +39,9 @@ def build_top_block(pipeline: GrPipeline) -> Any:
                 f"connecting {c.src_block}:{c.src_port} -> "
                 f"{c.dst_block}:{c.dst_port} failed: {e}"
             ) from e
+    # Python-defined basic_block subclasses use a pybind11 trampoline whose
+    # lifetime is tied to the Python wrapper object.  Without this anchor the
+    # GC can collect those wrappers after build_top_block returns, leaving GR's
+    # C++ scheduler with a dangling pointer → SIGSEGV on tb.run().
+    tb._py_instances = instances
     return tb

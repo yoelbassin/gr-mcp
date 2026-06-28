@@ -159,6 +159,18 @@ def resolved_ser_hard(
     return best
 
 
+def make_preamble(
+    points: np.ndarray, n: int = 64, seed: int = 7
+) -> tuple[list[float], list[float]]:
+    """A random sync sequence drawn from the modulation constellation `points`
+    so the carrier loop tracks it cleanly (an off-constellation preamble is
+    mistracked by higher-order PSK -> a wrong phase lock). Returns (i_list,
+    q_list)."""
+    pts = np.asarray(points)
+    s = pts[np.random.default_rng(seed).integers(0, len(pts), n)]
+    return s.real.tolist(), s.imag.tolist()
+
+
 def aligned_ber(rx: np.ndarray, tx: np.ndarray, max_shift: int = 256) -> float:
     """Minimum BER of tx against rx over integer shifts 0..max_shift, requiring
     at least half of tx to overlap. Returns 0.0 on an exact (shifted) match."""
