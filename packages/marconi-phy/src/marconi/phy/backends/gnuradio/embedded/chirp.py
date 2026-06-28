@@ -333,6 +333,8 @@ def make_chirp_sync(
             )
             self._buf = np.empty(0, dtype=np.complex64)
             self._locked = False
+            self._f_cfo = 0.0
+            self._n_out = 0  # payload samples emitted, for CFO phase continuity
 
         def forecast(self, noutput_items: int, ninputs: int) -> list[int]:
             return [0] * ninputs if self._locked else [noutput_items] * ninputs
@@ -347,13 +349,8 @@ def make_chirp_sync(
             if payload_start + sn > len(self._buf):
                 return False
             _, preamble_bin = _fine_peak(self._buf, preamble_start, grid)
-            f = _cfo_hz(preamble_bin, grid, bandwidth)
-            payload = self._buf[payload_start:]
-            k = np.arange(len(payload))
-            payload = (
-                payload * np.exp(-1j * 2 * np.pi * f * k / (oversample * bandwidth))
-            ).astype(np.complex64)
-            self._buf = payload
+            self._f_cfo = _cfo_hz(preamble_bin, grid, bandwidth)
+            self._buf = self._buf[payload_start:]  # strip; derotation is per-emit
             return True
 
         def general_work(self, input_items: Any, output_items: Any) -> int:
@@ -370,7 +367,18 @@ def make_chirp_sync(
             out = output_items[0]
             m = min(len(out), len(self._buf))
             if m:
-                out[:m] = self._buf[:m]
+                # Derotate the CFO across ALL emitted payload, with phase
+                # continuity over GR work batches (n_out is the running payload
+                # sample index): a one-shot derotation at lock leaves every
+                # post-lock batch un-corrected.
+                k = self._n_out + np.arange(m)
+                out[:m] = (
+                    self._buf[:m]
+                    * np.exp(
+                        -1j * 2 * np.pi * self._f_cfo * k / (oversample * bandwidth)
+                    )
+                ).astype(np.complex64)
+                self._n_out += m
                 self._buf = self._buf[m:]
             elif self._locked and len(x) == 0:
                 return -1  # WORK_DONE: locked + buffer drained + EOF
