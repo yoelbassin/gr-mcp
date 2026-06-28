@@ -6,6 +6,14 @@ from typing import Any
 
 from marconi.core.params import ParamValue
 from marconi.phy.backends.base import BackendError
+from marconi.phy.backends.gnuradio.embedded.chirp import (
+    make_chirp_demod,
+    make_chirp_mod,
+    make_chirp_prepend,
+    make_chirp_sync,
+    make_css_demap,
+    make_css_map,
+)
 from marconi.phy.backends.gnuradio.embedded.preamble import (
     make_sym_acquire,
     make_sym_prepend,
@@ -217,6 +225,25 @@ GR_BLOCKS: dict[str, Callable[[_GrCtx, Params], Any]] = {
         _as_int(p["pad_symbols"]),
         _as_float(p["threshold"]),
     ),
+    "chirp_prepend": lambda c, p: make_chirp_prepend(
+        c.gr, _as_int(p["sf"]), _as_int(p["oversample"]), _as_int(p["preamble_len"])
+    ),
+    "chirp_sync": lambda c, p: make_chirp_sync(
+        c.gr,
+        _as_int(p["sf"]),
+        _as_int(p["oversample"]),
+        _as_int(p["zero_pad"]),
+        _as_int(p["preamble_len"]),
+        _as_float(p["bandwidth"]),
+    ),
+    "chirp_mod": lambda c, p: make_chirp_mod(
+        c.gr, _as_int(p["sf"]), _as_int(p["oversample"])
+    ),
+    "chirp_demod": lambda c, p: make_chirp_demod(
+        c.gr, _as_int(p["sf"]), _as_int(p["oversample"]), _as_int(p["zero_pad"])
+    ),
+    "css_map": lambda c, p: make_css_map(c.gr, _as_int(p["sf"])),
+    "css_demap": lambda c, p: make_css_demap(c.gr, _as_int(p["sf"])),
 }
 
 
