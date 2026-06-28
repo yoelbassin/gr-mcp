@@ -38,7 +38,13 @@ class Channelize(RxStage[CompileContext]):
     cutoff/transition are derived from bandwidth_hz; `decim` is explicit because
     rate_factor (1/decim) is computed from params alone. The freq_xlating reads
     the INPUT rate (b.rate); the compiler hands the decimated rate to downstream
-    stages via rate_factor."""
+    stages via rate_factor.
+
+    NOTE: bandwidth_hz is the filter PASSBAND width (cutoff = bandwidth_hz/2), not
+    the signal's occupied bandwidth. A signal that fills its band edge-to-edge --
+    notably a CSS chirp sweeping +/-B/2 -- must be given bandwidth_hz >= ~2x its
+    bandwidth, or the band edges are clipped (for chirps: a silent, progressive
+    decode drift, not an error)."""
 
     name = "channelize"
     from_level = Level.IQ
