@@ -75,4 +75,43 @@ class Invert(RxStage[CompileContext]):
         b.chain("conjugate_cc")
 
 
-CONDITIONING_STAGES: tuple[type[RxStage[CompileContext]], ...] = (Channelize, Invert)
+class _ResampleParams(StageParams):
+    interpolation: StrictInt
+    decimation: StrictInt
+
+    @model_validator(mode="after")
+    def _ok(self) -> "_ResampleParams":
+        if self.interpolation < 1:
+            raise PydanticCustomError("value_error", "interpolation must be >= 1")
+        if self.decimation < 1:
+            raise PydanticCustomError("value_error", "decimation must be >= 1")
+        return self
+
+
+class Resample(RxStage[CompileContext]):
+    """Rational resample by interpolation/decimation via the polyphase arbitrary
+    resampler. The first non-unity rate_factor that is not 1/decim: lands an
+    arbitrary capture rate exactly on a target (CSS needs oversample*bandwidth).
+    RX-only conditioning."""
+
+    name = "resample"
+    from_level = Level.IQ
+    to_level = Level.IQ
+    family = "conditioning"
+    params_model = _ResampleParams
+
+    def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
+        b.chain(
+            "pfb_arb_resampler_ccf",
+            rate=int(params["interpolation"]) / int(params["decimation"]),
+        )
+
+    def rate_factor(self, params: Mapping[str, Any]) -> float:
+        return int(params["interpolation"]) / int(params["decimation"])
+
+
+CONDITIONING_STAGES: tuple[type[RxStage[CompileContext]], ...] = (
+    Channelize,
+    Invert,
+    Resample,
+)

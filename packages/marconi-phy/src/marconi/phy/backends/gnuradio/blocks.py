@@ -33,20 +33,20 @@ def _as_float_list(v: ParamValue) -> list[float]:
     return [_as_float(x) for x in v]
 
 
-def _modules() -> tuple[Any, Any, Any, Any, Any, Any]:
+def _modules() -> tuple[Any, Any, Any, Any, Any, Any, Any]:
     """The single gnuradio import gate. Returns (gr, blocks, analog, digital,
-    gr_filter, firdes). Called only at factory/build time, never at module import."""
+    gr_filter, firdes, pfb). Called only at factory/build time, never at import."""
     try:
         from gnuradio import analog, blocks, digital
         from gnuradio import filter as gr_filter
         from gnuradio import gr
-        from gnuradio.filter import firdes
+        from gnuradio.filter import firdes, pfb
     except ImportError as e:  # pragma: no cover - environment-dependent
         raise BackendError(
             "GNU Radio is not importable. Install GNU Radio 3.10+ system-wide "
             "and use a `uv venv --system-site-packages` venv."
         ) from e
-    return gr, blocks, analog, digital, gr_filter, firdes
+    return gr, blocks, analog, digital, gr_filter, firdes, pfb
 
 
 @dataclass(frozen=True)
@@ -57,11 +57,12 @@ class _GrCtx:
     digital: Any
     gr_filter: Any
     firdes: Any
+    pfb: Any
     rate: float
 
 
 def _make_ctx(rate: float) -> _GrCtx:
-    gr, blocks, analog, digital, gr_filter, firdes = _modules()
+    gr, blocks, analog, digital, gr_filter, firdes, pfb = _modules()
     return _GrCtx(
         gr=gr,
         blocks=blocks,
@@ -69,6 +70,7 @@ def _make_ctx(rate: float) -> _GrCtx:
         digital=digital,
         gr_filter=gr_filter,
         firdes=firdes,
+        pfb=pfb,
         rate=rate,
     )
 
@@ -162,6 +164,11 @@ GR_BLOCKS: dict[str, Callable[[_GrCtx, Params], Any]] = {
         _as_float(p["center"]),
         _as_float(p["rate"]),
     ),
+    # Rational resample via the polyphase arbitrary resampler (rate=interp/decim).
+    # This GR build's rational_resampler_ccc/ccf produce a garbage resample (the
+    # C++ block needs taps the absent Python hier wrapper would design); the pfb
+    # arbitrary resampler auto-designs its own and is the proven path.
+    "pfb_arb_resampler_ccf": lambda c, p: c.pfb.arb_resampler_ccf(_as_float(p["rate"])),
     "conjugate_cc": lambda c, p: c.blocks.conjugate_cc(),
     "symbol_sync_cc": lambda c, p: c.digital.symbol_sync_cc(
         c.digital.TED_GARDNER,
