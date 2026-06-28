@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from marconi.core.stages import Stage
 from marconi.phy.compile_context import CompileContext
+from marconi.phy.modulation.css.stages import CSS_STAGES
 from marconi.phy.modulation.fsk.stages import FSK_STAGES
 from marconi.phy.modulation.ook.stages import OOK_STAGES
 from marconi.phy.modulation.psk.stages import PSK_STAGES
@@ -20,6 +21,7 @@ _GROUPS: tuple[tuple[type[Stage[CompileContext]], ...], ...] = (
     PSK_STAGES,
     OOK_STAGES,
     QAM_STAGES,
+    CSS_STAGES,
 )
 
 
