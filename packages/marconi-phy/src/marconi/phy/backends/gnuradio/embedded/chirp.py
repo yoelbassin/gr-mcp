@@ -101,15 +101,6 @@ def _synchronize(signal: np.ndarray, grid: _Grid, detect_run: int) -> tuple[int,
     return payload_start, preamble_start
 
 
-def _cfo_hz(preamble_bin: int, grid: _Grid, bandwidth: float) -> float:
-    """Convert preamble dechirp bin to a carrier-frequency offset in Hz."""
-    n = 1 << grid.sf
-    pb_n = preamble_bin / grid.zero_pad
-    if pb_n > n / 2:
-        pb_n -= n
-    return pb_n * bandwidth / n
-
-
 def _parabolic(f: np.ndarray, p: int) -> float:
     """3-point parabolic sub-bin refinement of an FFT-magnitude peak at index p."""
     if 0 < p < len(f) - 1:
@@ -131,10 +122,7 @@ def _joint_sync(
 ) -> tuple[float, float]:
     """Joint estimate from the preamble up-chirps + SFD down-chirps. A preamble
     up-chirp dechirps to bin ~ (CFO + STO); an SFD down-chirp to ~ (CFO - STO).
-    Returns (cfo_bins, sto_bins) as signed fractional fold-bins.
-
-    _folded with down_ref=up (not time-reversed up) places SFD peaks at
-    (CFO - STO - zero_pad/oversample); adding zero_pad/oversample corrects d."""
+    Returns (cfo_bins, sto_bins) as signed fractional fold-bins."""
     sn = grid.sample_num
     sfd_start = payload_start - int(round(2.25 * sn))
     u = float(
