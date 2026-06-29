@@ -116,8 +116,32 @@ class Resample(RxStage[CompileContext]):
         return int(params["interpolation"]) / int(params["decimation"])
 
 
+class _ClockCorrectParams(StageParams):
+    ppm: float  # transmitter clock offset in parts-per-million (signed)
+
+
+class ClockCorrect(RxStage[CompileContext]):
+    """Cancel sampling-frequency offset (transmitter clock drift) by resampling
+    by 1/(1 + ppm*1e-6) via the polyphase arbitrary resampler. RX-only. SFO is a
+    silent no-op below ~1 chip of cumulative drift (ppm * n_samples), so it only
+    matters on long frames (e.g. the multi-second IQ_12 LoRa capture)."""
+
+    name = "clock_correct"
+    from_level = Level.IQ
+    to_level = Level.IQ
+    family = "conditioning"
+    params_model = _ClockCorrectParams
+
+    def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
+        b.chain("pfb_arb_resampler_ccf", rate=1.0 / (1.0 + float(params["ppm"]) * 1e-6))
+
+    def rate_factor(self, params: Mapping[str, Any]) -> float:
+        return 1.0 / (1.0 + float(params["ppm"]) * 1e-6)
+
+
 CONDITIONING_STAGES: tuple[type[RxStage[CompileContext]], ...] = (
     Channelize,
     Invert,
     Resample,
+    ClockCorrect,
 )
