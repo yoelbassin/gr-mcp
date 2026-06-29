@@ -76,8 +76,8 @@ def _detect(signal: np.ndarray, grid: _Grid, detect_run: int) -> int:
     raise ValueError("no CSS preamble detected")
 
 
-def _synchronize(signal: np.ndarray, grid: _Grid, detect_run: int) -> tuple[int, int]:
-    """Return (payload_start, preamble_start) sample offsets into `signal`."""
+def _synchronize(signal: np.ndarray, grid: _Grid, detect_run: int) -> int:
+    """Return the payload_start sample offset into `signal`."""
     sn = grid.sample_num
     x = _detect(signal, grid, detect_run)
     found = False
@@ -93,12 +93,11 @@ def _synchronize(signal: np.ndarray, grid: _Grid, detect_run: int) -> tuple[int,
     _, dn_bin = _fine_peak(signal, x, grid, up=False)
     offset = (dn_bin - grid.bins) if dn_bin > grid.bins / 2 else dn_bin
     x += int(round(offset / grid.zero_pad))
-    preamble_start = x - 4 * sn
     up_h, _ = _fine_peak(signal, x - sn, grid)
     dn_h, _ = _fine_peak(signal, x - sn, grid, up=False)
     sfd_syms = 2.25 if up_h > dn_h else 1.25
     payload_start = x + int(round(sfd_syms * sn))
-    return payload_start, preamble_start
+    return payload_start
 
 
 def _parabolic(f: np.ndarray, p: int) -> float:
@@ -372,7 +371,7 @@ def make_chirp_sync(
 
         def _try_lock(self) -> bool:
             try:
-                payload_start, _ = _synchronize(self._buf, grid, detect_run)
+                payload_start = _synchronize(self._buf, grid, detect_run)
             except ValueError:
                 return False
             if payload_start + sn > len(self._buf):
