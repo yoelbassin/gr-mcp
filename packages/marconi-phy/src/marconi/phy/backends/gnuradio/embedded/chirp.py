@@ -110,6 +110,46 @@ def _cfo_hz(preamble_bin: int, grid: _Grid, bandwidth: float) -> float:
     return pb_n * bandwidth / n
 
 
+def _parabolic(f: np.ndarray, p: int) -> float:
+    """3-point parabolic sub-bin refinement of an FFT-magnitude peak at index p."""
+    if 0 < p < len(f) - 1:
+        denom = f[p - 1] - 2.0 * f[p] + f[p + 1]
+        if denom != 0.0:
+            return p + 0.5 * (f[p - 1] - f[p + 1]) / denom
+    return float(p)
+
+
+def _peak_bin(signal: np.ndarray, x: int, grid: _Grid, up: bool) -> float:
+    """Signed, sub-bin dechirp peak of the window at x (fold-bin units)."""
+    f = _folded(signal, x, grid, up=up)
+    b = _parabolic(f, int(np.argmax(f)))
+    return b - grid.bins if b > grid.bins / 2 else b
+
+
+def _joint_sync(
+    signal: np.ndarray, payload_start: int, grid: _Grid
+) -> tuple[float, float]:
+    """Joint estimate from the preamble up-chirps + SFD down-chirps. A preamble
+    up-chirp dechirps to bin ~ (CFO + STO); an SFD down-chirp to ~ (CFO - STO).
+    Returns (cfo_bins, sto_bins) as signed fractional fold-bins.
+
+    _folded with down_ref=up (not time-reversed up) places SFD peaks at
+    (CFO - STO - zero_pad/oversample); adding zero_pad/oversample corrects d."""
+    sn = grid.sample_num
+    sfd_start = payload_start - int(round(2.25 * sn))
+    u = float(
+        np.median(
+            [_peak_bin(signal, sfd_start - i * sn, grid, True) for i in range(1, 8)]
+        )
+    )
+    d = float(
+        np.median(
+            [_peak_bin(signal, sfd_start + j * sn, grid, False) for j in range(2)]
+        )
+    )
+    return (u + d) / 2.0, (u - d) / 2.0
+
+
 def _modulate_symbol(s: int, sf: int, oversample: int) -> np.ndarray:
     n = 1 << sf
     t = np.arange(oversample * n) / oversample
@@ -312,45 +352,57 @@ def make_chirp_sync(
     preamble_len: int,
     bandwidth: float,
 ) -> Any:
-    """RX: buffer IQ, detect CSS preamble+SFD, derotate CFO, emit payload IQ.
-
-    Mirrors make_sym_acquire's buffer/lock/EOF-flush shape. Locks only when
-    _synchronize succeeds AND at least one payload symbol fits in the buffer;
-    otherwise keeps accumulating. On EOF without a lock, yields no output
-    (treated as a failed decode by the caller)."""
+    """RX: buffer IQ, detect CSS preamble+SFD, jointly estimate CFO + fractional
+    STO, apply the fractional sample timing (streaming windowed-sinc FIR) and
+    derotate the CFO, emitting payload IQ. Mirrors make_sym_acquire's
+    buffer/lock/EOF-flush shape."""
     grid = _Grid(sf, oversample, zero_pad)
     sn = grid.sample_num
     detect_run = preamble_len - 2
     min_buf = (preamble_len + 6) * sn
+    _NTAPS = 33
+    _HALF = (_NTAPS - 1) // 2
 
     class _ChirpSync(gr.basic_block):
         def __init__(self) -> None:
             gr.basic_block.__init__(
-                self,
-                name="chirp_sync",
-                in_sig=[np.complex64],
-                out_sig=[np.complex64],
+                self, name="chirp_sync", in_sig=[np.complex64], out_sig=[np.complex64]
             )
             self._buf = np.empty(0, dtype=np.complex64)
             self._locked = False
             self._f_cfo = 0.0
             self._n_out = 0  # payload samples emitted, for CFO phase continuity
+            self._taps = np.zeros(_NTAPS, dtype=np.complex64)
+            self._hist = np.zeros(_NTAPS - 1, dtype=np.complex64)
+            self._drop = 0  # FIR group-delay outputs still to discard
+            self._tail_flushed = (
+                False  # True once the _HALF-zero tail has been injected
+            )
 
         def forecast(self, noutput_items: int, ninputs: int) -> list[int]:
             return [0] * ninputs if self._locked else [noutput_items] * ninputs
 
         def _try_lock(self) -> bool:
             try:
-                payload_start, preamble_start = _synchronize(
-                    self._buf, grid, detect_run
-                )
+                payload_start, _ = _synchronize(self._buf, grid, detect_run)
             except ValueError:
                 return False
             if payload_start + sn > len(self._buf):
                 return False
-            _, preamble_bin = _fine_peak(self._buf, preamble_start, grid)
-            self._f_cfo = _cfo_hz(preamble_bin, grid, bandwidth)
-            self._buf = self._buf[payload_start:]  # strip; derotation is per-emit
+            cfo_bins, sto_bins = _joint_sync(self._buf, payload_start, grid)
+            self._f_cfo = cfo_bins * bandwidth / grid.bins
+            sto = sto_bins * oversample / zero_pad  # fractional sample timing
+            n_int = int(round(sto))
+            mu = sto - n_int
+            k = np.arange(_NTAPS) - _HALF
+            h = np.sinc(k - mu) * np.blackman(_NTAPS)
+            self._taps = (h / h.sum()).astype(np.complex64)
+            start = payload_start - n_int  # +est_sto correction = read earlier by n_int
+            if start < _NTAPS - 1:
+                return False
+            self._hist = self._buf[start - (_NTAPS - 1) : start].copy()
+            self._buf = self._buf[start:]
+            self._drop = _HALF
             return True
 
         def general_work(self, input_items: Any, output_items: Any) -> int:
@@ -364,24 +416,40 @@ def make_chirp_sync(
                 if not self._try_lock():
                     return 0
                 self._locked = True
+            # When all real payload is consumed at EOF, inject _HALF zeros so the
+            # streaming FIR outputs the last _HALF held-in-history payload samples.
+            # This runs in the SAME general_work call (no separate GR scheduling
+            # call needed), because the zero injection and processing happen inline.
+            if (
+                self._locked
+                and len(x) == 0
+                and len(self._buf) == 0
+                and not self._tail_flushed
+            ):
+                self._buf = np.zeros(_HALF, dtype=np.complex64)
+                self._tail_flushed = True
             out = output_items[0]
             m = min(len(out), len(self._buf))
             if m:
-                # Derotate the CFO across ALL emitted payload, with phase
-                # continuity over GR work batches (n_out is the running payload
-                # sample index): a one-shot derotation at lock leaves every
-                # post-lock batch un-corrected.
-                k = self._n_out + np.arange(m)
-                out[:m] = (
-                    self._buf[:m]
+                ext = np.concatenate([self._hist, self._buf[:m]])
+                y = np.convolve(ext, self._taps, "valid")  # fractional delay, len m
+                self._hist = ext[-(_NTAPS - 1) :]
+                self._buf = self._buf[m:]
+                if self._drop:
+                    d = min(self._drop, len(y))
+                    y = y[d:]
+                    self._drop -= d
+                k = self._n_out + np.arange(len(y))
+                out[: len(y)] = (
+                    y
                     * np.exp(
                         -1j * 2 * np.pi * self._f_cfo * k / (oversample * bandwidth)
                     )
                 ).astype(np.complex64)
-                self._n_out += m
-                self._buf = self._buf[m:]
-            elif self._locked and len(x) == 0:
-                return -1  # WORK_DONE: locked + buffer drained + EOF
-            return m
+                self._n_out += len(y)
+                return len(y)
+            if self._locked and len(x) == 0 and len(self._buf) == 0:
+                return -1  # WORK_DONE: locked + buffer drained + tail flushed
+            return 0
 
     return _ChirpSync()

@@ -57,14 +57,18 @@ def test_css_ber0_impaired(sf: int, tmp_path: Path) -> None:
     clean, imp, op = tmp_path / "c.iq", tmp_path / "i.iq", tmp_path / "o.bits"
     m = _modem(sf)
     assert be.run_pipeline(_compile(m, "tx", rate, bp, clean)).status == "ok"
-    # CSS uses block-based dechirp (no Gardner timing loop): it absorbs INTEGER
-    # sample-timing offsets via SFD alignment but is sensitive to sub-sample
-    # (half-chip) STO. Sub-sample/real timing robustness is validated on the
-    # off-air capture (test_css_offair.py, Flinders SF11 20/20, which has real
-    # sub-sample STO + the resample path); here the sim exercises the core
-    # mod/demod/acquisition under CFO + AWGN + integer STO.
+    # The joint up/down-chirp estimator recovers FRACTIONAL sample timing (and a
+    # clean CFO), so the block dechirp now decodes through a sub-sample STO that
+    # previously smeared marginal symbols (the old integer-only sto=2.0 limit).
     channel(
-        clean, imp, snr_db=15.0, cfo_hz=0.03 * bw, sto=2.0, sample_rate=rate, seed=sf
+        clean,
+        imp,
+        snr_db=15.0,
+        cfo_hz=0.03 * bw,
+        sto=1.5,
+        sfo_ppm=0.0,
+        sample_rate=rate,
+        seed=sf,
     )
     assert be.run_pipeline(_compile(m, "rx", rate, imp, op)).status == "ok"
     out = read_bits(op)
