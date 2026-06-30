@@ -12,9 +12,9 @@ from marconi.core.stages import Stage, validate_path
 
 # These sets grow as stages are added (access_code/segment seeders;
 # fixed_frame/var_length_frame slicers) — slice 1 ships only hdlc_deframe.
-_SEEDERS = {"hdlc_deframe"}
+_SEEDERS = {"hdlc_deframe", "segment"}
 _SELF_SLICING = {"hdlc_deframe"}
-_BODY_SLICERS: set[str] = set()
+_BODY_SLICERS: set[str] = {"fixed_frame"}
 
 
 def validate_codec(
