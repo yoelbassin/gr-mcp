@@ -90,4 +90,50 @@ class OfdmDemod(RxStage[CompileContext]):
         return Descriptor(Level.SYMBOLS, "c", in_desc.layout, Carrier.HARD)
 
 
-OFDM_STAGES: tuple[type[Stage[CompileContext]], ...] = (OfdmDemod, OfdmFrameSyncProbe)
+class _DqpskParams(StageParams):
+    data_syms: StrictInt
+    n_carriers: StrictInt
+    scheme: str = "psk"
+    order: StrictInt = 4
+
+
+class DqpskSoftDemap(RxStage[CompileContext]):
+    """Differential-QPSK soft demap, SYMBOLS->BITS soft, from STOCK GR blocks. The
+    per-carrier differential is delay + multiply_conjugate; the PRS reference is
+    dropped by keep_m_in_n; the soft decision is constellation_soft_decoder.
+    Generic over differential PSK over symbol-major framed carriers."""
+
+    name = "dqpsk_soft_demap"
+    from_level = Level.SYMBOLS
+    to_level = Level.BITS
+    family = "ofdm"
+    params_model = _DqpskParams
+
+    def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
+        nc = int(params["n_carriers"])
+        ds = int(params["data_syms"])
+        src = b.tail  # incoming carrier stream (never None after IO source)
+        assert src is not None
+        dly = b.chain("delay_cc", samples=nc)  # src -> delay, tail=delay
+        mc = b.add("multiply_conjugate_cc")
+        b.connect(src, mc, dst_port=0)  # carriers  -> mc.0
+        b.connect(dly, mc, dst_port=1)  # delayed   -> mc.1  (c[i]*conj(c[i-nc]))
+        b.set_tail(mc)
+        b.chain("keep_m_in_n_c", m=ds * nc, n=(ds + 1) * nc, offset=nc)  # drop PRS diff
+        b.chain(
+            "constellation_soft_decoder",
+            scheme=str(params.get("scheme", "psk")),
+            order=int(params.get("order", 4)),
+        )
+
+    def out_descriptor(
+        self, in_desc: Descriptor, params: Mapping[str, Any]
+    ) -> Descriptor:
+        return Descriptor(Level.BITS, "f", in_desc.layout, Carrier.SOFT)
+
+
+OFDM_STAGES: tuple[type[Stage[CompileContext]], ...] = (
+    OfdmDemod,
+    DqpskSoftDemap,
+    OfdmFrameSyncProbe,
+)

@@ -299,6 +299,13 @@ GR_BLOCKS: dict[str, Callable[[_GrCtx, Params], Any]] = {
         _as_int(p["n"]),
         _as_int(p.get("offset", 0)),
     ),
+    "delay_cc": lambda c, p: c.blocks.delay(
+        c.gr.sizeof_gr_complex, _as_int(p["samples"])
+    ),
+    "multiply_conjugate_cc": lambda c, p: c.blocks.multiply_conjugate_cc(),
+    "constellation_soft_decoder": lambda c, p: c.digital.constellation_soft_decoder_cf(
+        _const(c, str(p["scheme"]), _as_int(p["order"])).base()
+    ),
 }
 
 
