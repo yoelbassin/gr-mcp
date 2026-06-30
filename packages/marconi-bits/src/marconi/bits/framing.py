@@ -197,6 +197,35 @@ def parse_tx(
     return TxCarrier(out)
 
 
+# --- Segment: carve flat bitstream into fixed-length frames -------------------
+def segment_rx(c: RxCarrier, *, frame_body_len: int) -> RxCarrier:
+    frames: list[_Frame] = []
+    i = 0
+    while i + frame_body_len <= len(c.bits):
+        frames.append(_Frame(start=i, cursor=i))
+        i += frame_body_len
+    return RxCarrier(bits=c.bits, frames=frames)
+
+
+def segment_tx(c: TxCarrier) -> TxCarrier:
+    return c
+
+
+# --- FixedFrame: materialise each frame's payload bytes -----------------------
+def fixed_frame_rx(c: RxCarrier, *, payload_bits: int) -> RxCarrier:
+    out: list[_Frame] = []
+    for f in c.frames:
+        if f.cursor + payload_bits <= len(c.bits):
+            f.payload = bits_to_bytes(c.bits[f.cursor : f.cursor + payload_bits])
+            f.cursor += payload_bits
+            out.append(f)
+    return RxCarrier(bits=c.bits, frames=out)
+
+
+def fixed_frame_tx(c: TxCarrier, *, payload_bits: int) -> TxCarrier:
+    return TxCarrier([bytes_to_bits(b) for b in c.items])
+
+
 # --- HDLC framing (ported V1 numpy) -------------------------------------------
 def _bitstuff(bits: np.ndarray) -> np.ndarray:
     out: list[int] = []

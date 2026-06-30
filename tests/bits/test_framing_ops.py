@@ -4,6 +4,22 @@ from marconi.bits import framing
 from marconi.bits.carriers import RxCarrier, TxCarrier
 
 
+def test_segment_then_fixed_frame_carves_payloads():
+    bits = np.unpackbits(np.array([0xAB, 0xCD, 0x12, 0x34], dtype=np.uint8))  # 32 bits
+    c = framing.segment_rx(RxCarrier(bits=bits), frame_body_len=16)
+    assert len(c.frames) == 2
+    c = framing.fixed_frame_rx(c, payload_bits=16)
+    assert c.frames[0].payload == bytes([0xAB, 0xCD])
+    assert c.frames[1].payload == bytes([0x12, 0x34])
+
+
+def test_fixed_frame_tx_packs_bits():
+    tx = framing.fixed_frame_tx(TxCarrier([bytes([0xAB, 0xCD])]), payload_bits=16)
+    assert list(tx.items[0]) == list(
+        np.unpackbits(np.array([0xAB, 0xCD], dtype=np.uint8))
+    )
+
+
 def test_nibble_swap_swaps_per_byte_and_roundtrips():
     bits = np.array([1, 0, 1, 1, 0, 0, 0, 1], dtype=np.uint8)  # 1011 0001
     out = framing.nibble_swap_rx(RxCarrier(bits=bits)).bits

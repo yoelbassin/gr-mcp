@@ -64,8 +64,46 @@ class NibbleSwap(DuplexStage[ProgramBuilder]):
         b.add(framing.nibble_swap_tx)
 
 
+class Segment(DuplexStage[ProgramBuilder]):
+    name = "segment"
+    from_level = Level.BITS
+    to_level = Level.FRAMES
+    family = "framing"
+
+    class _Params(StageParams):
+        frame_body_len: int
+
+    params_model = _Params
+
+    def emit_rx(self, b: ProgramBuilder, params: Mapping[str, Any]) -> None:
+        b.add(framing.segment_rx, frame_body_len=int(params["frame_body_len"]))
+
+    def emit_tx(self, b: ProgramBuilder, params: Mapping[str, Any]) -> None:
+        b.add(framing.segment_tx)
+
+
+class FixedFrame(DuplexStage[ProgramBuilder]):
+    name = "fixed_frame"
+    from_level = Level.FRAMES
+    to_level = Level.FRAMES
+    family = "framing"
+
+    class _Params(StageParams):
+        payload_bits: int
+
+    params_model = _Params
+
+    def emit_rx(self, b: ProgramBuilder, params: Mapping[str, Any]) -> None:
+        b.add(framing.fixed_frame_rx, payload_bits=int(params["payload_bits"]))
+
+    def emit_tx(self, b: ProgramBuilder, params: Mapping[str, Any]) -> None:
+        b.add(framing.fixed_frame_tx, payload_bits=int(params["payload_bits"]))
+
+
 FRAMING_STAGES: tuple[type[DuplexStage[ProgramBuilder]], ...] = (
     Differential,
+    FixedFrame,
     HdlcDeframe,
     NibbleSwap,
+    Segment,
 )
