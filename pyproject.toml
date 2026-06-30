@@ -7,6 +7,7 @@ members = ["packages/*"]
 [tool.uv.sources]
 marconi-core = { workspace = true }
 marconi-phy = { workspace = true }
+marconi-bits = { workspace = true }
 
 [tool.isort]
 profile = "black"
@@ -15,7 +16,7 @@ known_first_party = ["marconi"]
 [tool.mypy]
 ignore_missing_imports = true
 explicit_package_bases = true
-mypy_path = "packages/marconi-core/src:packages/marconi-phy/src"
+mypy_path = "packages/marconi-core/src:packages/marconi-phy/src:packages/marconi-bits/src"
 
 [[tool.mypy.overrides]]
 module = "marconi.*"
