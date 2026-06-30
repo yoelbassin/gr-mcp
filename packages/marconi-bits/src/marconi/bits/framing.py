@@ -279,6 +279,24 @@ def hdlc_deframe_tx(c: TxCarrier, *, bit_order: str = "msb") -> TxCarrier:
     return TxCarrier(framed)
 
 
+# --- Nibble swap (swap high/low nibble within each byte) ----------------------
+def _nibble_swap_bits(bits: np.ndarray) -> np.ndarray:
+    b = np.asarray(bits, dtype=np.uint8).copy()
+    n = (b.size // 8) * 8
+    if n:
+        g = b[:n].reshape(-1, 8)
+        b[:n] = np.concatenate([g[:, 4:], g[:, :4]], axis=1).reshape(-1)
+    return b
+
+
+def nibble_swap_rx(c: RxCarrier) -> RxCarrier:
+    return RxCarrier(bits=_nibble_swap_bits(c.bits), frames=c.frames)
+
+
+def nibble_swap_tx(c: TxCarrier) -> TxCarrier:
+    return TxCarrier([_nibble_swap_bits(it) for it in c.items])
+
+
 # --- NRZI / differential (ported V1 numpy) ------------------------------------
 def differential_rx(c: RxCarrier, *, invert: bool = False) -> RxCarrier:
     b = np.asarray(c.bits, dtype=np.uint8)
