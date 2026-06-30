@@ -38,3 +38,18 @@ def test_descramble_xors_and_roundtrips():
     assert c.frames[0].payload == bytes([0xAB ^ 0x0F, 0xCD ^ 0x10])
     tx = framing.descramble_tx(TxCarrier([c.frames[0].payload]), sequence=seq)
     assert tx.items[0] == bytes([0xAB, 0xCD])
+
+
+def test_segment_rx_drops_short_tail():
+    # 33 bits, frame_body_len=16: frames at [0,16) and [16,32), 1-bit tail dropped
+    bits = np.zeros(33, dtype=np.uint8)
+    c = framing.segment_rx(RxCarrier(bits=bits), frame_body_len=16)
+    assert len(c.frames) == 2
+
+
+def test_fixed_frame_rx_drops_past_end_frame():
+    # 20-bit carrier, cursor=16, payload_bits=16: 16+16=32 > 20 → frame dropped
+    bits = np.zeros(20, dtype=np.uint8)
+    f = _Frame(start=16, cursor=16)
+    c = framing.fixed_frame_rx(RxCarrier(bits=bits, frames=[f]), payload_bits=16)
+    assert len(c.frames) == 0
