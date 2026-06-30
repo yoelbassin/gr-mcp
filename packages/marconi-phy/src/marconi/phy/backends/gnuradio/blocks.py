@@ -133,6 +133,9 @@ GR_BLOCKS: dict[str, Callable[[_GrCtx, Params], Any]] = {
     "bits_file_sink": lambda c, p: c.blocks.file_sink(
         c.gr.sizeof_char, str(p["path"]), False
     ),
+    "soft_bits_file_source": lambda c, p: c.blocks.file_source(
+        c.gr.sizeof_float, str(p["path"]), bool(p.get("repeat", False))
+    ),
     "soft_bits_file_sink": lambda c, p: c.blocks.file_sink(
         c.gr.sizeof_float, str(p["path"]), False
     ),
@@ -291,6 +294,9 @@ GR_BLOCKS: dict[str, Callable[[_GrCtx, Params], Any]] = {
         1,
     ),
     "blockinterleaver_cc": lambda c, p: c.blocks.blockinterleaver_cc(
+        _as_int_list(p["perm"]), bool(p.get("mode", True)), False
+    ),
+    "blockinterleaver_ff": lambda c, p: c.blocks.blockinterleaver_ff(
         _as_int_list(p["perm"]), bool(p.get("mode", True)), False
     ),
     "keep_m_in_n_c": lambda c, p: c.blocks.keep_m_in_n(
