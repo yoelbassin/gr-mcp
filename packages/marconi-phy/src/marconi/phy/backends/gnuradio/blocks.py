@@ -14,6 +14,7 @@ from marconi.phy.backends.gnuradio.embedded.chirp import (
     make_css_demap,
     make_css_map,
 )
+from marconi.phy.backends.gnuradio.embedded.coding import make_css_explicit_decode
 from marconi.phy.backends.gnuradio.embedded.preamble import (
     make_sym_acquire,
     make_sym_prepend,
@@ -39,6 +40,14 @@ def _as_float_list(v: ParamValue) -> list[float]:
     if not isinstance(v, list):
         raise BackendError(f"expected a list of numbers, got {type(v).__name__}: {v!r}")
     return [_as_float(x) for x in v]
+
+
+def _as_int_list(v: ParamValue) -> list[int]:
+    if not isinstance(v, list):
+        raise BackendError(
+            f"expected a list of integers, got {type(v).__name__}: {v!r}"
+        )
+    return [_as_int(x) for x in v]
 
 
 def _modules() -> tuple[Any, Any, Any, Any, Any, Any, Any]:
@@ -244,6 +253,18 @@ GR_BLOCKS: dict[str, Callable[[_GrCtx, Params], Any]] = {
     ),
     "css_map": lambda c, p: make_css_map(c.gr, _as_int(p["sf"])),
     "css_demap": lambda c, p: make_css_demap(c.gr, _as_int(p["sf"])),
+    "css_explicit_decode": lambda c, p: make_css_explicit_decode(
+        c.gr,
+        sf=_as_int(p["sf"]),
+        header_cr=_as_int(p["header_cr"]),
+        ldro=bool(p["ldro"]),
+        header_data_bits=_as_int(p["header_data_bits"]),
+        header_parity=_as_int_list(p["header_parity"]),
+        field_payload_len=_as_int_list(p["field_payload_len"]),
+        field_cr=_as_int_list(p["field_cr"]),
+        field_has_crc=_as_int_list(p["field_has_crc"]),
+        field_parity=_as_int_list(p["field_parity"]),
+    ),
 }
 
 
