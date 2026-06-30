@@ -52,20 +52,20 @@ def _as_int_list(v: ParamValue) -> list[int]:
     return [_as_int(x) for x in v]
 
 
-def _modules() -> tuple[Any, Any, Any, Any, Any, Any, Any, Any]:
-    """The single gnuradio import gate. Returns (gr, blocks, analog, digital,
-    gr_filter, firdes, pfb, fft). Called only at factory/build time, never at import."""
+def _modules() -> tuple[Any, Any, Any, Any, Any, Any, Any, Any, Any]:
+    """Single gnuradio import gate → (gr, blocks, analog, digital,
+    gr_filter, firdes, pfb, fft, trellis). Called at build time only."""
     try:
         from gnuradio import analog, blocks, digital, fft
         from gnuradio import filter as gr_filter
-        from gnuradio import gr
+        from gnuradio import gr, trellis
         from gnuradio.filter import firdes, pfb
     except ImportError as e:  # pragma: no cover - environment-dependent
         raise BackendError(
             "GNU Radio is not importable. Install GNU Radio 3.10+ system-wide "
             "and use a `uv venv --system-site-packages` venv."
         ) from e
-    return gr, blocks, analog, digital, gr_filter, firdes, pfb, fft
+    return gr, blocks, analog, digital, gr_filter, firdes, pfb, fft, trellis
 
 
 @dataclass(frozen=True)
@@ -78,11 +78,12 @@ class _GrCtx:
     firdes: Any
     pfb: Any
     fft: Any
+    trellis: Any
     rate: float
 
 
 def _make_ctx(rate: float) -> _GrCtx:
-    gr, blocks, analog, digital, gr_filter, firdes, pfb, fft = _modules()
+    gr, blocks, analog, digital, gr_filter, firdes, pfb, fft, trellis = _modules()
     return _GrCtx(
         gr=gr,
         blocks=blocks,
@@ -92,6 +93,7 @@ def _make_ctx(rate: float) -> _GrCtx:
         firdes=firdes,
         pfb=pfb,
         fft=fft,
+        trellis=trellis,
         rate=rate,
     )
 
