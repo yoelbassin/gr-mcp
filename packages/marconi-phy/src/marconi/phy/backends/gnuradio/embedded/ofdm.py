@@ -52,9 +52,15 @@ def make_ofdm_frame_sync(
                 self._base is None
                 and self._buf.size >= null_len + (data_syms + 1) * sym_len
             ):
-                self._base = prim.find_null(
-                    self._buf, null_len=null_len, frame_len=frame_len, sym_len=sym_len
-                )
+                try:
+                    self._base = prim.find_null(
+                        self._buf,
+                        null_len=null_len,
+                        frame_len=frame_len,
+                        sym_len=sym_len,
+                    )
+                except ValueError:
+                    pass  # null not yet in buffer; retry on next call
             while (
                 self._base is not None
                 and self._base + (data_syms + 1) * sym_len <= self._buf.size

@@ -38,6 +38,9 @@ def find_null(
                 refined = max(0, j - w)
                 while refined < n and p[refined] <= thresh:
                     refined += 1
+                if refined >= n:
+                    # Buffer ends inside the null — need more data.
+                    raise ValueError("no null symbol found")
                 return refined
             i = j
         else:
