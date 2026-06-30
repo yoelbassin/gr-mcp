@@ -35,8 +35,6 @@ def test_block_fec_detect_only_cr1_passes_clean_codeword():
 
 def test_block_fec_cr4_corrects_single_bit_error():
     # CR4/8 (4 parity bits) corrects one flipped bit.
-    from itertools import product  # noqa: F401
-
     parity = coding.HAMMING_PARITY[4]
     # build a valid codeword for nibble 0b0110, then flip bit 2
     data = [0, 1, 1, 0]
@@ -45,6 +43,18 @@ def test_block_fec_cr4_corrects_single_bit_error():
         cw |= (sum(d * r for d, r in zip(data, row)) % 2) << (4 + p_idx)
     corrupted = cw ^ (1 << 2)
     assert coding.block_fec_decode(corrupted, parity, correct=True) == 0b0110
+
+
+def test_block_fec_cr1_does_not_correct_even_when_requested():
+    # CR4/5 (1 parity bit) is below the correction threshold; passing correct=True
+    # must still return the corrupted nibble unchanged — detect-only stays detect-only.
+    nibble = 0b1011
+    parity = coding.HAMMING_PARITY[1]
+    data = [1, 1, 0, 1]
+    p = sum(d * r for d, r in zip(data, parity[0])) % 2
+    codeword = nibble | (p << 4)
+    corrupted = codeword ^ 1  # flip data bit 0; corrupted nibble = 0b1010
+    assert coding.block_fec_decode(corrupted, parity, correct=True) == (nibble ^ 1)
 
 
 def test_frame_len_sf11_255_byte_ldro_cr1():
