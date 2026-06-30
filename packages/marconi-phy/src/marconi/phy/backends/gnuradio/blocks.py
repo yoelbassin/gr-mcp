@@ -15,6 +15,7 @@ from marconi.phy.backends.gnuradio.embedded.chirp import (
     make_css_map,
 )
 from marconi.phy.backends.gnuradio.embedded.coding import make_css_explicit_decode
+from marconi.phy.backends.gnuradio.embedded.ofdm import make_ofdm_frame_sync
 from marconi.phy.backends.gnuradio.embedded.preamble import (
     make_sym_acquire,
     make_sym_prepend,
@@ -50,11 +51,11 @@ def _as_int_list(v: ParamValue) -> list[int]:
     return [_as_int(x) for x in v]
 
 
-def _modules() -> tuple[Any, Any, Any, Any, Any, Any, Any]:
+def _modules() -> tuple[Any, Any, Any, Any, Any, Any, Any, Any]:
     """The single gnuradio import gate. Returns (gr, blocks, analog, digital,
-    gr_filter, firdes, pfb). Called only at factory/build time, never at import."""
+    gr_filter, firdes, pfb, fft). Called only at factory/build time, never at import."""
     try:
-        from gnuradio import analog, blocks, digital
+        from gnuradio import analog, blocks, digital, fft
         from gnuradio import filter as gr_filter
         from gnuradio import gr
         from gnuradio.filter import firdes, pfb
@@ -63,7 +64,7 @@ def _modules() -> tuple[Any, Any, Any, Any, Any, Any, Any]:
             "GNU Radio is not importable. Install GNU Radio 3.10+ system-wide "
             "and use a `uv venv --system-site-packages` venv."
         ) from e
-    return gr, blocks, analog, digital, gr_filter, firdes, pfb
+    return gr, blocks, analog, digital, gr_filter, firdes, pfb, fft
 
 
 @dataclass(frozen=True)
@@ -75,11 +76,12 @@ class _GrCtx:
     gr_filter: Any
     firdes: Any
     pfb: Any
+    fft: Any
     rate: float
 
 
 def _make_ctx(rate: float) -> _GrCtx:
-    gr, blocks, analog, digital, gr_filter, firdes, pfb = _modules()
+    gr, blocks, analog, digital, gr_filter, firdes, pfb, fft = _modules()
     return _GrCtx(
         gr=gr,
         blocks=blocks,
@@ -88,6 +90,7 @@ def _make_ctx(rate: float) -> _GrCtx:
         gr_filter=gr_filter,
         firdes=firdes,
         pfb=pfb,
+        fft=fft,
         rate=rate,
     )
 
@@ -264,6 +267,37 @@ GR_BLOCKS: dict[str, Callable[[_GrCtx, Params], Any]] = {
         field_cr=_as_int_list(p["field_cr"]),
         field_has_crc=_as_int_list(p["field_has_crc"]),
         field_parity=_as_int_list(p["field_parity"]),
+    ),
+    "ofdm_frame_sync": lambda c, p: make_ofdm_frame_sync(
+        c.gr,
+        fft_len=_as_int(p["fft_len"]),
+        cp_len=_as_int(p["cp_len"]),
+        sym_len=_as_int(p["sym_len"]),
+        null_len=_as_int(p["null_len"]),
+        frame_len=_as_int(p["frame_len"]),
+        data_syms=_as_int(p["data_syms"]),
+    ),
+    "stream_to_vector": lambda c, p: c.blocks.stream_to_vector(
+        c.gr.sizeof_gr_complex, _as_int(p["vlen"])
+    ),
+    "vector_to_stream": lambda c, p: c.blocks.vector_to_stream(
+        c.gr.sizeof_gr_complex, _as_int(p["vlen"])
+    ),
+    "fft_vcc": lambda c, p: c.fft.fft_vcc(
+        _as_int(p["fft_len"]),
+        bool(p.get("forward", True)),
+        c.fft.window.rectangular(_as_int(p["fft_len"])),
+        False,
+        1,
+    ),
+    "blockinterleaver_cc": lambda c, p: c.blocks.blockinterleaver_cc(
+        _as_int_list(p["perm"]), bool(p.get("mode", True)), False
+    ),
+    "keep_m_in_n_c": lambda c, p: c.blocks.keep_m_in_n(
+        c.gr.sizeof_gr_complex,
+        _as_int(p["m"]),
+        _as_int(p["n"]),
+        _as_int(p.get("offset", 0)),
     ),
 }
 

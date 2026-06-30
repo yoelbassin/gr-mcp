@@ -13,18 +13,32 @@ def find_null(
     sym_len: int,
     win: int = 512,
 ) -> int:
-    """Sample index just after the first contiguous low-energy (null) run."""
+    """Sample index just after the first contiguous low-energy (null) run.
+
+    ``win`` is clamped to ``null_len`` so the envelope smoother doesn't wash
+    out the null in short test buffers (where null_len << default 512).
+    After finding the null region via the smoothed envelope, the boundary is
+    refined on the raw power so the return value is the exact first high-power
+    sample (not the smeared envelope crossing).
+    """
     p = np.abs(x) ** 2
-    env = np.convolve(p, np.ones(win) / win, mode="same")
-    low = env < 0.25 * np.median(env)
+    w = min(win, null_len)
+    env = np.convolve(p, np.ones(w) / w, mode="same")
+    thresh = 0.25 * np.median(env)
+    low = env < thresh
     i, n = 0, len(x)
-    while i < n - frame_len - sym_len:
+    while i < n:
         if low[i]:
             j = i
             while j < n and low[j]:
                 j += 1
             if (j - i) > null_len * 0.5:
-                return j
+                # Refine: scan forward in raw power from (j - w) to find exact
+                # first high-energy sample, bypassing convolution smear.
+                refined = max(0, j - w)
+                while refined < n and p[refined] <= thresh:
+                    refined += 1
+                return refined
             i = j
         else:
             i += 1
