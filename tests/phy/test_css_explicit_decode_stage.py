@@ -1,10 +1,11 @@
 import pytest
+from pydantic import ValidationError
 
 from marconi.core.descriptor import Carrier, Descriptor
 from marconi.core.levels import Level
 from marconi.core.stages import StageDirectionError
 from marconi.phy.compile_context import CompileContext
-from marconi.phy.modulation.css.stages import CssExplicitDecode
+from marconi.phy.modulation.css.stages import CssExplicitDecode, _ExplicitParams
 
 
 def _ctx():
@@ -46,3 +47,26 @@ def test_stage_in_registry():
     from marconi.phy.stages.registry import stage_registry
 
     assert "css_explicit_decode" in stage_registry()
+
+
+# --- _ExplicitParams range guards ---
+
+
+def test_explicit_params_valid_sf11_cr4():
+    p = _ExplicitParams.model_validate(_PARAMS)
+    assert p.sf == 11 and p.header_cr == 4
+
+
+def test_explicit_params_sf_too_low_raises():
+    with pytest.raises(ValidationError):
+        _ExplicitParams.model_validate({**_PARAMS, "sf": 4})
+
+
+def test_explicit_params_sf_too_high_raises():
+    with pytest.raises(ValidationError):
+        _ExplicitParams.model_validate({**_PARAMS, "sf": 15})
+
+
+def test_explicit_params_header_cr_out_of_range_raises():
+    with pytest.raises(ValidationError):
+        _ExplicitParams.model_validate({**_PARAMS, "header_cr": 5})

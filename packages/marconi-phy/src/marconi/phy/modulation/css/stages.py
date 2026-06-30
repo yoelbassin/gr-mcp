@@ -134,6 +134,22 @@ class _ExplicitParams(StageParams):
     field_has_crc: list[int]
     field_parity: list[int]
 
+    @model_validator(mode="after")
+    def _ok(self) -> "_ExplicitParams":
+        if not (_SF_MIN <= self.sf <= _SF_MAX):
+            raise PydanticCustomError(
+                "value_error",
+                "sf {sf} out of range [{lo}, {hi}]",
+                {"sf": self.sf, "lo": _SF_MIN, "hi": _SF_MAX, "field": "sf"},
+            )
+        if not (1 <= self.header_cr <= 4):
+            raise PydanticCustomError(
+                "value_error",
+                "header_cr {header_cr} out of range [1, 4]",
+                {"header_cr": self.header_cr, "field": "header_cr"},
+            )
+        return self
+
 
 class CssExplicitDecode(RxStage[CompileContext]):
     """CSS explicit-header decode, SYMBOLS->BITS (RX-only). Parses the LoRa-style
