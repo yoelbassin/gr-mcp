@@ -1,7 +1,7 @@
 import numpy as np
 
 from marconi.bits import framing
-from marconi.bits.carriers import RxCarrier, TxCarrier
+from marconi.bits.carriers import RxCarrier, TxCarrier, _Frame
 
 
 def test_segment_then_fixed_frame_carves_payloads():
@@ -26,3 +26,15 @@ def test_nibble_swap_swaps_per_byte_and_roundtrips():
     assert list(out) == [0, 0, 0, 1, 1, 0, 1, 1]  # 0001 1011
     tx = framing.nibble_swap_tx(TxCarrier([out]))
     assert list(tx.items[0]) == list(bits)
+
+
+def test_descramble_xors_and_roundtrips():
+    seq = "0f10"
+    f = _Frame(start=0, cursor=0)
+    f.payload = bytes([0xAB, 0xCD])
+    c = framing.descramble_rx(
+        RxCarrier(bits=np.zeros(0, np.uint8), frames=[f]), sequence=seq
+    )
+    assert c.frames[0].payload == bytes([0xAB ^ 0x0F, 0xCD ^ 0x10])
+    tx = framing.descramble_tx(TxCarrier([c.frames[0].payload]), sequence=seq)
+    assert tx.items[0] == bytes([0xAB, 0xCD])

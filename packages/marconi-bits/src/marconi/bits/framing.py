@@ -308,6 +308,28 @@ def hdlc_deframe_tx(c: TxCarrier, *, bit_order: str = "msb") -> TxCarrier:
     return TxCarrier(framed)
 
 
+# --- Descramble: XOR each frame payload byte-for-byte with a sequence --------
+def _xor_seq(data: bytes, seq: bytes) -> bytes:
+    if len(seq) < len(data):
+        raise ValueError(
+            f"descramble sequence ({len(seq)} bytes) shorter than payload "
+            f"({len(data)} bytes)"
+        )
+    return bytes(b ^ seq[i] for i, b in enumerate(data))
+
+
+def descramble_rx(c: RxCarrier, *, sequence: str) -> RxCarrier:
+    seq = bytes.fromhex(sequence)
+    for f in c.frames:
+        f.payload = _xor_seq(f.payload, seq)
+    return c
+
+
+def descramble_tx(c: TxCarrier, *, sequence: str) -> TxCarrier:
+    seq = bytes.fromhex(sequence)
+    return TxCarrier([_xor_seq(it, seq) for it in c.items])
+
+
 # --- Nibble swap (swap high/low nibble within each byte) ----------------------
 def _nibble_swap_bits(bits: np.ndarray) -> np.ndarray:
     b = np.asarray(bits, dtype=np.uint8).copy()
