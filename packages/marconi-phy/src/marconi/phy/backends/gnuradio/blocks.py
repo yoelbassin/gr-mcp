@@ -15,6 +15,7 @@ from marconi.phy.backends.gnuradio.embedded.chirp import (
     make_css_map,
 )
 from marconi.phy.backends.gnuradio.embedded.coding import make_css_explicit_decode
+from marconi.phy.backends.gnuradio.embedded.depuncture import make_depuncture
 from marconi.phy.backends.gnuradio.embedded.ofdm import make_ofdm_frame_sync
 from marconi.phy.backends.gnuradio.embedded.preamble import (
     make_sym_acquire,
@@ -311,6 +312,9 @@ GR_BLOCKS: dict[str, Callable[[_GrCtx, Params], Any]] = {
     "multiply_conjugate_cc": lambda c, p: c.blocks.multiply_conjugate_cc(),
     "constellation_soft_decoder": lambda c, p: c.digital.constellation_soft_decoder_cf(
         _const(c, str(p["scheme"]), _as_int(p["order"])).base()
+    ),
+    "depuncture": lambda c, p: make_depuncture(
+        c.gr, keep_mask=_as_int_list(p["keep_mask"])
     ),
 }
 

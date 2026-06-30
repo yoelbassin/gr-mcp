@@ -27,4 +27,22 @@ class Deinterleave(RxStage[CompileContext]):
         b.chain("blockinterleaver_ff", perm=[int(x) for x in params["perm"]], mode=True)
 
 
-CODING_STAGES: tuple[type[Stage[CompileContext]], ...] = (Deinterleave,)
+class _DepunctureParams(StageParams):
+    keep_mask: list[int]
+
+
+class Depuncture(RxStage[CompileContext]):
+    """Generic depuncture, BITS->BITS soft. Scatters soft into a wider codeword per
+    a keep-mask (0 = erasure). Protocol puncture tables are params."""
+
+    name = "depuncture"
+    from_level = Level.BITS
+    to_level = Level.BITS
+    family = "coding"
+    params_model = _DepunctureParams
+
+    def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
+        b.chain("depuncture", keep_mask=[int(x) for x in params["keep_mask"]])
+
+
+CODING_STAGES: tuple[type[Stage[CompileContext]], ...] = (Deinterleave, Depuncture)
