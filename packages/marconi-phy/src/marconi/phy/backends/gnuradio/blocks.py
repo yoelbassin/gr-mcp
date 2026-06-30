@@ -21,6 +21,7 @@ from marconi.phy.backends.gnuradio.embedded.preamble import (
     make_sym_acquire,
     make_sym_prepend,
 )
+from marconi.phy.backends.gnuradio.embedded.trellis_fec import make_trellis_viterbi
 
 Params = dict[str, ParamValue]
 Factory = Callable[[Params], Any]
@@ -317,6 +318,16 @@ GR_BLOCKS: dict[str, Callable[[_GrCtx, Params], Any]] = {
     ),
     "depuncture": lambda c, p: make_depuncture(
         c.gr, keep_mask=_as_int_list(p["keep_mask"])
+    ),
+    "trellis_viterbi": lambda c, p: make_trellis_viterbi(
+        c,
+        rate_inv=_as_int(p["rate_inv"]),
+        polys=_as_int_list(p["polys"]),
+        frame_bits=_as_int(p["frame_bits"]),
+        tail=_as_int(p["tail"]),
+    ),
+    "keep_m_in_n_b": lambda c, p: c.blocks.keep_m_in_n(
+        c.gr.sizeof_char, _as_int(p["m"]), _as_int(p["n"]), 0
     ),
 }
 
