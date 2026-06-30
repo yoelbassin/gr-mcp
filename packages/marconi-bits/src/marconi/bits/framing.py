@@ -65,6 +65,31 @@ def crc_value(
     return _calculator(poly, bits, init, reflected, xorout).checksum(bytes(data))
 
 
+def _fold(
+    body: bytes,
+    *,
+    poly: int,
+    bits: int,
+    init: int,
+    reflected: bool,
+    xorout: int,
+    fold_tail: int,
+) -> int:
+    if fold_tail <= 0:
+        return crc_value(
+            body, poly=poly, bits=bits, init=init, reflected=reflected, xorout=xorout
+        )
+    val = crc_value(
+        body[:-fold_tail],
+        poly=poly,
+        bits=bits,
+        init=init,
+        reflected=reflected,
+        xorout=xorout,
+    )
+    return (val ^ int.from_bytes(body[-fold_tail:], "big")) & ((1 << bits) - 1)
+
+
 def crc_rx(
     c: RxCarrier,
     *,
@@ -74,9 +99,11 @@ def crc_rx(
     reflected: bool = False,
     xorout: int = 0,
     bit_order: str = "msb",
+    fold_tail: int = 0,
+    checksum_le: bool = False,
 ) -> RxCarrier:
     """Trailing check: the last `bits` of each frame payload are the FCS."""
-    endian = _bitorder(bit_order)
+    endian = "little" if checksum_le else _bitorder(bit_order)
     n = bits // 8
     out: list[_Frame] = []
     for f in c.frames:
@@ -85,13 +112,14 @@ def crc_rx(
         body, checksum = f.payload[:-n], f.payload[-n:]
         rx = int.from_bytes(checksum, endian)
         f.crc_ok = (
-            crc_value(
+            _fold(
                 body,
                 poly=poly,
                 bits=bits,
                 init=init,
                 reflected=reflected,
                 xorout=xorout,
+                fold_tail=fold_tail,
             )
             == rx
         )
@@ -109,14 +137,22 @@ def crc_tx(
     reflected: bool = False,
     xorout: int = 0,
     bit_order: str = "msb",
+    fold_tail: int = 0,
+    checksum_le: bool = False,
 ) -> TxCarrier:
-    endian = _bitorder(bit_order)
+    endian = "little" if checksum_le else _bitorder(bit_order)
     n = bits // 8
     return TxCarrier(
         [
             p
-            + crc_value(
-                p, poly=poly, bits=bits, init=init, reflected=reflected, xorout=xorout
+            + _fold(
+                p,
+                poly=poly,
+                bits=bits,
+                init=init,
+                reflected=reflected,
+                xorout=xorout,
+                fold_tail=fold_tail,
             ).to_bytes(n, endian)
             for p in c.items
         ]

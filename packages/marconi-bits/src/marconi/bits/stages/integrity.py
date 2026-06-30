@@ -25,6 +25,8 @@ class Crc(DuplexStage[ProgramBuilder]):
         reflected: bool = False
         xorout: int = 0
         bit_order: str = "msb"
+        fold_tail: int = 0
+        checksum_le: bool = False
 
         @field_validator("bits")
         @classmethod
@@ -43,6 +45,8 @@ class Crc(DuplexStage[ProgramBuilder]):
             "reflected": bool(params.get("reflected", False)),
             "xorout": int(params.get("xorout", 0)),
             "bit_order": str(params.get("bit_order", "msb")),
+            "fold_tail": int(params.get("fold_tail", 0)),
+            "checksum_le": bool(params.get("checksum_le", False)),
         }
 
     def emit_rx(self, b: ProgramBuilder, params: Mapping[str, Any]) -> None:
