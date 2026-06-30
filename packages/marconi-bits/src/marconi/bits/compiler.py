@@ -1,0 +1,25 @@
+from __future__ import annotations
+
+from collections.abc import Mapping
+from typing import Literal
+
+from marconi.bits.builder import ProgramBuilder
+from marconi.bits.models import CodecSpec
+from marconi.bits.program import FrameProgram
+from marconi.core.stages import Stage, StageDirectionError
+
+
+def compile_codec(
+    codec: CodecSpec,
+    registry: Mapping[str, Stage[ProgramBuilder]],
+    direction: Literal["rx", "tx"],
+) -> FrameProgram:
+    b = ProgramBuilder()
+    steps = codec.path if direction == "rx" else list(reversed(codec.path))
+    for step in steps:
+        stage = registry[step.conv]
+        if direction not in stage.directions:
+            raise StageDirectionError(stage.name, direction, stage.directions)
+        emit = stage.emit_rx if direction == "rx" else stage.emit_tx
+        emit(b, step.params)
+    return FrameProgram(direction=direction, steps=b.steps)
