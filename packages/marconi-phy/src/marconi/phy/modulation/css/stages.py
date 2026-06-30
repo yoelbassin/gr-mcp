@@ -9,7 +9,7 @@ from pydantic_core import PydanticCustomError
 from marconi.core.descriptor import Carrier, Descriptor
 from marconi.core.levels import Level
 from marconi.core.params import StageParams
-from marconi.core.stages import DuplexStage
+from marconi.core.stages import DuplexStage, RxStage, Stage
 from marconi.phy.compile_context import CompileContext
 
 _SF_MIN, _SF_MAX = 5, 14
@@ -123,8 +123,52 @@ class CssDemap(DuplexStage[CompileContext]):
         return Descriptor(Level.BITS, "b", in_desc.layout, Carrier.HARD)
 
 
-CSS_STAGES: tuple[type[DuplexStage[CompileContext]], ...] = (
+class _ExplicitParams(StageParams):
+    sf: StrictInt
+    header_cr: StrictInt = 4
+    ldro: bool = False
+    header_data_bits: StrictInt
+    header_parity: list[int]
+    field_payload_len: list[int]
+    field_cr: list[int]
+    field_has_crc: list[int]
+    field_parity: list[int]
+
+
+class CssExplicitDecode(RxStage[CompileContext]):
+    """CSS explicit-header decode, SYMBOLS->BITS (RX-only). Parses the LoRa-style
+    explicit header from the first 8 symbols, decodes the payload at its own code
+    rate, emits de-FEC'd payload bits. Generic over CSS explicit-header frames."""
+
+    name = "css_explicit_decode"
+    from_level = Level.SYMBOLS
+    to_level = Level.BITS
+    family = "css"
+    params_model = _ExplicitParams
+
+    def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
+        b.chain(
+            "css_explicit_decode",
+            sf=int(params["sf"]),
+            header_cr=int(params.get("header_cr", 4)),
+            ldro=bool(params.get("ldro", False)),
+            header_data_bits=int(params["header_data_bits"]),
+            header_parity=[int(x) for x in params["header_parity"]],
+            field_payload_len=[int(x) for x in params["field_payload_len"]],
+            field_cr=[int(x) for x in params["field_cr"]],
+            field_has_crc=[int(x) for x in params["field_has_crc"]],
+            field_parity=[int(x) for x in params["field_parity"]],
+        )
+
+    def out_descriptor(
+        self, in_desc: Descriptor, params: Mapping[str, Any]
+    ) -> Descriptor:
+        return Descriptor(Level.BITS, "b", in_desc.layout, Carrier.HARD)
+
+
+CSS_STAGES: tuple[type[Stage[CompileContext]], ...] = (
     ChirpSync,
     Dechirp,
     CssDemap,
+    CssExplicitDecode,
 )
