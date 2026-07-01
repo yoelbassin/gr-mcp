@@ -118,8 +118,27 @@ class Descramble(DuplexStage[ProgramBuilder]):
         b.add(framing.descramble_tx, sequence=str(params["sequence"]))
 
 
+class DescrambleBits(DuplexStage[ProgramBuilder]):
+    name = "descramble_bits"
+    from_level = Level.BITS
+    to_level = Level.BITS
+    family = "framing"
+
+    class _Params(StageParams):
+        sequence: str
+
+    params_model = _Params
+
+    def emit_rx(self, b: ProgramBuilder, params: Mapping[str, Any]) -> None:
+        b.add(framing.descramble_bits_rx, sequence=str(params["sequence"]))
+
+    def emit_tx(self, b: ProgramBuilder, params: Mapping[str, Any]) -> None:
+        b.add(framing.descramble_bits_tx, sequence=str(params["sequence"]))
+
+
 FRAMING_STAGES: tuple[type[DuplexStage[ProgramBuilder]], ...] = (
     Descramble,
+    DescrambleBits,
     Differential,
     FixedFrame,
     HdlcDeframe,

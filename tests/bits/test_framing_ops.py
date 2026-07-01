@@ -53,3 +53,19 @@ def test_fixed_frame_rx_drops_past_end_frame():
     f = _Frame(start=16, cursor=16)
     c = framing.fixed_frame_rx(RxCarrier(bits=bits, frames=[f]), payload_bits=16)
     assert len(c.frames) == 0
+
+
+def test_descramble_bits_xor_and_tile():
+    bits = np.array([1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1], np.uint8)
+    out = framing.descramble_bits_rx(RxCarrier(bits=bits), sequence="f0")  # 11110000
+    assert out.bits.tolist() == [0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0]
+
+
+def test_descramble_bits_round_trip():
+    rng = np.random.default_rng(0)
+    bits = rng.integers(0, 2, 800).astype(np.uint8)
+    seq = "a5c3"  # 16-bit repeating sequence
+    framing.descramble_bits_tx(TxCarrier([bits]))  # identity carrier shape
+    enc = framing.descramble_bits_rx(RxCarrier(bits=bits), sequence=seq).bits
+    back = framing.descramble_bits_rx(RxCarrier(bits=enc), sequence=seq).bits
+    assert np.array_equal(back, bits)

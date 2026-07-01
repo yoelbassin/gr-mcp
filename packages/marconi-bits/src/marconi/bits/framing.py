@@ -344,6 +344,32 @@ def hdlc_deframe_tx(c: TxCarrier, *, bit_order: str = "msb") -> TxCarrier:
     return TxCarrier(framed)
 
 
+# --- Descramble at the BITS rung: XOR the whole stream with a repeating seq ---
+def _seq_bits(sequence: str) -> np.ndarray:
+    return np.unpackbits(np.frombuffer(bytes.fromhex(sequence), dtype=np.uint8))
+
+
+def descramble_bits_rx(c: RxCarrier, *, sequence: str = "") -> RxCarrier:
+    seq = _seq_bits(sequence)
+    bits = np.asarray(c.bits, dtype=np.uint8)
+    if seq.size == 0 or bits.size == 0:
+        return c
+    return RxCarrier(
+        bits=np.bitwise_xor(bits, np.resize(seq, bits.size)), frames=c.frames
+    )
+
+
+def descramble_bits_tx(c: TxCarrier, *, sequence: str = "") -> TxCarrier:
+    seq = _seq_bits(sequence)
+    out = []
+    for it in c.items:
+        b = np.asarray(it, dtype=np.uint8)
+        out.append(
+            np.bitwise_xor(b, np.resize(seq, b.size)) if seq.size and b.size else b
+        )
+    return TxCarrier(out)
+
+
 # --- Descramble: XOR each frame payload byte-for-byte with a sequence --------
 def _xor_seq(data: bytes, seq: bytes) -> bytes:
     if len(seq) < len(data):
