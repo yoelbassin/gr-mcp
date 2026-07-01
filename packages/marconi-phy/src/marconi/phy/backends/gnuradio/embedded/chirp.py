@@ -5,6 +5,8 @@ from typing import Any
 
 import numpy as np
 
+from marconi.phy.modulation.css.coding import gray_decode, gray_encode
+
 
 def _base_upchirp(sf: int, oversample: int) -> np.ndarray:
     n = 1 << sf
@@ -149,19 +151,6 @@ def _demod_symbol(chunk: np.ndarray, grid: _Grid) -> int:
     return int(round(fine % grid.bins / grid.zero_pad)) % n
 
 
-def _gray_encode(n: int) -> int:
-    return n ^ (n >> 1)
-
-
-def _gray_decode(g: int) -> int:
-    n = g
-    g >>= 1
-    while g:
-        n ^= g
-        g >>= 1
-    return n
-
-
 # Each GR class is defined INSIDE its builder so that `gr` is never a module-
 # level name (satisfies the phy ⊥ gnuradio invariant checked by test_invariants).
 
@@ -287,7 +276,7 @@ def make_css_map(gr: Any, sf: int) -> Any:
             for i in range(nsym):
                 bits = x[i * sf : (i + 1) * sf]
                 s = int(np.asarray(bits, dtype=int).dot(1 << np.arange(sf)[::-1]))
-                out[i] = _gray_encode(s)
+                out[i] = gray_encode(s)
             self.consume(0, nsym * sf)
             return nsym
 
@@ -312,7 +301,7 @@ def make_css_demap(gr: Any, sf: int) -> Any:
             out = output_items[0]
             nsym = min(len(x), len(out) // sf)
             for i in range(nsym):
-                s = _gray_decode(int(x[i]) & ((1 << sf) - 1))
+                s = gray_decode(int(x[i]) & ((1 << sf) - 1))
                 bits = [(s >> (sf - 1 - j)) & 1 for j in range(sf)]
                 out[i * sf : (i + 1) * sf] = np.asarray(bits, dtype=np.uint8)
             self.consume(0, nsym)
