@@ -11,6 +11,34 @@ import numpy as np
 from marconi.phy.modulation.ofdm import primitives as prim
 
 
+def _resync_base(
+    buf: np.ndarray,
+    predicted: int,
+    *,
+    null_len: int,
+    tol: int,
+    max_corr: int,
+) -> int:
+    """Refine the next frame's base by locating the null nearest ``predicted``.
+    Snaps to ``predicted`` within ``tol`` (detection noise / negligible SFO) and
+    ignores implausible jumps beyond ``max_corr``, so a drift-free capture strides
+    exactly as before; genuine accumulated drift follows the detected null."""
+    lo, hi = predicted - null_len - max_corr, predicted + max_corr
+    if lo < 0 or hi > buf.size:
+        return predicted
+    p = np.abs(buf[lo:hi]) ** 2
+    cs = np.concatenate([np.zeros(1), np.cumsum(p)])
+    energy = cs[null_len:] - cs[: p.size - null_len + 1]
+    j = int(np.argmin(energy))
+    thr = 0.25 * float(np.mean(p))
+    if energy[j] > thr * null_len:
+        return predicted
+    while j < p.size and p[j] <= thr:
+        j += 1
+    delta = lo + j - predicted
+    return lo + j if tol < abs(delta) <= max_corr else predicted
+
+
 def make_ofdm_frame_sync(
     gr: Any,
     *,
@@ -32,7 +60,11 @@ def make_ofdm_frame_sync(
         # scale-consistent within a frame and is magnitude-invariant for the lock.
         arr = np.concatenate(blocks).astype(np.complex64)
         std = float(np.std(arr))
-        return (arr / std).astype(np.complex64) if std > 0 else arr
+        if std < 1e-12:
+            return np.zeros_like(arr)
+        return (arr / std).astype(np.complex64)
+
+    tol, max_corr = max(1, cp_len // 2), sym_len
 
     class _OfdmFrameSync(gr.basic_block):
         def __init__(self) -> None:
@@ -74,7 +106,13 @@ def make_ofdm_frame_sync(
                 self._out = np.concatenate(
                     [self._out, _frame_usefuls(self._buf, self._base)]
                 )
-                self._base += frame_len
+                self._base = _resync_base(
+                    self._buf,
+                    self._base + frame_len,
+                    null_len=null_len,
+                    tol=tol,
+                    max_corr=max_corr,
+                )
             out = output_items[0]
             if self._out.size:
                 k = min(self._out.size, len(out))
