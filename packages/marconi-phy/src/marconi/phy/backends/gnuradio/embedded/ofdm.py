@@ -1,6 +1,5 @@
-"""OFDM frame sync + CP-strip (embedded GR block, scalar). Null-syncs and, per
-frame, emits the FIC symbols' CP-stripped useful parts back-to-back, for a stock
-stream_to_vector -> fft_vcc to transform. Generic; geometry is parameters."""
+"""OFDM frame sync + CP-strip: null-syncs, then per frame emits the CP-stripped
+usefuls back-to-back for a stock stream_to_vector -> fft_vcc. Geometry is params."""
 
 from __future__ import annotations
 
@@ -19,10 +18,8 @@ def _resync_base(
     tol: int,
     max_corr: int,
 ) -> int:
-    """Refine the next frame's base by locating the null nearest ``predicted``.
-    Snaps to ``predicted`` within ``tol`` (detection noise / negligible SFO) and
-    ignores implausible jumps beyond ``max_corr``, so a drift-free capture strides
-    exactly as before; genuine accumulated drift follows the detected null."""
+    """Null nearest ``predicted``; snap within ``tol``, reject jumps past
+    ``max_corr`` — drift-free strides unchanged, real drift follows the null."""
     lo, hi = predicted - null_len - max_corr, predicted + max_corr
     if lo < 0 or hi > buf.size:
         return predicted
@@ -54,10 +51,7 @@ def make_ofdm_frame_sync(
             buf[base + m * sym_len + cp_len : base + m * sym_len + cp_len + fft_len]
             for m in range(data_syms + 1)
         ]
-        # Normalize per frame: the raw capture stores large-amplitude ADC values;
-        # the downstream stock soft decoder needs unit-ish magnitude input (the
-        # de-risk normalized the IQ globally). Per-frame keeps the differential
-        # scale-consistent within a frame and is magnitude-invariant for the lock.
+        # Per-frame std-normalize: the stock soft decoder zeros on large input.
         arr = np.concatenate(blocks).astype(np.complex64)
         std = float(np.std(arr))
         if std < 1e-12:
