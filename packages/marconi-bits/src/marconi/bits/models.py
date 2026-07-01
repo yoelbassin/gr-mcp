@@ -32,11 +32,11 @@ class FrameResult(BaseModel):
     bit_offset: int
     payload_hex: str
     crc_ok: bool | None
-    message: dict | None = None
+    message: dict[str, int | str] | None = None
 
 
 class DecodeResult(BaseModel):
-    messages: list[dict]
+    messages: list[dict[str, int | str]]
     frames: list[FrameResult]
     num_frames: int
     num_crc_ok: int

@@ -186,7 +186,9 @@ def _encode_charset(text: str, bits: int, table: str) -> int:
     return value
 
 
-def _apply_fields_rx(message: dict, fields: list[ParseField]) -> dict:
+def _apply_fields_rx(
+    message: dict[str, int | str], fields: list[ParseField]
+) -> dict[str, int | str]:
     for f in fields:
         if f.charset is not None:
             message[f.name] = _decode_charset(int(message[f.name]), f.bits, f.charset)
@@ -214,7 +216,9 @@ def parse_rx(
     for f in c.frames:
         if f.crc_ok is not False and len(f.payload) >= need:
             parsed = struct.parse(_lsb(f.payload, bit_order))
-            msg = {k: int(v) for k, v in parsed.items() if not k.startswith("_")}
+            msg: dict[str, int | str] = {
+                k: int(v) for k, v in parsed.items() if not k.startswith("_")
+            }
             out.append(replace(f, message=_apply_fields_rx(msg, fields)))
         else:
             out.append(f)

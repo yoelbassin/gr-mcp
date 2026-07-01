@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any
 
 import numpy as np
 
@@ -11,7 +12,7 @@ class _Frame:
     cursor: int
     payload: bytes = b""
     crc_ok: bool | None = None
-    message: dict | None = None
+    message: dict[str, int | str] | None = None
 
 
 @dataclass(frozen=True)
@@ -23,4 +24,4 @@ class RxCarrier:
 
 @dataclass(frozen=True)
 class TxCarrier:
-    items: list
+    items: list[Any]  # varies per TX stage: bytes | ndarray | message dict
