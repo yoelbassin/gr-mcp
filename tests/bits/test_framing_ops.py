@@ -69,3 +69,17 @@ def test_descramble_bits_round_trip():
     enc = framing.descramble_bits_rx(RxCarrier(bits=bits), sequence=seq).bits
     back = framing.descramble_bits_rx(RxCarrier(bits=enc), sequence=seq).bits
     assert np.array_equal(back, bits)
+
+
+def test_descramble_bits_tx_rx_round_trip_multi_item_non_period_aligned():
+    seq = "a5c3"  # 16-bit repeating keystream
+    rng = np.random.default_rng(1)
+    frames = [rng.integers(0, 2, 30).astype(np.uint8) for _ in range(4)]  # 30 % 16 != 0
+    wire = np.concatenate(
+        [
+            np.asarray(it, np.uint8)
+            for it in framing.descramble_bits_tx(TxCarrier(frames), sequence=seq).items
+        ]
+    )
+    back = framing.descramble_bits_rx(RxCarrier(bits=wire), sequence=seq).bits
+    assert np.array_equal(back, np.concatenate(frames))

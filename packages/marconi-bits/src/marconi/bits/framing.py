@@ -360,14 +360,13 @@ def descramble_bits_rx(c: RxCarrier, *, sequence: str = "") -> RxCarrier:
 
 
 def descramble_bits_tx(c: TxCarrier, *, sequence: str = "") -> TxCarrier:
+    if not c.items:
+        return c
     seq = _seq_bits(sequence)
-    out = []
-    for it in c.items:
-        b = np.asarray(it, dtype=np.uint8)
-        out.append(
-            np.bitwise_xor(b, np.resize(seq, b.size)) if seq.size and b.size else b
-        )
-    return TxCarrier(out)
+    stream = np.concatenate([np.asarray(it, dtype=np.uint8) for it in c.items])
+    if seq.size == 0 or stream.size == 0:
+        return c
+    return TxCarrier(items=[np.bitwise_xor(stream, np.resize(seq, stream.size))])
 
 
 # --- Descramble: XOR each frame payload byte-for-byte with a sequence --------
