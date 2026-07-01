@@ -115,7 +115,7 @@ def _peak_bin(signal: np.ndarray, x: int, grid: _Grid, up: bool) -> float:
 
 
 def _joint_sync(
-    signal: np.ndarray, payload_start: int, grid: _Grid
+    signal: np.ndarray, payload_start: int, grid: _Grid, preamble_len: int
 ) -> tuple[float, float]:
     """Joint estimate from the preamble up-chirps + SFD down-chirps. A preamble
     up-chirp dechirps to bin ~ (CFO + STO); an SFD down-chirp to ~ (CFO - STO).
@@ -124,7 +124,10 @@ def _joint_sync(
     sfd_start = payload_start - int(round(2.25 * sn))
     u = float(
         np.median(
-            [_peak_bin(signal, sfd_start - i * sn, grid, True) for i in range(1, 8)]
+            [
+                _peak_bin(signal, sfd_start - i * sn, grid, True)
+                for i in range(1, preamble_len)
+            ]
         )
     )
     d = float(
@@ -354,7 +357,9 @@ def make_chirp_sync(
                 return False
             if payload_start + sn > len(self._buf):
                 return False
-            cfo_bins, sto_bins = _joint_sync(self._buf, payload_start, grid)
+            cfo_bins, sto_bins = _joint_sync(
+                self._buf, payload_start, grid, preamble_len
+            )
             self._f_cfo = cfo_bins * bandwidth / grid.bins
             sto = sto_bins * oversample / zero_pad  # fractional sample timing
             n_int = int(round(sto))
