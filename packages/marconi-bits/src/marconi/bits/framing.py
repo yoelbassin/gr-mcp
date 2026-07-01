@@ -278,7 +278,7 @@ def _bitstuff(bits: np.ndarray) -> np.ndarray:
     return np.array(out, dtype=np.uint8)
 
 
-def _destuff(bits: np.ndarray) -> np.ndarray:
+def _destuff(bits: np.ndarray) -> np.ndarray | None:
     out: list[int] = []
     ones = 0
     i = 0
@@ -289,6 +289,8 @@ def _destuff(bits: np.ndarray) -> np.ndarray:
         if bit:
             ones += 1
             if ones == 5:
+                if i + 1 >= n or int(bits[i + 1]) == 1:
+                    return None
                 i += 1
                 ones = 0
         else:
@@ -304,7 +306,7 @@ def _find_flags(bits: np.ndarray) -> list[int]:
     while i <= n - 8:
         if np.array_equal(bits[i : i + 8], _HDLC_FLAG):
             flags.append(i)
-            i += 8
+            i += 7
         else:
             i += 1
     return flags
@@ -320,7 +322,7 @@ def hdlc_deframe_rx(c: RxCarrier, *, bit_order: str = "msb") -> RxCarrier:
         if region.size == 0:
             continue
         content = _destuff(region)
-        if content.size == 0 or content.size % 8 != 0:
+        if content is None or content.size == 0 or content.size % 8 != 0:
             continue
         frames.append(
             _Frame(

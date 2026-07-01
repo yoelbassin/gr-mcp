@@ -4,6 +4,8 @@ import numpy as np
 
 from marconi.bits.carriers import RxCarrier, TxCarrier, _Frame
 from marconi.bits.framing import (
+    _destuff,
+    _find_flags,
     build_struct,
     crc_value,
     differential_rx,
@@ -30,6 +32,23 @@ def test_hdlc_frame_deframe_roundtrip() -> None:
     out = hdlc_deframe_rx(RxCarrier(bits=framed), bit_order="msb")
     assert len(out.frames) == 1
     assert out.frames[0].payload == payload
+
+
+def test_destuff_rejects_sixth_consecutive_one() -> None:
+    assert _destuff(np.array([1, 1, 1, 1, 1, 1, 0, 1], dtype=np.uint8)) is None
+    assert _destuff(np.array([0, 1, 1, 1, 1, 1, 1, 1], dtype=np.uint8)) is None
+
+
+def test_destuff_removes_valid_stuffed_zero() -> None:
+    out = _destuff(np.array([1, 1, 1, 1, 1, 0, 1], dtype=np.uint8))
+    assert out is not None and np.array_equal(
+        out, np.array([1, 1, 1, 1, 1, 1], dtype=np.uint8)
+    )
+
+
+def test_find_flags_catches_zero_shared_flag() -> None:
+    seq = np.array([0, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 0], dtype=np.uint8)
+    assert _find_flags(seq) == [0, 7]
 
 
 def test_crc_x25_and_ccitt_vectors() -> None:
