@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from dataclasses import replace
 from functools import lru_cache
 from typing import Literal
 
@@ -111,7 +112,7 @@ def crc_rx(
             continue
         body, checksum = f.payload[:-n], f.payload[-n:]
         rx = int.from_bytes(checksum, endian)
-        f.crc_ok = (
+        crc_ok = (
             _fold(
                 body,
                 poly=poly,
@@ -123,8 +124,7 @@ def crc_rx(
             )
             == rx
         )
-        f.payload = body
-        out.append(f)
+        out.append(replace(f, crc_ok=crc_ok, payload=body))
     return RxCarrier(bits=c.bits, frames=out)
 
 
@@ -212,12 +212,15 @@ def parse_rx(
     c: RxCarrier, *, struct: BitStruct, fields: list[ParseField], bit_order: str = "msb"
 ) -> RxCarrier:
     need = (sum(f.bits for f in fields) + 7) // 8
+    out: list[_Frame] = []
     for f in c.frames:
         if f.crc_ok is not False and len(f.payload) >= need:
             parsed = struct.parse(_lsb(f.payload, bit_order))
             msg = {k: int(v) for k, v in parsed.items() if not k.startswith("_")}
-            f.message = _apply_fields_rx(msg, fields)
-    return c
+            out.append(replace(f, message=_apply_fields_rx(msg, fields)))
+        else:
+            out.append(f)
+    return RxCarrier(bits=c.bits, frames=out)
 
 
 def parse_tx(
@@ -252,9 +255,8 @@ def fixed_frame_rx(c: RxCarrier, *, payload_bits: int) -> RxCarrier:
     out: list[_Frame] = []
     for f in c.frames:
         if f.cursor + payload_bits <= len(c.bits):
-            f.payload = bits_to_bytes(c.bits[f.cursor : f.cursor + payload_bits])
-            f.cursor += payload_bits
-            out.append(f)
+            payload = bits_to_bytes(c.bits[f.cursor : f.cursor + payload_bits])
+            out.append(replace(f, payload=payload, cursor=f.cursor + payload_bits))
     return RxCarrier(bits=c.bits, frames=out)
 
 
@@ -383,9 +385,8 @@ def _xor_seq(data: bytes, seq: bytes) -> bytes:
 
 def descramble_rx(c: RxCarrier, *, sequence: str) -> RxCarrier:
     seq = bytes.fromhex(sequence)
-    for f in c.frames:
-        f.payload = _xor_seq(f.payload, seq)
-    return c
+    frames = [replace(f, payload=_xor_seq(f.payload, seq)) for f in c.frames]
+    return RxCarrier(bits=c.bits, frames=frames)
 
 
 def descramble_tx(c: TxCarrier, *, sequence: str) -> TxCarrier:

@@ -13,8 +13,7 @@ _SF7_CRC_LE = bytes([0xFF, 0x10])
 
 def test_fold_tail_crc_validates_reference_payload():
     # Full trailing frame = payload + CRC field (19 bytes).
-    f = _Frame(start=0, cursor=0)
-    f.payload = _SF7_PAYLOAD + _SF7_CRC_LE
+    f = _Frame(start=0, cursor=0, payload=_SF7_PAYLOAD + _SF7_CRC_LE)
     c = framing.crc_rx(
         RxCarrier(bits=np.zeros(0, np.uint8), frames=[f]),
         poly=0x1021,

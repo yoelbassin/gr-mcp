@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 
-@dataclass
+@dataclass(frozen=True)
 class _Frame:
     start: int
     cursor: int
@@ -14,13 +14,13 @@ class _Frame:
     message: dict | None = None
 
 
-@dataclass
+@dataclass(frozen=True)
 class RxCarrier:
     bits: np.ndarray
     frames: list[_Frame] = field(default_factory=list)
     llrs: np.ndarray | None = None  # soft lane: present, unused in slice 1
 
 
-@dataclass
+@dataclass(frozen=True)
 class TxCarrier:
     items: list

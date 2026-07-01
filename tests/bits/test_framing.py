@@ -79,5 +79,5 @@ def test_parse_roundtrip_signed() -> None:
         bits=np.zeros(0, np.uint8),
         frames=[_Frame(start=0, cursor=0, payload=built, crc_ok=True)],
     )
-    parse_rx(car, struct=st, fields=fields, bit_order="msb")
-    assert car.frames[0].message == msg
+    out = parse_rx(car, struct=st, fields=fields, bit_order="msb")
+    assert out.frames[0].message == msg

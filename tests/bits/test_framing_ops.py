@@ -30,8 +30,7 @@ def test_nibble_swap_swaps_per_byte_and_roundtrips():
 
 def test_descramble_xors_and_roundtrips():
     seq = "0f10"
-    f = _Frame(start=0, cursor=0)
-    f.payload = bytes([0xAB, 0xCD])
+    f = _Frame(start=0, cursor=0, payload=bytes([0xAB, 0xCD]))
     c = framing.descramble_rx(
         RxCarrier(bits=np.zeros(0, np.uint8), frames=[f]), sequence=seq
     )
