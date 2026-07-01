@@ -22,11 +22,3 @@ class Descriptor:
     item_type: str  # GR stream item type: "c","f","b","s" (backend-resolved)
     layout: Layout = Layout.STREAM
     carrier: Carrier = Carrier.HARD
-
-    def compatible_with(self, other: Descriptor) -> bool:
-        return (
-            self.level == other.level
-            and self.item_type == other.item_type
-            and self.layout == other.layout
-            and self.carrier == other.carrier
-        )
