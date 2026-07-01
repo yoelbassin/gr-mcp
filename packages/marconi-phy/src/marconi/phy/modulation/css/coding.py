@@ -20,6 +20,10 @@ HAMMING_PARITY: dict[int, list[list[int]]] = {
 _MIN_PARITY_FOR_CORRECTION = 3
 
 
+def supported_cr(cr: int) -> bool:
+    return cr in HAMMING_PARITY
+
+
 def gray_encode(x: int) -> int:
     return x ^ (x >> 1)
 

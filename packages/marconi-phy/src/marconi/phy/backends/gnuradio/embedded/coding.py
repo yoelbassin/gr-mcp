@@ -88,6 +88,9 @@ def make_css_explicit_decode(
                 return
             payload_len = coding.bits_to_uint(hbits, pl_start, pl_len)
             payload_cr = coding.bits_to_uint(hbits, cr_start, cr_len)
+            if not coding.supported_cr(payload_cr):
+                self._done = True
+                return
             has_crc = coding.bits_to_uint(hbits, crc_start, crc_len)
             self._frame_len = coding.css_explicit_frame_len(
                 payload_len, has_crc, payload_cr, sf, int(ldro), sf_reduction

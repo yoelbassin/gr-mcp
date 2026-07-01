@@ -70,3 +70,11 @@ def test_header_parity_ok_roundtrips_known_masks():
     for i, m in enumerate(masks):
         computed |= (bin(m & data).count("1") & 1) << (len(masks) - 1 - i)
     assert coding.header_parity_ok(data, computed, masks)
+
+
+def test_supported_cr_matches_hamming_keys():
+    for cr in (1, 2, 3, 4):
+        assert coding.supported_cr(cr)
+    for cr in (0, 5, 6, 7):
+        assert not coding.supported_cr(cr)
+    assert set(coding.HAMMING_PARITY) == {1, 2, 3, 4}
