@@ -127,6 +127,9 @@ class _ExplicitParams(StageParams):
     sf: StrictInt
     header_cr: StrictInt = 4
     ldro: bool = False
+    header_symbols: StrictInt
+    header_nibbles: StrictInt
+    sf_reduction: StrictInt
     header_data_bits: StrictInt
     header_parity: list[int]
     field_payload_len: list[int]
@@ -152,9 +155,10 @@ class _ExplicitParams(StageParams):
 
 
 class CssExplicitDecode(RxStage[CompileContext]):
-    """CSS explicit-header decode, SYMBOLS->BITS (RX-only). Parses the LoRa-style
-    explicit header from the first 8 symbols, decodes the payload at its own code
-    rate, emits de-FEC'd payload bits. Generic over CSS explicit-header frames."""
+    """CSS explicit-header decode, SYMBOLS->BITS (RX-only). Parses the explicit
+    header, decodes the payload at its own code rate, emits de-FEC'd payload bits.
+    Generic over CSS explicit-header frames: the header geometry (symbol/nibble
+    counts, reduced-rate delta) and field layout are caller-supplied parameters."""
 
     name = "css_explicit_decode"
     from_level = Level.SYMBOLS
@@ -168,6 +172,9 @@ class CssExplicitDecode(RxStage[CompileContext]):
             sf=int(params["sf"]),
             header_cr=int(params.get("header_cr", 4)),
             ldro=bool(params.get("ldro", False)),
+            header_symbols=int(params["header_symbols"]),
+            header_nibbles=int(params["header_nibbles"]),
+            sf_reduction=int(params["sf_reduction"]),
             header_data_bits=int(params["header_data_bits"]),
             header_parity=[int(x) for x in params["header_parity"]],
             field_payload_len=[int(x) for x in params["field_payload_len"]],

@@ -13,9 +13,6 @@ import numpy as np
 
 from marconi.phy.modulation.css import coding
 
-_HEADER_SYMBOLS = 8
-_EXPLICIT_HEADER_NIBBLES = 5
-
 
 def make_css_explicit_decode(
     gr: Any,
@@ -23,6 +20,9 @@ def make_css_explicit_decode(
     sf: int,
     header_cr: int,
     ldro: bool,
+    header_symbols: int,
+    header_nibbles: int,
+    sf_reduction: int,
     header_data_bits: int,
     header_parity: list,
     field_payload_len: list,
@@ -31,8 +31,8 @@ def make_css_explicit_decode(
     field_parity: list,
 ) -> Any:
     n = 1 << sf
-    header_sf_app = sf - 2
-    payload_sf_app = sf - 2 if ldro else sf
+    header_sf_app = sf - sf_reduction
+    payload_sf_app = sf - sf_reduction if ldro else sf
     masks = [int(x) for x in header_parity]
     pl_start, pl_len = (int(x) for x in field_payload_len)
     cr_start, cr_len = (int(x) for x in field_cr)
@@ -85,9 +85,9 @@ def make_css_explicit_decode(
 
         def _parse_header(self) -> None:
             nibbles = _fec_nibbles(
-                self._symbols[:_HEADER_SYMBOLS], header_sf_app, header_cr
+                self._symbols[:header_symbols], header_sf_app, header_cr
             )
-            hbits = _nibbles_to_bits(nibbles[:_EXPLICIT_HEADER_NIBBLES])
+            hbits = _nibbles_to_bits(nibbles[:header_nibbles])
             data_int = coding.bits_to_uint(hbits, 0, header_data_bits)
             received = coding.bits_to_uint(hbits, par_start, par_len)
             if not coding.header_parity_ok(data_int, received, masks):
@@ -97,14 +97,14 @@ def make_css_explicit_decode(
             payload_cr = coding.bits_to_uint(hbits, cr_start, cr_len)
             has_crc = coding.bits_to_uint(hbits, crc_start, crc_len)
             self._frame_len = coding.css_explicit_frame_len(
-                payload_len, has_crc, payload_cr, sf, int(ldro)
+                payload_len, has_crc, payload_cr, sf, int(ldro), sf_reduction
             )
             self._payload_cr = payload_cr
-            self._carry = _nibbles_to_bits(nibbles[_EXPLICIT_HEADER_NIBBLES:])
+            self._carry = _nibbles_to_bits(nibbles[header_nibbles:])
 
         def _decode_frame(self) -> None:
             assert self._frame_len is not None
-            payload = self._symbols[_HEADER_SYMBOLS : _HEADER_SYMBOLS + self._frame_len]
+            payload = self._symbols[header_symbols : header_symbols + self._frame_len]
             nibbles = _fec_nibbles(payload, payload_sf_app, self._payload_cr)
             self._out = self._carry + _nibbles_to_bits(nibbles)
             self._done = True
@@ -115,12 +115,12 @@ def make_css_explicit_decode(
             if not self._done and self._out is None:
                 self._symbols.extend(int(s) for s in inp)
                 self.consume(0, len(inp))
-                if self._frame_len is None and len(self._symbols) >= _HEADER_SYMBOLS:
+                if self._frame_len is None and len(self._symbols) >= header_symbols:
                     self._parse_header()
                 if (
                     self._frame_len is not None
                     and self._out is None
-                    and len(self._symbols) >= _HEADER_SYMBOLS + self._frame_len
+                    and len(self._symbols) >= header_symbols + self._frame_len
                 ):
                     self._decode_frame()
                 if not self._out:

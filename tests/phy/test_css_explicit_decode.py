@@ -27,6 +27,9 @@ _SF11_SYMBOLS = [
 
 _HEADER = dict(
     header_cr=4,
+    header_symbols=8,
+    header_nibbles=5,
+    sf_reduction=2,
     header_data_bits=12,
     header_parity=[3840, 2273, 1178, 599, 303],
     field_payload_len=[0, 8],

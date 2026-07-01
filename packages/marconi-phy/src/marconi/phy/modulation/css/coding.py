@@ -92,7 +92,8 @@ def header_parity_ok(data_int: int, received_parity: int, masks: list[int]) -> b
 
 
 def css_explicit_frame_len(
-    payload_len: int, has_crc: int, cr: int, sf: int, ldro: int
+    payload_len: int, has_crc: int, cr: int, sf: int, ldro: int, sf_reduction: int
 ) -> int:
-    blocks = max(ceil((2 * payload_len - sf + 7 + 4 * has_crc) / (sf - 2 * ldro)), 0)
+    denom = sf - sf_reduction * ldro
+    blocks = max(ceil((2 * payload_len - sf + 7 + 4 * has_crc) / denom), 0)
     return (cr + 4) * blocks

@@ -59,7 +59,7 @@ def test_block_fec_cr1_does_not_correct_even_when_requested():
 
 def test_frame_len_sf11_255_byte_ldro_cr1():
     # IQ_2: 255-byte payload, has_crc, cr=1, sf=11, ldro=1 → 285 coded payload symbols.
-    assert coding.css_explicit_frame_len(255, 1, 1, 11, 1) == 285
+    assert coding.css_explicit_frame_len(255, 1, 1, 11, 1, 2) == 285
 
 
 def test_header_parity_ok_roundtrips_known_masks():
