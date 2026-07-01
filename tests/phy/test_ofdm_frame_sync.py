@@ -54,4 +54,8 @@ def test_frame_sync_strips_cp(tmp_path):
     assert r.status == "ok", r
     out = np.fromfile(snk, np.complex64)
     assert out.size == (DS + 1) * FFT
-    assert np.allclose(out[:FFT], usefuls[0], atol=1e-4)
+    # ofdm_frame_sync normalizes each frame's usefuls by their std (so the stock
+    # soft decoder downstream sees unit-ish magnitude); compare against that.
+    expected = np.concatenate(usefuls)
+    expected = (expected / np.std(expected)).astype(np.complex64)
+    assert np.allclose(out, expected, atol=1e-4)

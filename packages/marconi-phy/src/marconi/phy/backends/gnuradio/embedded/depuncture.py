@@ -24,7 +24,7 @@ def make_depuncture(gr: Any, *, keep_mask: list) -> Any:
             self._out = np.empty(0, dtype=np.float32)
 
         def forecast(self, noutput_items: int, ninputs: int) -> list:
-            return [1] * ninputs
+            return [0] * ninputs if self._out.size else [1] * ninputs
 
         def general_work(self, input_items: Any, output_items: Any) -> int:
             inp = input_items[0]

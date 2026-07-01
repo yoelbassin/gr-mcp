@@ -66,6 +66,8 @@ def test_ofdm_demod_symbol_major(tmp_path):
     assert r.status == "ok", r
     out = np.fromfile(snk, np.complex64)
     assert out.size == 4 * NC
-    assert np.allclose(
-        out.reshape(4, NC), cells, atol=1e-3
-    )  # symbol-major (symbol, carrier)
+    # ofdm_frame_sync normalizes each frame by std, so the recovered carriers equal
+    # the planted cells up to one global (real) scale; compare up to that scale.
+    carriers = out.reshape(4, NC)  # symbol-major (symbol, carrier)
+    scale = np.vdot(cells, carriers) / np.vdot(cells, cells)
+    assert np.allclose(carriers, cells * scale, rtol=1e-3, atol=1e-4)

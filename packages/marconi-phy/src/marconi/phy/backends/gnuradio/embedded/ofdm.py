@@ -26,7 +26,13 @@ def make_ofdm_frame_sync(
             buf[base + m * sym_len + cp_len : base + m * sym_len + cp_len + fft_len]
             for m in range(data_syms + 1)
         ]
-        return np.concatenate(blocks).astype(np.complex64)
+        # Normalize per frame: the raw capture stores large-amplitude ADC values;
+        # the downstream stock soft decoder needs unit-ish magnitude input (the
+        # de-risk normalized the IQ globally). Per-frame keeps the differential
+        # scale-consistent within a frame and is magnitude-invariant for the lock.
+        arr = np.concatenate(blocks).astype(np.complex64)
+        std = float(np.std(arr))
+        return (arr / std).astype(np.complex64) if std > 0 else arr
 
     class _OfdmFrameSync(gr.basic_block):
         def __init__(self) -> None:
@@ -41,7 +47,7 @@ def make_ofdm_frame_sync(
             self._out = np.empty(0, dtype=np.complex64)
 
         def forecast(self, noutput_items: int, ninputs: int) -> list:
-            return [1] * ninputs
+            return [0] * ninputs if self._out.size else [1] * ninputs
 
         def general_work(self, input_items: Any, output_items: Any) -> int:
             inp = input_items[0]
