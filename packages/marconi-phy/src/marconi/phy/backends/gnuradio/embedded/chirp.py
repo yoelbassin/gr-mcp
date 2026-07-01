@@ -5,10 +5,6 @@ from typing import Any
 
 import numpy as np
 
-# ─── Module-level numpy DSP (zero GR imports) ────────────────────────────────
-# Ported verbatim from the de-risk scripts (derisk_css.py / derisk_css2.py)
-# that reproduced the Flinders SF11 oracle (conf 0.9961, 20/20 symbols).
-
 
 def _base_upchirp(sf: int, oversample: int) -> np.ndarray:
     n = 1 << sf
@@ -166,7 +162,6 @@ def _gray_decode(g: int) -> int:
     return n
 
 
-# ─── Embedded GR-block builders ──────────────────────────────────────────────
 # Each GR class is defined INSIDE its builder so that `gr` is never a module-
 # level name (satisfies the phy ⊥ gnuradio invariant checked by test_invariants).
 
@@ -216,7 +211,6 @@ def make_chirp_prepend(gr: Any, sf: int, oversample: int, preamble_len: int) -> 
 
 
 def make_chirp_mod(gr: Any, sf: int, oversample: int) -> Any:
-    """TX: int16 symbol index → oversample*(1<<sf) complex64 chirp samples."""
     sn = oversample * (1 << sf)
     table = np.stack([_modulate_symbol(s, sf, oversample) for s in range(1 << sf)])
 
@@ -274,8 +268,6 @@ def make_chirp_demod(gr: Any, sf: int, oversample: int, zero_pad: int) -> Any:
 
 
 def make_css_map(gr: Any, sf: int) -> Any:
-    """TX: sf uint8 bits (MSB-first) → one Gray-encoded int16 symbol index."""
-
     class _CssMap(gr.basic_block):
         def __init__(self) -> None:
             gr.basic_block.__init__(
@@ -303,8 +295,6 @@ def make_css_map(gr: Any, sf: int) -> Any:
 
 
 def make_css_demap(gr: Any, sf: int) -> Any:
-    """RX: one Gray-encoded int16 symbol index → sf uint8 bits (MSB-first)."""
-
     class _CssDemap(gr.basic_block):
         def __init__(self) -> None:
             gr.basic_block.__init__(

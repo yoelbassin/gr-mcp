@@ -10,7 +10,7 @@ class _Frame:
     start: int
     cursor: int
     payload: bytes = b""
-    crc_ok: bool | None = None  # None = no oracle checked it
+    crc_ok: bool | None = None
     message: dict | None = None
 
 
@@ -18,7 +18,7 @@ class _Frame:
 class RxCarrier:
     bits: np.ndarray
     frames: list[_Frame] = field(default_factory=list)
-    llrs: np.ndarray | None = None  # soft lane: present, unused in slice 1
+    llrs: np.ndarray | None = None
 
 
 @dataclass(frozen=True)

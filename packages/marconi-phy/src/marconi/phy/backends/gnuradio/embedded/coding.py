@@ -1,10 +1,3 @@
-"""Symbol-level explicit-header CSS decoder (embedded GR block). Reads dechirped
-int16 symbols, parses the explicit header from the first 8 symbols, decodes the
-payload at its own code rate, splices the SF>7 carry nibbles, and emits the de-FEC'd
-payload bits (uint8, one per byte). Generic over CSS explicit-header frames — the
-header field layout and code rates are parameters; LoRa is one parameter set.
-"""
-
 from __future__ import annotations
 
 from typing import Any

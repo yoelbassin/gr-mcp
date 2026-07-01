@@ -37,7 +37,6 @@ def _lsb(data: bytes, bit_order: str) -> bytes:
     return data.translate(_BITREV) if bit_order == "lsb" else data
 
 
-# --- CRC: generic, engine = the `crc` library (direct catalog parameters) ----
 @lru_cache(maxsize=None)
 def _calculator(
     poly: int, bits: int, init: int, reflected: bool, xorout: int
@@ -159,7 +158,6 @@ def crc_tx(
     )
 
 
-# --- parse: generic bitfields, engine = construct -----------------------------
 def parse_fields(raw: Iterable[object]) -> list[ParseField]:
     return [ParseField.model_validate(f) for f in raw]
 
@@ -236,7 +234,6 @@ def parse_tx(
     return TxCarrier(out)
 
 
-# --- Segment: carve flat bitstream into fixed-length frames -------------------
 def segment_rx(c: RxCarrier, *, frame_body_len: int) -> RxCarrier:
     frames: list[_Frame] = []
     i = 0
@@ -250,7 +247,6 @@ def segment_tx(c: TxCarrier) -> TxCarrier:
     return c
 
 
-# --- FixedFrame: materialise each frame's payload bytes -----------------------
 def fixed_frame_rx(c: RxCarrier, *, payload_bits: int) -> RxCarrier:
     out: list[_Frame] = []
     for f in c.frames:
@@ -264,7 +260,6 @@ def fixed_frame_tx(c: TxCarrier, *, payload_bits: int) -> TxCarrier:
     return TxCarrier([bytes_to_bits(b) for b in c.items])
 
 
-# --- HDLC framing (ported V1 numpy) -------------------------------------------
 def _bitstuff(bits: np.ndarray) -> np.ndarray:
     out: list[int] = []
     ones = 0
@@ -348,7 +343,6 @@ def hdlc_deframe_tx(c: TxCarrier, *, bit_order: str = "msb") -> TxCarrier:
     return TxCarrier(framed)
 
 
-# --- Descramble at the BITS rung: XOR the whole stream with a repeating seq ---
 def _seq_bits(sequence: str) -> np.ndarray:
     return np.unpackbits(np.frombuffer(bytes.fromhex(sequence), dtype=np.uint8))
 
@@ -373,7 +367,6 @@ def descramble_bits_tx(c: TxCarrier, *, sequence: str = "") -> TxCarrier:
     return TxCarrier(items=[np.bitwise_xor(stream, np.resize(seq, stream.size))])
 
 
-# --- Descramble: XOR each frame payload byte-for-byte with a sequence --------
 def _xor_seq(data: bytes, seq: bytes) -> bytes:
     if len(seq) < len(data):
         raise ValueError(
@@ -394,7 +387,6 @@ def descramble_tx(c: TxCarrier, *, sequence: str) -> TxCarrier:
     return TxCarrier([_xor_seq(it, seq) for it in c.items])
 
 
-# --- Nibble swap (swap high/low nibble within each byte) ----------------------
 def _nibble_swap_bits(bits: np.ndarray) -> np.ndarray:
     b = np.asarray(bits, dtype=np.uint8).copy()
     n = (b.size // 8) * 8
@@ -412,7 +404,6 @@ def nibble_swap_tx(c: TxCarrier) -> TxCarrier:
     return TxCarrier([_nibble_swap_bits(it) for it in c.items])
 
 
-# --- NRZI / differential (ported V1 numpy) ------------------------------------
 def differential_rx(c: RxCarrier, *, invert: bool = False) -> RxCarrier:
     b = np.asarray(c.bits, dtype=np.uint8)
     if b.size == 0:

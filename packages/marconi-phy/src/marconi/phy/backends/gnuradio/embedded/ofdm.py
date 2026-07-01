@@ -1,6 +1,3 @@
-"""OFDM frame sync + CP-strip: null-syncs, then per frame emits the CP-stripped
-usefuls back-to-back for a stock stream_to_vector -> fft_vcc. Geometry is params."""
-
 from __future__ import annotations
 
 from typing import Any
@@ -92,7 +89,7 @@ def make_ofdm_frame_sync(
                         sym_len=sym_len,
                     )
                 except ValueError:
-                    pass  # null not yet in buffer; retry on next call
+                    pass
             while (
                 self._base is not None
                 and self._base + (data_syms + 1) * sym_len <= self._buf.size
