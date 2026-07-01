@@ -7,10 +7,9 @@ from multiprocessing.context import BaseContext
 from pathlib import Path
 from typing import Any
 
-from marconi.phy.backends.base import Backend, BackendError
+from marconi.phy.backends.base import Backend, BackendError, RunResult
 from marconi.phy.backends.gnuradio.build import build_top_block
 from marconi.phy.backends.gnuradio.worker import (
-    RunResult,
     run_pipeline_worker,
     sink_paths,
 )

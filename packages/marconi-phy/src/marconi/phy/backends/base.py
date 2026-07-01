@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from typing import Literal
+
+from pydantic import BaseModel
 
 from marconi.phy.ir import GrPipeline
 
@@ -9,10 +12,17 @@ class BackendError(Exception):
     pass
 
 
+class RunResult(BaseModel):
+    status: Literal["ok", "error", "timeout"]
+    artifacts: list[str] = []
+    error: str | None = None
+
+
 class Backend(ABC):
-    """The swap seam between the compiler's IR and an execution engine. The GR-3.x
-    backend (Plan 3) and a future GR-4.0 backend implement this; the compiler and
-    GrPipeline are engine-portable above it."""
+    """The swap seam between the compiler's IR and an execution engine. The
+    GR-3.10 backend implements it today; GR-4.0 is the planned second. The IR is
+    portable across GR versions above this seam — GR keeps most block names, so
+    the port is largely a kind->factory remap, not an engine-neutral rewrite."""
 
     @property
     @abstractmethod
@@ -22,3 +32,9 @@ class Backend(ABC):
     def instantiate(self, pipeline: GrPipeline) -> object:
         """Resolve every block kind and wire connections WITHOUT running.
         Raise BackendError on an unresolvable kind or an invalid connection."""
+
+    @abstractmethod
+    def run_pipeline(self, pipeline: GrPipeline, timeout: float = 30.0) -> RunResult:
+        """Execute the wired pipeline to completion (file-to-file) and return its
+        status + sink artifacts. Execution belongs to the seam so a second backend
+        inherits the run model rather than re-authoring it."""

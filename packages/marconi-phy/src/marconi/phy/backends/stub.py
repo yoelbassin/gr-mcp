@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 
-from marconi.phy.backends.base import Backend, BackendError
+from marconi.phy.backends.base import Backend, BackendError, RunResult
 from marconi.phy.ir import GrPipeline
 
 
@@ -54,3 +54,6 @@ class StubBackend(Backend):
                 )
             edges.append((c.src_block, c.src_port, c.dst_block, c.dst_port))
         return StubGraph(blocks=blocks, edges=edges)
+
+    def run_pipeline(self, pipeline: GrPipeline, timeout: float = 30.0) -> RunResult:
+        raise BackendError("stub backend validates wiring only; it does not execute")

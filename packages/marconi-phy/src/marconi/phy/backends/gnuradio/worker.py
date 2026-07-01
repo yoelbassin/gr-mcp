@@ -1,11 +1,8 @@
 from __future__ import annotations
 
 from multiprocessing.connection import Connection
-from typing import Literal
 
-from pydantic import BaseModel
-
-from marconi.phy.backends.base import BackendError
+from marconi.phy.backends.base import BackendError, RunResult
 from marconi.phy.ir import GrPipeline
 
 _SINK_KINDS = {
@@ -14,12 +11,6 @@ _SINK_KINDS = {
     "soft_bits_file_sink",
     "symbols_file_sink",
 }
-
-
-class RunResult(BaseModel):
-    status: Literal["ok", "error", "timeout"]
-    artifacts: list[str] = []
-    error: str | None = None
 
 
 def sink_paths(pipeline: GrPipeline) -> list[str]:
