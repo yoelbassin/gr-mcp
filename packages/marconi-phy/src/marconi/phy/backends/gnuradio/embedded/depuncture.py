@@ -1,6 +1,7 @@
-"""Generic depuncture (erasure insertion) embedded block — the one operation no
-stock GR block does (it expands: sum(keep_mask) inputs -> len(keep_mask) outputs,
-inputs where the mask is 1, 0.0 erasures where 0). Puncture tables are parameters."""
+"""Soft (float32) depuncture: scatter sum(keep_mask) inputs into len(keep_mask)
+outputs at the mask's 1-positions, 0.0 erasures elsewhere. Stock fec.depuncture_bb
+is uint8 (127 erasures) with no float depuncture_ff, so the soft lane feeding
+trellis.viterbi_combined_fb has no stock equivalent. Puncture tables are params."""
 
 from __future__ import annotations
 
