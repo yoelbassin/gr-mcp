@@ -9,6 +9,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from bits.test_lora_codec import _codec
 
 from marconi.bits.registry import registry
 from marconi.bits.seam import parse_bitstream
@@ -21,7 +22,6 @@ from marconi.phy.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_
 from marconi.phy.compiler import compile_modem
 from marconi.phy.models import ModemSpec, ModemStep
 from marconi.phy.stages import stage_registry
-from tests.bits.test_lora_codec import _codec
 
 IQ = Descriptor(Level.IQ, "c")
 _RATE = 1_000_000.0
