@@ -18,8 +18,8 @@ from marconi.phy.backends.gnuradio.embedded.coding import make_css_explicit_deco
 from marconi.phy.backends.gnuradio.embedded.depuncture import make_depuncture
 from marconi.phy.backends.gnuradio.embedded.ofdm import make_ofdm_frame_sync
 from marconi.phy.backends.gnuradio.embedded.preamble import (
-    make_sym_acquire,
     make_sym_prepend,
+    make_sym_strip,
 )
 from marconi.phy.backends.gnuradio.embedded.trellis_fec import make_trellis_viterbi
 
@@ -51,6 +51,10 @@ def _as_int_list(v: ParamValue) -> list[int]:
             f"expected a list of integers, got {type(v).__name__}: {v!r}"
         )
     return [_as_int(x) for x in v]
+
+
+def _complex_syms(i: list[float], q: list[float]) -> list[complex]:
+    return [complex(a, b) for a, b in zip(i, q)]
 
 
 def _modules() -> tuple[Any, Any, Any, Any, Any, Any, Any, Any, Any]:
@@ -237,13 +241,13 @@ GR_BLOCKS: dict[str, Callable[[_GrCtx, Params], Any]] = {
         _as_float_list(p["preamble_q"]),
         _as_int(p["pad_symbols"]),
     ),
-    "sym_acquire": lambda c, p: make_sym_acquire(
-        c.gr,
-        _as_float_list(p["preamble_i"]),
-        _as_float_list(p["preamble_q"]),
-        _as_int(p["pad_symbols"]),
+    "corr_est_cc": lambda c, p: c.digital.corr_est_cc(
+        _complex_syms(_as_float_list(p["preamble_i"]), _as_float_list(p["preamble_q"])),
+        _as_int(p["sps"]),
+        _as_int(p["mark_delay"]),
         _as_float(p["threshold"]),
     ),
+    "sym_strip": lambda c, p: make_sym_strip(c.gr, n_pre=_as_int(p["n_pre"])),
     "chirp_prepend": lambda c, p: make_chirp_prepend(
         c.gr, _as_int(p["sf"]), _as_int(p["oversample"]), _as_int(p["preamble_len"])
     ),

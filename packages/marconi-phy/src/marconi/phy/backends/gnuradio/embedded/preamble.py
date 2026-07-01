@@ -64,78 +64,50 @@ def make_sym_prepend(
     return _SymPrepend()
 
 
-def _acquire_lock(
-    seg: np.ndarray, pre: np.ndarray, min_buf: int, threshold: float
-) -> tuple[int, float] | None:
-    n = len(pre)
-    max_lag = min(len(seg) - n, min_buf - n) + 1
-    if max_lag < 1:
-        return None
-    corr = np.array([np.vdot(pre, seg[lag : lag + n]) for lag in range(max_lag)])
-    k = int(np.argmax(np.abs(corr)))
-    if np.abs(corr[k]) / (float(np.mean(np.abs(corr))) + 1e-9) < threshold:
-        return None
-    return k, float(np.angle(corr[k]))
+def make_sym_strip(gr: Any, *, n_pre: int) -> Any:
+    """RX back half of preamble_sync: consume the phase_est tag emitted by an
+    upstream corr_est_cc, latch the FIRST detection (a later stronger payload
+    replica cannot steal the lock), strip pad+preamble, and derotate the payload
+    by exp(-j*phase_est). corr_est_cc delays its pass-through by the correlator
+    length, so the payload begins n_pre+1 samples past the tagged offset."""
+    pmt = gr.pmt
 
-
-def make_sym_acquire(
-    gr: Any,
-    preamble_i: list[float],
-    preamble_q: list[float],
-    pad_symbols: int,
-    threshold: float,
-) -> Any:
-    """RX: buffer; correlate vs the preamble; on a sharp peak lock (lag, phase),
-    strip the ramp+preamble, then emit payload * exp(-j phase). Flushes the
-    buffered tail at EOF (file-based pipeline: tags do not survive file_sink, so
-    the strip is physical). The preamble must be drawn from the modulation's
-    constellation so the carrier loop tracks it cleanly — an off-constellation
-    preamble is mistracked by higher-order PSK and yields a wrong phase lock."""
-    pre = _complex_preamble(preamble_i, preamble_q).astype(np.complex128)
-    n = len(pre)
-    min_buf = max(int(pad_symbols) + 2 * n, 4 * n)
-
-    class _SymAcquire(gr.basic_block):
+    class _SymStrip(gr.basic_block):
         def __init__(self) -> None:
             gr.basic_block.__init__(
                 self,
-                name="sym_acquire",
+                name="sym_strip",
                 in_sig=[np.complex64],
                 out_sig=[np.complex64],
             )
-            self._buf = np.empty(0, dtype=np.complex64)
             self._locked = False
-            self._phase = 0.0
+            self._rot: complex = 1.0 + 0j
+            self._payload_start = 0
 
         def forecast(self, noutput_items: int, ninputs: int) -> list[int]:
-            # Locked: run without input only while there is buffered payload to
-            # flush; once drained, require input again so EOF propagates from
-            # upstream instead of self-terminating on a momentarily empty input.
-            if not self._locked:
-                return [noutput_items] * ninputs
-            return [0] * ninputs if self._buf.size else [1] * ninputs
+            return [noutput_items] * ninputs
 
         def general_work(self, input_items: Any, output_items: Any) -> int:
             x = input_items[0]
-            if len(x):
-                self._buf = np.concatenate([self._buf, x])
-                self.consume(0, len(x))
+            base = self.nitems_read(0)
             if not self._locked:
-                if len(self._buf) < min_buf:
+                for t in self.get_tags_in_window(0, 0, len(x)):
+                    if pmt.symbol_to_string(t.key) == "phase_est":
+                        self._rot = complex(np.exp(-1j * pmt.to_double(t.value)))
+                        self._payload_start = t.offset + n_pre + 1
+                        self._locked = True
+                        break
+                if not self._locked:
+                    self.consume(0, len(x))
                     return 0
-                lock = _acquire_lock(
-                    self._buf.astype(np.complex128), pre, min_buf, threshold
-                )
-                if lock is None:
-                    return 0
-                k, self._phase = lock
-                self._locked = True
-                self._buf = self._buf[k + n :]
+            s = max(0, self._payload_start - base)
+            if s >= len(x):
+                self.consume(0, len(x))
+                return 0
             out = output_items[0]
-            m = min(len(out), len(self._buf))
-            if m:
-                out[:m] = self._buf[:m] * np.exp(-1j * self._phase)
-                self._buf = self._buf[m:]
-            return m
+            k = min(len(out), len(x) - s)
+            out[:k] = (x[s : s + k] * self._rot).astype(np.complex64)
+            self.consume(0, s + k)
+            return int(k)
 
-    return _SymAcquire()
+    return _SymStrip()

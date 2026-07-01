@@ -82,9 +82,10 @@ def test_preamble_sync_ber0_no_oracle(order: int, tmp_path: Path) -> None:
     )
     assert be.run_pipeline(_compile(modem, "rx", imp, op)).status == "ok"
     out = read_bits(op)
-    # preamble stripped: output is the payload (minus the demod end-transient),
-    # not payload + ramp(192) + preamble(64); guards against a passthrough no-op.
+    # preamble stripped: output is the payload minus the demod end-transient and
+    # corr_est_cc's withheld filter tail (~104 syms), not payload+ramp+preamble;
+    # guards against a passthrough no-op.
     k = order.bit_length() - 1
     assert len(out) < n_bits + 32 * k
-    assert len(out) > n_bits - 64 * k
+    assert len(out) > n_bits - 128 * k
     assert aligned_ber(out, bits, max_shift=16 * k) == 0.0

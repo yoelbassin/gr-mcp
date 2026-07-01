@@ -12,7 +12,7 @@ _P = {
     "preamble_i": _PRE.real.tolist(),
     "preamble_q": _PRE.imag.tolist(),
     "pad_symbols": 192,
-    "threshold": 3.0,
+    "threshold": 0.9,
 }
 SYM_C = Descriptor(Level.SYMBOLS, "c", carrier=Carrier.SOFT)
 
@@ -27,15 +27,18 @@ def test_symbols_to_symbols_soft_unity_rate() -> None:
     assert s.rate_factor(_P) == 1.0
 
 
-def test_emit_rx_chains_sym_acquire_with_params() -> None:
-    b = CompileContext(SYM_C, rate=4.0, symbol_rate=1.0)
+def test_emit_rx_chains_corr_est_then_strip() -> None:
+    b = CompileContext(SYM_C, rate=1.0, symbol_rate=1.0)
     PreambleSync().emit_rx(b, _P)
-    blk = next(x for x in b.build("t", 4.0).blocks if x.kind == "sym_acquire")
-    assert blk.params["pad_symbols"] == 192
-    assert blk.params["threshold"] == 3.0
-    pi, pq = blk.params["preamble_i"], blk.params["preamble_q"]
+    blocks = b.build("t", 1.0).blocks
+    assert [x.kind for x in blocks] == ["corr_est_cc", "sym_strip"]
+    ce, strip = blocks
+    assert ce.params["sps"] == 1 and ce.params["mark_delay"] == 0
+    assert ce.params["threshold"] == 0.9
+    pi, pq = ce.params["preamble_i"], ce.params["preamble_q"]
     assert isinstance(pi, list) and isinstance(pq, list)
     assert len(pi) == 64 and len(pq) == 64
+    assert strip.params["n_pre"] == 64
 
 
 def test_emit_tx_chains_sym_prepend() -> None:

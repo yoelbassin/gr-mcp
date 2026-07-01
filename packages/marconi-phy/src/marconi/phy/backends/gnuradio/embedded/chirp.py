@@ -341,8 +341,7 @@ def make_chirp_sync(
 ) -> Any:
     """RX: buffer IQ, detect CSS preamble+SFD, jointly estimate CFO + fractional
     STO, apply the fractional sample timing (streaming windowed-sinc FIR) and
-    derotate the CFO, emitting payload IQ. Mirrors make_sym_acquire's
-    buffer/lock/EOF-flush shape."""
+    derotate the CFO, emitting payload IQ."""
     grid = _Grid(sf, oversample, zero_pad)
     sn = grid.sample_num
     detect_run = preamble_len - 2

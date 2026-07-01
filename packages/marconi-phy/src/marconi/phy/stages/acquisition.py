@@ -16,7 +16,7 @@ class _PreambleSyncParams(StageParams):
     preamble_i: list[float]
     preamble_q: list[float]
     pad_symbols: StrictInt = 192
-    threshold: float = 3.0
+    threshold: float = 0.9
 
     @model_validator(mode="after")
     def _ok(self) -> "_PreambleSyncParams":
@@ -48,13 +48,17 @@ class PreambleSync(DuplexStage[CompileContext]):
     params_model = _PreambleSyncParams
 
     def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
+        pre_i = list(params["preamble_i"])
+        pre_q = list(params["preamble_q"])
         b.chain(
-            "sym_acquire",
-            preamble_i=list(params["preamble_i"]),
-            preamble_q=list(params["preamble_q"]),
-            pad_symbols=int(params.get("pad_symbols", 192)),
-            threshold=float(params.get("threshold", 3.0)),
+            "corr_est_cc",
+            preamble_i=pre_i,
+            preamble_q=pre_q,
+            sps=1,
+            mark_delay=0,
+            threshold=float(params.get("threshold", 0.9)),
         )
+        b.chain("sym_strip", n_pre=len(pre_i))
 
     def emit_tx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
         b.chain(
