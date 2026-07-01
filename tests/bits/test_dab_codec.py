@@ -40,6 +40,13 @@ def _codec() -> CodecSpec:
                     "xorout": 0xFFFF,
                 },
             ),
+            CodecStep(
+                conv="parse",
+                params={
+                    "bit_order": "msb",
+                    "fields": [{"name": "fib_data", "bits": 240}],
+                },
+            ),
         ],
     )
 
