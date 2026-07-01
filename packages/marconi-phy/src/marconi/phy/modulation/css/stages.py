@@ -151,6 +151,16 @@ class _ExplicitParams(StageParams):
                 "header_cr {header_cr} out of range [1, 4]",
                 {"header_cr": self.header_cr, "field": "header_cr"},
             )
+        if self.ldro and self.sf_reduction >= self.sf:
+            raise PydanticCustomError(
+                "value_error",
+                "sf_reduction {sf_reduction} must be < sf {sf} when ldro is set",
+                {
+                    "sf_reduction": self.sf_reduction,
+                    "sf": self.sf,
+                    "field": "sf_reduction",
+                },
+            )
         return self
 
 

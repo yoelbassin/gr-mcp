@@ -96,6 +96,31 @@ def test_css_params_require_sf() -> None:
     assert missing, "sf is required"
 
 
+def test_explicit_params_reject_sf_reduction_ge_sf_when_ldro() -> None:
+    from marconi.phy.modulation.css.stages import CssExplicitDecode
+
+    bad: list = []
+    validate_params(
+        "css_explicit_decode[0]",
+        CssExplicitDecode().params_model,
+        {
+            "sf": 7,
+            "ldro": True,
+            "sf_reduction": 7,
+            "header_symbols": 8,
+            "header_nibbles": 5,
+            "header_data_bits": 12,
+            "header_parity": [3840, 2273, 1178, 599, 303],
+            "field_payload_len": [0, 8],
+            "field_cr": [8, 3],
+            "field_has_crc": [11, 1],
+            "field_parity": [15, 5],
+        },
+        bad,
+    )
+    assert bad, "sf_reduction >= sf with ldro should be rejected"
+
+
 # ─── Direction support ────────────────────────────────────────────────────────
 
 

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from marconi.bits.carriers import RxCarrier, TxCarrier, _Frame
 from marconi.bits.framing import (
+    _decode_charset,
     _destuff,
     _find_flags,
     build_struct,
@@ -81,3 +83,8 @@ def test_parse_roundtrip_signed() -> None:
     )
     out = parse_rx(car, struct=st, fields=fields, bit_order="msb")
     assert out.frames[0].message == msg
+
+
+def test_decode_charset_rejects_short_table() -> None:
+    with pytest.raises(ValueError):
+        _decode_charset(0, 6, "ABC")

@@ -171,6 +171,8 @@ def build_struct(fields: list[ParseField]) -> BitStruct:
 
 
 def _decode_charset(value: int, bits: int, table: str) -> str:
+    if len(table) < 64:
+        raise ValueError(f"charset table has {len(table)} entries, need >= 64")
     n = bits // 6
     return "".join(table[(value >> (6 * (n - 1 - i))) & 0x3F] for i in range(n)).rstrip(
         " "
@@ -178,6 +180,8 @@ def _decode_charset(value: int, bits: int, table: str) -> str:
 
 
 def _encode_charset(text: str, bits: int, table: str) -> int:
+    if len(table) < 64 or " " not in table:
+        raise ValueError("charset table needs >= 64 entries including a space")
     n = bits // 6
     text = text.ljust(n, " ")[:n]
     value = 0

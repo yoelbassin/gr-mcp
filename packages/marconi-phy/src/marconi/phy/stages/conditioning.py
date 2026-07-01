@@ -119,6 +119,12 @@ class Resample(RxStage[CompileContext]):
 class _ClockCorrectParams(StageParams):
     ppm: float  # transmitter clock offset in parts-per-million (signed)
 
+    @model_validator(mode="after")
+    def _ok(self) -> "_ClockCorrectParams":
+        if self.ppm <= -1e6:
+            raise PydanticCustomError("value_error", "ppm must be > -1e6")
+        return self
+
 
 class ClockCorrect(RxStage[CompileContext]):
     """Cancel sampling-frequency offset (transmitter clock drift) by resampling
