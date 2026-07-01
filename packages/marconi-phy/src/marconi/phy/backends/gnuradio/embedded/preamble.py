@@ -64,6 +64,20 @@ def make_sym_prepend(
     return _SymPrepend()
 
 
+def _acquire_lock(
+    seg: np.ndarray, pre: np.ndarray, min_buf: int, threshold: float
+) -> tuple[int, float] | None:
+    n = len(pre)
+    max_lag = min(len(seg) - n, min_buf - n) + 1
+    if max_lag < 1:
+        return None
+    corr = np.array([np.vdot(pre, seg[lag : lag + n]) for lag in range(max_lag)])
+    k = int(np.argmax(np.abs(corr)))
+    if np.abs(corr[k]) / (float(np.mean(np.abs(corr))) + 1e-9) < threshold:
+        return None
+    return k, float(np.angle(corr[k]))
+
+
 def make_sym_acquire(
     gr: Any,
     preamble_i: list[float],
@@ -94,9 +108,12 @@ def make_sym_acquire(
             self._phase = 0.0
 
         def forecast(self, noutput_items: int, ninputs: int) -> list[int]:
-            # locked: drain the internal buffer with no new input, so the
-            # scheduler keeps calling work at EOF to flush the payload tail.
-            return [0] * ninputs if self._locked else [noutput_items] * ninputs
+            # Locked: run without input only while there is buffered payload to
+            # flush; once drained, require input again so EOF propagates from
+            # upstream instead of self-terminating on a momentarily empty input.
+            if not self._locked:
+                return [noutput_items] * ninputs
+            return [0] * ninputs if self._buf.size else [1] * ninputs
 
         def general_work(self, input_items: Any, output_items: Any) -> int:
             x = input_items[0]
@@ -106,23 +123,19 @@ def make_sym_acquire(
             if not self._locked:
                 if len(self._buf) < min_buf:
                     return 0
-                seg = self._buf.astype(np.complex128)
-                corr = np.array(
-                    [np.vdot(pre, seg[lag : lag + n]) for lag in range(len(seg) - n)]
+                lock = _acquire_lock(
+                    self._buf.astype(np.complex128), pre, min_buf, threshold
                 )
-                k = int(np.argmax(np.abs(corr)))
-                if np.abs(corr[k]) / (float(np.mean(np.abs(corr))) + 1e-9) < threshold:
+                if lock is None:
                     return 0
+                k, self._phase = lock
                 self._locked = True
-                self._phase = float(np.angle(corr[k]))
                 self._buf = self._buf[k + n :]
             out = output_items[0]
             m = min(len(out), len(self._buf))
             if m:
                 out[:m] = self._buf[:m] * np.exp(-1j * self._phase)
                 self._buf = self._buf[m:]
-            elif self._locked and len(x) == 0:
-                return -1  # WORK_DONE: buffer drained, input exhausted
             return m
 
     return _SymAcquire()
