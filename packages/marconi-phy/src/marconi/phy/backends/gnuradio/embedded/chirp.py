@@ -56,30 +56,38 @@ def _fine_peak(
     return float(f[peak]), peak
 
 
-def _detect(signal: np.ndarray, grid: _Grid, detect_run: int) -> int:
-    sn = grid.sample_num
-    x = 0
-    run: list[int] = []
-    while x < len(signal) - sn * detect_run:
-        if len(run) == detect_run - 1:
-            return x - int(round(run[-1] / grid.zero_pad * grid.oversample))
-        _, peak = _fine_peak(signal, x, grid)
-        if run:
-            delta = (run[-1] - peak) % grid.bins
-            delta = min(delta, grid.bins - delta)
-            run = run + [peak] if delta <= grid.zero_pad else [peak]
-        else:
-            run = [peak]
-        x += sn
-    raise ValueError("no CSS preamble detected")
+@dataclass
+class _DetectScan:
+    grid: _Grid
+    detect_run: int
+    x: int = 0
+    run: list[int] = field(default_factory=list)
+
+    def step(self, signal: np.ndarray) -> int | None:
+        sn = self.grid.sample_num
+        while self.x < len(signal) - sn * self.detect_run:
+            if len(self.run) == self.detect_run - 1:
+                back = int(
+                    round(self.run[-1] / self.grid.zero_pad * self.grid.oversample)
+                )
+                return self.x - back
+            _, peak = _fine_peak(signal, self.x, self.grid)
+            if self.run:
+                delta = (self.run[-1] - peak) % self.grid.bins
+                delta = min(delta, self.grid.bins - delta)
+                self.run = self.run + [peak] if delta <= self.grid.zero_pad else [peak]
+            else:
+                self.run = [peak]
+            self.x += sn
+        return None
 
 
-def _synchronize(signal: np.ndarray, grid: _Grid, detect_run: int) -> int:
-    """Return the payload_start sample offset into `signal`."""
+def _sfd_sync(signal: np.ndarray, x: int, grid: _Grid, cap: int) -> int | None:
     sn = grid.sample_num
-    x = _detect(signal, grid, detect_run)
     found = False
     while x < len(signal) - sn:
+        if x >= cap:
+            raise ValueError("no SFD within the preamble span")
         up_h, _ = _fine_peak(signal, x, grid)
         dn_h, _ = _fine_peak(signal, x, grid, up=False)
         x += sn
@@ -87,15 +95,16 @@ def _synchronize(signal: np.ndarray, grid: _Grid, detect_run: int) -> int:
             found = True
             break
     if not found:
-        raise ValueError("SFD not found")
+        return None
+    if x + 2 * sn > len(signal):
+        return None
     _, dn_bin = _fine_peak(signal, x, grid, up=False)
     offset = (dn_bin - grid.bins) if dn_bin > grid.bins / 2 else dn_bin
     x += int(round(offset / grid.zero_pad))
     up_h, _ = _fine_peak(signal, x - sn, grid)
     dn_h, _ = _fine_peak(signal, x - sn, grid, up=False)
     sfd_syms = 2.25 if up_h > dn_h else 1.25
-    payload_start = x + int(round(sfd_syms * sn))
-    return payload_start
+    return x + int(round(sfd_syms * sn))
 
 
 def _parabolic(f: np.ndarray, p: int) -> float:
@@ -331,6 +340,8 @@ def make_chirp_sync(
     min_buf = (preamble_len + 6) * sn
     _NTAPS = 33
     _HALF = (_NTAPS - 1) // 2
+    _SFD_SPAN = (preamble_len + 6) * sn
+    _LOOKBACK = _SFD_SPAN + _NTAPS - 1
 
     class _ChirpSync(gr.basic_block):
         def __init__(self) -> None:
@@ -344,17 +355,39 @@ def make_chirp_sync(
             self._taps = np.zeros(_NTAPS, dtype=np.complex64)
             self._hist = np.zeros(_NTAPS - 1, dtype=np.complex64)
             self._drop = 0  # FIR group-delay outputs still to discard
-            self._tail_flushed = (
-                False  # True once the _HALF-zero tail has been injected
-            )
+            self._scan = _DetectScan(grid, detect_run)
+            self._det_x: int | None = None
 
         def forecast(self, noutput_items: int, ninputs: int) -> list[int]:
-            return [0] * ninputs if self._locked else [noutput_items] * ninputs
+            if not self._locked:
+                return [noutput_items] * ninputs
+            return [0 if len(self._buf) else 1] * ninputs
+
+        def _trim_prelock(self) -> None:
+            anchor = self._scan.x if self._det_x is None else self._det_x
+            cut = anchor - _LOOKBACK
+            if cut > 0:
+                self._buf = self._buf[cut:]
+                self._scan.x -= cut
+                if self._det_x is not None:
+                    self._det_x -= cut
 
         def _try_lock(self) -> bool:
+            if self._det_x is None:
+                self._det_x = self._scan.step(self._buf)
+            if self._det_x is None:
+                self._trim_prelock()
+                return False
             try:
-                payload_start = _synchronize(self._buf, grid, detect_run)
+                payload_start = _sfd_sync(
+                    self._buf, self._det_x, grid, self._det_x + _SFD_SPAN
+                )
             except ValueError:
+                self._det_x = None
+                self._scan.run = []
+                self._trim_prelock()
+                return False
+            if payload_start is None:
                 return False
             if payload_start + sn > len(self._buf):
                 return False
@@ -387,18 +420,6 @@ def make_chirp_sync(
                 if not self._try_lock():
                     return 0
                 self._locked = True
-            # When all real payload is consumed at EOF, inject _HALF zeros so the
-            # streaming FIR outputs the last _HALF held-in-history payload samples.
-            # This runs in the SAME general_work call (no separate GR scheduling
-            # call needed), because the zero injection and processing happen inline.
-            if (
-                self._locked
-                and len(x) == 0
-                and len(self._buf) == 0
-                and not self._tail_flushed
-            ):
-                self._buf = np.zeros(_HALF, dtype=np.complex64)
-                self._tail_flushed = True
             out = output_items[0]
             m = min(len(out), len(self._buf))
             if m:
@@ -419,8 +440,6 @@ def make_chirp_sync(
                 ).astype(np.complex64)
                 self._n_out += len(y)
                 return len(y)
-            if self._locked and len(x) == 0 and len(self._buf) == 0:
-                return -1  # WORK_DONE: locked + buffer drained + tail flushed
             return 0
 
     return _ChirpSync()

@@ -224,6 +224,12 @@ def test_symbols_terminal_routing_smoke(tmp_path: Path) -> None:
     tx_result = be.run_pipeline(tx_pipe)
     assert tx_result.status == "ok", f"TX pipeline failed: {tx_result}"
 
+    # chirp_sync withholds its final FIR half-length at EOF; pad so the last
+    # payload symbol completes (real captures carry trailing noise anyway).
+    sn = OS * (1 << SF)
+    frame = np.fromfile(iq_path, dtype=np.complex64)
+    np.concatenate([frame, np.zeros(sn, dtype=np.complex64)]).tofile(iq_path)
+
     rx_result = be.run_pipeline(rx_pipe)
     assert rx_result.status == "ok", f"RX pipeline failed: {rx_result}"
 
@@ -261,3 +267,80 @@ def test_css_params_accept_preamble_len_5() -> None:
         "chirp_sync[0]", ChirpSync().params_model, {"sf": 7, "preamble_len": 5}, ok
     )
     assert not ok, ok
+
+
+def test_detect_scan_chunked_equals_oneshot() -> None:
+    from marconi.phy.backends.gnuradio.embedded import chirp
+
+    sf, os_, zp, pl = 7, 2, 4, 8
+    grid = chirp._Grid(sf, os_, zp)
+    sn = grid.sample_num
+    up = chirp._base_upchirp(sf, os_)
+    rng = np.random.default_rng(1)
+    for pad_windows in (0, 3, 11):
+        npad = pad_windows * sn + 37
+        pad = 0.05 * (rng.standard_normal(npad) + 1j * rng.standard_normal(npad))
+        tail = 0.05 * (rng.standard_normal(8 * sn) + 1j * rng.standard_normal(8 * sn))
+        sig = np.concatenate(
+            [pad, np.tile(up, pl), np.conj(np.tile(up, 3)), tail]
+        ).astype(np.complex64)
+        oneshot = chirp._DetectScan(grid, pl - 2).step(sig)
+        chunked = chirp._DetectScan(grid, pl - 2)
+        got = None
+        for end in range(sn, len(sig) + 1, sn // 3):
+            got = chunked.step(sig[:end])
+            if got is not None:
+                break
+        assert oneshot is not None
+        assert got == oneshot
+
+
+def test_detect_scan_single_pass(monkeypatch) -> None:
+    from marconi.phy.backends.gnuradio.embedded import chirp
+
+    grid = chirp._Grid(7, 2, 4)
+    sn = grid.sample_num
+    calls = {"n": 0}
+    orig = chirp._fine_peak
+
+    def counting(*a, **k):  # untyped: mypy checks typed-def bodies even in tests
+        calls["n"] += 1
+        return orig(*a, **k)
+
+    monkeypatch.setattr(chirp, "_fine_peak", counting)
+    rng = np.random.default_rng(5)
+    n_win = 200
+    sig = (
+        rng.standard_normal(n_win * sn) + 1j * rng.standard_normal(n_win * sn)
+    ).astype(np.complex64)
+    scan = chirp._DetectScan(grid, 6)
+    for k in range(1, n_win + 1):
+        assert scan.step(sig[: k * sn]) is None
+    assert calls["n"] <= n_win
+
+
+def test_sfd_sync_pending_vs_miss() -> None:
+    from marconi.phy.backends.gnuradio.embedded import chirp
+
+    sf, os_, zp, pl = 7, 2, 4, 8
+    grid = chirp._Grid(sf, os_, zp)
+    sn = grid.sample_num
+    up = chirp._base_upchirp(sf, os_)
+    sig = np.tile(up, pl).astype(np.complex64)  # preamble only, SFD not yet arrived
+    assert chirp._sfd_sync(sig, 0, grid, (pl + 6) * sn) is None
+    partial = np.concatenate(
+        [np.tile(up, pl), np.conj(np.tile(up, 2))[: int(1.6 * sn)]]
+    ).astype(
+        np.complex64
+    )  # SFD found but its refinement window is still streaming in
+    assert chirp._sfd_sync(partial, 0, grid, (pl + 6) * sn) is None
+    full = np.concatenate([np.tile(up, pl), np.conj(np.tile(up, 3))]).astype(
+        np.complex64
+    )
+    ps = chirp._sfd_sync(full, 0, grid, (pl + 6) * sn)
+    assert ps is not None and ps > pl * sn
+    long_up = np.tile(up, pl + 12).astype(np.complex64)  # no SFD within cap
+    import pytest as _pytest
+
+    with _pytest.raises(ValueError):
+        chirp._sfd_sync(long_up, 0, grid, (pl + 6) * sn)

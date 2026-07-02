@@ -215,3 +215,27 @@ def test_chirp_mod_build_allocation_bounded():
         _, peak = tracemalloc.get_traced_memory()
         tracemalloc.stop()
         assert peak < 10 * 2**20, f"sf={sf} build allocated {peak} bytes"
+
+
+def test_chirp_sync_noise_bounded_no_lock():
+    ensure_worker_warm()
+    from gnuradio import blocks as gb
+    from gnuradio import gr
+
+    from marconi.phy.backends.gnuradio.embedded.chirp import make_chirp_sync
+
+    sf, os_, zp, pl = SF, OS, ZP, PREAMBLE_LEN
+    sn = os_ * (1 << sf)
+    rng = np.random.default_rng(9)
+    n = 400 * sn
+    sig = (rng.standard_normal(n) + 1j * rng.standard_normal(n)).astype(np.complex64)
+    blk = make_chirp_sync(gr, sf, os_, zp, pl, float(os_ * (1 << sf)))
+    tb = gr.top_block()
+    src = gb.vector_source_c(sig.tolist(), False)
+    snk = gb.vector_sink_c()
+    tb.connect(src, blk, snk)
+    tb.run()
+    bound = 2 * (pl + 6) * sn + 8192
+    assert blk._buf.size <= bound, f"pre-lock buffer {blk._buf.size} > {bound}"
+    assert not blk._locked
+    assert len(snk.data()) == 0
