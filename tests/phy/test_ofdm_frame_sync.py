@@ -134,3 +134,49 @@ def test_resync_base_snaps_corrects_and_rejects():
     assert _resync_base(buf, 133, **r) == 133  # within tol -> snap to prediction
     assert _resync_base(buf, 200, **r) == 200  # no null in window -> keep prediction
     assert _resync_base(buf, 395, **r) == 395  # insufficient buffer -> keep prediction
+
+
+def test_frame_sync_buffer_stays_bounded():
+    ensure_worker_warm()
+    from gnuradio import blocks as gb
+    from gnuradio import gr
+
+    from marconi.phy.backends.gnuradio.embedded.ofdm import make_ofdm_frame_sync
+
+    fft, cp, ds = 256, 64, 9
+    sym = fft + cp
+    null = 400
+    frame = null + (ds + 1) * sym
+    rng = np.random.default_rng(5)
+    parts, usefuls_all = [], []
+    for _ in range(40):
+        parts.append(np.zeros(null, complex))
+        us = [
+            rng.standard_normal(fft) + 1j * rng.standard_normal(fft)
+            for _ in range(ds + 1)
+        ]
+        usefuls_all.append(np.concatenate(us))
+        for u in us:
+            parts.append(np.concatenate([u[-cp:], u]))
+    sig = np.concatenate(parts).astype(np.complex64)
+    blk = make_ofdm_frame_sync(
+        gr,
+        fft_len=fft,
+        cp_len=cp,
+        sym_len=sym,
+        null_len=null,
+        frame_len=frame,
+        data_syms=ds,
+    )
+    tb = gr.top_block()
+    src = gb.vector_source_c(sig.tolist(), False)
+    snk = gb.vector_sink_c()
+    tb.connect(src, blk, snk)
+    tb.run()
+    out = np.array(snk.data(), np.complex64)
+    expected = np.concatenate(
+        [(u / np.std(u)).astype(np.complex64) for u in usefuls_all]
+    )
+    assert out.size == expected.size
+    assert np.allclose(out, expected, atol=1e-4)
+    assert blk._buf.size <= 2 * frame + 8192, f"buffer held {blk._buf.size}"

@@ -69,14 +69,16 @@ def make_ofdm_frame_sync(
             self._base: int | None = None
             self._out = np.empty(0, dtype=np.complex64)
 
-        def forecast(self, noutput_items: int, ninputs: int) -> list:
-            return [0] * ninputs if self._out.size else [1] * ninputs
+        def forecast(self, noutput_items: int, ninputs: int) -> list[int]:
+            drainable = (
+                self._base is not None
+                and self._base + (data_syms + 1) * sym_len <= self._buf.size
+            )
+            return [0 if (self._out.size or drainable) else 1] * ninputs
 
         def general_work(self, input_items: Any, output_items: Any) -> int:
             inp = input_items[0]
             if inp.size:
-                # never trim _buf: _resync_base's forward null search reads the
-                # full prefix — a prefix-trim regressed real DAB 192->12 (issue 18)
                 self._buf = np.concatenate([self._buf, np.asarray(inp, np.complex64)])
                 self.consume(0, len(inp))
             if (
@@ -92,20 +94,40 @@ def make_ofdm_frame_sync(
                     )
                 except ValueError:
                     pass
+            # trim only behind a snapped base: a frame emits only once the forward
+            # null window (frame_len + max_corr) is buffered — the naive trim that
+            # ignored this regressed real DAB 192->12 (issue 18)
             while (
                 self._base is not None
-                and self._base + (data_syms + 1) * sym_len <= self._buf.size
+                and self._base + frame_len + max_corr <= self._buf.size
             ):
                 self._out = np.concatenate(
                     [self._out, _frame_usefuls(self._buf, self._base)]
                 )
-                self._base = _resync_base(
+                nb = _resync_base(
                     self._buf,
                     self._base + frame_len,
                     null_len=null_len,
                     tol=tol,
                     max_corr=max_corr,
                 )
+                self._buf = self._buf[nb:]
+                self._base = 0
+            if inp.size == 0 and self._out.size == 0:
+                while (
+                    self._base is not None
+                    and self._base + (data_syms + 1) * sym_len <= self._buf.size
+                ):
+                    self._out = np.concatenate(
+                        [self._out, _frame_usefuls(self._buf, self._base)]
+                    )
+                    self._base = _resync_base(
+                        self._buf,
+                        self._base + frame_len,
+                        null_len=null_len,
+                        tol=tol,
+                        max_corr=max_corr,
+                    )
             out = output_items[0]
             if self._out.size:
                 k = min(self._out.size, len(out))
