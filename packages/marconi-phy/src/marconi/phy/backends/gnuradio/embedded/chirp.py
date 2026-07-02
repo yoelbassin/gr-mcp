@@ -204,7 +204,6 @@ def make_chirp_prepend(gr: Any, sf: int, oversample: int, preamble_len: int) -> 
 
 def make_chirp_mod(gr: Any, sf: int, oversample: int) -> Any:
     sn = oversample * (1 << sf)
-    table = np.stack([_modulate_symbol(s, sf, oversample) for s in range(1 << sf)])
 
     class _ChirpMod(gr.basic_block):
         def __init__(self) -> None:
@@ -223,7 +222,9 @@ def make_chirp_mod(gr: Any, sf: int, oversample: int) -> Any:
             out = output_items[0]
             nsym = min(len(x), len(out) // sn)
             for i in range(nsym):
-                out[i * sn : (i + 1) * sn] = table[int(x[i]) % (1 << sf)]
+                out[i * sn : (i + 1) * sn] = _modulate_symbol(
+                    int(x[i]) % (1 << sf), sf, oversample
+                )
             self.consume(0, nsym)
             return nsym * sn
 

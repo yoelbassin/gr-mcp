@@ -10,6 +10,7 @@ off-main-thread production runner to avoid the embedded-uint8-output SIGSEGV.
 
 from __future__ import annotations
 
+import tracemalloc
 from pathlib import Path
 
 import numpy as np
@@ -200,3 +201,17 @@ def test_chirp_prepend_output_length(tmp_path: Path) -> None:
         f"expected {expected_total} samples ({expected_prepend} prepend + "
         f"{payload_samples} payload), got {len(out)}"
     )
+
+
+def test_chirp_mod_build_allocation_bounded():
+    ensure_worker_warm()
+    from gnuradio import gr
+
+    from marconi.phy.backends.gnuradio.embedded.chirp import make_chirp_mod
+
+    for sf in (12, 14):
+        tracemalloc.start()
+        make_chirp_mod(gr, sf, 2)
+        _, peak = tracemalloc.get_traced_memory()
+        tracemalloc.stop()
+        assert peak < 10 * 2**20, f"sf={sf} build allocated {peak} bytes"
