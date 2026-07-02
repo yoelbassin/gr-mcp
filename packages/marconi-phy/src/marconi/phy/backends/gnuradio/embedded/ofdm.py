@@ -75,6 +75,8 @@ def make_ofdm_frame_sync(
         def general_work(self, input_items: Any, output_items: Any) -> int:
             inp = input_items[0]
             if inp.size:
+                # never trim _buf: _resync_base's forward null search reads the
+                # full prefix — a prefix-trim regressed real DAB 192->12 (issue 18)
                 self._buf = np.concatenate([self._buf, np.asarray(inp, np.complex64)])
                 self.consume(0, len(inp))
             if (
