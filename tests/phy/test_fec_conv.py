@@ -3,9 +3,11 @@ import numpy as np
 from marconi.core.bitfile import read_bits
 from marconi.core.descriptor import Carrier, Descriptor
 from marconi.core.levels import Level
+from marconi.core.stages import validate_params
 from marconi.phy.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
 from marconi.phy.compiler import compile_modem
 from marconi.phy.models import ModemSpec, ModemStep
+from marconi.phy.modulation.coding.stages import Fec
 from marconi.phy.stages import stage_registry
 
 
@@ -81,3 +83,35 @@ def test_fec_conv_generic_rate_half(tmp_path):
         tmp_path, rate_inv=2, polys=[0o133, 0o171], frame_bits=200, seed=2
     )
     assert np.array_equal(out, info)
+
+
+_CC_PARAMS = {
+    "scheme": "cc",
+    "rate_inv": 2,
+    "polys": [0o171, 0o133],
+    "frame_bits": 100,
+    "tail": 6,
+}
+
+
+def test_fec_params_reject_unknown_scheme():
+    issues: list = []
+    validate_params(
+        "fec[0]", Fec().params_model, {**_CC_PARAMS, "scheme": "turbo"}, issues
+    )
+    assert issues, "unknown scheme must fail at validation, not KeyError at emit"
+
+
+def test_fec_params_reject_nonpositive_and_empty():
+    for override in ({"rate_inv": 0}, {"frame_bits": 0}, {"polys": []}, {"tail": -1}):
+        issues: list = []
+        validate_params(
+            "fec[0]", Fec().params_model, {**_CC_PARAMS, **override}, issues
+        )
+        assert issues, f"{override} must be rejected"
+
+
+def test_fec_params_accept_cc():
+    ok: list = []
+    validate_params("fec[0]", Fec().params_model, _CC_PARAMS, ok)
+    assert not ok, ok

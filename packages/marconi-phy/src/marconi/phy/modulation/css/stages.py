@@ -33,8 +33,8 @@ class _CssParams(StageParams):
             raise PydanticCustomError("value_error", "oversample must be >= 1")
         if self.zero_pad < 1:
             raise PydanticCustomError("value_error", "zero_pad must be >= 1")
-        if self.preamble_len < 3:
-            raise PydanticCustomError("value_error", "preamble_len must be >= 3")
+        if self.preamble_len < 5:
+            raise PydanticCustomError("value_error", "preamble_len must be >= 5")
         return self
 
 

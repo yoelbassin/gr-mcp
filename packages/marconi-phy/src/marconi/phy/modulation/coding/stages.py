@@ -3,6 +3,9 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from typing import Any
 
+from pydantic import Field, StrictInt, model_validator
+from pydantic_core import PydanticCustomError
+
 from marconi.core.descriptor import Carrier, Descriptor
 from marconi.core.levels import Level
 from marconi.core.params import StageParams
@@ -48,10 +51,20 @@ class Depuncture(RxStage[CompileContext]):
 
 class _ConvParams(StageParams):
     scheme: str
-    rate_inv: int
-    polys: list[int]
-    frame_bits: int
-    tail: int = 0
+    rate_inv: StrictInt = Field(ge=1)
+    polys: list[int] = Field(min_length=1)
+    frame_bits: StrictInt = Field(ge=1)
+    tail: StrictInt = Field(default=0, ge=0)
+
+    @model_validator(mode="after")
+    def _ok(self) -> "_ConvParams":
+        if self.scheme not in _FEC_EMIT:
+            raise PydanticCustomError(
+                "value_error",
+                "unknown fec scheme '{scheme}'; known: {known}",
+                {"scheme": self.scheme, "known": ", ".join(sorted(_FEC_EMIT))},
+            )
+        return self
 
 
 def _emit_cc(b: CompileContext, p: Mapping[str, Any]) -> None:

@@ -237,3 +237,27 @@ def test_symbols_terminal_routing_smoke(tmp_path: Path) -> None:
     assert np.array_equal(
         recovered_bits, bits
     ), f"symbol→bit mismatch at indices {np.where(recovered_bits != bits)[0][:10]}"
+
+
+def test_css_params_reject_preamble_len_below_5() -> None:
+    from marconi.phy.modulation.css.stages import ChirpSync
+
+    for bad in (3, 4):  # 3 = IndexError in _detect, 4 = single-peak mislock
+        issues: list = []
+        validate_params(
+            "chirp_sync[0]",
+            ChirpSync().params_model,
+            {"sf": 7, "preamble_len": bad},
+            issues,
+        )
+        assert issues, f"preamble_len={bad} should be rejected"
+
+
+def test_css_params_accept_preamble_len_5() -> None:
+    from marconi.phy.modulation.css.stages import ChirpSync
+
+    ok: list = []
+    validate_params(
+        "chirp_sync[0]", ChirpSync().params_model, {"sf": 7, "preamble_len": 5}, ok
+    )
+    assert not ok, ok
