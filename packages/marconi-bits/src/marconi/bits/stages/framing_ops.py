@@ -3,6 +3,9 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from pydantic import Field, StrictInt, model_validator
+from pydantic_core import PydanticCustomError
+
 from marconi.bits import framing
 from marconi.bits.builder import ProgramBuilder
 from marconi.core.levels import Level
@@ -71,7 +74,7 @@ class Segment(DuplexStage[ProgramBuilder]):
     family = "framing"
 
     class _Params(StageParams):
-        frame_body_len: int
+        frame_body_len: StrictInt = Field(ge=1)
 
     params_model = _Params
 
@@ -89,7 +92,7 @@ class FixedFrame(DuplexStage[ProgramBuilder]):
     family = "framing"
 
     class _Params(StageParams):
-        payload_bits: int
+        payload_bits: StrictInt = Field(ge=1)
 
     params_model = _Params
 
@@ -100,16 +103,27 @@ class FixedFrame(DuplexStage[ProgramBuilder]):
         b.add(framing.fixed_frame_tx, payload_bits=int(params["payload_bits"]))
 
 
+class _SequenceParams(StageParams):
+    sequence: str
+
+    @model_validator(mode="after")
+    def _ok(self) -> "_SequenceParams":
+        try:
+            bytes.fromhex(self.sequence)
+        except ValueError:
+            raise PydanticCustomError(
+                "value_error", "sequence must be an even-length hex string"
+            ) from None
+        return self
+
+
 class Descramble(DuplexStage[ProgramBuilder]):
     name = "descramble"
     from_level = Level.FRAMES
     to_level = Level.FRAMES
     family = "framing"
 
-    class _Params(StageParams):
-        sequence: str
-
-    params_model = _Params
+    params_model = _SequenceParams
 
     def emit_rx(self, b: ProgramBuilder, params: Mapping[str, Any]) -> None:
         b.add(framing.descramble_rx, sequence=str(params["sequence"]))
@@ -124,10 +138,7 @@ class DescrambleBits(DuplexStage[ProgramBuilder]):
     to_level = Level.BITS
     family = "framing"
 
-    class _Params(StageParams):
-        sequence: str
-
-    params_model = _Params
+    params_model = _SequenceParams
 
     def emit_rx(self, b: ProgramBuilder, params: Mapping[str, Any]) -> None:
         b.add(framing.descramble_bits_rx, sequence=str(params["sequence"]))
