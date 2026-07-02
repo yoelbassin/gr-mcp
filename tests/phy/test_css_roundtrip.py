@@ -74,3 +74,34 @@ def test_css_ber0_impaired(sf: int, tmp_path: Path) -> None:
     out = read_bits(op)
     assert len(out) >= sf * 30  # preamble stripped, payload recovered
     assert aligned_ber(out, bits, max_shift=8 * sf) == 0.0
+
+
+@pytest.mark.xfail(
+    reason="chirp_sync does not correct SFO; clock_correct owns it "
+    "(see test_clock_correct_roundtrip). Pins the coverage boundary.",
+    strict=False,
+)
+@pytest.mark.parametrize("sf", [7])
+def test_css_ber0_sfo_documents_gap(sf: int, tmp_path: Path) -> None:
+    ensure_worker_warm()
+    be = GnuRadioBackend()
+    rate = _OS * (1 << sf) * _SYM
+    bw = _SYM * (1 << sf)
+    bits = np.random.default_rng(sf).integers(0, 2, sf * 40).astype(np.uint8)
+    bp = write_bits(tmp_path / "in.bits", bits)
+    clean, imp, op = tmp_path / "c.iq", tmp_path / "i.iq", tmp_path / "o.bits"
+    m = _modem(sf)
+    assert be.run_pipeline(_compile(m, "tx", rate, bp, clean)).status == "ok"
+    channel(
+        clean,
+        imp,
+        snr_db=15.0,
+        cfo_hz=0.03 * bw,
+        sto=1.5,
+        sfo_ppm=50.0,
+        sample_rate=rate,
+        seed=sf,
+    )
+    assert be.run_pipeline(_compile(m, "rx", rate, imp, op)).status == "ok"
+    out = read_bits(op)
+    assert aligned_ber(out, bits, max_shift=8 * sf) == 0.0  # xfails: SFO uncorrected

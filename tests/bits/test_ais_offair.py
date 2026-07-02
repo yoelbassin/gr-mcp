@@ -96,6 +96,7 @@ def test_ais_offair_crc(tmp_path: Path) -> None:
     ensure_worker_warm()
     reg = registry()
     total = 0
+    msgs: list = []
     for center in (-25000.0, 25000.0):
         snk = tmp_path / f"bits_{int(center)}.u8"
         pipe = compile_modem(
@@ -114,4 +115,8 @@ def test_ais_offair_crc(tmp_path: Path) -> None:
             Bitstream(path=snk, num_bits=n, source_capture=_SLICE), _ais_codec(), reg
         )
         total += res.num_crc_ok
+        msgs.extend(res.messages)
     assert total >= 4, f"expected >= 4 CRC-valid AIS frames, got {total}"
+    assert msgs, "no CRC-valid AIS messages were parsed"
+    types = [int(m["msg_type"]) for m in msgs]
+    assert all(1 <= t <= 27 for t in types), f"out-of-range AIS msg_type: {types}"
