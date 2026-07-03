@@ -190,6 +190,36 @@ class FixedFrame(DuplexStage[ProgramBuilder]):
         b.add(framing.fixed_frame_tx, payload_bits=int(params["payload_bits"]))
 
 
+class LengthFrame(DuplexStage[ProgramBuilder]):
+    name = "length_frame"
+    from_level = Level.FRAMES
+    to_level = Level.FRAMES
+    slices_body = True  # carves the seeded region using a decoded length field
+    family = "framing"
+
+    class _Params(StageParams):
+        length_bits: StrictInt = Field(ge=1)
+        base_bytes: StrictInt = Field(ge=0)
+        unit_bytes: StrictInt = Field(default=1, ge=1)
+        bit_order: str = "msb"
+
+    params_model = _Params
+
+    def _kw(self, params: Mapping[str, Any]) -> dict[str, Any]:
+        return {
+            "length_bits": int(params["length_bits"]),
+            "base_bytes": int(params["base_bytes"]),
+            "unit_bytes": int(params.get("unit_bytes", 1)),
+            "bit_order": str(params.get("bit_order", "msb")),
+        }
+
+    def emit_rx(self, b: ProgramBuilder, params: Mapping[str, Any]) -> None:
+        b.add(framing.length_frame_rx, **self._kw(params))
+
+    def emit_tx(self, b: ProgramBuilder, params: Mapping[str, Any]) -> None:
+        b.add(framing.length_frame_tx, **self._kw(params))
+
+
 class _SequenceParams(StageParams):
     sequence: str
 
@@ -241,6 +271,7 @@ FRAMING_STAGES: tuple[type[DuplexStage[ProgramBuilder]], ...] = (
     Differential,
     FixedFrame,
     HdlcDeframe,
+    LengthFrame,
     NibbleSwap,
     Segment,
     SyncWord,

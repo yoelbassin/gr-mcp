@@ -470,6 +470,49 @@ def codebook_tx(
     return TxCarrier(out)
 
 
+def _read_uint(bits: np.ndarray, start: int, width: int) -> int:
+    field = bits[start : start + width]
+    return int(field.dot(1 << np.arange(width - 1, -1, -1, dtype=np.int64)))
+
+
+def length_frame_rx(
+    c: RxCarrier,
+    *,
+    length_bits: int,
+    base_bytes: int,
+    unit_bytes: int,
+    bit_order: str = "msb",
+) -> RxCarrier:
+    """Carve each seeded frame's body using a length field it carries: read a
+    ``length_bits`` integer L at the cursor, then take ``base_bytes + unit_bytes*L``
+    bytes as the payload (the length field and any trailing checkword included).
+    Closes the header->length plumbing gap: a decoded length drives framing
+    instead of a hardcoded stride."""
+    bits = np.asarray(c.bits, dtype=np.uint8)
+    out: list[_Frame] = []
+    for f in c.frames:
+        if f.cursor + length_bits > bits.size:
+            continue
+        length = _read_uint(bits, f.cursor, length_bits)
+        nbits = (base_bytes + unit_bytes * length) * 8
+        if nbits <= 0 or f.cursor + nbits > bits.size:
+            continue
+        payload = bits_to_bytes(bits[f.cursor : f.cursor + nbits], bit_order)
+        out.append(replace(f, payload=payload, cursor=f.cursor + nbits))
+    return RxCarrier(bits=bits, frames=out)
+
+
+def length_frame_tx(
+    c: TxCarrier,
+    *,
+    length_bits: int,
+    base_bytes: int,
+    unit_bytes: int,
+    bit_order: str = "msb",
+) -> TxCarrier:
+    return c  # the length field is assembled upstream (parse/crc); nothing to add
+
+
 def sync_word_rx(c: RxCarrier, *, sync: str, max_errors: int = 0) -> RxCarrier:
     """Correlating frame seeder: seed a frame just past every position where the
     bitstream matches ``sync`` within ``max_errors`` bit flips (a sync word is
