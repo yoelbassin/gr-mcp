@@ -71,10 +71,13 @@ def test_strip_derotates_payload_to_the_constellation(tmp_path: Path) -> None:
     assert np.array_equal(_nearest(out, pts), _nearest(payload[:k], pts))
 
 
-def test_strip_locks_first_preamble_not_stronger_replica(tmp_path: Path) -> None:
-    # issue 02: a 2x-amplitude preamble replica inside the payload would steal a
-    # global-argmax lock. corr_est_cc tags in stream order and sym_strip latches
-    # the FIRST, so the true preamble wins and the payload is not truncated.
+def test_strip_first_lock_intact_replica_rearms(tmp_path: Path) -> None:
+    # corr_est_cc tags in stream order, so a 2x-amplitude preamble replica
+    # inside the payload cannot retroactively steal the first lock (the old
+    # global-argmax failure): the payload head decodes under burst-1's phase.
+    # Since issue 03 every detection re-arms — the replica reads as a new
+    # burst: its own span is stripped and the continuation is re-derotated
+    # (an exact 64-symbol preamble inside a payload IS a burst boundary).
     pts = _qpsk_points()
     rng = np.random.default_rng(1)
     pre = pts[rng.integers(0, 4, 64)]
@@ -82,5 +85,13 @@ def test_strip_locks_first_preamble_not_stronger_replica(tmp_path: Path) -> None
     payload[150:214] = 2.0 * pre
     stream = np.concatenate([_ramp(192), pre, payload]) * np.exp(-1j * 0.5)
     out = _run_rx(pre, stream, tmp_path)
-    assert len(out) > len(payload) - 128
-    assert np.array_equal(_nearest(out[:20], pts), _nearest(payload[:20], pts))
+    assert np.array_equal(_nearest(out[:145], pts), _nearest(payload[:145], pts))
+    # the post-replica payload re-emerges (re-armed, same carrier phase)
+    tail = _nearest(out[150:230], pts)
+    ref = _nearest(payload, pts)
+    hits = [
+        s
+        for s in range(205, 226)
+        if np.array_equal(tail[: len(ref) - s][:60], ref[s : s + 60])
+    ]
+    assert hits, "post-replica payload not re-acquired"

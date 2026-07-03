@@ -2,7 +2,14 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from phy._dsp import aligned_ber, channel, make_preamble, read_bits, write_bits
+from phy._dsp import (
+    aligned_ber,
+    channel,
+    make_preamble,
+    read_bits,
+    read_complex,
+    write_bits,
+)
 
 from marconi.core.descriptor import Descriptor
 from marconi.core.levels import Level
@@ -89,3 +96,46 @@ def test_preamble_sync_ber0_no_oracle(order: int, tmp_path: Path) -> None:
     assert len(out) < n_bits + 32 * k
     assert len(out) > n_bits - 128 * k
     assert aligned_ber(out, bits, max_shift=16 * k) == 0.0
+
+
+def test_two_burst_capture_decodes_both(tmp_path: Path) -> None:
+    """A capture holding two independent bursts decodes both in one run:
+    sym_strip re-arms on burst 2's phase_est tag (issue 03). The carrier loop
+    re-locks with an arbitrary M-fold ambiguity across the inter-burst gap, so
+    burst 2 decodes only if its own tag re-estimates the rotation — the
+    pre-fix first-tag latch replays burst 1's phase forever."""
+    ensure_worker_warm()
+    be = GnuRadioBackend()
+    order, k = 4, 2
+    n_bits = 2048
+    rng = np.random.default_rng(11)
+    bits1 = rng.integers(0, 2, n_bits).astype(np.uint8)
+    bits2 = rng.integers(0, 2, n_bits).astype(np.uint8)
+    modem = _modem(order)
+    f1, f2 = tmp_path / "f1.iq", tmp_path / "f2.iq"
+    # 16 pad bits absorb the RRC pulse tail truncated at each burst's end (in
+    # single-burst tests those edge symbols hide inside corr_est's withheld
+    # EOF tail); the payloads under test then round-trip exactly.
+    pad = np.zeros(16, dtype=np.uint8)
+    b1 = write_bits(tmp_path / "b1.bits", np.concatenate([bits1, pad]))
+    b2 = write_bits(tmp_path / "b2.bits", np.concatenate([bits2, pad]))
+    assert be.run_pipeline(_compile(modem, "tx", b1, f1)).status == "ok"
+    assert be.run_pipeline(_compile(modem, "tx", b2, f2)).status == "ok"
+    noise = 0.02 * (rng.standard_normal(2048) + 1j * rng.standard_normal(2048))
+    gap, tail = noise[:1024], noise[1024:]
+    cap = np.concatenate(
+        [
+            read_complex(f1),
+            gap.astype(np.complex64),
+            read_complex(f2),
+            tail.astype(np.complex64),
+        ]
+    ).astype(np.complex64)
+    cap_p, imp, op = tmp_path / "cap.iq", tmp_path / "imp.iq", tmp_path / "out.bits"
+    cap.tofile(cap_p)
+    channel(cap_p, imp, snr_db=25.0, cfo_hz=0.004 * _SR, sample_rate=_SR, seed=3)
+    assert be.run_pipeline(_compile(modem, "rx", imp, op)).status == "ok"
+    out = read_bits(op)
+    assert len(out) > 2 * n_bits  # both payloads present (plus inter-burst junk)
+    assert aligned_ber(out[: n_bits + 64 * k], bits1, max_shift=16 * k) == 0.0
+    assert aligned_ber(out[n_bits:], bits2, max_shift=2048) == 0.0

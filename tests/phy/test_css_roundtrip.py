@@ -81,6 +81,54 @@ def test_css_ber0_impaired(sf: int, osr: int, tmp_path: Path) -> None:
     assert aligned_ber(out, bits, max_shift=8 * sf) == 0.0
 
 
+def test_css_two_burst_capture_decodes_both(tmp_path: Path) -> None:
+    """A capture with two CSS bursts — each under a DIFFERENT carrier offset —
+    decodes both in one run: chirp_sync re-arms per preamble with fresh
+    CFO/timing estimates (issue 03; the pre-fix block applied burst 1's
+    correction to the whole remainder of the capture). Also pins the
+    re-lock diagnostics surfaced through RunResult."""
+    from phy._dsp import read_complex
+
+    ensure_worker_warm()
+    be = GnuRadioBackend()
+    sf, osr = 7, 2
+    rate = osr * (1 << sf) * _SYM
+    bw = _SYM * (1 << sf)
+    sn = osr * (1 << sf)
+    rng = np.random.default_rng(21)
+    bits1 = rng.integers(0, 2, sf * 30).astype(np.uint8)
+    bits2 = rng.integers(0, 2, sf * 30).astype(np.uint8)
+    m = _modem(sf, osr)
+    f1, f2 = tmp_path / "f1.iq", tmp_path / "f2.iq"
+    b1 = write_bits(tmp_path / "b1.bits", bits1)
+    b2 = write_bits(tmp_path / "b2.bits", bits2)
+    assert be.run_pipeline(_compile(m, "tx", rate, b1, f1)).status == "ok"
+    assert be.run_pipeline(_compile(m, "tx", rate, b2, f2)).status == "ok"
+    i1, i2 = tmp_path / "i1.iq", tmp_path / "i2.iq"
+    channel(f1, i1, cfo_hz=0.03 * bw, sample_rate=rate, seed=1)
+    channel(f2, i2, cfo_hz=-0.04 * bw, sample_rate=rate, seed=2)
+    gap = 0.02 * (rng.standard_normal(20 * sn) + 1j * rng.standard_normal(20 * sn))
+    tail = 0.02 * (rng.standard_normal(14 * sn) + 1j * rng.standard_normal(14 * sn))
+    cap = np.concatenate(
+        [
+            read_complex(i1),
+            gap.astype(np.complex64),
+            read_complex(i2),
+            tail.astype(np.complex64),
+        ]
+    ).astype(np.complex64)
+    cap_p, imp, op = tmp_path / "cap.iq", tmp_path / "imp.iq", tmp_path / "o.bits"
+    cap.tofile(cap_p)
+    channel(cap_p, imp, snr_db=20.0, sample_rate=rate, seed=3)
+    r = be.run_pipeline(_compile(m, "rx", rate, imp, op))
+    assert r.status == "ok"
+    assert any(d.get("locks") == 2 for d in r.diagnostics.values()), r.diagnostics
+    out = read_bits(op)
+    assert len(out) > len(bits1) + len(bits2)  # both payloads (plus gap junk)
+    assert aligned_ber(out[: len(bits1) + 8 * sf], bits1, max_shift=8 * sf) == 0.0
+    assert aligned_ber(out[len(bits1) :], bits2, max_shift=40 * sf) == 0.0
+
+
 @pytest.mark.xfail(
     reason="chirp_sync does not correct SFO; clock_correct owns it "
     "(see test_clock_correct_roundtrip). Pins the coverage boundary.",

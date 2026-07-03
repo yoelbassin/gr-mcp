@@ -16,6 +16,9 @@ class RunResult(BaseModel):
     status: Literal["ok", "error", "timeout"]
     artifacts: list[str] = []
     error: str | None = None
+    # per-block counters (keyed by block id) harvested after the run, e.g.
+    # {"b4": {"locks": 2}} — lets a caller tell "no signal found" from silence
+    diagnostics: dict[str, dict[str, int]] = {}
 
 
 class Backend(ABC):

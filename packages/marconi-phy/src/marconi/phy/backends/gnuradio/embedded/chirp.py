@@ -214,7 +214,10 @@ def make_chirp_mod(gr: Any, sf: int, oversample: int) -> Any:
 
 
 def make_chirp_demod(gr: Any, sf: int, oversample: int, zero_pad: int) -> Any:
-    """RX: oversample*(1<<sf) complex64 chirp samples → int16 symbol index."""
+    """RX: oversample*(1<<sf) complex64 chirp samples → int16 symbol index.
+    Translates upstream "burst" sample tags to symbol tags (chirp_sync emits
+    whole-symbol burst segments, so tagged offsets land on window boundaries)."""
+    pmt = gr.pmt
     grid = _Grid(sf, oversample, zero_pad)
     sn = grid.sample_num
 
@@ -226,7 +229,11 @@ def make_chirp_demod(gr: Any, sf: int, oversample: int, zero_pad: int) -> Any:
                 in_sig=[np.complex64],
                 out_sig=[np.int16],
             )
+            self.set_tag_propagation_policy(gr.TPP_DONT)
             self._buf = np.empty(0, dtype=np.complex64)
+            self._abs = 0  # absolute input offset of _buf[0]
+            self._syms = 0  # total symbols emitted
+            self._pend: list[int] = []  # symbol indices awaiting their tag
 
         def forecast(self, noutput_items: int, ninputs: int) -> list[int]:
             # A full-symbol input demand (sn) can exceed GR's default stream
@@ -237,6 +244,12 @@ def make_chirp_demod(gr: Any, sf: int, oversample: int, zero_pad: int) -> Any:
         def general_work(self, input_items: Any, output_items: Any) -> int:
             x = input_items[0]
             if len(x):
+                if not self._buf.size:
+                    self._abs = self.nitems_read(0)
+                for t in self.get_tags_in_window(0, 0, len(x)):
+                    if pmt.symbol_to_string(t.key) == "burst":
+                        rel = int(t.offset) - self._abs
+                        self._pend.append(self._syms + rel // sn)
                 self._buf = np.concatenate([self._buf, np.asarray(x, np.complex64)])
                 self.consume(0, len(x))
             out = output_items[0]
@@ -245,6 +258,18 @@ def make_chirp_demod(gr: Any, sf: int, oversample: int, zero_pad: int) -> Any:
                 out[i] = _demod_symbol(self._buf[i * sn : (i + 1) * sn], grid)
             if nsym:
                 self._buf = self._buf[nsym * sn :]
+                self._abs += nsym * sn
+                emitted = self._syms + nsym
+                for s in self._pend:
+                    if s < emitted:
+                        self.add_item_tag(
+                            0,
+                            self.nitems_written(0) + (s - self._syms),
+                            pmt.intern("burst"),
+                            pmt.PMT_NIL,
+                        )
+                self._pend = [s for s in self._pend if s >= emitted]
+                self._syms = emitted
             return nsym
 
     return _ChirpDemod()
@@ -313,16 +338,20 @@ def make_chirp_sync(
     bandwidth: float,
 ) -> Any:
     """RX: buffer IQ, detect CSS preamble+SFD, jointly estimate CFO + fractional
-    STO, apply the fractional sample timing (streaming windowed-sinc FIR) and
-    derotate the CFO, emitting payload IQ."""
+    STO per burst, apply the fractional sample timing (streaming windowed-sinc
+    FIR) and derotate the CFO, emitting payload IQ. The hunt never stops: each
+    further preamble re-arms with fresh estimates; every burst's first payload
+    sample carries a "burst" stream tag, and each burst segment is emitted as a
+    whole number of symbol windows so a downstream demod stays aligned.
+    Emission trails the detector by a bounded margin (samples an in-progress
+    detection could still claim are withheld, including at EOF)."""
+    pmt = gr.pmt
     grid = _Grid(sf, oversample, zero_pad)
     sn = grid.sample_num
     detect_run = preamble_len - 2
-    min_buf = (preamble_len + 6) * sn
     _NTAPS = 33
     _HALF = (_NTAPS - 1) // 2
     _SFD_SPAN = (preamble_len + 6) * sn
-    _LOOKBACK = _SFD_SPAN + _NTAPS - 1
 
     class _ChirpSync(gr.basic_block):
         def __init__(self) -> None:
@@ -330,35 +359,38 @@ def make_chirp_sync(
                 self, name="chirp_sync", in_sig=[np.complex64], out_sig=[np.complex64]
             )
             self._buf = np.empty(0, dtype=np.complex64)
-            self._locked = False
+            self._armed = False
             self._f_cfo = 0.0
-            self._n_out = 0  # payload samples emitted, for CFO phase continuity
+            self._n_out = 0  # per-burst payload samples, for CFO phase continuity
             self._taps = np.zeros(_NTAPS, dtype=np.complex64)
             self._hist = np.zeros(_NTAPS - 1, dtype=np.complex64)
             self._drop = 0  # FIR group-delay outputs still to discard
+            self._seg = 0  # samples appended to _out for the current segment
             self._scan = _DetectScan(grid, detect_run)
             self._det_x: int | None = None
+            self._out = np.empty(0, dtype=np.complex64)
+            self._drained = 0  # samples of _out ever handed to the scheduler
+            self._queued = 0  # samples ever appended to _out
+            self._tagq: list[int] = []  # _out indices (absolute) of burst starts
+            self.diagnostics = {"locks": 0}
 
         def forecast(self, noutput_items: int, ninputs: int) -> list[int]:
-            if not self._locked:
-                return [noutput_items] * ninputs
-            return [0 if len(self._buf) else 1] * ninputs
+            work = self._out.size or (self._armed and self._cleared() > 0)
+            return [0 if work else 1] * ninputs
 
-        def _trim_prelock(self) -> None:
-            anchor = self._scan.x if self._det_x is None else self._det_x
-            cut = anchor - _LOOKBACK
-            if cut > 0:
-                self._buf = self._buf[cut:]
-                self._scan.x -= cut
-                if self._det_x is not None:
-                    self._det_x -= cut
+        def _cleared(self) -> int:
+            """Samples of _buf beyond any claim by an in-progress detection
+            (with one symbol of slack for the joint estimator's look-back)."""
+            c = self._scan.x - (len(self._scan.run) + 1) * sn
+            if self._det_x is not None:
+                c = min(c, self._det_x)
+            return max(0, min(c - sn, len(self._buf)))
 
-        def _try_lock(self) -> bool:
+        def _hunt(self) -> tuple[int, float, float] | None:
             if self._det_x is None:
                 self._det_x = self._scan.step(self._buf)
             if self._det_x is None:
-                self._trim_prelock()
-                return False
+                return None
             try:
                 payload_start = _sfd_sync(
                     self._buf, self._det_x, grid, self._det_x + _SFD_SPAN
@@ -366,15 +398,51 @@ def make_chirp_sync(
             except ValueError:
                 self._det_x = None
                 self._scan.run = []
-                self._trim_prelock()
-                return False
-            if payload_start is None:
-                return False
-            if payload_start + sn > len(self._buf):
-                return False
+                return None
+            if payload_start is None or payload_start + sn > len(self._buf):
+                return None
             cfo_bins, sto_bins = _joint_sync(
                 self._buf, payload_start, grid, preamble_len
             )
+            return payload_start, cfo_bins, sto_bins
+
+        def _fir_to_out(self, upto: int) -> None:
+            """Move _buf[:upto] through the current FIR+CFO into _out."""
+            if upto <= 0:
+                return
+            ext = np.concatenate([self._hist, self._buf[:upto]])
+            y = np.convolve(ext, self._taps, "valid")
+            self._hist = ext[-(_NTAPS - 1) :]
+            self._trim(upto)
+            if self._drop:
+                d = min(self._drop, len(y))
+                y = y[d:]
+                self._drop -= d
+            k = self._n_out + np.arange(len(y))
+            rotated = (
+                y * np.exp(-1j * 2 * np.pi * self._f_cfo * k / (oversample * bandwidth))
+            ).astype(np.complex64)
+            self._n_out += len(y)
+            self._out = np.concatenate([self._out, rotated])
+            self._queued += len(rotated)
+            self._seg += len(rotated)
+
+        def _trim(self, cut: int) -> None:
+            if cut <= 0:
+                return
+            self._buf = self._buf[cut:]
+            self._scan.x = max(0, self._scan.x - cut)
+            if self._det_x is not None:
+                self._det_x = max(0, self._det_x - cut)
+
+        def _relock(self, payload_start: int, cfo_bins: float, sto_bins: float) -> None:
+            if self._armed:
+                # flush the old segment up to an emitted-count symbol boundary
+                # (so a downstream demod's windows stay aligned across bursts)
+                boundary = self._det_x if self._det_x is not None else payload_start
+                flush = max(0, ((self._seg + boundary) // sn) * sn - self._seg)
+                self._fir_to_out(flush)
+                payload_start -= flush  # _fir_to_out trimmed _buf by `flush`
             self._f_cfo = cfo_bins * bandwidth / grid.bins
             sto = sto_bins * oversample / zero_pad  # fractional sample timing
             n_int = int(round(sto))
@@ -382,45 +450,48 @@ def make_chirp_sync(
             k = np.arange(_NTAPS) - _HALF
             h = np.sinc(k - mu) * np.blackman(_NTAPS)
             self._taps = (h / h.sum()).astype(np.complex64)
-            start = payload_start - n_int  # +est_sto correction = read earlier by n_int
-            if start < _NTAPS - 1:
-                return False
+            start = max(_NTAPS - 1, payload_start - n_int)
             self._hist = self._buf[start - (_NTAPS - 1) : start].copy()
-            self._buf = self._buf[start:]
+            self._trim(start)
             self._drop = _HALF
-            return True
+            self._n_out = 0
+            self._seg = 0
+            self._scan = _DetectScan(grid, detect_run)
+            self._det_x = None
+            self._tagq.append(self._queued)
+            self._armed = True
+            self.diagnostics["locks"] += 1
 
         def general_work(self, input_items: Any, output_items: Any) -> int:
             x = input_items[0]
             if len(x):
                 self._buf = np.concatenate([self._buf, x])
                 self.consume(0, len(x))
-            if not self._locked:
-                if len(self._buf) < min_buf and len(x) > 0:
-                    return 0
-                if not self._try_lock():
-                    return 0
-                self._locked = True
+            while True:
+                lock = self._hunt()
+                if lock is None:
+                    break
+                self._relock(*lock)
+            if self._armed:
+                self._fir_to_out(self._cleared())
+            else:
+                self._trim(self._cleared())
             out = output_items[0]
-            m = min(len(out), len(self._buf))
-            if m:
-                ext = np.concatenate([self._hist, self._buf[:m]])
-                y = np.convolve(ext, self._taps, "valid")  # fractional delay, len m
-                self._hist = ext[-(_NTAPS - 1) :]
-                self._buf = self._buf[m:]
-                if self._drop:
-                    d = min(self._drop, len(y))
-                    y = y[d:]
-                    self._drop -= d
-                k = self._n_out + np.arange(len(y))
-                out[: len(y)] = (
-                    y
-                    * np.exp(
-                        -1j * 2 * np.pi * self._f_cfo * k / (oversample * bandwidth)
-                    )
-                ).astype(np.complex64)
-                self._n_out += len(y)
-                return len(y)
-            return 0
+            k = int(min(self._out.size, len(out)))
+            if k:
+                out[:k] = self._out[:k]
+                self._out = self._out[k:]
+                span = (self._drained, self._drained + k)
+                for tag in self._tagq:
+                    if span[0] <= tag < span[1]:
+                        self.add_item_tag(
+                            0,
+                            self.nitems_written(0) + (tag - span[0]),
+                            pmt.intern("burst"),
+                            pmt.PMT_NIL,
+                        )
+                self._tagq = [t for t in self._tagq if t >= span[1]]
+                self._drained += k
+            return k
 
     return _ChirpSync()

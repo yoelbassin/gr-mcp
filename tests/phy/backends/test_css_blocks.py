@@ -182,15 +182,18 @@ def _full_chain_pipeline(
 def test_chirp_sync_clean_roundtrip(tmp_path: Path) -> None:
     """chirp_prepend adds preamble+SFD; chirp_sync detects it, strips to payload,
     and derotates the (zero) CFO; payload bits survive the full chain exactly.
-    The only test that exercises chirp_sync end-to-end before the Task-4 sim."""
+    chirp_sync's emission trails its always-on burst hunt by a bounded margin
+    (withheld at EOF), so the payload is followed by pad symbols that absorb it."""
     ensure_worker_warm()
-    bits = np.random.default_rng(3).integers(0, 2, SF * 40).astype(np.uint8)
-    bp = write_bits(tmp_path / "in.bits", bits)
+    rng = np.random.default_rng(3)
+    bits = rng.integers(0, 2, SF * 40).astype(np.uint8)
+    pad = rng.integers(0, 2, SF * (PREAMBLE_LEN + 4)).astype(np.uint8)
+    bp = write_bits(tmp_path / "in.bits", np.concatenate([bits, pad]))
     op = tmp_path / "out.bits"
     be = GnuRadioBackend()
     assert be.run_pipeline(_full_chain_pipeline(bp, op)).status == "ok"
     out = read_bits(op)
-    assert len(out) >= len(bits) - SF  # preamble stripped, ≤1 trailing symbol lost
+    assert len(out) >= len(bits)  # payload fully emitted; pad absorbs the tail
     assert aligned_ber(out, bits) == 0.0
 
 
@@ -252,5 +255,5 @@ def test_chirp_sync_noise_bounded_no_lock():
     tb.run()
     bound = 2 * (pl + 6) * sn + 8192
     assert blk._buf.size <= bound, f"pre-lock buffer {blk._buf.size} > {bound}"
-    assert not blk._locked
+    assert not blk._armed
     assert len(snk.data()) == 0

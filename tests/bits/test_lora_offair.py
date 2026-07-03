@@ -1,8 +1,7 @@
-"""Real off-air LoRa SF11 (IQ_2), end-to-end through phy -> bits, CRC as the oracle.
-
-The GR demod is non-deterministic run-to-run, so this asserts a robust
-threshold (num_crc_ok >= 1), not an exact count.
-"""
+"""Real off-air LoRa SF11 (IQ_2), end-to-end through phy -> bits, CRC as the
+oracle. The slice holds TWO complete frames (~3.9 s and ~8.9 s into the
+capture); both must decode CRC-valid in one run — chirp_sync re-arms per
+preamble and css_explicit_decode loops per burst tag (issue 03)."""
 
 from __future__ import annotations
 
@@ -88,6 +87,7 @@ def test_iq2_decodes_crc_valid_rf_fingerpring(tmp_path: Path) -> None:
     res = parse_bitstream(
         Bitstream(path=snk, num_bits=n, source_capture=_SLICE), _codec(), registry()
     )
-    assert res.num_crc_ok >= 1, f"expected a CRC-valid LoRa frame, got {res.num_crc_ok}"
-    decoded = bytes.fromhex(res.frames[0].payload_hex)
-    assert decoded.startswith(b"RF fingerpring Project for Lora"), decoded[:32]
+    assert res.num_crc_ok >= 2, f"expected both frames CRC-valid, got {res.num_crc_ok}"
+    for f in res.frames[:2]:
+        decoded = bytes.fromhex(f.payload_hex)
+        assert decoded.startswith(b"RF fingerpring Project for Lora"), decoded[:32]

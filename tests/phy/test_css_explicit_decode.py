@@ -50,11 +50,18 @@ _WHITEN = bytes.fromhex(
 )
 
 
-def _run_block(symbols):
+def _run_block(symbols, tag_offsets=()):
+    import pmt
     from gnuradio import blocks, gr
 
+    tags = [
+        gr.tag_utils.python_to_tag(
+            (int(o), pmt.intern("burst"), pmt.PMT_NIL, pmt.intern("test"))
+        )
+        for o in tag_offsets
+    ]
     blk = make_css_explicit_decode(gr, sf=11, ldro=True, **_HEADER)
-    src = blocks.vector_source_s([int(s) for s in symbols], False, 1, [])
+    src = blocks.vector_source_s([int(s) for s in symbols], False, 1, tags)
     snk = blocks.vector_sink_b()
     tb = gr.top_block("css_explicit_decode_test")
     tb._py_instances = {"blk": blk}  # GC anchor
@@ -65,7 +72,7 @@ def _run_block(symbols):
     t = threading.Thread(target=tb.run)
     t.start()
     t.join(30)
-    return list(snk.data())
+    return list(snk.data()), blk
 
 
 def _assemble(bits, payload_len=255):
@@ -87,6 +94,35 @@ def _assemble(bits, payload_len=255):
 
 
 def test_explicit_decode_yields_rf_fingerpring_payload():
-    bits = _run_block(_SF11_SYMBOLS)
+    bits, _ = _run_block(_SF11_SYMBOLS)
     payload = _assemble(bits)
     assert payload.startswith(b"RF fingerpring Project for Lora"), payload[:31]
+
+
+def test_explicit_decode_loops_back_to_back_frames():
+    """Two frames in one symbol stream decode as two frames — the pre-fix
+    block set _done after frame 1 and consumed-and-discarded the rest
+    (issue 03)."""
+    one, _ = _run_block(_SF11_SYMBOLS)
+    two, blk = _run_block(_SF11_SYMBOLS * 2)
+    assert len(two) == 2 * len(one)
+    assert _assemble(two[: len(one)]) == _assemble(one)
+    assert _assemble(two[len(one) :]) == _assemble(one)
+    assert blk.diagnostics["frames_decoded"] == 2
+
+
+def test_explicit_decode_corrupt_header_skips_to_next_tag():
+    """A corrupt header is reported and the next tagged burst still decodes —
+    the pre-fix block treated a header-parity failure as end-of-stream and
+    reported nothing (issue 03)."""
+    import numpy as np
+
+    rng = np.random.default_rng(5)
+    corrupt = list(_SF11_SYMBOLS)
+    corrupt[:8] = [int(v) for v in rng.integers(1, 2048, 8)]
+    frame_len = len(_SF11_SYMBOLS)
+    bits, blk = _run_block(corrupt + _SF11_SYMBOLS, tag_offsets=(0, frame_len))
+    payload = _assemble(bits)
+    assert payload.startswith(b"RF fingerpring Project for Lora"), payload[:31]
+    assert blk.diagnostics["header_fail"] == 1
+    assert blk.diagnostics["frames_decoded"] == 1

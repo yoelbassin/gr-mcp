@@ -73,6 +73,15 @@ def _arm_crash_trampoline(tb: Any, crashes: list[str]) -> None:
             blk.forecast = _trampolined_forecast(blk.forecast, tb, crashes)
 
 
+def _harvest_diagnostics(tb: Any) -> dict[str, dict[str, int]]:
+    out: dict[str, dict[str, int]] = {}
+    for bid, blk in getattr(tb, "_py_instances", {}).items():
+        diag = getattr(blk, "diagnostics", None)
+        if isinstance(diag, dict) and diag:
+            out[str(bid)] = {str(k): int(v) for k, v in diag.items()}
+    return out
+
+
 def _run_flowgraph(pipeline: GrPipeline) -> RunResult:
     from marconi.phy.backends.gnuradio.build import build_top_block  # lazy
 
@@ -89,14 +98,20 @@ def _run_flowgraph(pipeline: GrPipeline) -> RunResult:
             status="error",
             error=f"flowgraph raised: {e}",
             artifacts=sink_paths(pipeline),
+            diagnostics=_harvest_diagnostics(tb),
         )
     if crashes:
         return RunResult(
             status="error",
             error="embedded block raised:\n" + "\n".join(crashes),
             artifacts=sink_paths(pipeline),
+            diagnostics=_harvest_diagnostics(tb),
         )
-    return RunResult(status="ok", artifacts=sink_paths(pipeline))
+    return RunResult(
+        status="ok",
+        artifacts=sink_paths(pipeline),
+        diagnostics=_harvest_diagnostics(tb),
+    )
 
 
 def _captured_text(capture_path: str | None) -> str:

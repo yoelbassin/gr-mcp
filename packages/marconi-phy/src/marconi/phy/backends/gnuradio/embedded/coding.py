@@ -23,6 +23,7 @@ def make_css_explicit_decode(
     field_has_crc: list,
     field_parity: list,
 ) -> Any:
+    pmt = gr.pmt
     n = 1 << sf
     header_sf_app = sf - sf_reduction
     payload_sf_app = sf - sf_reduction if ldro else sf
@@ -62,71 +63,143 @@ def make_css_explicit_decode(
         return out
 
     class _CssExplicitDecode(gr.basic_block):
+        """Decodes every frame in the stream. Without burst tags, frames are
+        assumed back-to-back (a header parse follows the previous frame's end;
+        a header failure stalls until a tag arrives). With upstream "burst"
+        tags (chirp_sync -> chirp_demod), headers parse only at tagged symbol
+        offsets, so inter-burst junk is never mistaken for a header and a
+        corrupt header just skips to the next burst. Per-run counters are
+        exposed as `diagnostics` and surfaced through RunResult."""
+
         def __init__(self) -> None:
             gr.basic_block.__init__(
                 self, name="css_explicit_decode", in_sig=[np.int16], out_sig=[np.uint8]
             )
+            self.set_tag_propagation_policy(gr.TPP_DONT)
             self._symbols: list[int] = []
+            self._abs0 = 0  # absolute symbol index of _symbols[0]
+            self._start = 0  # absolute symbol index of the current frame candidate
+            self._tags: list[int] = []
+            self._tagged = False
+            self._stalled = False
             self._frame_len: int | None = None
             self._payload_cr: int = 0
+            self._declared_bits = 0
             self._carry: list[int] = []
-            self._out: list[int] | None = None
-            self._done = False
+            self._outbits: list[int] = []
+            self.diagnostics = {
+                "frames_seen": 0,
+                "header_ok": 0,
+                "header_fail": 0,
+                "frames_decoded": 0,
+            }
 
         def forecast(self, noutput_items: int, ninputs: int) -> list:
-            return [1] * ninputs
+            return [0 if self._outbits else 1] * ninputs
 
-        def _parse_header(self) -> None:
+        def _sym(self, lo: int, hi: int) -> list[int]:
+            return self._symbols[lo - self._abs0 : hi - self._abs0]
+
+        def _avail(self) -> int:
+            return self._abs0 + len(self._symbols)
+
+        def _next_start(self) -> int | None:
+            if not self._tagged:
+                return None if self._stalled else self._start
+            while self._tags and self._tags[0] < self._start:
+                self._tags.pop(0)
+            return self._tags.pop(0) if self._tags else None
+
+        def _parse_header(self, start: int) -> bool:
             nibbles = _fec_nibbles(
-                self._symbols[:header_symbols], header_sf_app, header_cr
+                self._sym(start, start + header_symbols), header_sf_app, header_cr
             )
             hbits = _nibbles_to_bits(nibbles[:header_nibbles])
             data_int = coding.bits_to_uint(hbits, 0, header_data_bits)
             received = coding.bits_to_uint(hbits, par_start, par_len)
-            if not coding.header_parity_ok(data_int, received, masks):
-                self._done = True
-                return
-            payload_len = coding.bits_to_uint(hbits, pl_start, pl_len)
+            self.diagnostics["frames_seen"] += 1
             payload_cr = coding.bits_to_uint(hbits, cr_start, cr_len)
-            if not coding.supported_cr(payload_cr):
-                self._done = True
-                return
+            if not coding.header_parity_ok(data_int, received, masks) or (
+                not coding.supported_cr(payload_cr)
+            ):
+                self.diagnostics["header_fail"] += 1
+                return False
+            self.diagnostics["header_ok"] += 1
+            payload_len = coding.bits_to_uint(hbits, pl_start, pl_len)
             has_crc = coding.bits_to_uint(hbits, crc_start, crc_len)
             self._frame_len = coding.css_explicit_frame_len(
                 payload_len, has_crc, payload_cr, sf, int(ldro), sf_reduction
             )
             self._payload_cr = payload_cr
+            self._declared_bits = payload_len * 8 + has_crc * 16
             self._carry = _nibbles_to_bits(nibbles[header_nibbles:])
+            return True
 
-        def _decode_frame(self) -> None:
-            assert self._frame_len is not None
-            payload = self._symbols[header_symbols : header_symbols + self._frame_len]
+        def _decode_frame(self, start: int, frame_len: int) -> None:
+            payload = self._sym(
+                start + header_symbols, start + header_symbols + frame_len
+            )
             nibbles = _fec_nibbles(payload, payload_sf_app, self._payload_cr)
-            self._out = self._carry + _nibbles_to_bits(nibbles)
-            self._done = True
+            bits = self._carry + _nibbles_to_bits(nibbles)
+            # emit exactly the header-declared frame content; the last FEC
+            # block's rounding pad would misalign every following frame in
+            # the bit stream (a single-frame stream never shows this)
+            self._outbits.extend(bits[: self._declared_bits])
+            self.diagnostics["frames_decoded"] += 1
+
+        def _advance(self, to: int) -> None:
+            self._start = to
+            self._frame_len = None
+            drop = min(to, self._avail()) - self._abs0
+            if drop > 0:
+                self._symbols = self._symbols[drop:]
+                self._abs0 += drop
+
+        def _process(self) -> None:
+            while True:
+                if self._frame_len is None:
+                    start = self._next_start()
+                    if start is None or self._avail() < start + header_symbols:
+                        if start is not None and self._tagged:
+                            self._tags.insert(0, start)  # not enough symbols yet
+                        return
+                    self._start = start
+                    if not self._parse_header(start):
+                        if self._tagged:
+                            continue  # hunt the next tagged burst
+                        self._stalled = True  # blind stream: no way to resync
+                        return
+                frame_len = self._frame_len
+                if frame_len is None:  # narrow: parse either set it or returned
+                    return
+                need = self._start + header_symbols + frame_len
+                if self._avail() < need:
+                    return
+                self._decode_frame(self._start, frame_len)
+                # a frame whose declared extent crosses the next burst tag is
+                # cut there so a corrupt length can never swallow a real burst
+                nxt = self._tags[0] if self._tags else None
+                self._advance(need if nxt is None or nxt >= need else nxt)
 
         def general_work(self, input_items: Any, output_items: Any) -> int:
             inp = input_items[0]
             out = output_items[0]
-            if not self._done and self._out is None:
+            if len(inp):
+                base = self.nitems_read(0)
+                for t in self.get_tags_in_window(0, 0, len(inp)):
+                    if pmt.symbol_to_string(t.key) == "burst":
+                        self._tags.append(int(t.offset))
+                        self._tagged = True
+                        self._stalled = False
+                if not self._symbols:
+                    self._abs0 = base
                 self._symbols.extend(int(s) for s in inp)
                 self.consume(0, len(inp))
-                if self._frame_len is None and len(self._symbols) >= header_symbols:
-                    self._parse_header()
-                if (
-                    self._frame_len is not None
-                    and self._out is None
-                    and len(self._symbols) >= header_symbols + self._frame_len
-                ):
-                    self._decode_frame()
-                if not self._out:
-                    return 0
-            if self._out:
-                emit = min(len(self._out), len(out))
-                out[:emit] = self._out[:emit]
-                self._out = self._out[emit:]
-                return emit
-            self.consume(0, len(inp))
-            return 0
+                self._process()
+            emit = min(len(self._outbits), len(out))
+            if emit:
+                out[:emit] = self._outbits[:emit]
+                self._outbits = self._outbits[emit:]
+            return emit
 
     return _CssExplicitDecode()
