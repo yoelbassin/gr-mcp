@@ -35,6 +35,8 @@ class HdlcDeframe(DuplexStage[ProgramBuilder]):
     name = "hdlc_deframe"
     from_level = Level.BITS
     to_level = Level.FRAMES
+    seeds_frames = True
+    self_slicing = True  # flag-delimited frames are complete as emitted
     family = "framing"
 
     class _Params(StageParams):
@@ -76,6 +78,7 @@ class Segment(DuplexStage[ProgramBuilder]):
     name = "segment"
     from_level = Level.BITS
     to_level = Level.FRAMES
+    seeds_frames = True  # seeds a fixed-stride region; needs a body slicer
     family = "framing"
 
     class _Params(StageParams):
@@ -94,6 +97,7 @@ class FixedFrame(DuplexStage[ProgramBuilder]):
     name = "fixed_frame"
     from_level = Level.FRAMES
     to_level = Level.FRAMES
+    slices_body = True  # carves the seeded region into fixed-length bodies
     family = "framing"
 
     class _Params(StageParams):

@@ -10,10 +10,6 @@ from marconi.core.levels import Level
 from marconi.core.models import ValidationIssue
 from marconi.core.stages import Stage, validate_path
 
-_SEEDERS = {"hdlc_deframe", "segment"}
-_SELF_SLICING = {"hdlc_deframe"}
-_BODY_SLICERS: set[str] = {"fixed_frame"}
-
 
 def validate_codec(
     codec: CodecSpec, registry: Mapping[str, Stage[Any]]
@@ -22,22 +18,26 @@ def validate_codec(
     if not codec.path:
         return [ValidationIssue(message="codec has no converters")]
     validate_path(codec.path, registry, Level.BITS, "codec", issues)
-    present = {s.conv for s in codec.path if s.conv in registry}
-    if present:
-        if not (present & _SEEDERS):
+    stages = [registry[s.conv] for s in codec.path if s.conv in registry]
+    if stages:
+        # Capability comes from the stages' own flags, never from a name-set —
+        # a user-registered seeder/slicer advertises itself (issue 08).
+        if not any(s.seeds_frames for s in stages):
             issues.append(
                 ValidationIssue(
-                    message="codec needs a frame seeder (e.g. 'hdlc_deframe')"
+                    message="codec needs a frame seeder (a BITS->FRAMES stage "
+                    "declaring seeds_frames, e.g. 'hdlc_deframe')"
                 )
             )
-        if not (present & _SELF_SLICING) and not (present & _BODY_SLICERS):
-            issues.append(ValidationIssue(message="codec needs a body slicer"))
-        if "parse" not in present:
+        elif not any(s.self_slicing or s.slices_body for s in stages):
             issues.append(
                 ValidationIssue(
-                    message="codec is missing the required 'parse' converter"
+                    message="codec needs a body slicer (a stage declaring "
+                    "self_slicing or slices_body)"
                 )
             )
+        # parse is OPTIONAL: a deframe+integrity codec of an unknown protocol
+        # (the reverse-engineering entry state) is a valid decode to frames.
         for idx, step in enumerate(codec.path):
             if step.conv == "parse":
                 fields = step.params.get("fields")

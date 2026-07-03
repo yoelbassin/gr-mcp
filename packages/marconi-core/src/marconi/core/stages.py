@@ -48,6 +48,15 @@ class Stage(ABC, Generic[B]):
     directions: frozenset[str] = frozenset({"rx", "tx"})
     params_model: type[StageParams]
 
+    # Framing capabilities a codec validator consumes (declared by the stage,
+    # not enumerated by name in the validator — so a user-registered stage
+    # advertises its own capability). A seeder establishes frame boundaries
+    # (BITS->FRAMES); it is self_slicing if it also produces complete frames,
+    # else a slices_body stage must carve the seeded region into frame bodies.
+    seeds_frames: bool = False
+    self_slicing: bool = False
+    slices_body: bool = False
+
     @abstractmethod
     def emit_rx(self, b: B, params: Mapping[str, Any]) -> None: ...
 
