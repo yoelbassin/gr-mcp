@@ -211,30 +211,67 @@ def _apply_fields_tx(message: dict, fields: list[ParseField]) -> dict:
     return out
 
 
+_Case = tuple[BitStruct, list[ParseField]]
+
+
+def _need_bytes(fields: list[ParseField]) -> int:
+    return (sum(f.bits for f in fields) + 7) // 8
+
+
+def _decode_struct(
+    struct: BitStruct, payload: bytes, bit_order: str, fields: list[ParseField]
+) -> dict[str, int | str]:
+    parsed = struct.parse(_lsb(payload, bit_order))
+    msg: dict[str, int | str] = {
+        k: int(v) for k, v in parsed.items() if not k.startswith("_")
+    }
+    return _apply_fields_rx(msg, fields)
+
+
 def parse_rx(
-    c: RxCarrier, *, struct: BitStruct, fields: list[ParseField], bit_order: str = "msb"
+    c: RxCarrier,
+    *,
+    struct: BitStruct,
+    fields: list[ParseField],
+    bit_order: str = "msb",
+    discriminator: str | None = None,
+    cases: dict[int, _Case] | None = None,
 ) -> RxCarrier:
-    need = (sum(f.bits for f in fields) + 7) // 8
     out: list[_Frame] = []
     for f in c.frames:
-        if f.crc_ok is not False and len(f.payload) >= need:
-            parsed = struct.parse(_lsb(f.payload, bit_order))
-            msg: dict[str, int | str] = {
-                k: int(v) for k, v in parsed.items() if not k.startswith("_")
-            }
-            out.append(replace(f, message=_apply_fields_rx(msg, fields)))
-        else:
+        if f.crc_ok is False or len(f.payload) < _need_bytes(fields):
             out.append(f)
+            continue
+        msg = _decode_struct(struct, f.payload, bit_order, fields)
+        # A per-type body is applied only when its discriminator matches AND the
+        # payload can hold it; otherwise the shared header stands alone — a
+        # non-matching type is never re-read with a wrong-type struct.
+        if discriminator is not None and cases:
+            selected = cases.get(int(msg.get(discriminator, -1)))
+            if selected is not None and len(f.payload) >= _need_bytes(selected[1]):
+                msg = _decode_struct(selected[0], f.payload, bit_order, selected[1])
+        out.append(replace(f, message=msg))
     return RxCarrier(bits=c.bits, frames=out)
 
 
 def parse_tx(
-    c: TxCarrier, *, struct: BitStruct, fields: list[ParseField], bit_order: str = "msb"
+    c: TxCarrier,
+    *,
+    struct: BitStruct,
+    fields: list[ParseField],
+    bit_order: str = "msb",
+    discriminator: str | None = None,
+    cases: dict[int, _Case] | None = None,
 ) -> TxCarrier:
     out = []
     for m in c.items:
+        sel_struct, sel_fields = struct, fields
+        if discriminator is not None and cases and discriminator in m:
+            case = cases.get(int(m[discriminator]))
+            if case is not None:
+                sel_struct, sel_fields = case
         try:
-            built = struct.build(_apply_fields_tx(dict(m), fields))
+            built = sel_struct.build(_apply_fields_tx(dict(m), sel_fields))
         except (ConstructError, KeyError, TypeError) as e:
             raise ValueError(f"message {m} does not fit the parse fields: {e}") from e
         out.append(_lsb(built, bit_order))

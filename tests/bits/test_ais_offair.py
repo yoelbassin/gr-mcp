@@ -41,10 +41,15 @@ _SLICE = (
     / "ais_60s.cf32"
 )
 
-_AIS_FIELDS = [
+# Every AIS type shares this header; the position-report body belongs only to
+# types 1/2/3. Applying it to a type-4/5/18 frame would mis-parse it (issue 07),
+# so it rides a msg_type dispatch and other types decode to the header alone.
+_AIS_COMMON = [
     {"name": "msg_type", "bits": 6},
     {"name": "repeat", "bits": 2},
     {"name": "mmsi", "bits": 30},
+]
+_AIS_POSITION = [
     {"name": "nav_status", "bits": 4},
     {"name": "rot", "bits": 8, "signed": True},
     {"name": "sog", "bits": 10},
@@ -78,7 +83,19 @@ def _ais_codec() -> CodecSpec:
                     "bit_order": "lsb",
                 },
             ),
-            CodecStep(conv="parse", params={"bit_order": "msb", "fields": _AIS_FIELDS}),
+            CodecStep(
+                conv="parse",
+                params={
+                    "bit_order": "msb",
+                    "fields": _AIS_COMMON,
+                    "discriminator": "msg_type",
+                    "cases": [
+                        {"when": 1, "fields": _AIS_POSITION},
+                        {"when": 2, "fields": _AIS_POSITION},
+                        {"when": 3, "fields": _AIS_POSITION},
+                    ],
+                },
+            ),
         ],
     )
 
@@ -130,3 +147,7 @@ def test_ais_offair_crc(tmp_path: Path) -> None:
     assert msgs, "no CRC-valid AIS messages were parsed"
     types = [int(m["msg_type"]) for m in msgs]
     assert all(1 <= t <= 27 for t in types), f"out-of-range AIS msg_type: {types}"
+    # dispatch, not mis-parse: only types 1/2/3 carry the position-report body
+    for m in msgs:
+        if "sog" in m:
+            assert int(m["msg_type"]) in (1, 2, 3), f"body on wrong type: {m}"
