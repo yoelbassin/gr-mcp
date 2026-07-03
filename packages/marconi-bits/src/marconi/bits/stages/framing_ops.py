@@ -56,6 +56,48 @@ class HdlcDeframe(DuplexStage[ProgramBuilder]):
         )
 
 
+class Codebook(DuplexStage[ProgramBuilder]):
+    name = "codebook"
+    from_level = Level.BITS
+    to_level = Level.BITS
+    family = "coding"
+
+    class _Params(StageParams):
+        code_bits: StrictInt = Field(ge=1)
+        data_bits: StrictInt = Field(ge=1)
+        table: list[int]
+
+        @model_validator(mode="after")
+        def _sized(self) -> "Codebook._Params":
+            if len(self.table) != (1 << self.data_bits):
+                raise PydanticCustomError(
+                    "value_error",
+                    "codebook table needs {want} entries for data_bits={data_bits}, "
+                    "got {have}",
+                    {
+                        "want": 1 << self.data_bits,
+                        "data_bits": self.data_bits,
+                        "have": len(self.table),
+                    },
+                )
+            return self
+
+    params_model = _Params
+
+    def _kw(self, params: Mapping[str, Any]) -> dict[str, Any]:
+        return {
+            "code_bits": int(params["code_bits"]),
+            "data_bits": int(params["data_bits"]),
+            "table": [int(x) for x in params["table"]],
+        }
+
+    def emit_rx(self, b: ProgramBuilder, params: Mapping[str, Any]) -> None:
+        b.add(framing.codebook_rx, **self._kw(params))
+
+    def emit_tx(self, b: ProgramBuilder, params: Mapping[str, Any]) -> None:
+        b.add(framing.codebook_tx, **self._kw(params))
+
+
 class NibbleSwap(DuplexStage[ProgramBuilder]):
     name = "nibble_swap"
     from_level = Level.BITS
@@ -157,6 +199,7 @@ class DescrambleBits(DuplexStage[ProgramBuilder]):
 
 
 FRAMING_STAGES: tuple[type[DuplexStage[ProgramBuilder]], ...] = (
+    Codebook,
     Descramble,
     DescrambleBits,
     Differential,

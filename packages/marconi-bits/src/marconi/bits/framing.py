@@ -418,6 +418,58 @@ def nibble_swap_tx(c: TxCarrier) -> TxCarrier:
     return TxCarrier([_nibble_swap_bits(it) for it in c.items])
 
 
+def _codebook_maps(
+    code_bits: int, data_bits: int, table: list[int]
+) -> tuple[np.ndarray, np.ndarray]:
+    if len(table) != (1 << data_bits):
+        raise ValueError(
+            f"codebook table has {len(table)} entries, need {1 << data_bits} "
+            f"for data_bits={data_bits}"
+        )
+    fwd = np.asarray(table, dtype=np.int64)
+    if fwd.size and int(fwd.max()) >= (1 << code_bits):
+        raise ValueError("codebook symbol exceeds code_bits width")
+    inv = np.zeros(1 << code_bits, dtype=np.int64)  # unknown symbol -> 0
+    inv[fwd] = np.arange(fwd.size, dtype=np.int64)
+    return fwd, inv
+
+
+def _unpack_symbols(bits: np.ndarray, width: int) -> np.ndarray:
+    n = bits.size // width
+    g = np.asarray(bits[: n * width], dtype=np.int64).reshape(n, width)
+    weights = 1 << np.arange(width - 1, -1, -1, dtype=np.int64)
+    return g @ weights
+
+
+def _pack_symbols(values: np.ndarray, width: int) -> np.ndarray:
+    shifts = np.arange(width - 1, -1, -1, dtype=np.int64)
+    return ((values[:, None] >> shifts) & 1).reshape(-1).astype(np.uint8)
+
+
+def codebook_rx(
+    c: RxCarrier, *, code_bits: int, data_bits: int, table: list[int]
+) -> RxCarrier:
+    """Fixed-width symbol substitution (a line/block code): each ``code_bits``
+    input symbol maps to its ``data_bits`` inverse-table value. One op expresses
+    3-of-6, Manchester, PPM chip-pairs — the table and widths are caller data."""
+    _, inv = _codebook_maps(code_bits, data_bits, table)
+    data = inv[_unpack_symbols(np.asarray(c.bits, np.uint8), code_bits)]
+    return RxCarrier(bits=_pack_symbols(data, data_bits), frames=c.frames)
+
+
+def codebook_tx(
+    c: TxCarrier, *, code_bits: int, data_bits: int, table: list[int]
+) -> TxCarrier:
+    fwd, _ = _codebook_maps(code_bits, data_bits, table)
+    out = [
+        _pack_symbols(
+            fwd[_unpack_symbols(np.asarray(it, np.uint8), data_bits)], code_bits
+        )
+        for it in c.items
+    ]
+    return TxCarrier(out)
+
+
 def differential_rx(c: RxCarrier, *, invert: bool = False) -> RxCarrier:
     b = np.asarray(c.bits, dtype=np.uint8)
     if b.size == 0:
