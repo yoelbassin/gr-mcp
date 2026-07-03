@@ -248,7 +248,7 @@ def test_symbols_terminal_routing_smoke(tmp_path: Path) -> None:
 def test_css_params_reject_preamble_len_below_5() -> None:
     from marconi.phy.modulation.css.stages import ChirpSync
 
-    for bad in (3, 4):  # 3 = IndexError in _detect, 4 = single-peak mislock
+    for bad in (3, 4):  # 3 = IndexError in _DetectScan.step, 4 = single-peak mislock
         issues: list = []
         validate_params(
             "chirp_sync[0]",

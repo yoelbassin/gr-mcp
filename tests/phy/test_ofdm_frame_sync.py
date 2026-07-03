@@ -147,6 +147,7 @@ def test_frame_sync_buffer_stays_bounded():
     sym = fft + cp
     null = 400
     frame = null + (ds + 1) * sym
+    # seed 4 trips issue 45's find_null one-frame-short quirk
     rng = np.random.default_rng(5)
     parts, usefuls_all = [], []
     for _ in range(40):
