@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import multiprocessing
 import os
-from collections.abc import Iterable
+import tempfile
 from multiprocessing.context import BaseContext
 from pathlib import Path
 from typing import Any
 
-from marconi.phy.backends.base import Backend, BackendError, RunResult
+from marconi.phy.backends.base import Backend, RunResult
 from marconi.phy.backends.gnuradio.build import build_top_block
 from marconi.phy.backends.gnuradio.worker import (
     run_pipeline_worker,
@@ -16,6 +16,7 @@ from marconi.phy.backends.gnuradio.worker import (
 from marconi.phy.ir import GrPipeline
 
 _GRACE_SECONDS = 5.0
+_TAIL_CHARS = 4000
 _PRELOAD = ["marconi.phy.backends.gnuradio._preload"]
 
 
@@ -52,45 +53,66 @@ def ensure_worker_warm() -> None:
     _warmed = True
 
 
-def _remove(paths: Iterable[str]) -> None:
-    for p in paths:
-        try:
-            Path(p).unlink()
-        except OSError:
-            pass
-
-
-def _run_in_subprocess(
-    payload_json: str, timeout: float, cleanup: Iterable[str]
-) -> RunResult:
-    recv, send = _CTX.Pipe(duplex=False)
-    proc = _CTX.Process(  # type: ignore[attr-defined]
-        target=run_pipeline_worker, args=(payload_json, send)
-    )
-    proc.start()
-    send.close()
-    proc.join(timeout)
-    if proc.is_alive():
-        proc.terminate()
-        proc.join(_GRACE_SECONDS)
-        if proc.is_alive():
-            proc.kill()
-            proc.join()
-        recv.close()
-        _remove(cleanup)
-        return RunResult(status="timeout", error="run exceeded timeout; worker killed")
-    payload: str | None = None
+def _read_tail(path: str) -> str:
     try:
-        if recv.poll():
-            payload = recv.recv()
-    except EOFError:
-        payload = None
-    finally:
-        recv.close()
+        text = Path(path).read_text(errors="replace")
+    except OSError:
+        return ""
+    return text[-_TAIL_CHARS:].strip()
+
+
+def _resolve_result(
+    timed_out: bool, payload: str | None, exitcode: int | None, tail: str
+) -> RunResult:
+    """A worker that reported its result keeps it even if it was killed while
+    lingering in GR teardown past the deadline — the pipe outranks the clock.
+    Caller-named sinks are never deleted; partial output is evidence."""
     if payload is not None:
         return RunResult.model_validate_json(payload)
-    _remove(cleanup)
-    raise BackendError(f"backend worker exited abnormally (exitcode={proc.exitcode})")
+    suffix = f"\n{tail}" if tail else ""
+    if timed_out:
+        return RunResult(
+            status="timeout",
+            error=f"run exceeded timeout; worker killed{suffix}",
+        )
+    return RunResult(
+        status="error",
+        error=f"backend worker exited abnormally (exitcode={exitcode}){suffix}",
+    )
+
+
+def _run_in_subprocess(payload_json: str, timeout: float) -> RunResult:
+    recv, send = _CTX.Pipe(duplex=False)
+    cap_fd, cap_path = tempfile.mkstemp(prefix="marconi-gr-", suffix=".log")
+    os.close(cap_fd)
+    try:
+        proc = _CTX.Process(  # type: ignore[attr-defined]
+            target=run_pipeline_worker, args=(payload_json, send, cap_path)
+        )
+        proc.start()
+        send.close()
+        proc.join(timeout)
+        timed_out = proc.is_alive()
+        if timed_out:
+            proc.terminate()
+            proc.join(_GRACE_SECONDS)
+            if proc.is_alive():
+                proc.kill()
+                proc.join()
+        payload: str | None = None
+        try:
+            if recv.poll():
+                payload = recv.recv()
+        except EOFError:
+            payload = None
+        finally:
+            recv.close()
+        return _resolve_result(timed_out, payload, proc.exitcode, _read_tail(cap_path))
+    finally:
+        try:
+            os.unlink(cap_path)
+        except OSError:
+            pass
 
 
 class GnuRadioBackend(Backend):
@@ -102,6 +124,8 @@ class GnuRadioBackend(Backend):
         return build_top_block(pipeline)
 
     def run_pipeline(self, pipeline: GrPipeline, timeout: float = 30.0) -> RunResult:
-        return _run_in_subprocess(
-            pipeline.model_dump_json(), timeout, sink_paths(pipeline)
-        )
+        result = _run_in_subprocess(pipeline.model_dump_json(), timeout)
+        if result.status != "ok" and not result.artifacts:
+            partial = [p for p in sink_paths(pipeline) if Path(p).exists()]
+            result = result.model_copy(update={"artifacts": partial})
+        return result

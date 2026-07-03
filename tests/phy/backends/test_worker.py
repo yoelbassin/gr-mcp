@@ -1,11 +1,20 @@
 import subprocess
 import sys
 import textwrap
+import threading
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
-from marconi.phy.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
+from marconi.phy.backends.base import RunResult
+from marconi.phy.backends.gnuradio import worker as worker_mod
+from marconi.phy.backends.gnuradio.runner import (
+    GnuRadioBackend,
+    _resolve_result,
+    _run_in_subprocess,
+    ensure_worker_warm,
+)
 from marconi.phy.ir import GrBlock, GrConnection, GrPipeline
 
 
@@ -69,3 +78,156 @@ def test_parent_process_stays_gnuradio_free() -> None:
     )
     out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
     assert out.returncode == 0 and "OK" in out.stdout, out.stderr
+
+
+# ─── Failure paths (issue 02) ────────────────────────────────────────────────
+
+
+def _raising_flowgraph(sink: Path) -> Any:
+    from gnuradio import blocks as gb
+    from gnuradio import gr
+
+    class _Boom(gr.basic_block):
+        def __init__(self) -> None:
+            gr.basic_block.__init__(
+                self, name="boom", in_sig=[np.complex64], out_sig=[np.complex64]
+            )
+
+        def forecast(self, noutput_items: int, ninputs: int) -> list:
+            return [1] * ninputs
+
+        def general_work(self, input_items: Any, output_items: Any) -> int:
+            raise RuntimeError("boom-marker")
+
+    tb = gr.top_block("boom")
+    boom = _Boom()
+    tb.connect(gb.vector_source_c([0.1 + 0.1j] * 4096, False), boom)
+    tb.connect(boom, gb.file_sink(gr.sizeof_gr_complex, str(sink), False))
+    tb._py_instances = {"boom": boom}
+    return tb
+
+
+def test_embedded_raise_reports_error_and_keeps_sink(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    """A raise on a GR block thread must not hang tb.run() (the pre-trampoline
+    behavior) and must surface as status=error with the traceback, with the
+    caller-named sink left in place."""
+    import marconi.phy.backends.gnuradio.build as build_mod
+
+    sink = tmp_path / "out.iq"
+    monkeypatch.setattr(
+        build_mod, "build_top_block", lambda pipeline: _raising_flowgraph(sink)
+    )
+    pipe = GrPipeline(
+        name="boom",
+        sample_rate=1.0,
+        blocks=[GrBlock(id="k", kind="iq_file_sink", params={"path": str(sink)})],
+        connections=[],
+    )
+    box: dict = {}
+    t = threading.Thread(
+        target=lambda: box.setdefault("r", worker_mod._run_flowgraph(pipe)),
+        daemon=True,
+    )
+    t.start()
+    t.join(60.0)
+    assert "r" in box, "flowgraph hung: crash trampoline failed to unwind tb.run()"
+    res = box["r"]
+    assert res.status == "error"
+    assert "boom-marker" in (res.error or "")
+    assert "RuntimeError" in (res.error or "")  # full traceback, not a bare repr
+    assert sink.exists(), "caller-named sink deleted; partial output is evidence"
+    assert str(sink) in res.artifacts
+
+
+def test_scheduler_abort_flags_error(capfd: Any) -> None:
+    """A block demanding more items than the stream buffer holds aborts the
+    scheduler while tb.run() returns normally (probed, issue 01); the worker
+    must convert the captured block_executor message into status=error."""
+    from gnuradio import blocks as gb
+    from gnuradio import gr
+
+    class _Greedy(gr.basic_block):
+        def __init__(self) -> None:
+            gr.basic_block.__init__(
+                self, name="greedy", in_sig=[np.complex64], out_sig=[np.complex64]
+            )
+
+        def forecast(self, noutput_items: int, ninputs: int) -> list:
+            return [1 << 20] * ninputs
+
+        def general_work(self, input_items: Any, output_items: Any) -> int:
+            self.consume(0, len(input_items[0]))
+            return 0
+
+    tb = gr.top_block("greedy")
+    greedy = _Greedy()
+    snk = gb.vector_sink_c()
+    tb.connect(gb.vector_source_c([0j] * 4096, False), greedy)
+    tb.connect(greedy, snk)
+    tb.run()
+    text = "".join(capfd.readouterr())
+    assert "block_executor" in text, "expected a scheduler abort on stdio"
+    flagged = worker_mod._flag_scheduler_abort(RunResult(status="ok"), text)
+    assert flagged.status == "error"
+    assert "scheduler abort" in (flagged.error or "")
+    clean = worker_mod._flag_scheduler_abort(RunResult(status="ok"), "")
+    assert clean.status == "ok"
+
+
+def test_timeout_reports_and_keeps_partial_sink(tmp_path: Path) -> None:
+    ensure_worker_warm()
+    rng = np.random.default_rng(2)
+    data = (rng.standard_normal(4096) + 1j * rng.standard_normal(4096)).astype(
+        np.complex64
+    )
+    src = tmp_path / "in.iq"
+    data.tofile(src)
+    dst = tmp_path / "out.iq"
+    pipe = GrPipeline(
+        name="forever",
+        sample_rate=1.0,
+        blocks=[
+            GrBlock(
+                id="s",
+                kind="iq_file_source",
+                params={"path": str(src), "repeat": True},
+            ),
+            GrBlock(id="k", kind="iq_file_sink", params={"path": str(dst)}),
+        ],
+        connections=[GrConnection(src_block="s", dst_block="k")],
+    )
+    res = GnuRadioBackend().run_pipeline(pipe, timeout=1.5)
+    assert res.status == "timeout"
+    assert "timeout" in (res.error or "")
+    assert dst.exists(), "partial sink must survive the worker kill"
+    assert dst.stat().st_size > 0
+    assert str(dst) in res.artifacts
+
+
+def test_abnormal_worker_exit_is_error_with_cause() -> None:
+    ensure_worker_warm()
+    res = _run_in_subprocess("this is not a pipeline", timeout=30.0)
+    assert res.status == "error"
+    assert "abnormally" in (res.error or "")
+    assert "exitcode" in (res.error or "")
+    # the child's traceback was captured and attached, not discarded
+    assert "ValidationError" in (res.error or "")
+
+
+def test_result_pipe_outranks_timeout_kill() -> None:
+    """A worker that reported ok but lingered in GR teardown past the deadline
+    is killed — its completed result (and artifacts) must survive."""
+    ok = RunResult(status="ok", artifacts=["/tmp/x.iq"]).model_dump_json()
+    kept = _resolve_result(True, ok, -15, "")
+    assert kept.status == "ok"
+    assert kept.artifacts == ["/tmp/x.iq"]
+
+
+def test_resolve_timeout_and_abnormal_shapes() -> None:
+    t = _resolve_result(True, None, -9, "tail-text")
+    assert t.status == "timeout" and "tail-text" in (t.error or "")
+    a = _resolve_result(False, None, 1, "boom")
+    assert a.status == "error"
+    assert "exitcode=1" in (a.error or "") and "boom" in (a.error or "")
