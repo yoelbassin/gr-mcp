@@ -7,6 +7,8 @@ from typing import Any
 
 import numpy as np
 
+from marconi.phy.backends.gnuradio.embedded.lifecycle import OutQueue, forecast_drain
+
 
 def make_depuncture(gr: Any, *, keep_mask: list) -> Any:
     mask = np.asarray([int(m) for m in keep_mask], dtype=np.int8)
@@ -20,10 +22,10 @@ def make_depuncture(gr: Any, *, keep_mask: list) -> Any:
                 self, name="depuncture", in_sig=[np.float32], out_sig=[np.float32]
             )
             self._buf = np.empty(0, dtype=np.float32)
-            self._out = np.empty(0, dtype=np.float32)
+            self._out = OutQueue(np.float32)
 
         def forecast(self, noutput_items: int, ninputs: int) -> list:
-            return [0] * ninputs if self._out.size else [1] * ninputs
+            return forecast_drain(self._out.pending, ninputs)
 
         def general_work(self, input_items: Any, output_items: Any) -> int:
             inp = input_items[0]
@@ -34,13 +36,7 @@ def make_depuncture(gr: Any, *, keep_mask: list) -> Any:
                 blk = np.zeros(block_out, dtype=np.float32)
                 blk[keep_idx] = self._buf[:block_in]
                 self._buf = self._buf[block_in:]
-                self._out = np.concatenate([self._out, blk])
-            out = output_items[0]
-            if self._out.size:
-                k = min(self._out.size, len(out))
-                out[:k] = self._out[:k]
-                self._out = self._out[k:]
-                return int(k)
-            return 0
+                self._out.push(blk)
+            return self._out.drain(output_items[0])
 
     return _Depuncture()

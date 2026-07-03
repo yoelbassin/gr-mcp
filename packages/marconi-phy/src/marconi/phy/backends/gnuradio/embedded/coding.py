@@ -4,6 +4,7 @@ from typing import Any
 
 import numpy as np
 
+from marconi.phy.backends.gnuradio.embedded.lifecycle import OutQueue, forecast_drain
 from marconi.phy.modulation.css import coding
 
 
@@ -86,7 +87,7 @@ def make_css_explicit_decode(
             self._payload_cr: int = 0
             self._declared_bits = 0
             self._carry: list[int] = []
-            self._outbits: list[int] = []
+            self._out = OutQueue(np.uint8)
             self.diagnostics = {
                 "frames_seen": 0,
                 "header_ok": 0,
@@ -95,7 +96,7 @@ def make_css_explicit_decode(
             }
 
         def forecast(self, noutput_items: int, ninputs: int) -> list:
-            return [0 if self._outbits else 1] * ninputs
+            return forecast_drain(self._out.pending, ninputs)
 
         def _sym(self, lo: int, hi: int) -> list[int]:
             return self._symbols[lo - self._abs0 : hi - self._abs0]
@@ -144,7 +145,7 @@ def make_css_explicit_decode(
             # emit exactly the header-declared frame content; the last FEC
             # block's rounding pad would misalign every following frame in
             # the bit stream (a single-frame stream never shows this)
-            self._outbits.extend(bits[: self._declared_bits])
+            self._out.push(np.asarray(bits[: self._declared_bits], dtype=np.uint8))
             self.diagnostics["frames_decoded"] += 1
 
         def _advance(self, to: int) -> None:
@@ -183,7 +184,6 @@ def make_css_explicit_decode(
 
         def general_work(self, input_items: Any, output_items: Any) -> int:
             inp = input_items[0]
-            out = output_items[0]
             if len(inp):
                 base = self.nitems_read(0)
                 for t in self.get_tags_in_window(0, 0, len(inp)):
@@ -196,10 +196,6 @@ def make_css_explicit_decode(
                 self._symbols.extend(int(s) for s in inp)
                 self.consume(0, len(inp))
                 self._process()
-            emit = min(len(self._outbits), len(out))
-            if emit:
-                out[:emit] = self._outbits[:emit]
-                self._outbits = self._outbits[emit:]
-            return emit
+            return self._out.drain(output_items[0])
 
     return _CssExplicitDecode()

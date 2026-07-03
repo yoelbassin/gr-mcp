@@ -4,6 +4,7 @@ from typing import Any
 
 import numpy as np
 
+from marconi.phy.backends.gnuradio.embedded.lifecycle import OutQueue, forecast_drain
 from marconi.phy.modulation.ofdm import primitives as prim
 
 
@@ -71,7 +72,7 @@ def make_ofdm_frame_sync(
             self._base: int | None = None
             self._emitted = False
             self._detect_len = null_len + usefuls_len
-            self._out = np.empty(0, dtype=np.complex64)
+            self._out = OutQueue(np.complex64)
 
         def forecast(self, noutput_items: int, ninputs: int) -> list[int]:
             usefuls_ready = (
@@ -79,7 +80,7 @@ def make_ofdm_frame_sync(
                 and not self._emitted
                 and self._base + usefuls_len <= self._buf.size
             )
-            return [0 if (self._out.size or usefuls_ready) else 1] * ninputs
+            return forecast_drain(self._out.pending or usefuls_ready, ninputs)
 
         def general_work(self, input_items: Any, output_items: Any) -> int:
             inp = input_items[0]
@@ -112,9 +113,7 @@ def make_ofdm_frame_sync(
                 if not self._emitted:
                     if self._base + usefuls_len > self._buf.size:
                         break
-                    self._out = np.concatenate(
-                        [self._out, _frame_usefuls(self._buf, self._base)]
-                    )
+                    self._out.push(_frame_usefuls(self._buf, self._base))
                     self._emitted = True
                 if self._base + frame_len + max_corr > self._buf.size:
                     break
@@ -128,12 +127,6 @@ def make_ofdm_frame_sync(
                 self._buf = self._buf[nb:]
                 self._base = 0
                 self._emitted = False
-            out = output_items[0]
-            if self._out.size:
-                k = min(self._out.size, len(out))
-                out[:k] = self._out[:k]
-                self._out = self._out[k:]
-                return int(k)
-            return 0
+            return self._out.drain(output_items[0])
 
     return _OfdmFrameSync()

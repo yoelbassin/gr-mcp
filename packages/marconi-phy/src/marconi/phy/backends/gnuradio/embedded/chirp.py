@@ -5,6 +5,7 @@ from typing import Any
 
 import numpy as np
 
+from marconi.phy.backends.gnuradio.embedded.lifecycle import OutQueue, forecast_drain
 from marconi.phy.modulation.css.coding import gray_decode, gray_encode
 
 
@@ -186,29 +187,28 @@ def make_chirp_mod(gr: Any, sf: int, oversample: int) -> Any:
                 in_sig=[np.int16],
                 out_sig=[np.complex64],
             )
-            self._out = np.empty(0, dtype=np.complex64)
+            self._out = OutQueue(np.complex64)
 
         def forecast(self, noutput_items: int, ninputs: int) -> list[int]:
-            return [0 if self._out.size else 1] * ninputs
+            return forecast_drain(self._out.pending, ninputs)
 
         def general_work(self, input_items: Any, output_items: Any) -> int:
             x = input_items[0]
             out = output_items[0]
-            if not self._out.size and len(x):
+            if not self._out.pending and len(x):
                 # One symbol can exceed the granted output window (sn > len(out)
                 # for large sf); synthesize just enough and drain across calls.
                 nsym = min(len(x), -(-len(out) // sn))
-                self._out = np.concatenate(
-                    [
-                        _modulate_symbol(int(s) % (1 << sf), sf, oversample)
-                        for s in x[:nsym]
-                    ]
+                self._out.push(
+                    np.concatenate(
+                        [
+                            _modulate_symbol(int(s) % (1 << sf), sf, oversample)
+                            for s in x[:nsym]
+                        ]
+                    )
                 )
                 self.consume(0, nsym)
-            k = min(self._out.size, len(out))
-            out[:k] = self._out[:k]
-            self._out = self._out[k:]
-            return int(k)
+            return self._out.drain(out)
 
     return _ChirpMod()
 
@@ -238,8 +238,8 @@ def make_chirp_demod(gr: Any, sf: int, oversample: int, zero_pad: int) -> Any:
         def forecast(self, noutput_items: int, ninputs: int) -> list[int]:
             # A full-symbol input demand (sn) can exceed GR's default stream
             # buffer for large sf; accumulate internally and announce
-            # drainability instead (the depuncture/ofdm lifecycle).
-            return [0 if self._buf.size >= sn else 1] * ninputs
+            # drainability instead (the shared lifecycle contract).
+            return forecast_drain(self._buf.size >= sn, ninputs)
 
         def general_work(self, input_items: Any, output_items: Any) -> int:
             x = input_items[0]
@@ -352,6 +352,7 @@ def make_chirp_sync(
     _NTAPS = 33
     _HALF = (_NTAPS - 1) // 2
     _SFD_SPAN = (preamble_len + 6) * sn
+    _OUT_CAP = 1 << 16  # pending-out saturation: stop consuming, let GR backpressure
 
     class _ChirpSync(gr.basic_block):
         def __init__(self) -> None:
@@ -368,15 +369,13 @@ def make_chirp_sync(
             self._seg = 0  # samples appended to _out for the current segment
             self._scan = _DetectScan(grid, detect_run)
             self._det_x: int | None = None
-            self._out = np.empty(0, dtype=np.complex64)
-            self._drained = 0  # samples of _out ever handed to the scheduler
-            self._queued = 0  # samples ever appended to _out
+            self._out = OutQueue(np.complex64)
             self._tagq: list[int] = []  # _out indices (absolute) of burst starts
             self.diagnostics = {"locks": 0}
 
         def forecast(self, noutput_items: int, ninputs: int) -> list[int]:
-            work = self._out.size or (self._armed and self._cleared() > 0)
-            return [0 if work else 1] * ninputs
+            work = self._out.pending or (self._armed and self._cleared() > 0)
+            return forecast_drain(bool(work), ninputs)
 
         def _cleared(self) -> int:
             """Samples of _buf beyond any claim by an in-progress detection
@@ -423,8 +422,7 @@ def make_chirp_sync(
                 y * np.exp(-1j * 2 * np.pi * self._f_cfo * k / (oversample * bandwidth))
             ).astype(np.complex64)
             self._n_out += len(y)
-            self._out = np.concatenate([self._out, rotated])
-            self._queued += len(rotated)
+            self._out.push(rotated)
             self._seg += len(rotated)
 
         def _trim(self, cut: int) -> None:
@@ -458,13 +456,16 @@ def make_chirp_sync(
             self._seg = 0
             self._scan = _DetectScan(grid, detect_run)
             self._det_x = None
-            self._tagq.append(self._queued)
+            self._tagq.append(self._out.pushed_total)
             self._armed = True
             self.diagnostics["locks"] += 1
 
         def general_work(self, input_items: Any, output_items: Any) -> int:
             x = input_items[0]
-            if len(x):
+            # Saturated pending-out: leave the input unconsumed so GR's own
+            # backpressure reaches upstream instead of _out growing unboundedly
+            # under a slow consumer.
+            if len(x) and self._out.size < _OUT_CAP:
                 self._buf = np.concatenate([self._buf, x])
                 self.consume(0, len(x))
             while True:
@@ -472,26 +473,22 @@ def make_chirp_sync(
                 if lock is None:
                     break
                 self._relock(*lock)
-            if self._armed:
+            if self._armed and self._out.size < _OUT_CAP:
                 self._fir_to_out(self._cleared())
-            else:
+            elif not self._armed:
                 self._trim(self._cleared())
-            out = output_items[0]
-            k = int(min(self._out.size, len(out)))
+            before = self._out.drained_total
+            k = self._out.drain(output_items[0])
             if k:
-                out[:k] = self._out[:k]
-                self._out = self._out[k:]
-                span = (self._drained, self._drained + k)
                 for tag in self._tagq:
-                    if span[0] <= tag < span[1]:
+                    if before <= tag < before + k:
                         self.add_item_tag(
                             0,
-                            self.nitems_written(0) + (tag - span[0]),
+                            self.nitems_written(0) + (tag - before),
                             pmt.intern("burst"),
                             pmt.PMT_NIL,
                         )
-                self._tagq = [t for t in self._tagq if t >= span[1]]
-                self._drained += k
+                self._tagq = [t for t in self._tagq if t >= before + k]
             return k
 
     return _ChirpSync()

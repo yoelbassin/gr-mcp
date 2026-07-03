@@ -121,34 +121,8 @@ def test_frame_sync_resyncs_under_drift(tmp_path):
     assert np.allclose(out, expected, atol=1e-4)
 
 
-class _FakeGr:
-    """Pure-python stand-in for the gr module: runs the block's state machine
-    without a scheduler so call and chunk timing can be forced exactly."""
-
-    class basic_block:
-        def __init__(self, name: str, in_sig: list, out_sig: list) -> None:
-            self._consumed = 0
-
-        def consume(self, port: int, n: int) -> None:
-            self._consumed += n
-
-
-def _drive(blk, sig: np.ndarray, chunk: int) -> np.ndarray:
-    """Feed sig in `chunk`-sized pieces; after every piece, keep calling with
-    ZERO input until quiescent — the wakeups the scheduler is allowed to make
-    whenever forecast announces 0."""
-    got = []
-    for start in range(0, sig.size, chunk):
-        nxt = np.asarray(sig[start : start + chunk], np.complex64)
-        while True:
-            out = np.zeros(1 << 16, np.complex64)
-            k = blk.general_work([nxt], [out])
-            if k:
-                got.append(out[:k].copy())
-            nxt = np.empty(0, np.complex64)
-            if k == 0:
-                break
-    return np.concatenate(got) if got else np.empty(0, np.complex64)
+from phy._fakegr import FAKE_GR as _FakeGr  # noqa: E402
+from phy._fakegr import drive as _drive  # noqa: E402
 
 
 def test_zero_input_wakeup_is_timing_invariant():
