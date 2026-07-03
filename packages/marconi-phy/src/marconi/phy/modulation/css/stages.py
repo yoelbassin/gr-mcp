@@ -13,6 +13,7 @@ from marconi.core.stages import DuplexStage, RxStage, Stage
 from marconi.phy.compile_context import CompileContext
 
 _SF_MIN, _SF_MAX = 5, 14
+_OSR_MAX = 8
 
 
 class _CssParams(StageParams):
@@ -29,8 +30,12 @@ class _CssParams(StageParams):
                 "sf {sf} out of range [{lo}, {hi}]",
                 {"sf": self.sf, "lo": _SF_MIN, "hi": _SF_MAX, "field": "sf"},
             )
-        if self.oversample < 1:
-            raise PydanticCustomError("value_error", "oversample must be >= 1")
+        if not (1 <= self.oversample <= _OSR_MAX):
+            raise PydanticCustomError(
+                "value_error",
+                "oversample {oversample} out of range [1, {hi}]",
+                {"oversample": self.oversample, "hi": _OSR_MAX, "field": "oversample"},
+            )
         if self.zero_pad < 1:
             raise PydanticCustomError("value_error", "zero_pad must be >= 1")
         if self.preamble_len < 5:

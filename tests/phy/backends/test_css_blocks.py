@@ -14,6 +14,7 @@ import tracemalloc
 from pathlib import Path
 
 import numpy as np
+import pytest
 from phy._dsp import aligned_ber, read_bits, write_bits
 
 from marconi.phy.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
@@ -90,15 +91,29 @@ def _prepend_pipeline(
     )
 
 
-def test_css_core_bits_roundtrip(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("sf", "os_", "n_syms"),
+    [
+        (SF, OS, N_SYMS),
+        # sn = os*2^sf exceeds GR's 8191-item default buffer from sf=12 os=2 up;
+        # these pin the whole advertised SF range (mod completes, demod nonempty).
+        (12, 2, 12),
+        (13, 2, 12),
+        (14, 2, 12),
+        (11, 4, 12),
+    ],
+)
+def test_css_core_bits_roundtrip(
+    sf: int, os_: int, n_syms: int, tmp_path: Path
+) -> None:
     """css_map → chirp_mod → chirp_demod → css_demap recovers bits exactly."""
     ensure_worker_warm()
-    bits = np.random.default_rng(0).integers(0, 2, SF * N_SYMS).astype(np.uint8)
+    bits = np.random.default_rng(0).integers(0, 2, sf * n_syms).astype(np.uint8)
     bp = write_bits(tmp_path / "in.bits", bits)
     op = tmp_path / "out.bits"
 
     be = GnuRadioBackend()
-    result = be.run_pipeline(_bits_to_bits_pipeline(bp, op))
+    result = be.run_pipeline(_bits_to_bits_pipeline(bp, op, sf=sf, os=os_))
     assert result.status == "ok", f"pipeline failed: {result}"
 
     out = read_bits(op)

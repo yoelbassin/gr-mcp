@@ -96,6 +96,17 @@ def test_css_params_require_sf() -> None:
     assert missing, "sf is required"
 
 
+def test_css_params_bound_oversample() -> None:
+    from marconi.phy.modulation.css.stages import Dechirp
+
+    for osr, expect_ok in ((0, False), (1, True), (8, True), (9, False)):
+        issues: list = []
+        validate_params(
+            "dechirp[0]", Dechirp().params_model, {"sf": 7, "oversample": osr}, issues
+        )
+        assert (not issues) is expect_ok, f"oversample={osr}: {issues}"
+
+
 def test_explicit_params_reject_sf_reduction_ge_sf_when_ldro() -> None:
     from marconi.phy.modulation.css.stages import CssExplicitDecode
 

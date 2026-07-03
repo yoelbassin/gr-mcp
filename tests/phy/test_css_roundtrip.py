@@ -15,10 +15,10 @@ IQ = Descriptor(Level.IQ, "c")
 _OS, _ZP, _SYM = 2, 4, 1.0
 
 
-def _modem(sf: int) -> ModemSpec:
+def _modem(sf: int, oversample: int = _OS) -> ModemSpec:
     p: dict[str, ParamValue] = {
         "sf": sf,
-        "oversample": _OS,
+        "oversample": oversample,
         "zero_pad": _ZP,
         "preamble_len": 8,
     }
@@ -46,16 +46,21 @@ def _compile(modem: ModemSpec, direction: str, rate: float, src: Path, snk: Path
     )
 
 
-@pytest.mark.parametrize("sf", [7, 11])
-def test_css_ber0_impaired(sf: int, tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("sf", "osr"),
+    [(7, 2), (11, 2), (12, 2), (12, 4)],
+    # sf=12 osr=2 is the first mode whose symbol (osr*2^sf = 8192 items)
+    # exceeds GR's 8191-item default stream buffer; osr=4 doubles it.
+)
+def test_css_ber0_impaired(sf: int, osr: int, tmp_path: Path) -> None:
     ensure_worker_warm()
     be = GnuRadioBackend()
-    rate = _OS * (1 << sf) * _SYM  # oversample * bandwidth
+    rate = osr * (1 << sf) * _SYM  # oversample * bandwidth
     bw = _SYM * (1 << sf)
     bits = np.random.default_rng(sf).integers(0, 2, sf * 40).astype(np.uint8)
     bp = write_bits(tmp_path / "in.bits", bits)
     clean, imp, op = tmp_path / "c.iq", tmp_path / "i.iq", tmp_path / "o.bits"
-    m = _modem(sf)
+    m = _modem(sf, osr)
     assert be.run_pipeline(_compile(m, "tx", rate, bp, clean)).status == "ok"
     # The joint up/down-chirp estimator recovers FRACTIONAL sample timing (and a
     # clean CFO), so the block dechirp now decodes through a sub-sample STO that

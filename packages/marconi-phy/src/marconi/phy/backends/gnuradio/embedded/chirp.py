@@ -186,20 +186,29 @@ def make_chirp_mod(gr: Any, sf: int, oversample: int) -> Any:
                 in_sig=[np.int16],
                 out_sig=[np.complex64],
             )
+            self._out = np.empty(0, dtype=np.complex64)
 
         def forecast(self, noutput_items: int, ninputs: int) -> list[int]:
-            return [max(1, noutput_items // sn)] * ninputs
+            return [0 if self._out.size else 1] * ninputs
 
         def general_work(self, input_items: Any, output_items: Any) -> int:
             x = input_items[0]
             out = output_items[0]
-            nsym = min(len(x), len(out) // sn)
-            for i in range(nsym):
-                out[i * sn : (i + 1) * sn] = _modulate_symbol(
-                    int(x[i]) % (1 << sf), sf, oversample
+            if not self._out.size and len(x):
+                # One symbol can exceed the granted output window (sn > len(out)
+                # for large sf); synthesize just enough and drain across calls.
+                nsym = min(len(x), -(-len(out) // sn))
+                self._out = np.concatenate(
+                    [
+                        _modulate_symbol(int(s) % (1 << sf), sf, oversample)
+                        for s in x[:nsym]
+                    ]
                 )
-            self.consume(0, nsym)
-            return nsym * sn
+                self.consume(0, nsym)
+            k = min(self._out.size, len(out))
+            out[:k] = self._out[:k]
+            self._out = self._out[k:]
+            return int(k)
 
     return _ChirpMod()
 
@@ -217,17 +226,25 @@ def make_chirp_demod(gr: Any, sf: int, oversample: int, zero_pad: int) -> Any:
                 in_sig=[np.complex64],
                 out_sig=[np.int16],
             )
+            self._buf = np.empty(0, dtype=np.complex64)
 
         def forecast(self, noutput_items: int, ninputs: int) -> list[int]:
-            return [noutput_items * sn] * ninputs
+            # A full-symbol input demand (sn) can exceed GR's default stream
+            # buffer for large sf; accumulate internally and announce
+            # drainability instead (the depuncture/ofdm lifecycle).
+            return [0 if self._buf.size >= sn else 1] * ninputs
 
         def general_work(self, input_items: Any, output_items: Any) -> int:
             x = input_items[0]
+            if len(x):
+                self._buf = np.concatenate([self._buf, np.asarray(x, np.complex64)])
+                self.consume(0, len(x))
             out = output_items[0]
-            nsym = min(len(out), len(x) // sn)
+            nsym = min(len(out), self._buf.size // sn)
             for i in range(nsym):
-                out[i] = _demod_symbol(x[i * sn : (i + 1) * sn], grid)
-            self.consume(0, nsym * sn)
+                out[i] = _demod_symbol(self._buf[i * sn : (i + 1) * sn], grid)
+            if nsym:
+                self._buf = self._buf[nsym * sn :]
             return nsym
 
     return _ChirpDemod()
