@@ -87,7 +87,7 @@ class QamDemod(DuplexStage[CompileContext]):
         b.chain("chunks_to_symbols_bc", scheme="qam", order=int(params["order"]))
         b.chain(
             "rrc_filter_ccf",
-            interpolation=int(round(b.sps)),
+            interpolation=b.sps_int(),
             rate=b.rate,
             sps=b.sps,
             alpha=alpha,

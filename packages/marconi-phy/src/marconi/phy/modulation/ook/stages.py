@@ -37,7 +37,7 @@ class OokEnvelope(DuplexStage[CompileContext]):
     def emit_tx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
         b.chain("add_const_ff", value=1.0)
         b.chain("multiply_const_ff", value=0.5)
-        b.chain("repeat_f", interp=int(round(b.sps)))
+        b.chain("repeat_f", interp=b.sps_int())
         b.chain("float_to_complex")
 
     def out_descriptor(

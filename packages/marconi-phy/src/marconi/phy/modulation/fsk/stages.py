@@ -38,7 +38,7 @@ class Fsk(DuplexStage[CompileContext]):
 
     def emit_tx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
         deviation = float(params["deviation"])
-        b.chain("repeat_f", interp=int(round(b.sps)))
+        b.chain("repeat_f", interp=b.sps_int())
         b.chain(
             "frequency_modulator",
             sensitivity=2.0 * math.pi * deviation / b.rate,

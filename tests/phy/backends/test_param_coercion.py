@@ -8,8 +8,15 @@ def test_as_float_accepts_numbers() -> None:
     assert _as_float(2) == 2.0 and _as_float(2.5) == 2.5
 
 
-def test_as_int_truncates_numbers() -> None:
+def test_as_int_accepts_integral_only() -> None:
     assert _as_int(4.0) == 4 and _as_int(7) == 7
+
+
+def test_as_int_rejects_non_integral_float() -> None:
+    # a StrictInt spec never produces 2.7, but the IR-direct path skips
+    # pydantic; the backend must not silently truncate (issue 10)
+    with pytest.raises(BackendError):
+        _as_int(2.7)
 
 
 @pytest.mark.parametrize("bad", [True, "x", [1.0], None])

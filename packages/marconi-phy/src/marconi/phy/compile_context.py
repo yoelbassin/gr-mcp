@@ -1,8 +1,18 @@
 from __future__ import annotations
 
 from marconi.core.descriptor import Descriptor
+from marconi.core.errors import register_error
 from marconi.core.params import ParamValue
 from marconi.phy.ir import GrBlock, GrConnection, GrPipeline
+
+
+class SampleRateError(Exception):
+    """The sample_rate/symbol_rate pair does not land on an integer sps, so a
+    TX interpolation factor cannot be honored without shifting the symbol rate
+    off the compiler's rate model (a silent ground-truth error)."""
+
+
+register_error(SampleRateError, "invalid_argument")
 
 
 class CompileContext:
@@ -22,6 +32,18 @@ class CompileContext:
     @property
     def sps(self) -> float:
         return self.rate / self.symbol_rate
+
+    def sps_int(self) -> int:
+        """sps as an exact integer for TX interpolation/repeat factors. Raises
+        rather than silently rounding an off-grid rate pair (issue 10)."""
+        sps = self.sps
+        if abs(sps - round(sps)) > 1e-9:
+            raise SampleRateError(
+                f"sample_rate {self.rate} / symbol_rate {self.symbol_rate} = "
+                f"{sps} is not an integer samples-per-symbol; TX cannot honor a "
+                "fractional interpolation factor without shifting the symbol rate"
+            )
+        return round(sps)
 
     def _new_id(self, kind: str) -> str:
         n = self._counter.get(kind, 0)

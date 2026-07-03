@@ -83,7 +83,7 @@ class PskDemod(DuplexStage[CompileContext]):
         span = int(params.get("span", 11))
         b.chain(
             "rrc_filter_ccf",
-            interpolation=int(round(b.sps)),
+            interpolation=b.sps_int(),
             rate=b.rate,
             sps=b.sps,
             alpha=alpha,

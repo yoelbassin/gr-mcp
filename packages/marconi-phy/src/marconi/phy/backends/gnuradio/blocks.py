@@ -36,6 +36,10 @@ def _as_float(v: ParamValue) -> float:
 def _as_int(v: ParamValue) -> int:
     if isinstance(v, bool) or not isinstance(v, (int, float)):
         raise BackendError(f"expected an integer, got {type(v).__name__}: {v!r}")
+    if isinstance(v, float) and not v.is_integer():
+        # the IR-direct dev path skips pydantic, so this is the last line of
+        # defense against a silently truncated param (2.7 -> 2)
+        raise BackendError(f"expected an integer, got non-integral float: {v!r}")
     return int(v)
 
 
