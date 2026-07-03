@@ -167,48 +167,12 @@ def _demod_symbol(chunk: np.ndarray, grid: _Grid) -> int:
 # level name (satisfies the phy ⊥ gnuradio invariant checked by test_invariants).
 
 
-def make_chirp_prepend(gr: Any, sf: int, oversample: int, preamble_len: int) -> Any:
-    """TX: emit preamble_len up-chirps + 2.25 down-chirps, then pass IQ 1:1."""
+def chirp_prefix(sf: int, oversample: int, preamble_len: int) -> np.ndarray:
     sn = oversample * (1 << sf)
     up = _base_upchirp(sf, oversample)
     down = np.conj(up)
     sfd = np.concatenate([down, down, down[: sn // 4]])
-    prepend = np.concatenate([np.tile(up, preamble_len), sfd]).astype(np.complex64)
-
-    class _ChirpPrepend(gr.basic_block):
-        def __init__(self) -> None:
-            gr.basic_block.__init__(
-                self,
-                name="chirp_prepend",
-                in_sig=[np.complex64],
-                out_sig=[np.complex64],
-            )
-            self._pre = prepend.copy()
-            self._done = False
-
-        def forecast(self, noutput_items: int, ninputs: int) -> list[int]:
-            return [0] * ninputs if not self._done else [noutput_items] * ninputs
-
-        def general_work(self, input_items: Any, output_items: Any) -> int:
-            out = output_items[0]
-            o = 0
-            if not self._done:
-                k = min(len(out), len(self._pre))
-                out[:k] = self._pre[:k]
-                self._pre = self._pre[k:]
-                o += k
-                if len(self._pre) == 0:
-                    self._done = True
-                if o == len(out):
-                    return o
-            x = input_items[0]
-            m = min(len(out) - o, len(x))
-            if m:
-                out[o : o + m] = x[:m]
-                self.consume(0, m)
-            return o + m
-
-    return _ChirpPrepend()
+    return np.concatenate([np.tile(up, preamble_len), sfd]).astype(np.complex64)
 
 
 def make_chirp_mod(gr: Any, sf: int, oversample: int) -> Any:

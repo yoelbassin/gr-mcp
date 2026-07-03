@@ -7,9 +7,9 @@ from typing import Any
 from marconi.core.params import ParamValue
 from marconi.phy.backends.base import BackendError
 from marconi.phy.backends.gnuradio.embedded.chirp import (
+    chirp_prefix,
     make_chirp_demod,
     make_chirp_mod,
-    make_chirp_prepend,
     make_chirp_sync,
     make_css_demap,
     make_css_map,
@@ -17,14 +17,14 @@ from marconi.phy.backends.gnuradio.embedded.chirp import (
 from marconi.phy.backends.gnuradio.embedded.coding import make_css_explicit_decode
 from marconi.phy.backends.gnuradio.embedded.depuncture import make_depuncture
 from marconi.phy.backends.gnuradio.embedded.ofdm import make_ofdm_frame_sync
-from marconi.phy.backends.gnuradio.embedded.preamble import (
-    make_sym_prepend,
-    make_sym_strip,
-)
+from marconi.phy.backends.gnuradio.embedded.preamble import make_sym_strip, sym_prefix
 from marconi.phy.backends.gnuradio.embedded.trellis_fec import make_trellis_viterbi
 
 Params = dict[str, ParamValue]
 Factory = Callable[[Params], Any]
+
+# vector_insert_c re-inserts each period; graphs stay far below 2^30 items
+_INSERT_ONCE = 1 << 30
 
 
 def _as_float(v: ParamValue) -> float:
@@ -235,11 +235,14 @@ GR_BLOCKS: dict[str, Callable[[_GrCtx, Params], Any]] = {
     "multiply_const_ff": lambda c, p: c.blocks.multiply_const_ff(_as_float(p["value"])),
     "add_const_ff": lambda c, p: c.blocks.add_const_ff(_as_float(p["value"])),
     "float_to_complex": lambda c, p: c.blocks.float_to_complex(1),
-    "sym_prepend": lambda c, p: make_sym_prepend(
-        c.gr,
-        _as_float_list(p["preamble_i"]),
-        _as_float_list(p["preamble_q"]),
-        _as_int(p["pad_symbols"]),
+    "sym_prepend": lambda c, p: c.blocks.vector_insert_c(
+        sym_prefix(
+            _as_float_list(p["preamble_i"]),
+            _as_float_list(p["preamble_q"]),
+            _as_int(p["pad_symbols"]),
+        ).tolist(),
+        _INSERT_ONCE,
+        0,
     ),
     "corr_est_cc": lambda c, p: c.digital.corr_est_cc(
         _complex_syms(_as_float_list(p["preamble_i"]), _as_float_list(p["preamble_q"])),
@@ -248,8 +251,12 @@ GR_BLOCKS: dict[str, Callable[[_GrCtx, Params], Any]] = {
         _as_float(p["threshold"]),
     ),
     "sym_strip": lambda c, p: make_sym_strip(c.gr, n_pre=_as_int(p["n_pre"])),
-    "chirp_prepend": lambda c, p: make_chirp_prepend(
-        c.gr, _as_int(p["sf"]), _as_int(p["oversample"]), _as_int(p["preamble_len"])
+    "chirp_prepend": lambda c, p: c.blocks.vector_insert_c(
+        chirp_prefix(
+            _as_int(p["sf"]), _as_int(p["oversample"]), _as_int(p["preamble_len"])
+        ).tolist(),
+        _INSERT_ONCE,
+        0,
     ),
     "chirp_sync": lambda c, p: make_chirp_sync(
         c.gr,
