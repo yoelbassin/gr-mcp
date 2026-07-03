@@ -107,29 +107,19 @@ def test_css_params_bound_oversample() -> None:
         assert (not issues) is expect_ok, f"oversample={osr}: {issues}"
 
 
-def test_explicit_params_reject_sf_reduction_ge_sf_when_ldro() -> None:
+def test_explicit_params_reject_sf_reduction_ge_sf_when_reduced() -> None:
+    from phy._css_lora import HEADER
+
     from marconi.phy.modulation.css.stages import CssExplicitDecode
 
     bad: list = []
     validate_params(
         "css_explicit_decode[0]",
         CssExplicitDecode().params_model,
-        {
-            "sf": 7,
-            "ldro": True,
-            "sf_reduction": 7,
-            "header_symbols": 8,
-            "header_nibbles": 5,
-            "header_data_bits": 12,
-            "header_parity": [3840, 2273, 1178, 599, 303],
-            "field_payload_len": [0, 8],
-            "field_cr": [8, 3],
-            "field_has_crc": [11, 1],
-            "field_parity": [15, 5],
-        },
+        {**HEADER, "sf": 7, "reduced": True, "sf_reduction": 7},
         bad,
     )
-    assert bad, "sf_reduction >= sf with ldro should be rejected"
+    assert bad, "sf_reduction >= sf with reduced should be rejected"
 
 
 # ─── Direction support ────────────────────────────────────────────────────────
@@ -341,20 +331,20 @@ def test_sfd_sync_pending_vs_miss() -> None:
     sn = grid.sample_num
     up = chirp._base_upchirp(sf, os_)
     sig = np.tile(up, pl).astype(np.complex64)  # preamble only, SFD not yet arrived
-    assert chirp._sfd_sync(sig, 0, grid, (pl + 6) * sn) is None
+    assert chirp._sfd_sync(sig, 0, grid, (pl + 6) * sn, 2.25) is None
     partial = np.concatenate(
         [np.tile(up, pl), np.conj(np.tile(up, 2))[: int(1.6 * sn)]]
     ).astype(
         np.complex64
     )  # SFD found but its refinement window is still streaming in
-    assert chirp._sfd_sync(partial, 0, grid, (pl + 6) * sn) is None
+    assert chirp._sfd_sync(partial, 0, grid, (pl + 6) * sn, 2.25) is None
     full = np.concatenate([np.tile(up, pl), np.conj(np.tile(up, 3))]).astype(
         np.complex64
     )
-    ps = chirp._sfd_sync(full, 0, grid, (pl + 6) * sn)
+    ps = chirp._sfd_sync(full, 0, grid, (pl + 6) * sn, 2.25)
     assert ps is not None and ps > pl * sn
     long_up = np.tile(up, pl + 12).astype(np.complex64)  # no SFD within cap
     import pytest as _pytest
 
     with _pytest.raises(ValueError):
-        chirp._sfd_sync(long_up, 0, grid, (pl + 6) * sn)
+        chirp._sfd_sync(long_up, 0, grid, (pl + 6) * sn, 2.25)

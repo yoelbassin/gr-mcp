@@ -13,7 +13,6 @@ from marconi.bits.carriers import RxCarrier, TxCarrier, _Frame
 from marconi.bits.models import ParseField
 
 _HDLC_FLAG = np.array([0, 1, 1, 1, 1, 1, 1, 0], dtype=np.uint8)
-_HDLC_TRAINING = np.array([0, 1] * 12, dtype=np.uint8)
 _BITREV = bytes(int(format(i, "08b")[::-1], 2) for i in range(256))
 
 
@@ -340,14 +339,21 @@ def hdlc_deframe_rx(c: RxCarrier, *, bit_order: str = "msb") -> RxCarrier:
     return RxCarrier(bits=bits, frames=frames)
 
 
-def hdlc_deframe_tx(c: TxCarrier, *, bit_order: str = "msb") -> TxCarrier:
+def hdlc_deframe_tx(
+    c: TxCarrier, *, bit_order: str = "msb", training: str = ""
+) -> TxCarrier:
+    """Flag-delimit each frame with bit-stuffing. ``training`` is an optional
+    bit-string ("0101...") wrapped around the whole burst (a link's preamble /
+    ramp-up sequence); empty by default — the sequence belongs to a protocol,
+    not to HDLC."""
+    train = np.array([int(ch) for ch in training], dtype=np.uint8)
     framed: list[np.ndarray] = []
     for content in c.items:
         body = _bitstuff(bytes_to_bits(content, bit_order))
         framed.append(np.concatenate([_HDLC_FLAG, body, _HDLC_FLAG]).astype(np.uint8))
-    if framed:
-        framed[0] = np.concatenate([_HDLC_TRAINING, framed[0]]).astype(np.uint8)
-        framed[-1] = np.concatenate([framed[-1], _HDLC_TRAINING]).astype(np.uint8)
+    if framed and train.size:
+        framed[0] = np.concatenate([train, framed[0]]).astype(np.uint8)
+        framed[-1] = np.concatenate([framed[-1], train]).astype(np.uint8)
     return TxCarrier(framed)
 
 

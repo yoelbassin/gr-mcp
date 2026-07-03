@@ -25,18 +25,7 @@ _SF11_SYMBOLS = [
     1296, 1936, 1332, 1852, 632, 960, 1224, 1640, 716, 56, 1976, 1772,
 ]  # fmt: skip
 
-_HEADER = dict(
-    header_cr=4,
-    header_symbols=8,
-    header_nibbles=5,
-    sf_reduction=2,
-    header_data_bits=12,
-    header_parity=[3840, 2273, 1178, 599, 303],
-    field_payload_len=[0, 8],
-    field_cr=[8, 3],
-    field_has_crc=[11, 1],
-    field_parity=[15, 5],
-)
+from phy._css_lora import HEADER as _HEADER  # noqa: E402  (LoRa constants in tests)
 
 # whitening sequence (LoRa, off-air); from V1 examples/lora/sfo_search.py
 _WHITEN = bytes.fromhex(
@@ -60,7 +49,7 @@ def _run_block(symbols, tag_offsets=()):
         )
         for o in tag_offsets
     ]
-    blk = make_css_explicit_decode(gr, sf=11, ldro=True, **_HEADER)
+    blk = make_css_explicit_decode(gr, **_HEADER)
     src = blocks.vector_source_s([int(s) for s in symbols], False, 1, tags)
     snk = blocks.vector_sink_b()
     tb = gr.top_block("css_explicit_decode_test")

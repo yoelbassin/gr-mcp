@@ -253,7 +253,10 @@ GR_BLOCKS: dict[str, Callable[[_GrCtx, Params], Any]] = {
     "sym_strip": lambda c, p: make_sym_strip(c.gr, n_pre=_as_int(p["n_pre"])),
     "chirp_prepend": lambda c, p: c.blocks.vector_insert_c(
         chirp_prefix(
-            _as_int(p["sf"]), _as_int(p["oversample"]), _as_int(p["preamble_len"])
+            _as_int(p["sf"]),
+            _as_int(p["oversample"]),
+            _as_int(p["preamble_len"]),
+            _as_float(p["sfd_symbols"]),
         ).tolist(),
         _INSERT_ONCE,
         0,
@@ -265,6 +268,8 @@ GR_BLOCKS: dict[str, Callable[[_GrCtx, Params], Any]] = {
         _as_int(p["zero_pad"]),
         _as_int(p["preamble_len"]),
         _as_float(p["bandwidth"]),
+        _as_float(p["sfd_symbols"]),
+        _as_int(p["sync_symbols"]),
     ),
     "chirp_mod": lambda c, p: make_chirp_mod(
         c.gr, _as_int(p["sf"]), _as_int(p["oversample"])
@@ -278,7 +283,7 @@ GR_BLOCKS: dict[str, Callable[[_GrCtx, Params], Any]] = {
         c.gr,
         sf=_as_int(p["sf"]),
         header_cr=_as_int(p["header_cr"]),
-        ldro=bool(p["ldro"]),
+        reduced=bool(p["reduced"]),
         header_symbols=_as_int(p["header_symbols"]),
         header_nibbles=_as_int(p["header_nibbles"]),
         sf_reduction=_as_int(p["sf_reduction"]),
@@ -288,6 +293,11 @@ GR_BLOCKS: dict[str, Callable[[_GrCtx, Params], Any]] = {
         field_cr=_as_int_list(p["field_cr"]),
         field_has_crc=_as_int_list(p["field_has_crc"]),
         field_parity=_as_int_list(p["field_parity"]),
+        data_bits=_as_int(p["data_bits"]),
+        crc_bytes=_as_int(p["crc_bytes"]),
+        parity_masks=_as_int_list(p["parity_masks"]),
+        reduced_offset=_as_int(p["reduced_offset"]),
+        full_offset=_as_int(p["full_offset"]),
     ),
     "ofdm_frame_sync": lambda c, p: make_ofdm_frame_sync(
         c.gr,

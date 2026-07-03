@@ -32,9 +32,9 @@ def test_final_frame_larger_than_output_window_drains_at_eof() -> None:
     """css_explicit_decode's decoded frame (2056 bits) must fully emerge even
     when every granted output window is far smaller — the EOF flush rides on
     forecast announcing drainability, never on more input arriving."""
-    blk = make_css_explicit_decode(FAKE_GR, sf=11, ldro=True, **_HEADER)
+    blk = make_css_explicit_decode(FAKE_GR, **_HEADER)
     big_out = drive(
-        make_css_explicit_decode(FAKE_GR, sf=11, ldro=True, **_HEADER),
+        make_css_explicit_decode(FAKE_GR, **_HEADER),
         np.asarray(_SF11_SYMBOLS, np.int16),
         chunk=1 << 16,
         out_dtype=np.uint8,
@@ -59,9 +59,10 @@ def test_chirp_sync_memory_bounded_under_slow_consumer() -> None:
     sn = osr * (1 << sf)
     rng = np.random.default_rng(3)
     payload = 0.7 * (rng.standard_normal(400 * sn) + 1j * rng.standard_normal(400 * sn))
-    sig = np.concatenate([chirp_prefix(sf, osr, pl), payload]).astype(np.complex64)
+    sfd, sync = 2.25, 2
+    sig = np.concatenate([chirp_prefix(sf, osr, pl, sfd), payload]).astype(np.complex64)
 
-    blk = make_chirp_sync(FAKE_GR, sf, osr, 4, pl, float(1 << sf))
+    blk = make_chirp_sync(FAKE_GR, sf, osr, 4, pl, float(1 << sf), sfd, sync)
     pos = 0
     drained = 0
     stalls = 0

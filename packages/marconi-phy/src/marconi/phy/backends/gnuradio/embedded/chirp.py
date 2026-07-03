@@ -83,7 +83,9 @@ class _DetectScan:
         return None
 
 
-def _sfd_sync(signal: np.ndarray, x: int, grid: _Grid, cap: int) -> int | None:
+def _sfd_sync(
+    signal: np.ndarray, x: int, grid: _Grid, cap: int, sfd_symbols: float
+) -> int | None:
     sn = grid.sample_num
     found = False
     while x < len(signal) - sn:
@@ -104,7 +106,7 @@ def _sfd_sync(signal: np.ndarray, x: int, grid: _Grid, cap: int) -> int | None:
     x += int(round(offset / grid.zero_pad))
     up_h, _ = _fine_peak(signal, x - sn, grid)
     dn_h, _ = _fine_peak(signal, x - sn, grid, up=False)
-    sfd_syms = 2.25 if up_h > dn_h else 1.25
+    sfd_syms = sfd_symbols if up_h > dn_h else sfd_symbols - 1
     return x + int(round(sfd_syms * sn))
 
 
@@ -125,13 +127,17 @@ def _peak_bin(signal: np.ndarray, x: int, grid: _Grid, up: bool) -> float:
 
 
 def _joint_sync(
-    signal: np.ndarray, payload_start: int, grid: _Grid, preamble_len: int
+    signal: np.ndarray,
+    payload_start: int,
+    grid: _Grid,
+    preamble_len: int,
+    sfd_symbols: float,
 ) -> tuple[float, float]:
     """Joint estimate from the preamble up-chirps + SFD down-chirps. A preamble
     up-chirp dechirps to bin ~ (CFO + STO); an SFD down-chirp to ~ (CFO - STO).
     Returns (cfo_bins, sto_bins) as signed fractional fold-bins."""
     sn = grid.sample_num
-    sfd_start = payload_start - int(round(2.25 * sn))
+    sfd_start = payload_start - int(round(sfd_symbols * sn))
     u = float(
         np.median(
             [
@@ -168,11 +174,15 @@ def _demod_symbol(chunk: np.ndarray, grid: _Grid) -> int:
 # level name (satisfies the phy ⊥ gnuradio invariant checked by test_invariants).
 
 
-def chirp_prefix(sf: int, oversample: int, preamble_len: int) -> np.ndarray:
+def chirp_prefix(
+    sf: int, oversample: int, preamble_len: int, sfd_symbols: float
+) -> np.ndarray:
     sn = oversample * (1 << sf)
     up = _base_upchirp(sf, oversample)
     down = np.conj(up)
-    sfd = np.concatenate([down, down, down[: sn // 4]])
+    full = int(sfd_symbols)
+    frac = int(round((sfd_symbols - full) * sn))
+    sfd = np.concatenate([np.tile(down, full), down[:frac]])
     return np.concatenate([np.tile(up, preamble_len), sfd]).astype(np.complex64)
 
 
@@ -336,6 +346,8 @@ def make_chirp_sync(
     zero_pad: int,
     preamble_len: int,
     bandwidth: float,
+    sfd_symbols: float,
+    sync_symbols: int,
 ) -> Any:
     """RX: buffer IQ, detect CSS preamble+SFD, jointly estimate CFO + fractional
     STO per burst, apply the fractional sample timing (streaming windowed-sinc
@@ -348,7 +360,7 @@ def make_chirp_sync(
     pmt = gr.pmt
     grid = _Grid(sf, oversample, zero_pad)
     sn = grid.sample_num
-    detect_run = preamble_len - 2
+    detect_run = preamble_len - sync_symbols
     _NTAPS = 33
     _HALF = (_NTAPS - 1) // 2
     _SFD_SPAN = (preamble_len + 6) * sn
@@ -392,7 +404,7 @@ def make_chirp_sync(
                 return None
             try:
                 payload_start = _sfd_sync(
-                    self._buf, self._det_x, grid, self._det_x + _SFD_SPAN
+                    self._buf, self._det_x, grid, self._det_x + _SFD_SPAN, sfd_symbols
                 )
             except ValueError:
                 self._det_x = None
@@ -401,7 +413,7 @@ def make_chirp_sync(
             if payload_start is None or payload_start + sn > len(self._buf):
                 return None
             cfo_bins, sto_bins = _joint_sync(
-                self._buf, payload_start, grid, preamble_len
+                self._buf, payload_start, grid, preamble_len, sfd_symbols
             )
             return payload_start, cfo_bins, sto_bins
 

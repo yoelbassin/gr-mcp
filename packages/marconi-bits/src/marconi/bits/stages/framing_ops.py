@@ -39,6 +39,7 @@ class HdlcDeframe(DuplexStage[ProgramBuilder]):
 
     class _Params(StageParams):
         bit_order: str = "msb"
+        training: str = ""
 
     params_model = _Params
 
@@ -46,7 +47,11 @@ class HdlcDeframe(DuplexStage[ProgramBuilder]):
         b.add(framing.hdlc_deframe_rx, bit_order=str(params.get("bit_order", "msb")))
 
     def emit_tx(self, b: ProgramBuilder, params: Mapping[str, Any]) -> None:
-        b.add(framing.hdlc_deframe_tx, bit_order=str(params.get("bit_order", "msb")))
+        b.add(
+            framing.hdlc_deframe_tx,
+            bit_order=str(params.get("bit_order", "msb")),
+            training=str(params.get("training", "")),
+        )
 
 
 class NibbleSwap(DuplexStage[ProgramBuilder]):

@@ -1,4 +1,5 @@
 import pytest
+from phy._css_lora import HEADER
 from pydantic import ValidationError
 
 from marconi.core.descriptor import Carrier, Descriptor
@@ -16,20 +17,7 @@ def _ctx():
     )
 
 
-_PARAMS = dict(
-    sf=11,
-    header_cr=4,
-    ldro=True,
-    header_symbols=8,
-    header_nibbles=5,
-    sf_reduction=2,
-    header_data_bits=12,
-    header_parity=[3840, 2273, 1178, 599, 303],
-    field_payload_len=[0, 8],
-    field_cr=[8, 3],
-    field_has_crc=[11, 1],
-    field_parity=[15, 5],
-)
+_PARAMS = dict(HEADER)
 
 
 def test_stage_levels_and_emit():
@@ -70,6 +58,6 @@ def test_explicit_params_sf_too_high_raises():
         _ExplicitParams.model_validate({**_PARAMS, "sf": 15})
 
 
-def test_explicit_params_header_cr_out_of_range_raises():
+def test_explicit_params_header_cr_absent_from_parity_table_raises():
     with pytest.raises(ValidationError):
         _ExplicitParams.model_validate({**_PARAMS, "header_cr": 5})

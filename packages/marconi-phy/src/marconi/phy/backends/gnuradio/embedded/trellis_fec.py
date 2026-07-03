@@ -1,6 +1,6 @@
 """Build a rate-1/n terminated convolutional Viterbi from gnuradio.trellis.
-Generic over (rate_inv, polys, frame_bits, tail). Convention proven bit-exact
-against the DAB numpy golden (spike 5, agree 1.000)."""
+Generic over (rate_inv, polys, frame_bits, tail); the soft-metric table is
+derived from the FSM output cardinality, so no protocol constant lives here."""
 
 from __future__ import annotations
 

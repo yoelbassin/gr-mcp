@@ -130,7 +130,7 @@ class ClockCorrect(RxStage[CompileContext]):
     """Cancel sampling-frequency offset (transmitter clock drift) by resampling
     by 1/(1 + ppm*1e-6) via the polyphase arbitrary resampler. RX-only. SFO is a
     silent no-op below ~1 chip of cumulative drift (ppm * n_samples), so it only
-    matters on long frames (e.g. the multi-second IQ_12 LoRa capture)."""
+    matters on long (multi-second) frames."""
 
     name = "clock_correct"
     from_level = Level.IQ

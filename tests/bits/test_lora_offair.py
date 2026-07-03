@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 from bits.test_lora_codec import _codec
+from phy._css_lora import HEADER as _LORA_HEADER
 
 from marconi.bits.registry import registry
 from marconi.bits.seam import parse_bitstream
@@ -32,20 +33,7 @@ _SLICE = (
     / "iq2_frame.cf32"
 )
 
-_HEADER: dict[str, ParamValue] = {
-    "sf": 11,
-    "header_cr": 4,
-    "ldro": True,
-    "header_symbols": 8,
-    "header_nibbles": 5,
-    "sf_reduction": 2,
-    "header_data_bits": 12,
-    "header_parity": [3840, 2273, 1178, 599, 303],
-    "field_payload_len": [0, 8],
-    "field_cr": [8, 3],
-    "field_has_crc": [11, 1],
-    "field_parity": [15, 5],
-}
+_HEADER: dict[str, ParamValue] = dict(_LORA_HEADER)
 
 
 def _modem() -> ModemSpec:

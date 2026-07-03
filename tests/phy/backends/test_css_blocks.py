@@ -80,7 +80,12 @@ def _prepend_pipeline(
             GrBlock(
                 id="pre",
                 kind="chirp_prepend",
-                params={"sf": sf, "oversample": os, "preamble_len": preamble_len},
+                params={
+                    "sf": sf,
+                    "oversample": os,
+                    "preamble_len": preamble_len,
+                    "sfd_symbols": 2.25,
+                },
             ),
             GrBlock(id="snk", kind="iq_file_sink", params={"path": str(iq_out)}),
         ],
@@ -143,7 +148,12 @@ def _full_chain_pipeline(
             GrBlock(
                 id="pre",
                 kind="chirp_prepend",
-                params={"sf": sf, "oversample": os, "preamble_len": preamble_len},
+                params={
+                    "sf": sf,
+                    "oversample": os,
+                    "preamble_len": preamble_len,
+                    "sfd_symbols": 2.25,
+                },
             ),
             GrBlock(
                 id="sync",
@@ -154,6 +164,8 @@ def _full_chain_pipeline(
                     "zero_pad": zp,
                     "preamble_len": preamble_len,
                     "bandwidth": bw,
+                    "sfd_symbols": 2.25,
+                    "sync_symbols": 2,
                 },
             ),
             GrBlock(
@@ -247,7 +259,7 @@ def test_chirp_sync_noise_bounded_no_lock():
     rng = np.random.default_rng(9)
     n = 400 * sn
     sig = (rng.standard_normal(n) + 1j * rng.standard_normal(n)).astype(np.complex64)
-    blk = make_chirp_sync(gr, sf, os_, zp, pl, float(os_ * (1 << sf)))
+    blk = make_chirp_sync(gr, sf, os_, zp, pl, float(os_ * (1 << sf)), 2.25, 2)
     tb = gr.top_block()
     src = gb.vector_source_c(sig.tolist(), False)
     snk = gb.vector_sink_c()

@@ -13,7 +13,7 @@ def make_css_explicit_decode(
     *,
     sf: int,
     header_cr: int,
-    ldro: bool,
+    reduced: bool,
     header_symbols: int,
     header_nibbles: int,
     sf_reduction: int,
@@ -23,26 +23,34 @@ def make_css_explicit_decode(
     field_cr: list,
     field_has_crc: list,
     field_parity: list,
+    data_bits: int,
+    crc_bytes: int,
+    parity_masks: list,
+    reduced_offset: int,
+    full_offset: int,
 ) -> Any:
     pmt = gr.pmt
     n = 1 << sf
     header_sf_app = sf - sf_reduction
-    payload_sf_app = sf - sf_reduction if ldro else sf
+    payload_sf_app = sf - sf_reduction if reduced else sf
     masks = [int(x) for x in header_parity]
+    fec_masks = [int(x) for x in parity_masks]
     pl_start, pl_len = (int(x) for x in field_payload_len)
     cr_start, cr_len = (int(x) for x in field_cr)
     crc_start, crc_len = (int(x) for x in field_has_crc)
     par_start, par_len = (int(x) for x in field_parity)
 
     def _demap(symbols: list[int], sf_app: int) -> list[int]:
-        if sf_app < sf:  # reduced-rate (header / LDRO payload): value in s // 4
-            return coding.demap_symbols(symbols, sf_app, n=n, divisor=4, offset=0)
-        return coding.demap_symbols(symbols, sf_app, n=n, divisor=1, offset=1)
+        if sf_app < sf:  # reduced-rate window: symbol value carries sf_app units
+            return coding.demap_symbols(
+                symbols, sf_app, n=n, divisor=1 << sf_reduction, offset=reduced_offset
+            )
+        return coding.demap_symbols(symbols, sf_app, n=n, divisor=1, offset=full_offset)
 
     def _fec_nibbles(symbols: list[int], sf_app: int, cr: int) -> list[int]:
-        cw_len = cr + 4
-        correct = cr >= 3
-        parity = coding.HAMMING_PARITY[cr]
+        cw_len = cr + data_bits
+        correct = coding.can_correct(cr, data_bits)
+        parity = coding.parity_for_cr(fec_masks, cr)
         bits = _demap(symbols, sf_app)
         perm = coding.diag_deinterleave_perm(sf_app, cw_len)
         block = sf_app * cw_len
@@ -54,13 +62,15 @@ def make_css_explicit_decode(
                 word = 0
                 for bit in deint[i * cw_len : (i + 1) * cw_len]:
                     word = (word << 1) | bit
-                nibbles.append(coding.block_fec_decode(word, parity, correct))
+                nibbles.append(
+                    coding.block_fec_decode(word, parity, data_bits, correct)
+                )
         return nibbles
 
     def _nibbles_to_bits(nibbles: list[int]) -> list[int]:
         out: list[int] = []
         for nib in nibbles:
-            out.extend((nib >> (3 - j)) & 1 for j in range(4))
+            out.extend((nib >> (data_bits - 1 - j)) & 1 for j in range(data_bits))
         return out
 
     class _CssExplicitDecode(gr.basic_block):
@@ -121,7 +131,7 @@ def make_css_explicit_decode(
             self.diagnostics["frames_seen"] += 1
             payload_cr = coding.bits_to_uint(hbits, cr_start, cr_len)
             if not coding.header_parity_ok(data_int, received, masks) or (
-                not coding.supported_cr(payload_cr)
+                not coding.supported_cr(fec_masks, payload_cr)
             ):
                 self.diagnostics["header_fail"] += 1
                 return False
@@ -129,10 +139,18 @@ def make_css_explicit_decode(
             payload_len = coding.bits_to_uint(hbits, pl_start, pl_len)
             has_crc = coding.bits_to_uint(hbits, crc_start, crc_len)
             self._frame_len = coding.css_explicit_frame_len(
-                payload_len, has_crc, payload_cr, sf, int(ldro), sf_reduction
+                payload_len,
+                has_crc,
+                payload_cr,
+                sf,
+                int(reduced),
+                sf_reduction,
+                data_bits=data_bits,
+                header_nibbles=header_nibbles,
+                crc_bytes=crc_bytes,
             )
             self._payload_cr = payload_cr
-            self._declared_bits = payload_len * 8 + has_crc * 16
+            self._declared_bits = (payload_len + has_crc * crc_bytes) * 8
             self._carry = _nibbles_to_bits(nibbles[header_nibbles:])
             return True
 
