@@ -121,6 +121,83 @@ def test_frame_sync_resyncs_under_drift(tmp_path):
     assert np.allclose(out, expected, atol=1e-4)
 
 
+class _FakeGr:
+    """Pure-python stand-in for the gr module: runs the block's state machine
+    without a scheduler so call and chunk timing can be forced exactly."""
+
+    class basic_block:
+        def __init__(self, name: str, in_sig: list, out_sig: list) -> None:
+            self._consumed = 0
+
+        def consume(self, port: int, n: int) -> None:
+            self._consumed += n
+
+
+def _drive(blk, sig: np.ndarray, chunk: int) -> np.ndarray:
+    """Feed sig in `chunk`-sized pieces; after every piece, keep calling with
+    ZERO input until quiescent — the wakeups the scheduler is allowed to make
+    whenever forecast announces 0."""
+    got = []
+    for start in range(0, sig.size, chunk):
+        nxt = np.asarray(sig[start : start + chunk], np.complex64)
+        while True:
+            out = np.zeros(1 << 16, np.complex64)
+            k = blk.general_work([nxt], [out])
+            if k:
+                got.append(out[:k].copy())
+            nxt = np.empty(0, np.complex64)
+            if k == 0:
+                break
+    return np.concatenate(got) if got else np.empty(0, np.complex64)
+
+
+def test_zero_input_wakeup_is_timing_invariant():
+    """forecast announces 0 whenever emission work is pending, so the scheduler
+    MAY deliver zero-input calls at any point mid-stream; emitted content must
+    not depend on when they land. The pre-fix code treated inp.size == 0 as EOF
+    and emitted without the forward-null gate, so under drift a mid-stream
+    wakeup extracted the next frame at the un-snapped predicted base (issue 05)."""
+    from marconi.phy.backends.gnuradio.embedded.ofdm import make_ofdm_frame_sync
+
+    # seed 2 = the drift-test fixture; seed 7 trips find_null's known one-late
+    # boundary quirk (weak first CP sample), which is orthogonal to timing
+    rng = np.random.default_rng(2)
+    drift, m_frames = 3, 6
+    usefuls_per_frame, parts = [], []
+    for _ in range(m_frames):
+        parts.append(np.zeros(NULL + drift, complex))
+        us = [
+            rng.standard_normal(FFT) + 1j * rng.standard_normal(FFT)
+            for _ in range(DS + 1)
+        ]
+        usefuls_per_frame.append(np.concatenate(us))
+        for u in us:
+            parts.append(np.concatenate([u[-CP:], u]))
+    sig = np.concatenate(parts).astype(np.complex64)
+    expected = np.concatenate(
+        [(u / np.std(u)).astype(np.complex64) for u in usefuls_per_frame]
+    )
+
+    def run(chunk: int) -> np.ndarray:
+        blk = make_ofdm_frame_sync(
+            _FakeGr,
+            fft_len=FFT,
+            cp_len=CP,
+            sym_len=SYM,
+            null_len=NULL,
+            frame_len=FRAME,
+            data_syms=DS,
+        )
+        return _drive(blk, sig, chunk)
+
+    oneshot = run(sig.size)
+    assert oneshot.size == expected.size
+    assert np.allclose(oneshot, expected, atol=1e-4)
+    for chunk in (173, SYM, FRAME + 1):
+        chunked = run(chunk)
+        assert np.array_equal(chunked, oneshot), f"chunk={chunk} diverged"
+
+
 def test_resync_base_snaps_corrects_and_rejects():
     from marconi.phy.backends.gnuradio.embedded.ofdm import _resync_base
 

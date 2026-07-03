@@ -1,8 +1,10 @@
 # tests/bits/test_dab_offair.py
 """Real off-air DAB Mode I, end-to-end phy -> bits, CRC as the oracle, plus the
-readable ensemble label. Known-good on this slice is 192 CRC-valid FIBs; the gate
-is >= 180 (GR demod wobbles run-to-run — never assert exact counts on GR output)
-so the observed regression class (issue 18's trim, 192 -> 12) cannot pass green."""
+readable ensemble label. Known-good on this slice: 192 CRC-valid FIBs, measured
+10x with byte-identical sink output (variance 0; issue 05). The gate is
+known-good minus 2 — margin only for cross-machine float drift, tight enough
+that the observed regression classes (issue 18's trim 192 -> 12; a lost tail
+frame) cannot pass green."""
 import sys
 from pathlib import Path
 
@@ -76,9 +78,10 @@ def test_dab_decodes_crc_valid_bbc(tmp_path):
     res = parse_bitstream(
         Bitstream(path=snk, num_bits=n, source_capture=_SLICE), _codec(), registry()
     )
-    assert (
-        res.num_crc_ok >= 180
-    ), f"expected >=180 CRC-valid FIBs (known-good 192), got {res.num_crc_ok}"
+    assert res.num_crc_ok >= 190, (
+        "expected >=190 CRC-valid FIBs (known-good 192, 10x var 0), "
+        f"got {res.num_crc_ok}"
+    )
     labels = {
         _parse_ensemble(bytes.fromhex(f.payload_hex)) for f in res.frames if f.crc_ok
     }

@@ -138,6 +138,7 @@ def test_dab_phy_decodes_crc_valid_fibs(tmp_path):
             fib = np.packbits(dec[f * 256 : (f + 1) * 256])
             if _fib_crc_ok(fib):
                 ok += 1
-    assert (
-        ok >= 180
-    ), f"expected >=180 CRC-valid FIBs from the phy chain (known-good 192), got {ok}"
+    assert ok >= 190, (
+        "expected >=190 CRC-valid FIBs from the phy chain "
+        f"(known-good 192, 10x var 0; issue 05), got {ok}"
+    )
