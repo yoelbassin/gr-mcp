@@ -48,24 +48,24 @@ class PreambleSync(DuplexStage[CompileContext]):
     params_model = _PreambleSyncParams
 
     def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
-        pre_i = list(params["preamble_i"])
-        pre_q = list(params["preamble_q"])
+        p = _PreambleSyncParams.model_validate(dict(params))
         b.chain(
             "corr_est_cc",
-            preamble_i=pre_i,
-            preamble_q=pre_q,
+            preamble_i=p.preamble_i,
+            preamble_q=p.preamble_q,
             sps=1,
             mark_delay=0,
-            threshold=float(params.get("threshold", 0.9)),
+            threshold=p.threshold,
         )
-        b.chain("sym_strip", n_pre=len(pre_i))
+        b.chain("sym_strip", n_pre=len(p.preamble_i))
 
     def emit_tx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
+        p = _PreambleSyncParams.model_validate(dict(params))
         b.chain(
             "sym_prepend",
-            preamble_i=list(params["preamble_i"]),
-            preamble_q=list(params["preamble_q"]),
-            pad_symbols=int(params.get("pad_symbols", 192)),
+            preamble_i=p.preamble_i,
+            preamble_q=p.preamble_q,
+            pad_symbols=p.pad_symbols,
         )
 
 

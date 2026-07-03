@@ -110,8 +110,9 @@ class DqpskSoftDemap(RxStage[CompileContext]):
     params_model = _DqpskParams
 
     def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
-        nc = int(params["n_carriers"])
-        ds = int(params["data_syms"])
+        p = _DqpskParams.model_validate(dict(params))
+        nc = p.n_carriers
+        ds = p.data_syms
         src = b.tail  # incoming carrier stream (never None after IO source)
         assert src is not None
         dly = b.chain("delay_cc", samples=nc)  # src -> delay, tail=delay
@@ -120,11 +121,7 @@ class DqpskSoftDemap(RxStage[CompileContext]):
         b.connect(dly, mc, dst_port=1)  # delayed   -> mc.1  (c[i]*conj(c[i-nc]))
         b.set_tail(mc)
         b.chain("keep_m_in_n_c", m=ds * nc, n=(ds + 1) * nc, offset=nc)  # drop PRS diff
-        b.chain(
-            "constellation_soft_decoder",
-            scheme=str(params.get("scheme", "psk")),
-            order=int(params.get("order", 4)),
-        )
+        b.chain("constellation_soft_decoder", scheme=p.scheme, order=p.order)
 
     def out_descriptor(
         self, in_desc: Descriptor, params: Mapping[str, Any]

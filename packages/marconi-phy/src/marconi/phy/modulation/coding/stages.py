@@ -67,21 +67,19 @@ class _ConvParams(StageParams):
         return self
 
 
-def _emit_cc(b: CompileContext, p: Mapping[str, Any]) -> None:
-    fb, t = int(p["frame_bits"]), int(p.get("tail", 0))
+def _emit_cc(b: CompileContext, p: _ConvParams) -> None:
+    fb, t = p.frame_bits, p.tail
     b.chain(
         "trellis_viterbi",
-        rate_inv=int(p["rate_inv"]),
-        polys=[int(x) for x in p["polys"]],
+        rate_inv=p.rate_inv,
+        polys=[int(x) for x in p.polys],
         frame_bits=fb,
         tail=t,
     )
     b.chain("keep_m_in_n_b", m=fb, n=fb + t)
 
 
-_FEC_EMIT: dict[str, Callable[[CompileContext, Mapping[str, Any]], None]] = {
-    "cc": _emit_cc
-}
+_FEC_EMIT: dict[str, Callable[[CompileContext, "_ConvParams"], None]] = {"cc": _emit_cc}
 
 
 class Fec(RxStage[CompileContext]):
@@ -96,7 +94,8 @@ class Fec(RxStage[CompileContext]):
     params_model = _ConvParams
 
     def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
-        _FEC_EMIT[str(params["scheme"])](b, params)
+        p = _ConvParams.model_validate(dict(params))
+        _FEC_EMIT[p.scheme](b, p)
 
     def out_descriptor(
         self, in_desc: Descriptor, params: Mapping[str, Any]

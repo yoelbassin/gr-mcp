@@ -68,25 +68,26 @@ class ChirpSync(DuplexStage[CompileContext]):
     params_model = _CssParams
 
     def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
-        sf = int(params["sf"])
+        p = _CssParams.model_validate(dict(params))
         b.chain(
             "chirp_sync",
-            sf=sf,
-            oversample=int(params.get("oversample", 2)),
-            zero_pad=int(params.get("zero_pad", 4)),
-            preamble_len=int(params.get("preamble_len", 8)),
-            bandwidth=b.symbol_rate * (1 << sf),
-            sfd_symbols=float(params.get("sfd_symbols", 2.25)),
-            sync_symbols=int(params.get("sync_symbols", 2)),
+            sf=p.sf,
+            oversample=p.oversample,
+            zero_pad=p.zero_pad,
+            preamble_len=p.preamble_len,
+            bandwidth=b.symbol_rate * (1 << p.sf),
+            sfd_symbols=p.sfd_symbols,
+            sync_symbols=p.sync_symbols,
         )
 
     def emit_tx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
+        p = _CssParams.model_validate(dict(params))
         b.chain(
             "chirp_prepend",
-            sf=int(params["sf"]),
-            oversample=int(params.get("oversample", 2)),
-            preamble_len=int(params.get("preamble_len", 8)),
-            sfd_symbols=float(params.get("sfd_symbols", 2.25)),
+            sf=p.sf,
+            oversample=p.oversample,
+            preamble_len=p.preamble_len,
+            sfd_symbols=p.sfd_symbols,
         )
 
 
@@ -102,19 +103,12 @@ class Dechirp(DuplexStage[CompileContext]):
     params_model = _CssParams
 
     def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
-        b.chain(
-            "chirp_demod",
-            sf=int(params["sf"]),
-            oversample=int(params.get("oversample", 2)),
-            zero_pad=int(params.get("zero_pad", 4)),
-        )
+        p = _CssParams.model_validate(dict(params))
+        b.chain("chirp_demod", sf=p.sf, oversample=p.oversample, zero_pad=p.zero_pad)
 
     def emit_tx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
-        b.chain(
-            "chirp_mod",
-            sf=int(params["sf"]),
-            oversample=int(params.get("oversample", 2)),
-        )
+        p = _CssParams.model_validate(dict(params))
+        b.chain("chirp_mod", sf=p.sf, oversample=p.oversample)
 
     def out_descriptor(
         self, in_desc: Descriptor, params: Mapping[str, Any]
@@ -210,25 +204,26 @@ class CssExplicitDecode(RxStage[CompileContext]):
     params_model = _ExplicitParams
 
     def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
+        p = _ExplicitParams.model_validate(dict(params))
         b.chain(
             "css_explicit_decode",
-            sf=int(params["sf"]),
-            header_cr=int(params["header_cr"]),
-            reduced=bool(params.get("reduced", False)),
-            header_symbols=int(params["header_symbols"]),
-            header_nibbles=int(params["header_nibbles"]),
-            sf_reduction=int(params["sf_reduction"]),
-            header_data_bits=int(params["header_data_bits"]),
-            header_parity=[int(x) for x in params["header_parity"]],
-            field_payload_len=[int(x) for x in params["field_payload_len"]],
-            field_cr=[int(x) for x in params["field_cr"]],
-            field_has_crc=[int(x) for x in params["field_has_crc"]],
-            field_parity=[int(x) for x in params["field_parity"]],
-            data_bits=int(params["data_bits"]),
-            crc_bytes=int(params["crc_bytes"]),
-            parity_masks=[int(x) for x in params["parity_masks"]],
-            reduced_offset=int(params.get("reduced_offset", 0)),
-            full_offset=int(params.get("full_offset", 0)),
+            sf=p.sf,
+            header_cr=p.header_cr,
+            reduced=p.reduced,
+            header_symbols=p.header_symbols,
+            header_nibbles=p.header_nibbles,
+            sf_reduction=p.sf_reduction,
+            header_data_bits=p.header_data_bits,
+            header_parity=[int(x) for x in p.header_parity],
+            field_payload_len=[int(x) for x in p.field_payload_len],
+            field_cr=[int(x) for x in p.field_cr],
+            field_has_crc=[int(x) for x in p.field_has_crc],
+            field_parity=[int(x) for x in p.field_parity],
+            data_bits=p.data_bits,
+            crc_bytes=p.crc_bytes,
+            parity_masks=[int(x) for x in p.parity_masks],
+            reduced_offset=p.reduced_offset,
+            full_offset=p.full_offset,
         )
 
     def out_descriptor(

@@ -25,17 +25,17 @@ class Parse(DuplexStage[ProgramBuilder]):
     params_model = _Params
 
     def _kw(self, params: Mapping[str, Any]) -> dict[str, Any]:
-        fields = framing.parse_fields(params["fields"])
-        discriminator = params.get("discriminator")
+        p = self._Params.model_validate(dict(params))
+        fields = framing.parse_fields(p.fields)
         cases: dict[int, tuple[Any, list[Any]]] = {}
-        for case in params.get("cases") or []:
+        for case in p.cases:
             body = fields + framing.parse_fields(case["fields"])
             cases[int(case["when"])] = (framing.build_struct(body), body)
         return {
             "struct": framing.build_struct(fields),
             "fields": fields,
-            "bit_order": str(params.get("bit_order", "msb")),
-            "discriminator": str(discriminator) if discriminator else None,
+            "bit_order": p.bit_order,
+            "discriminator": p.discriminator or None,
             "cases": cases or None,
         }
 

@@ -27,12 +27,11 @@ class OokEnvelope(DuplexStage[CompileContext]):
     params_model = _OokParams
 
     def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
+        p = _OokParams.model_validate(dict(params))
         b.chain("complex_to_mag")
         b.chain("multiply_const_ff", value=2.0)
         b.chain("add_const_ff", value=-1.0)
-        b.chain(
-            "symbol_sync_ff", sps=b.sps, loop_bw=float(params.get("loop_bw", 0.045))
-        )
+        b.chain("symbol_sync_ff", sps=b.sps, loop_bw=p.loop_bw)
 
     def emit_tx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
         b.chain("add_const_ff", value=1.0)

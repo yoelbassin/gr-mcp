@@ -53,13 +53,13 @@ class Channelize(RxStage[CompileContext]):
     params_model = _ChannelizeParams
 
     def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
-        bandwidth = float(params["bandwidth_hz"])
+        p = _ChannelizeParams.model_validate(dict(params))
         b.chain(
             "freq_xlating_fir_filter_ccf",
-            decim=int(params["decim"]),
-            center=float(params.get("center_hz", 0.0)),
-            cutoff=bandwidth / 2.0,
-            transition=bandwidth / 2.0,
+            decim=p.decim,
+            center=p.center_hz,
+            cutoff=p.bandwidth_hz / 2.0,
+            transition=p.bandwidth_hz / 2.0,
             rate=b.rate,
         )
 

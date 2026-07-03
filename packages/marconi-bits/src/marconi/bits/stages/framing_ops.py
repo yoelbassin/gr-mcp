@@ -25,10 +25,12 @@ class Differential(DuplexStage[ProgramBuilder]):
     params_model = _Params
 
     def emit_rx(self, b: ProgramBuilder, params: Mapping[str, Any]) -> None:
-        b.add(framing.differential_rx, invert=bool(params.get("invert", False)))
+        p = self._Params.model_validate(dict(params))
+        b.add(framing.differential_rx, invert=p.invert)
 
     def emit_tx(self, b: ProgramBuilder, params: Mapping[str, Any]) -> None:
-        b.add(framing.differential_tx, invert=bool(params.get("invert", False)))
+        p = self._Params.model_validate(dict(params))
+        b.add(framing.differential_tx, invert=p.invert)
 
 
 class HdlcDeframe(DuplexStage[ProgramBuilder]):
@@ -46,14 +48,12 @@ class HdlcDeframe(DuplexStage[ProgramBuilder]):
     params_model = _Params
 
     def emit_rx(self, b: ProgramBuilder, params: Mapping[str, Any]) -> None:
-        b.add(framing.hdlc_deframe_rx, bit_order=str(params.get("bit_order", "msb")))
+        p = self._Params.model_validate(dict(params))
+        b.add(framing.hdlc_deframe_rx, bit_order=p.bit_order)
 
     def emit_tx(self, b: ProgramBuilder, params: Mapping[str, Any]) -> None:
-        b.add(
-            framing.hdlc_deframe_tx,
-            bit_order=str(params.get("bit_order", "msb")),
-            training=str(params.get("training", "")),
-        )
+        p = self._Params.model_validate(dict(params))
+        b.add(framing.hdlc_deframe_tx, bit_order=p.bit_order, training=p.training)
 
 
 class Codebook(DuplexStage[ProgramBuilder]):
@@ -124,14 +124,12 @@ class SyncWord(DuplexStage[ProgramBuilder]):
     params_model = _SyncParams
 
     def emit_rx(self, b: ProgramBuilder, params: Mapping[str, Any]) -> None:
-        b.add(
-            framing.sync_word_rx,
-            sync=str(params["sync"]),
-            max_errors=int(params.get("max_errors", 0)),
-        )
+        p = _SyncParams.model_validate(dict(params))
+        b.add(framing.sync_word_rx, sync=p.sync, max_errors=p.max_errors)
 
     def emit_tx(self, b: ProgramBuilder, params: Mapping[str, Any]) -> None:
-        b.add(framing.sync_word_tx, sync=str(params["sync"]))
+        p = _SyncParams.model_validate(dict(params))
+        b.add(framing.sync_word_tx, sync=p.sync)
 
 
 class NibbleSwap(DuplexStage[ProgramBuilder]):
@@ -206,11 +204,12 @@ class LengthFrame(DuplexStage[ProgramBuilder]):
     params_model = _Params
 
     def _kw(self, params: Mapping[str, Any]) -> dict[str, Any]:
+        p = self._Params.model_validate(dict(params))
         return {
-            "length_bits": int(params["length_bits"]),
-            "base_bytes": int(params["base_bytes"]),
-            "unit_bytes": int(params.get("unit_bytes", 1)),
-            "bit_order": str(params.get("bit_order", "msb")),
+            "length_bits": p.length_bits,
+            "base_bytes": p.base_bytes,
+            "unit_bytes": p.unit_bytes,
+            "bit_order": p.bit_order,
         }
 
     def emit_rx(self, b: ProgramBuilder, params: Mapping[str, Any]) -> None:

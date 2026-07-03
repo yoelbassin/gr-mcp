@@ -38,15 +38,16 @@ class Crc(DuplexStage[ProgramBuilder]):
     params_model = _Params
 
     def _args(self, params: Mapping[str, Any]) -> dict[str, Any]:
+        p = self._Params.model_validate(dict(params))
         return {
-            "poly": int(params["poly"]),
-            "bits": int(params["bits"]),
-            "init": int(params.get("init", 0)),
-            "reflected": bool(params.get("reflected", False)),
-            "xorout": int(params.get("xorout", 0)),
-            "bit_order": str(params.get("bit_order", "msb")),
-            "fold_tail": int(params.get("fold_tail", 0)),
-            "checksum_le": bool(params.get("checksum_le", False)),
+            "poly": p.poly,
+            "bits": p.bits,
+            "init": p.init,
+            "reflected": p.reflected,
+            "xorout": p.xorout,
+            "bit_order": p.bit_order,
+            "fold_tail": p.fold_tail,
+            "checksum_le": p.checksum_le,
         }
 
     def emit_rx(self, b: ProgramBuilder, params: Mapping[str, Any]) -> None:

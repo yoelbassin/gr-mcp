@@ -66,32 +66,28 @@ class QamDemod(DuplexStage[CompileContext]):
     params_model = _QamDemodParams
 
     def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
-        alpha = float(params.get("alpha", 0.35))
-        span = int(params.get("span", 11))
+        p = _QamDemodParams.model_validate(dict(params))
         b.chain(
             "rrc_filter_ccf",
             interpolation=1,
             rate=b.rate,
             sps=b.sps,
-            alpha=alpha,
-            span=span,
+            alpha=p.alpha,
+            span=p.span,
         )
-        b.chain(
-            "symbol_sync_cc", sps=b.sps, loop_bw=float(params.get("loop_bw", 0.045))
-        )
-        b.chain("constellation_receiver_cb", scheme="qam", order=int(params["order"]))
+        b.chain("symbol_sync_cc", sps=b.sps, loop_bw=p.loop_bw)
+        b.chain("constellation_receiver_cb", scheme="qam", order=p.order)
 
     def emit_tx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
-        alpha = float(params.get("alpha", 0.35))
-        span = int(params.get("span", 11))
-        b.chain("chunks_to_symbols_bc", scheme="qam", order=int(params["order"]))
+        p = _QamDemodParams.model_validate(dict(params))
+        b.chain("chunks_to_symbols_bc", scheme="qam", order=p.order)
         b.chain(
             "rrc_filter_ccf",
             interpolation=b.sps_int(),
             rate=b.rate,
             sps=b.sps,
-            alpha=alpha,
-            span=span,
+            alpha=p.alpha,
+            span=p.span,
         )
 
     def out_descriptor(

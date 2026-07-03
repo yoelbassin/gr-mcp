@@ -29,19 +29,17 @@ class Fsk(DuplexStage[CompileContext]):
     params_model = _FskParams
 
     def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
-        deviation = float(params["deviation"])
-        gain = b.rate / (2.0 * math.pi * deviation)
+        p = _FskParams.model_validate(dict(params))
+        gain = b.rate / (2.0 * math.pi * p.deviation)
         b.chain("quadrature_demod", gain=gain)
-        b.chain(
-            "symbol_sync_ff", sps=b.sps, loop_bw=float(params.get("loop_bw", 0.045))
-        )
+        b.chain("symbol_sync_ff", sps=b.sps, loop_bw=p.loop_bw)
 
     def emit_tx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
-        deviation = float(params["deviation"])
+        p = _FskParams.model_validate(dict(params))
         b.chain("repeat_f", interp=b.sps_int())
         b.chain(
             "frequency_modulator",
-            sensitivity=2.0 * math.pi * deviation / b.rate,
+            sensitivity=2.0 * math.pi * p.deviation / b.rate,
         )
 
     def out_descriptor(
