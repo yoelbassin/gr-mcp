@@ -48,7 +48,8 @@ def _calculator(
             final_xor_value=xorout,
             reverse_input=reflected,
             reverse_output=reflected,
-        )
+        ),
+        optimized=True,  # table engine (~2.1 MB/s) not the bit-by-bit one (~0.30)
     )
 
 
@@ -341,16 +342,19 @@ def _destuff(bits: np.ndarray) -> np.ndarray | None:
 
 
 def _find_flags(bits: np.ndarray) -> list[int]:
-    flags: list[int] = []
-    i = 0
-    n = len(bits)
-    while i <= n - 8:
-        if np.array_equal(bits[i : i + 8], _HDLC_FLAG):
-            flags.append(i)
-            i += 7
-        else:
-            i += 1
-    return flags
+    # A flag 01111110 is a 0, six 1s (a length-6 window summing to 6), then a 0.
+    # One cumsum + slice compares finds every one in a single pass -- no per-bit
+    # loop, no O(8n) window materialization. The 0-bookends cannot fall inside
+    # another flag's ones-run, so matches are always >=7 apart, exactly what the
+    # old greedy i+=7 scan reported. Kept in the GR-free bits layer; stock
+    # digital.hdlc_deframer_bp would drag GR into it for no throughput need.
+    n = bits.size
+    if n < 8:
+        return []
+    cs = np.concatenate(([0], np.cumsum(bits, dtype=np.int32)))
+    six_ones = (cs[7:n] - cs[1 : n - 6]) == 6
+    match = six_ones & (bits[0 : n - 7] == 0) & (bits[7:n] == 0)
+    return np.flatnonzero(match).tolist()
 
 
 def hdlc_deframe_rx(c: RxCarrier, *, bit_order: str = "msb") -> RxCarrier:
