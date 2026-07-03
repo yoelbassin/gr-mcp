@@ -200,9 +200,11 @@ GR_BLOCKS: dict[str, Callable[[_GrCtx, Params], Any]] = {
         _as_float(p["rate"]),
     ),
     # Rational resample via the polyphase arbitrary resampler (rate=interp/decim).
-    # This GR build's rational_resampler_ccc/ccf produce a garbage resample (the
-    # C++ block needs taps the absent Python hier wrapper would design); the pfb
-    # arbitrary resampler auto-designs its own and is the proven path.
+    # This GR 3.10.12 build's rational_resampler_ccf/ccc with no taps image/alias:
+    # BER ~0.46 (random) through the fsk round-trip at 8/7 and 8/9, even though a
+    # bare tone's RMS survives (energy preservation != spectral purity). The pfb
+    # arbitrary resampler auto-designs proper anti-imaging taps and is the
+    # BER-0-proven path (test_resample_roundtrip).
     "pfb_arb_resampler_ccf": lambda c, p: c.pfb.arb_resampler_ccf(_as_float(p["rate"])),
     "conjugate_cc": lambda c, p: c.blocks.conjugate_cc(),
     "symbol_sync_cc": lambda c, p: c.digital.symbol_sync_cc(

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections import Counter
+
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from marconi.core.params import ParamValue
@@ -31,8 +33,8 @@ class GrPipeline(BaseModel):
 
     @model_validator(mode="after")
     def _unique_block_ids(self) -> GrPipeline:
-        ids = [b.id for b in self.blocks]
-        dupes = sorted({i for i in ids if ids.count(i) > 1})
+        counts = Counter(b.id for b in self.blocks)
+        dupes = sorted(i for i, n in counts.items() if n > 1)
         if dupes:
             raise ValueError(f"duplicate block ids: {dupes}")
         return self

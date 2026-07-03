@@ -30,4 +30,5 @@ _GROUPS: tuple[tuple[type[Stage[CompileContext]], ...], ...] = (
 
 
 def stage_registry() -> dict[str, Stage[CompileContext]]:
-    return {cls().name: cls() for group in _GROUPS for cls in group}
+    stages = (cls() for group in _GROUPS for cls in group)
+    return {s.name: s for s in stages}
