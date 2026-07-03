@@ -98,6 +98,8 @@ class PskDemap(DuplexStage[CompileContext]):
     to_level = Level.BITS
     family = "psk"
     params_model = _PskDemapParams
+    accepts_item_type = "c"
+    accepts_carrier = Carrier.SOFT
 
     def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
         order = int(params["order"])

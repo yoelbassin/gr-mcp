@@ -26,6 +26,8 @@ class Deinterleave(RxStage[CompileContext]):
     to_level = Level.BITS
     family = "coding"
     params_model = _DeinterleaveParams
+    accepts_item_type = "f"
+    accepts_carrier = Carrier.SOFT
 
     def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
         b.chain("blockinterleaver_ff", perm=[int(x) for x in params["perm"]], mode=True)
@@ -44,6 +46,8 @@ class Depuncture(RxStage[CompileContext]):
     to_level = Level.BITS
     family = "coding"
     params_model = _DepunctureParams
+    accepts_item_type = "f"
+    accepts_carrier = Carrier.SOFT
 
     def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
         b.chain("depuncture", keep_mask=[int(x) for x in params["keep_mask"]])
@@ -92,6 +96,8 @@ class Fec(RxStage[CompileContext]):
     to_level = Level.BITS
     family = "coding"
     params_model = _ConvParams
+    accepts_item_type = "f"
+    accepts_carrier = Carrier.SOFT
 
     def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
         p = _ConvParams.model_validate(dict(params))

@@ -108,6 +108,8 @@ class QamDemap(DuplexStage[CompileContext]):
     to_level = Level.BITS
     family = "qam"
     params_model = _QamDemapParams
+    accepts_item_type = "b"
+    accepts_carrier = Carrier.HARD
 
     def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
         b.chain("unpack_k_bits_bb", k=int(math.log2(int(params["order"]))))

@@ -6,7 +6,7 @@ from typing import Any, Generic, Protocol, TypeVar
 
 from pydantic import BaseModel, ValidationError
 
-from marconi.core.descriptor import Descriptor
+from marconi.core.descriptor import Carrier, Descriptor
 from marconi.core.errors import register_error
 from marconi.core.levels import Level, adjacent
 from marconi.core.models import ValidationIssue
@@ -62,6 +62,15 @@ class Stage(ABC, Generic[B]):
     seeds_frames: bool = False
     self_slicing: bool = False
     slices_body: bool = False
+
+    # Seam invariant (issue 06): the wire item_type / decision-carrier a stage
+    # accepts on input. The phy compiler checks them against the upstream
+    # descriptor, so an ill-typed composition (e.g. hard bits into a soft-LLR
+    # consumer) fails at compile, not in the worker. None = polymorphic. The rule
+    # they encode: SYMBOLS is SOFT except QAM/CSS (hard@SYMBOLS); BITS is HARD
+    # except the soft-LLR lane ("f"/SOFT).
+    accepts_item_type: str | None = None
+    accepts_carrier: Carrier | None = None
 
     @abstractmethod
     def emit_rx(self, b: B, params: Mapping[str, Any]) -> None: ...

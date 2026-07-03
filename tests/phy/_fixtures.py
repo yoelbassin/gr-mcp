@@ -98,6 +98,24 @@ class FakeSoftDemap(DuplexStage[CompileContext]):
         return Descriptor(Level.BITS, "f", in_desc.layout, Carrier.SOFT)
 
 
+class FakeSoftFec(RxStage[CompileContext]):
+    name = "fake_soft_fec"
+    from_level = Level.BITS
+    to_level = Level.BITS
+    family = "general"
+    params_model = _NoParams
+    accepts_item_type = "f"
+    accepts_carrier = Carrier.SOFT
+
+    def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
+        b.chain("fake_soft_fec")
+
+    def out_descriptor(
+        self, in_desc: Descriptor, params: Mapping[str, Any]
+    ) -> Descriptor:
+        return Descriptor(Level.BITS, "b", in_desc.layout, Carrier.HARD)
+
+
 class RxOnlyDemod(RxStage[CompileContext]):
     name = "rx_only_demod"
     from_level = Level.IQ
@@ -139,4 +157,5 @@ def stub_factories() -> dict[str, BlockArity]:
         "fake_map": BlockArity(1, 1),
         "fake_soft_demap": BlockArity(1, 1),
         "fake_soft_map": BlockArity(1, 1),
+        "fake_soft_fec": BlockArity(1, 1),
     }

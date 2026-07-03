@@ -87,7 +87,7 @@ class OfdmDemod(RxStage[CompileContext]):
     def out_descriptor(
         self, in_desc: Descriptor, params: Mapping[str, Any]
     ) -> Descriptor:
-        return Descriptor(Level.SYMBOLS, "c", in_desc.layout, Carrier.HARD)
+        return Descriptor(Level.SYMBOLS, "c", in_desc.layout, Carrier.SOFT)
 
 
 class _DqpskParams(StageParams):
@@ -108,6 +108,8 @@ class DqpskSoftDemap(RxStage[CompileContext]):
     to_level = Level.BITS
     family = "ofdm"
     params_model = _DqpskParams
+    accepts_item_type = "c"
+    accepts_carrier = Carrier.SOFT
 
     def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
         p = _DqpskParams.model_validate(dict(params))

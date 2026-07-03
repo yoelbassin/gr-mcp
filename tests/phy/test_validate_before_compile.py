@@ -1,5 +1,5 @@
 import pytest
-from phy._fixtures import RxOnlyDemod, fixture_registry
+from phy._fixtures import FakeSoftFec, RxOnlyDemod, fixture_registry
 
 from marconi.core.descriptor import Descriptor
 from marconi.core.levels import Level
@@ -52,3 +52,28 @@ def test_valid_rx_path_still_compiles() -> None:
         _modem(("fake_demod", {}), ("fake_demap", {}), symbol_rate=2.0), "rx"
     )
     assert pipe.blocks[0].kind == "iq_file_source"
+
+
+def test_hard_bits_into_soft_consumer_raises_naming_both() -> None:
+    # fake_demap emits BITS "b"/HARD; fake_soft_fec accepts "f"/SOFT -> ill-typed
+    # composition, must fail at compile (not in the worker) naming both stages.
+    reg = {**fixture_registry(), "fake_soft_fec": FakeSoftFec()}
+    m = _modem(
+        ("fake_demod", {}), ("fake_demap", {}), ("fake_soft_fec", {}), symbol_rate=2.0
+    )
+    with pytest.raises(CompileError) as e:
+        _compile(m, "rx", reg)
+    msg = str(e.value)
+    assert "fake_soft_fec" in msg and "fake_demap" in msg
+
+
+def test_valid_soft_lane_compiles() -> None:
+    reg = {**fixture_registry(), "fake_soft_fec": FakeSoftFec()}
+    m = _modem(
+        ("fake_demod", {}),
+        ("fake_soft_demap", {}),
+        ("fake_soft_fec", {}),
+        symbol_rate=2.0,
+    )
+    pipe = _compile(m, "rx", reg)
+    assert any(b.kind == "bits_file_sink" for b in pipe.blocks)

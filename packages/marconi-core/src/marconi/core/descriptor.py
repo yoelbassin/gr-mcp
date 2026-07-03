@@ -19,6 +19,6 @@ class Carrier(str, Enum):
 @dataclass(frozen=True)
 class Descriptor:
     level: Level
-    item_type: str  # GR stream item type: "c","f","b","s" (backend-resolved)
+    item_type: str  # GR wire type "c/f/b/s"; selects IO blocks
     layout: Layout = Layout.STREAM
-    carrier: Carrier = Carrier.HARD
+    carrier: Carrier = Carrier.HARD  # decision-hardness, a seam invariant

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 
-from marconi.core.descriptor import Carrier, Descriptor
+from marconi.core.descriptor import Descriptor
 from marconi.core.errors import register_error
 from marconi.core.models import ValidationIssue
 from marconi.core.params import ParamValue
@@ -19,34 +19,27 @@ class CompileError(Exception):
 register_error(CompileError, "invalid_argument")  # an uncompilable spec
 
 
-# (item_type, carrier) -> (source_kind, sink_kind). Descriptor data, never stage
-# names: this is what replaces v1's rate-by-name scan and sink-by-block-type lookup.
-_IO_BLOCKS: dict[tuple[str, Carrier], tuple[str | None, str]] = {
-    ("c", Carrier.HARD): ("iq_file_source", "iq_file_sink"),
-    ("c", Carrier.SOFT): ("iq_file_source", "iq_file_sink"),
-    ("s", Carrier.HARD): (None, "symbols_file_sink"),
-    ("b", Carrier.HARD): ("bits_file_source", "bits_file_sink"),
-    ("f", Carrier.SOFT): ("soft_bits_file_source", "soft_bits_file_sink"),
+# item_type -> (source_kind, sink_kind). The GR wire type alone selects IO;
+# carrier is decision-hardness (a seam invariant), never a routing knob. Descriptor
+# data, never stage names: replaces v1's rate-by-name scan and sink-by-type lookup.
+_IO_BLOCKS: dict[str, tuple[str | None, str]] = {
+    "c": ("iq_file_source", "iq_file_sink"),
+    "s": (None, "symbols_file_sink"),
+    "b": ("bits_file_source", "bits_file_sink"),
+    "f": ("soft_bits_file_source", "soft_bits_file_sink"),
 }
 
 
 def _io_kinds(desc: Descriptor) -> tuple[str | None, str]:
-    key = (desc.item_type, desc.carrier)
-    if key not in _IO_BLOCKS:
-        raise CompileError(
-            f"no source/sink block for item_type {desc.item_type!r} "
-            f"carrier {desc.carrier.value}"
-        )
-    return _IO_BLOCKS[key]
+    if desc.item_type not in _IO_BLOCKS:
+        raise CompileError(f"no source/sink block for item_type {desc.item_type!r}")
+    return _IO_BLOCKS[desc.item_type]
 
 
 def _source_kind(desc: Descriptor) -> str:
     src, _ = _io_kinds(desc)
     if src is None:
-        raise CompileError(
-            f"item_type {desc.item_type!r} carrier {desc.carrier.value} "
-            "has no source block"
-        )
+        raise CompileError(f"item_type {desc.item_type!r} has no source block")
     return src
 
 
@@ -76,6 +69,34 @@ def _forward_pass(
         boundaries.append(stage.out_descriptor(boundaries[-1], step.params))
         rates.append(rates[-1] * stage.rate_factor(step.params))
     return boundaries, rates
+
+
+def _validate_descriptors(
+    steps: Sequence[SpecStep],
+    registry: Mapping[str, Stage[CompileContext]],
+    boundaries: Sequence[Descriptor],
+) -> None:
+    for i, step in enumerate(steps):
+        stage = _resolve(step, registry)
+        in_desc = boundaries[i]
+        producer = steps[i - 1].conv if i > 0 else "<source>"
+        if (
+            stage.accepts_item_type is not None
+            and in_desc.item_type != stage.accepts_item_type
+        ):
+            raise CompileError(
+                f"stage '{step.conv}' accepts item_type "
+                f"{stage.accepts_item_type!r} but '{producer}' produces "
+                f"{in_desc.item_type!r}"
+            )
+        if (
+            stage.accepts_carrier is not None
+            and in_desc.carrier != stage.accepts_carrier
+        ):
+            raise CompileError(
+                f"stage '{step.conv}' accepts {stage.accepts_carrier.value} "
+                f"carrier but '{producer}' produces {in_desc.carrier.value}"
+            )
 
 
 def _validate(
@@ -112,6 +133,7 @@ def compile_modem(
     steps = modem.path
     n = len(steps)
     boundaries, rates = _forward_pass(steps, registry, start, sample_rate)
+    _validate_descriptors(steps, registry, boundaries)
     ctx = CompileContext(start, sample_rate, modem.symbol_rate)
 
     if direction == "rx":

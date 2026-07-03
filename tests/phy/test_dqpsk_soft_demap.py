@@ -1,7 +1,7 @@
 import numpy as np
 
 from marconi.core.bitfile import read_llrs
-from marconi.core.descriptor import Descriptor
+from marconi.core.descriptor import Carrier, Descriptor
 from marconi.core.levels import Level
 from marconi.phy.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
 from marconi.phy.compiler import compile_modem
@@ -39,7 +39,7 @@ def test_dqpsk_soft_demap_recovers_bits(tmp_path):
         stage_registry(),
         direction="rx",
         sample_rate=1.0,
-        start=Descriptor(Level.SYMBOLS, "c"),
+        start=Descriptor(Level.SYMBOLS, "c", carrier=Carrier.SOFT),
         source_io={"path": str(src)},
         sink_io={"path": str(snk)},
     )

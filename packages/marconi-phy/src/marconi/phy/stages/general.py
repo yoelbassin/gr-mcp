@@ -23,6 +23,8 @@ class Slice(DuplexStage[CompileContext]):
     to_level = Level.BITS
     family = "general"
     params_model = _SliceParams
+    accepts_item_type = "f"
+    accepts_carrier = Carrier.SOFT
 
     def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
         b.chain("binary_slicer")

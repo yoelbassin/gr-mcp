@@ -94,7 +94,8 @@ class ChirpSync(DuplexStage[CompileContext]):
 class Dechirp(DuplexStage[CompileContext]):
     """CSS demod, IQ<->SYMBOLS. RX dechirps each symbol window (FFT, fold, argmax)
     to a hard symbol index (int16) -- decision-directed, so HARD at the seam (the
-    QAM precedent). TX modulates symbol indices to chirps."""
+    hard@SYMBOLS rule, enforced by accepts_carrier). TX modulates symbol indices to
+    chirps."""
 
     name = "dechirp"
     from_level = Level.IQ
@@ -125,6 +126,8 @@ class CssDemap(DuplexStage[CompileContext]):
     to_level = Level.BITS
     family = "css"
     params_model = _CssParams
+    accepts_item_type = "s"
+    accepts_carrier = Carrier.HARD
 
     def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
         b.chain("css_demap", sf=int(params["sf"]))
@@ -202,6 +205,8 @@ class CssExplicitDecode(RxStage[CompileContext]):
     to_level = Level.BITS
     family = "css"
     params_model = _ExplicitParams
+    accepts_item_type = "s"
+    accepts_carrier = Carrier.HARD
 
     def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
         p = _ExplicitParams.model_validate(dict(params))
