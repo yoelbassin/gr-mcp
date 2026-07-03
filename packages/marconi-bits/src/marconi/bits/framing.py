@@ -470,6 +470,37 @@ def codebook_tx(
     return TxCarrier(out)
 
 
+def sync_word_rx(c: RxCarrier, *, sync: str, max_errors: int = 0) -> RxCarrier:
+    """Correlating frame seeder: seed a frame just past every position where the
+    bitstream matches ``sync`` within ``max_errors`` bit flips (a sync word is
+    detected by correlation, not equality). Matches are taken non-overlapping."""
+    pat = bytes_to_bits(bytes.fromhex(sync))
+    bits = np.asarray(c.bits, dtype=np.uint8)
+    m = pat.size
+    frames: list[_Frame] = []
+    if m == 0 or bits.size < m:
+        return RxCarrier(bits=bits, frames=frames)
+    windows = np.lib.stride_tricks.sliding_window_view(bits, m)
+    hits = np.flatnonzero((windows != pat).sum(axis=1) <= max_errors)
+    reach = 0
+    for i in hits:
+        if i < reach:
+            continue
+        start = int(i) + m
+        frames.append(_Frame(start=start, cursor=start))
+        reach = int(i) + m
+    return RxCarrier(bits=bits, frames=frames)
+
+
+def sync_word_tx(c: TxCarrier, *, sync: str, max_errors: int = 0) -> TxCarrier:
+    pat = bytes_to_bits(bytes.fromhex(sync))
+    out: list[np.ndarray] = []
+    for it in c.items:
+        body = it if isinstance(it, np.ndarray) else bytes_to_bits(bytes(it))
+        out.append(np.concatenate([pat, np.asarray(body, np.uint8)]).astype(np.uint8))
+    return TxCarrier(out)
+
+
 def differential_rx(c: RxCarrier, *, invert: bool = False) -> RxCarrier:
     b = np.asarray(c.bits, dtype=np.uint8)
     if b.size == 0:

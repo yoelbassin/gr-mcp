@@ -98,6 +98,42 @@ class Codebook(DuplexStage[ProgramBuilder]):
         b.add(framing.codebook_tx, **self._kw(params))
 
 
+class _SyncParams(StageParams):
+    sync: str
+    max_errors: StrictInt = Field(default=0, ge=0)
+
+    @model_validator(mode="after")
+    def _hex(self) -> "_SyncParams":
+        try:
+            if not bytes.fromhex(self.sync):
+                raise ValueError
+        except ValueError:
+            raise PydanticCustomError(
+                "value_error", "sync must be a non-empty even-length hex string"
+            ) from None
+        return self
+
+
+class SyncWord(DuplexStage[ProgramBuilder]):
+    name = "sync_word"
+    from_level = Level.BITS
+    to_level = Level.FRAMES
+    seeds_frames = True  # establishes frame boundaries; a body slicer carves them
+    family = "framing"
+
+    params_model = _SyncParams
+
+    def emit_rx(self, b: ProgramBuilder, params: Mapping[str, Any]) -> None:
+        b.add(
+            framing.sync_word_rx,
+            sync=str(params["sync"]),
+            max_errors=int(params.get("max_errors", 0)),
+        )
+
+    def emit_tx(self, b: ProgramBuilder, params: Mapping[str, Any]) -> None:
+        b.add(framing.sync_word_tx, sync=str(params["sync"]))
+
+
 class NibbleSwap(DuplexStage[ProgramBuilder]):
     name = "nibble_swap"
     from_level = Level.BITS
@@ -207,4 +243,5 @@ FRAMING_STAGES: tuple[type[DuplexStage[ProgramBuilder]], ...] = (
     HdlcDeframe,
     NibbleSwap,
     Segment,
+    SyncWord,
 )
