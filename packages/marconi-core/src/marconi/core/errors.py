@@ -1,16 +1,11 @@
 from __future__ import annotations
 
-import functools
-from collections.abc import Callable
-from typing import TYPE_CHECKING, Any, TypeVar
-
-if TYPE_CHECKING:
-    from fastmcp.exceptions import ToolError
-
 from pydantic import ValidationError
 
-F = TypeVar("F", bound=Callable[..., Any])
-
+# Public exception types register their stable agent-facing [code] here at
+# import (see register_error call sites in each package). classify_error is
+# framework-free: a tool layer, if one is added, builds its own boundary on top
+# of it — core must not import a server framework.
 _REGISTRY: dict[type, str] = {}
 
 
@@ -36,25 +31,3 @@ def classify_error(exc: Exception) -> tuple[str, str]:
     if isinstance(exc, RuntimeError):
         return "runtime_error", str(exc)
     return "internal_error", f"{type(exc).__name__}: {exc}"
-
-
-def to_tool_error(exc: Exception) -> "ToolError":
-    from fastmcp.exceptions import ToolError
-
-    code, message = classify_error(exc)
-    return ToolError(f"[{code}] {message}")
-
-
-def tool_error_boundary(fn: F) -> F:
-    @functools.wraps(fn)
-    def wrapper(*args: Any, **kwargs: Any) -> Any:
-        from fastmcp.exceptions import ToolError
-
-        try:
-            return fn(*args, **kwargs)
-        except ToolError:
-            raise
-        except Exception as exc:  # noqa: BLE001
-            raise to_tool_error(exc) from exc
-
-    return wrapper  # type: ignore[return-value]

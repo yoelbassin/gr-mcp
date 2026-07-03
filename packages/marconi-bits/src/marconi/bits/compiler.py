@@ -6,7 +6,15 @@ from typing import Literal
 from marconi.bits.builder import ProgramBuilder
 from marconi.bits.models import CodecSpec
 from marconi.bits.program import FrameProgram
+from marconi.core.errors import register_error
 from marconi.core.stages import Stage, StageDirectionError
+
+
+class CodecCompileError(Exception):
+    pass
+
+
+register_error(CodecCompileError, "invalid_argument")  # an uncompilable codec
 
 
 def compile_codec(
@@ -17,7 +25,11 @@ def compile_codec(
     b = ProgramBuilder()
     steps = codec.path if direction == "rx" else list(reversed(codec.path))
     for step in steps:
-        stage = registry[step.conv]
+        stage = registry.get(step.conv)
+        if stage is None:
+            raise CodecCompileError(
+                f"unknown stage '{step.conv}'; known: {sorted(registry)}"
+            )
         if direction not in stage.directions:
             raise StageDirectionError(stage.name, direction, stage.directions)
         emit = stage.emit_rx if direction == "rx" else stage.emit_tx

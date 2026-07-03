@@ -7,6 +7,7 @@ from typing import Any, Generic, Protocol, TypeVar
 from pydantic import BaseModel, ValidationError
 
 from marconi.core.descriptor import Descriptor
+from marconi.core.errors import register_error
 from marconi.core.levels import Level, adjacent
 from marconi.core.models import ValidationIssue
 from marconi.core.params import StageParams
@@ -38,6 +39,11 @@ class StageDirectionError(Exception):
             f"stage '{stage}' does not support direction '{direction}'; "
             f"supported: {sorted(supported)}"
         )
+
+
+# A bad spec/direction is the user's to fix, not a bug to report.
+register_error(SpecValidationError, "invalid_argument")
+register_error(StageDirectionError, "invalid_argument")
 
 
 class Stage(ABC, Generic[B]):

@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 
 from marconi.core.descriptor import Carrier, Descriptor
+from marconi.core.errors import register_error
 from marconi.core.models import ValidationIssue
 from marconi.core.params import ParamValue
 from marconi.core.stages import SpecStep, Stage, validate_path
@@ -13,6 +14,9 @@ from marconi.phy.models import ModemSpec
 
 class CompileError(Exception):
     pass
+
+
+register_error(CompileError, "invalid_argument")  # an uncompilable spec
 
 
 # (item_type, carrier) -> (source_kind, sink_kind). Descriptor data, never stage

@@ -5,11 +5,17 @@ from typing import Literal
 
 from pydantic import BaseModel
 
+from marconi.core.errors import register_error
 from marconi.phy.ir import GrPipeline
 
 
 class BackendError(Exception):
     pass
+
+
+# Backend wiring/resolution failures (unknown block kind, bad connection): the
+# spec the caller handed in is wrong, not an internal bug.
+register_error(BackendError, "invalid_argument")
 
 
 class RunResult(BaseModel):
