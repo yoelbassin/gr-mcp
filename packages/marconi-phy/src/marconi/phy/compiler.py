@@ -71,10 +71,19 @@ def _forward_pass(
     return boundaries, rates
 
 
+# Relative tolerance on a stage's required input rate. Comfortably admits
+# clock_correct's ppm-scale rate shift (~5e-5 at 50 ppm) while catching the gross
+# resample-ratio mistakes issue 06 is about (forgotten/swapped/off-by-one ratios,
+# all >=2%) — the silent-garbage class the fixed-window dechirp cannot self-detect.
+_RATE_TOL = 0.02
+
+
 def _validate_descriptors(
     steps: Sequence[SpecStep],
     registry: Mapping[str, Stage[CompileContext]],
     boundaries: Sequence[Descriptor],
+    rates: Sequence[float],
+    symbol_rate: float,
 ) -> None:
     for i, step in enumerate(steps):
         stage = _resolve(step, registry)
@@ -97,6 +106,14 @@ def _validate_descriptors(
                 f"stage '{step.conv}' accepts {stage.accepts_carrier.value} "
                 f"carrier but '{producer}' produces {in_desc.carrier.value}"
             )
+        required = stage.required_input_rate(step.params, symbol_rate)
+        if required is not None and required > 0:
+            if abs(rates[i] - required) > _RATE_TOL * required:
+                raise CompileError(
+                    f"stage '{step.conv}' requires input sample rate ~{required:g} "
+                    f"but the pipeline delivers {rates[i]:g} at that boundary; "
+                    f"check resample ratios, oversample, and symbol_rate"
+                )
 
 
 def _validate(
@@ -112,7 +129,11 @@ def _validate(
     if issues:
         raise CompileError(
             "modem path invalid:\n"
-            + "\n".join(f"  {i.block_id or '<modem>'}: {i.message}" for i in issues)
+            + "\n".join(
+                f"  {i.block_id or '<modem>'}"
+                f"{'.' + i.field if i.field else ''}: {i.message}"
+                for i in issues
+            )
         )
 
 
@@ -133,7 +154,7 @@ def compile_modem(
     steps = modem.path
     n = len(steps)
     boundaries, rates = _forward_pass(steps, registry, start, sample_rate)
-    _validate_descriptors(steps, registry, boundaries)
+    _validate_descriptors(steps, registry, boundaries, rates, modem.symbol_rate)
     ctx = CompileContext(start, sample_rate, modem.symbol_rate)
 
     if direction == "rx":

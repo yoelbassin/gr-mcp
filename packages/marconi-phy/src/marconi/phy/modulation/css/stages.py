@@ -116,6 +116,14 @@ class Dechirp(DuplexStage[CompileContext]):
     ) -> Descriptor:
         return Descriptor(Level.SYMBOLS, "s", in_desc.layout, Carrier.HARD)
 
+    def required_input_rate(
+        self, params: Mapping[str, Any], symbol_rate: float
+    ) -> float | None:
+        # chirp_demod's window is a fixed oversample*2^sf samples per symbol, so
+        # the input must arrive at exactly that many samples per symbol.
+        p = _CssParams.model_validate(dict(params))
+        return p.oversample * (1 << p.sf) * symbol_rate
+
 
 class CssDemap(DuplexStage[CompileContext]):
     """CSS symbol<->bits, SYMBOLS<->BITS. RX Gray-decodes the symbol index and

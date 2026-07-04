@@ -173,7 +173,15 @@ def make_preamble(
 
 def aligned_ber(rx: np.ndarray, tx: np.ndarray, max_shift: int = 256) -> float:
     """Minimum BER of tx against rx over integer shifts 0..max_shift, requiring
-    at least half of tx to overlap. Returns 0.0 on an exact (shifted) match."""
+    at least half of tx to overlap. Returns 0.0 on an exact (shifted) match.
+
+    WARNING (issue 05): the half-overlap floor launders systematic tail
+    truncation — measured, not hypothetical. Requiring full coverage instead
+    fails 19/30 phy round-trips: clock_correct emits 1260/1350 bits (90-bit
+    tail lost, scored 0.0 today), and even the clean FSK/OOK paths truncate.
+    Fixing this honestly needs a per-path tail-loss investigation (inherent
+    streaming group-delay vs real bug) plus explicit bounded-tail assertions;
+    tracked in the issue, deliberately not curve-fitted here."""
     rx = np.asarray(rx, dtype=np.uint8)
     tx = np.asarray(tx, dtype=np.uint8)
     best = 1.0

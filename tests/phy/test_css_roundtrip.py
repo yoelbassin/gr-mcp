@@ -8,7 +8,7 @@ from marconi.core.descriptor import Descriptor
 from marconi.core.levels import Level
 from marconi.core.params import ParamValue
 from marconi.phy.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
-from marconi.phy.compiler import compile_modem
+from marconi.phy.compiler import CompileError, compile_modem
 from marconi.phy.models import ModemSpec, ModemStep
 
 IQ = Descriptor(Level.IQ, "c")
@@ -79,6 +79,42 @@ def test_css_ber0_impaired(sf: int, osr: int, tmp_path: Path) -> None:
     out = read_bits(op)
     assert len(out) >= sf * 30  # preamble stripped, payload recovered
     assert aligned_ber(out, bits, max_shift=8 * sf) == 0.0
+
+
+def test_dechirp_rejects_wrong_input_rate(tmp_path: Path) -> None:
+    # dechirp's window is oversample*2^sf samples/symbol, so the input rate must
+    # be ~oversample*2^sf*symbol_rate (here 2*128*1.0 = 256). A grossly wrong rate
+    # would dechirp garbage; the compiler must reject it, not emit it (issue 06).
+    m = _modem(7, 2)
+    with pytest.raises(CompileError) as e:
+        _compile(m, "rx", 200.0, tmp_path / "i", tmp_path / "o")
+    assert "rate" in str(e.value).lower()
+
+
+def test_dechirp_accepts_matching_input_rate(tmp_path: Path) -> None:
+    m = _modem(7, 2)
+    _compile(m, "rx", 256.0, tmp_path / "i", tmp_path / "o")  # exact: compiles
+
+
+def test_dechirp_rate_check_tolerates_clock_correct_ppm(tmp_path: Path) -> None:
+    # clock_correct resamples by 1/(1+ppm) — a legitimate sub-percent rate shift
+    # (0.005% at 50 ppm) the tolerance must admit, not reject (issue 06).
+    p: dict[str, ParamValue] = {
+        "sf": 7,
+        "oversample": 2,
+        "zero_pad": _ZP,
+        "preamble_len": 8,
+    }
+    m = ModemSpec(
+        symbol_rate=_SYM,
+        path=[
+            ModemStep(conv="clock_correct", params={"ppm": 50.0}),
+            ModemStep(conv="chirp_sync", params=p),
+            ModemStep(conv="dechirp", params=p),
+            ModemStep(conv="css_demap", params=p),
+        ],
+    )
+    _compile(m, "rx", 256.0, tmp_path / "i", tmp_path / "o")  # within tolerance
 
 
 def test_css_two_burst_capture_decodes_both(tmp_path: Path) -> None:

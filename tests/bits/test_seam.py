@@ -140,6 +140,19 @@ def test_parse_bitstream_decodes(tmp_path: Path) -> None:
     assert res.messages == [msg]
 
 
+def test_compile_codec_rejects_bad_params_with_named_field() -> None:
+    # Direct compile_codec (not just the seam) must validate params up front and
+    # raise a structured, field-named error — never let a raw pydantic
+    # ValidationError escape from inside a stage's emit (issue 07).
+    codec = CodecSpec(
+        name="x",
+        path=[CodecStep(conv="crc", params={"poly": 0x1021})],  # 'bits' missing
+    )
+    with pytest.raises(SpecValidationError) as e:
+        compile_codec(codec, registry(), "rx")
+    assert "bits" in str(e.value)
+
+
 def test_soft_bitstream_rejected(tmp_path: Path) -> None:
     p = tmp_path / "l.f32"
     write_llrs(p, np.array([1.0, -1.0], dtype=np.float32))

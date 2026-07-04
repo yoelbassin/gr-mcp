@@ -88,6 +88,16 @@ class Stage(ABC, Generic[B]):
     def rate_factor(self, params: Mapping[str, Any]) -> float:
         return 1.0
 
+    def required_input_rate(
+        self, params: Mapping[str, Any], symbol_rate: float
+    ) -> float | None:
+        """The input sample rate this stage needs, or None if rate-agnostic. The
+        compiler checks it against the rate it computed for this stage's input
+        boundary (within a tolerance that admits ppm-scale clock correction), so
+        a wrong resample ratio fails at compile instead of decoding garbage with
+        no diagnostics (issue 06)."""
+        return None
+
 
 class RxStage(Stage[B]):
     directions: frozenset[str] = frozenset({"rx"})

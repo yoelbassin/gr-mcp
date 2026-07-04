@@ -36,6 +36,14 @@ def test_tx_over_rx_only_stage_raises_before_emit() -> None:
     assert "direction" in str(e.value)
 
 
+def test_missing_param_names_the_field() -> None:
+    # fake_resampler requires interp/decim; a missing one must name the field in
+    # the error, not just "Field required" with no location (issue 07).
+    with pytest.raises(CompileError) as e:
+        _compile(_modem(("fake_resampler", {"decim": 1}), symbol_rate=2.0), "rx")
+    assert "interp" in str(e.value)
+
+
 def test_non_adjacent_path_raises() -> None:
     # fake_demap is SYMBOLS->BITS; from an IQ start it is not a valid first step.
     with pytest.raises(CompileError):
