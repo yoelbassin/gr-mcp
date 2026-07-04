@@ -25,18 +25,23 @@ class Parse(DuplexStage[ProgramBuilder]):
 
     params_model = _Params
 
+    @staticmethod
+    def _reject_misplaced_rest(fields: list[ParseField]) -> None:
+        positions = [i for i, f in enumerate(fields) if f.rest]
+        if positions and positions != [len(fields) - 1]:
+            raise ValueError("only one rest field is allowed and it must be last")
+
     def _kw(self, params: Mapping[str, Any]) -> dict[str, Any]:
         p = self._Params.model_validate(dict(params))
         fields = framing.parse_fields(p.fields)
-        rest_positions = [i for i, f in enumerate(fields) if f.rest]
-        if rest_positions and rest_positions != [len(fields) - 1]:
-            raise ValueError("only one rest field is allowed and it must be last")
-        for case in p.cases:
-            if any(ParseField.model_validate(cf).rest for cf in case["fields"]):
-                raise ValueError("rest fields are not allowed inside cases")
+        self._reject_misplaced_rest(fields)
         cases: dict[int, tuple[Any, list[Any]]] = {}
         for case in p.cases:
-            body = fields + framing.parse_fields(case["fields"])
+            case_fields = framing.parse_fields(case["fields"])
+            if any(f.rest for f in case_fields):
+                raise ValueError("rest fields are not allowed inside cases")
+            body = fields + case_fields
+            self._reject_misplaced_rest(body)
             cases[int(case["when"])] = (framing.build_struct(body), body)
         return {
             "struct": framing.build_struct(fields),

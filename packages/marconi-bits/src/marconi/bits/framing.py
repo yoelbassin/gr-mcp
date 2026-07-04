@@ -193,37 +193,51 @@ def parse_fields(raw: Iterable[object]) -> list[ParseField]:
     return [ParseField.model_validate(f) for f in raw]
 
 
+def _fixed_bits(fields: list[ParseField]) -> int:
+    return sum(f.bits for f in fields if not f.rest)
+
+
 def build_struct(fields: list[ParseField]) -> BitStruct:
     fixed = [f for f in fields if not f.rest]
     items: list = [f.name / BitsInteger(f.bits, signed=f.signed) for f in fixed]
-    pad = (-sum(f.bits for f in fixed)) % 8
+    pad = (-_fixed_bits(fields)) % 8
     if pad:
         items.append(Padding(pad))
     return BitStruct(*items)
 
 
-def _decode_charset(value: int, bits: int, table: str, char_bits: int) -> str:
+def _require_charset_table(table: str, char_bits: int) -> None:
     if len(table) < (1 << char_bits):
         raise ValueError(
             f"charset table has {len(table)} entries, need >= {1 << char_bits}"
         )
+
+
+def _indices_to_text(indices: Iterable[int], table: str) -> str:
+    return "".join(table[int(i)] for i in indices).rstrip(" ")
+
+
+def _charset_indices(text: str, table: str) -> list[int]:
+    fill = table.index(" ") if " " in table else 0
+    return [table.index(ch) if ch in table else fill for ch in text]
+
+
+def _decode_charset(value: int, bits: int, table: str, char_bits: int) -> str:
+    _require_charset_table(table, char_bits)
     mask = (1 << char_bits) - 1
     n = bits // char_bits
-    return "".join(
-        table[(value >> (char_bits * (n - 1 - i))) & mask] for i in range(n)
-    ).rstrip(" ")
+    return _indices_to_text(
+        ((value >> (char_bits * (n - 1 - i))) & mask for i in range(n)), table
+    )
 
 
 def _encode_charset(text: str, bits: int, table: str, char_bits: int) -> int:
     if len(table) < (1 << char_bits) or " " not in table:
         raise ValueError("charset table too small or missing a space")
     n = bits // char_bits
-    text = text.ljust(n, " ")[:n]
     value = 0
-    for ch in text:
-        value = (value << char_bits) | (
-            table.index(ch) if ch in table else table.index(" ")
-        )
+    for idx in _charset_indices(text.ljust(n, " ")[:n], table):
+        value = (value << char_bits) | idx
     return value
 
 
@@ -260,10 +274,6 @@ def _apply_fields_tx(message: dict, fields: list[ParseField]) -> dict:
 _Case = tuple[BitStruct, list[ParseField]]
 
 
-def _fixed_bits(fields: list[ParseField]) -> int:
-    return sum(f.bits for f in fields if not f.rest)
-
-
 def _need_bytes(fields: list[ParseField]) -> int:
     return (_fixed_bits(fields) + 7) // 8
 
@@ -284,21 +294,27 @@ def _apply_rest(
     fields: list[ParseField],
     bit_order: str,
 ) -> dict[str, int | str]:
+    # Rest recovers trailing chars only up to byte-packing granularity: the char
+    # count comes from the payload's *byte* length, so for an externally-produced
+    # payload whose true bit length isn't a byte multiple the final partial group
+    # is byte-fill, cleanly dropped only when the charset maps that residue to an
+    # rstrip-able char. Marconi's own TX byte-aligns (see _append_rest) so its
+    # round-trip is exact; a bit-exact rest for foreign payloads needs a
+    # carrier-level payload bit-length (tracked follow-up).
     rest = [f for f in fields if f.rest]
     if not rest:
         return msg
     (rf,) = rest
     assert rf.charset is not None  # ParseField validator guarantees this
+    _require_charset_table(rf.charset, rf.char_bits)
     fixed_bits = _fixed_bits(fields)
     fbits = bytes_to_bits(_lsb(payload, bit_order))
     n_chars = max(0, fbits.size - fixed_bits) // rf.char_bits
     if n_chars == 0:
         msg[rf.name] = ""
         return msg
-    value = _read_uint(fbits, fixed_bits, n_chars * rf.char_bits)
-    msg[rf.name] = _decode_charset(
-        value, n_chars * rf.char_bits, rf.charset, rf.char_bits
-    )
+    span = fbits[fixed_bits : fixed_bits + n_chars * rf.char_bits]
+    msg[rf.name] = _indices_to_text(_unpack_symbols(span, rf.char_bits), rf.charset)
     return msg
 
 
@@ -331,19 +347,36 @@ def parse_rx(
     return RxCarrier(bits=c.bits, frames=out)
 
 
+def _rest_char_count(fixed_bits: int, char_bits: int, text_len: int) -> int:
+    # Smallest char count >= text_len that byte-aligns the payload, so packbits
+    # adds no zero-fill and RX reads back exactly these chars (the spare ones are
+    # spaces, which rstrip drops -> exact round-trip). No aligned count exists for
+    # odd fixed_bits with even char_bits; then emit the raw text and accept the
+    # byte-fill approximation rather than corrupt it.
+    for n in range(text_len, text_len + 8):
+        if (fixed_bits + n * char_bits) % 8 == 0:
+            return n
+    return text_len
+
+
 def _append_rest(built: bytes, message: dict, fields: list[ParseField]) -> bytes:
     rest = [f for f in fields if f.rest]
     if not rest:
         return built
     (rf,) = rest
     assert rf.charset is not None  # ParseField validator guarantees this
-    fixed = bytes_to_bits(built)[: _fixed_bits(fields)]
+    fixed_bits = _fixed_bits(fields)
+    fixed = bytes_to_bits(built)[:fixed_bits]
     text = str(message[rf.name])
     n = len(text)
+    if " " in rf.charset:  # space-pad to a byte boundary only if a space exists
+        n = _rest_char_count(fixed_bits, rf.char_bits, len(text))
     if n == 0:
         return bits_to_bytes(fixed)
-    value = _encode_charset(text, n * rf.char_bits, rf.charset, rf.char_bits)
-    rest_bits = _pack_symbols(np.array([value], dtype=np.int64), n * rf.char_bits)
+    idxs = np.array(
+        _charset_indices(text.ljust(n, " ")[:n], rf.charset), dtype=np.int64
+    )
+    rest_bits = _pack_symbols(idxs, rf.char_bits)
     return bits_to_bytes(np.concatenate([fixed, rest_bits]).astype(np.uint8))
 
 
