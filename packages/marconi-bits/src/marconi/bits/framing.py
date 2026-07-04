@@ -459,6 +459,12 @@ def nibble_swap_tx(c: TxCarrier) -> TxCarrier:
     return TxCarrier([_nibble_swap_bits(it) for it in c.items])
 
 
+def realign_rx(c: RxCarrier, *, bit_offset: int) -> RxCarrier:
+    if c.frames:
+        raise ValueError("realign must run before any frame seeder")
+    return RxCarrier(bits=np.asarray(c.bits, np.uint8)[bit_offset:], frames=[])
+
+
 def _codebook_maps(
     code_bits: int, data_bits: int, table: list[int]
 ) -> tuple[np.ndarray, np.ndarray]:

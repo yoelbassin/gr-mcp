@@ -10,7 +10,7 @@ from marconi.bits import framing
 from marconi.bits.builder import ProgramBuilder
 from marconi.core.levels import Level
 from marconi.core.params import StageParams
-from marconi.core.stages import DuplexStage
+from marconi.core.stages import DuplexStage, RxStage, Stage
 
 
 class Differential(DuplexStage[ProgramBuilder]):
@@ -263,7 +263,22 @@ class DescrambleBits(DuplexStage[ProgramBuilder]):
         b.add(framing.descramble_bits_tx, sequence=str(params["sequence"]))
 
 
-FRAMING_STAGES: tuple[type[DuplexStage[ProgramBuilder]], ...] = (
+class Realign(RxStage[ProgramBuilder]):
+    name = "realign"
+    from_level = Level.BITS
+    to_level = Level.BITS
+    family = "framing"
+
+    class _Params(StageParams):
+        bit_offset: StrictInt = Field(ge=0)
+
+    params_model = _Params
+
+    def emit_rx(self, b: ProgramBuilder, params: Mapping[str, Any]) -> None:
+        b.add(framing.realign_rx, bit_offset=int(params["bit_offset"]))
+
+
+FRAMING_STAGES: tuple[type[Stage[ProgramBuilder]], ...] = (
     Codebook,
     Descramble,
     DescrambleBits,
@@ -272,6 +287,7 @@ FRAMING_STAGES: tuple[type[DuplexStage[ProgramBuilder]], ...] = (
     HdlcDeframe,
     LengthFrame,
     NibbleSwap,
+    Realign,
     Segment,
     SyncWord,
 )
