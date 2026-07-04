@@ -1,5 +1,10 @@
 """One-time asset regeneration: SDRuno IQ wav -> cf32 (complex64) slice.
 
+Un-wired probe scaffolding for the deferred real-off-air ACARS proof (tracker
+issues 22 coherent-MSK-demod and 23 real-off-air-proof); not collected by
+pytest, no importer. Regenerates the gitignored acars.cf32 that a future
+tests/bits/test_acars_offair.py will consume once the phy MSK gap is closed.
+
 Provenance: artifacts/assets/ACRAS/SDRuno_20200908_152020Z_129535kHz.wav,
 2ch int16 @ 2 MHz, 83.4 s, captured 2020-09-08 at 129.535 MHz.
 """

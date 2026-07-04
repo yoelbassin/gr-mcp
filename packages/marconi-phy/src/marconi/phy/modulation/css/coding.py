@@ -1,8 +1,9 @@
-"""Generic channel-coding primitives for chirp-spread-spectrum symbol streams —
-pure numpy/Python, no GNU Radio. Gray mapping, the diagonal interleave
-permutation, and a systematic single-error block-FEC decoder. Every value that
-belongs to a specific protocol (parity rows, data width, frame geometry) is
-caller-supplied; nothing here encodes one."""
+"""CSS-specific coding: the symbol demap, the diagonal interleave permutation,
+and the explicit-header frame-length algebra — pure numpy/Python, no GNU Radio.
+The generic block-code primitives (gray, parity, block_fec_decode, …) live in
+`marconi.core.coding` and are re-exported here. Every value that belongs to a
+specific protocol (parity rows, data width, frame geometry) is caller-supplied;
+nothing here encodes one."""
 
 from __future__ import annotations
 

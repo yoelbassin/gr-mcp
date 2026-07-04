@@ -2,6 +2,11 @@
 12.5 kHz mono AM-demodulated wav per candidate channel for acarsdec, and print the
 JSON skeleton to fill from acarsdec's output. Throwaway numpy — deliberately not
 Marconi code, so the golden is independent of the system under test.
+
+Un-wired probe scaffolding for the deferred real-off-air ACARS proof (tracker
+issues 22 coherent-MSK-demod and 23 real-off-air-proof); not collected by pytest,
+no importer. The frozen golden it produces is the external oracle a future
+tests/bits/test_acars_offair.py will match once the phy MSK gap is closed.
 """
 
 from __future__ import annotations
