@@ -19,7 +19,7 @@ _PARITY = {
     1: [15],
     2: [7, 14],
     3: [11, 13, 14],
-    4: [7, 14, 11, 15],
+    4: [7, 14, 11, 13],
 }
 PARITY_MASKS = [m for cr in sorted(_PARITY) for m in _PARITY[cr]]
 

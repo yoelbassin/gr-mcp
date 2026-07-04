@@ -104,3 +104,23 @@ def test_supported_cr_reads_the_supplied_table():
         assert coding.supported_cr(PARITY_MASKS, cr)
     for cr in (0, 5, 6, 7):
         assert not coding.supported_cr(PARITY_MASKS, cr)
+
+
+def _diag_reference(sf_app: int, cw_len: int) -> list[int]:
+    # Independent 2-D construction of the same diagonal de-interleave (build the
+    # symbol matrix, undo the per-column rotation, read out codewords), written
+    # from the gr-lora_sdr definition rather than production's closed form.
+    out: list[int] = []
+    for oc in range(sf_app):
+        for k in range(cw_len):
+            row = cw_len - 1 - k
+            col = (row - oc - 1) % sf_app
+            out.append(row * sf_app + col)
+    return out
+
+
+def test_diag_perm_matches_independent_construction():
+    for sf_app, cw_len in ((4, 8), (7, 5), (9, 8), (11, 8)):
+        assert coding.diag_deinterleave_perm(sf_app, cw_len) == _diag_reference(
+            sf_app, cw_len
+        )
