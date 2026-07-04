@@ -194,30 +194,36 @@ def parse_fields(raw: Iterable[object]) -> list[ParseField]:
 
 
 def build_struct(fields: list[ParseField]) -> BitStruct:
-    items: list = [f.name / BitsInteger(f.bits, signed=f.signed) for f in fields]
-    pad = (-sum(f.bits for f in fields)) % 8
+    fixed = [f for f in fields if not f.rest]
+    items: list = [f.name / BitsInteger(f.bits, signed=f.signed) for f in fixed]
+    pad = (-sum(f.bits for f in fixed)) % 8
     if pad:
         items.append(Padding(pad))
     return BitStruct(*items)
 
 
-def _decode_charset(value: int, bits: int, table: str) -> str:
-    if len(table) < 64:
-        raise ValueError(f"charset table has {len(table)} entries, need >= 64")
-    n = bits // 6
-    return "".join(table[(value >> (6 * (n - 1 - i))) & 0x3F] for i in range(n)).rstrip(
-        " "
-    )
+def _decode_charset(value: int, bits: int, table: str, char_bits: int) -> str:
+    if len(table) < (1 << char_bits):
+        raise ValueError(
+            f"charset table has {len(table)} entries, need >= {1 << char_bits}"
+        )
+    mask = (1 << char_bits) - 1
+    n = bits // char_bits
+    return "".join(
+        table[(value >> (char_bits * (n - 1 - i))) & mask] for i in range(n)
+    ).rstrip(" ")
 
 
-def _encode_charset(text: str, bits: int, table: str) -> int:
-    if len(table) < 64 or " " not in table:
-        raise ValueError("charset table needs >= 64 entries including a space")
-    n = bits // 6
+def _encode_charset(text: str, bits: int, table: str, char_bits: int) -> int:
+    if len(table) < (1 << char_bits) or " " not in table:
+        raise ValueError("charset table too small or missing a space")
+    n = bits // char_bits
     text = text.ljust(n, " ")[:n]
     value = 0
     for ch in text:
-        value = (value << 6) | (table.index(ch) if ch in table else table.index(" "))
+        value = (value << char_bits) | (
+            table.index(ch) if ch in table else table.index(" ")
+        )
     return value
 
 
@@ -225,8 +231,12 @@ def _apply_fields_rx(
     message: dict[str, int | str], fields: list[ParseField]
 ) -> dict[str, int | str]:
     for f in fields:
+        if f.rest:
+            continue
         if f.charset is not None:
-            message[f.name] = _decode_charset(int(message[f.name]), f.bits, f.charset)
+            message[f.name] = _decode_charset(
+                int(message[f.name]), f.bits, f.charset, f.char_bits
+            )
         elif f.enum is not None:
             message[f.name] = f.enum.get(int(message[f.name]), int(message[f.name]))
     return message
@@ -235,8 +245,12 @@ def _apply_fields_rx(
 def _apply_fields_tx(message: dict, fields: list[ParseField]) -> dict:
     out = dict(message)
     for f in fields:
+        if f.rest:
+            continue
         if f.charset is not None:
-            out[f.name] = _encode_charset(str(out[f.name]), f.bits, f.charset)
+            out[f.name] = _encode_charset(
+                str(out[f.name]), f.bits, f.charset, f.char_bits
+            )
         elif f.enum is not None:
             rev = {label: code for code, label in f.enum.items()}
             out[f.name] = rev.get(out[f.name], out[f.name])
@@ -246,8 +260,12 @@ def _apply_fields_tx(message: dict, fields: list[ParseField]) -> dict:
 _Case = tuple[BitStruct, list[ParseField]]
 
 
+def _fixed_bits(fields: list[ParseField]) -> int:
+    return sum(f.bits for f in fields if not f.rest)
+
+
 def _need_bytes(fields: list[ParseField]) -> int:
-    return (sum(f.bits for f in fields) + 7) // 8
+    return (_fixed_bits(fields) + 7) // 8
 
 
 def _decode_struct(
@@ -258,6 +276,30 @@ def _decode_struct(
         k: int(v) for k, v in parsed.items() if not k.startswith("_")
     }
     return _apply_fields_rx(msg, fields)
+
+
+def _apply_rest(
+    msg: dict[str, int | str],
+    payload: bytes,
+    fields: list[ParseField],
+    bit_order: str,
+) -> dict[str, int | str]:
+    rest = [f for f in fields if f.rest]
+    if not rest:
+        return msg
+    (rf,) = rest
+    assert rf.charset is not None  # ParseField validator guarantees this
+    fixed_bits = _fixed_bits(fields)
+    fbits = bytes_to_bits(_lsb(payload, bit_order))
+    n_chars = max(0, fbits.size - fixed_bits) // rf.char_bits
+    if n_chars == 0:
+        msg[rf.name] = ""
+        return msg
+    value = _read_uint(fbits, fixed_bits, n_chars * rf.char_bits)
+    msg[rf.name] = _decode_charset(
+        value, n_chars * rf.char_bits, rf.charset, rf.char_bits
+    )
+    return msg
 
 
 def parse_rx(
@@ -274,6 +316,7 @@ def parse_rx(
         if f.crc_ok is False or len(f.payload) < _need_bytes(fields):
             out.append(f)
             continue
+        sel_fields = fields
         msg = _decode_struct(struct, f.payload, bit_order, fields)
         # A per-type body is applied only when its discriminator matches AND the
         # payload can hold it; otherwise the shared header stands alone — a
@@ -282,8 +325,26 @@ def parse_rx(
             selected = cases.get(int(msg.get(discriminator, -1)))
             if selected is not None and len(f.payload) >= _need_bytes(selected[1]):
                 msg = _decode_struct(selected[0], f.payload, bit_order, selected[1])
+                sel_fields = selected[1]
+        msg = _apply_rest(msg, f.payload, sel_fields, bit_order)
         out.append(replace(f, message=msg))
     return RxCarrier(bits=c.bits, frames=out)
+
+
+def _append_rest(built: bytes, message: dict, fields: list[ParseField]) -> bytes:
+    rest = [f for f in fields if f.rest]
+    if not rest:
+        return built
+    (rf,) = rest
+    assert rf.charset is not None  # ParseField validator guarantees this
+    fixed = bytes_to_bits(built)[: _fixed_bits(fields)]
+    text = str(message[rf.name])
+    n = len(text)
+    if n == 0:
+        return bits_to_bytes(fixed)
+    value = _encode_charset(text, n * rf.char_bits, rf.charset, rf.char_bits)
+    rest_bits = _pack_symbols(np.array([value], dtype=np.int64), n * rf.char_bits)
+    return bits_to_bytes(np.concatenate([fixed, rest_bits]).astype(np.uint8))
 
 
 def parse_tx(
@@ -304,6 +365,7 @@ def parse_tx(
                 sel_struct, sel_fields = case
         try:
             built = sel_struct.build(_apply_fields_tx(dict(m), sel_fields))
+            built = _append_rest(built, m, sel_fields)
         except (ConstructError, KeyError, TypeError) as e:
             raise ValueError(f"message {m} does not fit the parse fields: {e}") from e
         out.append(_lsb(built, bit_order))

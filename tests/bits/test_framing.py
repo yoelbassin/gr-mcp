@@ -87,4 +87,4 @@ def test_parse_roundtrip_signed() -> None:
 
 def test_decode_charset_rejects_short_table() -> None:
     with pytest.raises(ValueError):
-        _decode_charset(0, 6, "ABC")
+        _decode_charset(0, 6, "ABC", 6)

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 
 class ParseField(BaseModel):
@@ -9,6 +9,16 @@ class ParseField(BaseModel):
     signed: bool = False
     charset: str | None = None
     enum: dict[int, str] | None = None
+    char_bits: int = 6
+    rest: bool = False
+
+    @model_validator(mode="after")
+    def _rest_shape(self) -> "ParseField":
+        if self.char_bits < 1:
+            raise ValueError("char_bits must be >= 1")
+        if self.rest and (self.charset is None or self.bits != 0):
+            raise ValueError("a rest field needs charset set and bits == 0")
+        return self
 
 
 class CodecStep(BaseModel):

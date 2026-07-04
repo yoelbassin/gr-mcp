@@ -5,6 +5,7 @@ from typing import Any
 
 from marconi.bits import framing
 from marconi.bits.builder import ProgramBuilder
+from marconi.bits.models import ParseField
 from marconi.core.levels import Level
 from marconi.core.params import StageParams
 from marconi.core.stages import DuplexStage
@@ -27,6 +28,12 @@ class Parse(DuplexStage[ProgramBuilder]):
     def _kw(self, params: Mapping[str, Any]) -> dict[str, Any]:
         p = self._Params.model_validate(dict(params))
         fields = framing.parse_fields(p.fields)
+        rest_positions = [i for i, f in enumerate(fields) if f.rest]
+        if rest_positions and rest_positions != [len(fields) - 1]:
+            raise ValueError("only one rest field is allowed and it must be last")
+        for case in p.cases:
+            if any(ParseField.model_validate(cf).rest for cf in case["fields"]):
+                raise ValueError("rest fields are not allowed inside cases")
         cases: dict[int, tuple[Any, list[Any]]] = {}
         for case in p.cases:
             body = fields + framing.parse_fields(case["fields"])
