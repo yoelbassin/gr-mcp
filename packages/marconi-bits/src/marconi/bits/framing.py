@@ -91,6 +91,18 @@ def _fold(
     return (val ^ int.from_bytes(body[-fold_tail:], "big")) & ((1 << bits) - 1)
 
 
+def _crc_bits(
+    bits: np.ndarray, *, poly: int, width: int, init: int, xorout: int
+) -> int:
+    mask = (1 << width) - 1
+    top = 1 << (width - 1)
+    reg = init & mask
+    for b in bits:
+        reg ^= (int(b) & 1) << (width - 1)
+        reg = ((reg << 1) ^ poly) & mask if reg & top else (reg << 1) & mask
+    return reg ^ xorout
+
+
 def crc_rx(
     c: RxCarrier,
     *,
@@ -102,8 +114,26 @@ def crc_rx(
     bit_order: str = "msb",
     fold_tail: int = 0,
     checksum_le: bool = False,
+    payload_bits: int | None = None,
 ) -> RxCarrier:
     """Trailing check: the last `bits` of each frame payload are the FCS."""
+    if bits % 8:
+        assert payload_bits is not None  # stage validator guarantees
+        assert not (reflected or fold_tail or checksum_le or bit_order != "msb")
+        out_sub: list[_Frame] = []
+        for f in c.frames:
+            fbits = bytes_to_bits(f.payload)[:payload_bits]
+            if fbits.size < bits:
+                continue
+            body_bits = fbits[: fbits.size - bits]
+            check_bits = fbits[fbits.size - bits :]
+            weights = 1 << np.arange(bits - 1, -1, -1, dtype=np.int64)
+            rx = int(check_bits.astype(np.int64).dot(weights))
+            crc = _crc_bits(body_bits, poly=poly, width=bits, init=init, xorout=xorout)
+            out_sub.append(
+                replace(f, crc_ok=crc == rx, payload=bits_to_bytes(body_bits))
+            )
+        return RxCarrier(bits=c.bits, frames=out_sub)
     endian = "little" if checksum_le else _bitorder(bit_order)
     n = bits // 8
     out: list[_Frame] = []
