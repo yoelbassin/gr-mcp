@@ -517,6 +517,50 @@ def codebook_tx(
     return TxCarrier(out)
 
 
+def frame_codebook_rx(
+    c: RxCarrier, *, code_bits: int, data_bits: int, table: list[int]
+) -> RxCarrier:
+    _, inv = _codebook_maps(code_bits, data_bits, table)
+
+    def _decode(bits: np.ndarray) -> np.ndarray:
+        return _pack_symbols(inv[_unpack_symbols(bits, code_bits)], data_bits)
+
+    if any(len(f.payload) for f in c.frames):
+        done = [
+            replace(f, payload=bits_to_bytes(_decode(bytes_to_bits(f.payload))))
+            for f in c.frames
+        ]
+        return RxCarrier(bits=c.bits, frames=done)
+    bits = np.asarray(c.bits, np.uint8)
+    cursors = [f.cursor for f in c.frames]
+    if any(b <= a for a, b in zip(cursors, cursors[1:])):
+        raise ValueError("frame_codebook needs strictly increasing frame cursors")
+    pieces: list[np.ndarray] = []
+    frames: list[_Frame] = []
+    pos = 0
+    for f, hi in zip(c.frames, cursors[1:] + [int(bits.size)]):
+        dec = _decode(bits[f.cursor : hi])
+        frames.append(replace(f, start=pos, cursor=pos))
+        pieces.append(dec)
+        pos += int(dec.size)
+    joined = np.concatenate(pieces) if pieces else np.zeros(0, np.uint8)
+    return RxCarrier(bits=joined, frames=frames)
+
+
+def frame_codebook_tx(
+    c: TxCarrier, *, code_bits: int, data_bits: int, table: list[int]
+) -> TxCarrier:
+    fwd, _ = _codebook_maps(code_bits, data_bits, table)
+    out: list[np.ndarray] = []
+    for it in c.items:
+        bits = it if isinstance(it, np.ndarray) else bytes_to_bits(bytes(it))
+        enc = _pack_symbols(
+            fwd[_unpack_symbols(np.asarray(bits, np.uint8), data_bits)], code_bits
+        )
+        out.append(enc)
+    return TxCarrier(out)
+
+
 def _read_uint(bits: np.ndarray, start: int, width: int) -> int:
     field = bits[start : start + width]
     return int(field.dot(1 << np.arange(width - 1, -1, -1, dtype=np.int64)))

@@ -56,46 +56,63 @@ class HdlcDeframe(DuplexStage[ProgramBuilder]):
         b.add(framing.hdlc_deframe_tx, bit_order=p.bit_order, training=p.training)
 
 
+class _CodebookParams(StageParams):
+    code_bits: StrictInt = Field(ge=1)
+    data_bits: StrictInt = Field(ge=1)
+    table: list[int]
+
+    @model_validator(mode="after")
+    def _sized(self) -> "_CodebookParams":
+        if len(self.table) != (1 << self.data_bits):
+            raise PydanticCustomError(
+                "value_error",
+                "codebook table needs {want} entries for data_bits={data_bits}, "
+                "got {have}",
+                {
+                    "want": 1 << self.data_bits,
+                    "data_bits": self.data_bits,
+                    "have": len(self.table),
+                },
+            )
+        return self
+
+
+def _codebook_kw(params: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "code_bits": int(params["code_bits"]),
+        "data_bits": int(params["data_bits"]),
+        "table": [int(x) for x in params["table"]],
+    }
+
+
 class Codebook(DuplexStage[ProgramBuilder]):
     name = "codebook"
     from_level = Level.BITS
     to_level = Level.BITS
     family = "coding"
 
-    class _Params(StageParams):
-        code_bits: StrictInt = Field(ge=1)
-        data_bits: StrictInt = Field(ge=1)
-        table: list[int]
-
-        @model_validator(mode="after")
-        def _sized(self) -> "Codebook._Params":
-            if len(self.table) != (1 << self.data_bits):
-                raise PydanticCustomError(
-                    "value_error",
-                    "codebook table needs {want} entries for data_bits={data_bits}, "
-                    "got {have}",
-                    {
-                        "want": 1 << self.data_bits,
-                        "data_bits": self.data_bits,
-                        "have": len(self.table),
-                    },
-                )
-            return self
-
-    params_model = _Params
-
-    def _kw(self, params: Mapping[str, Any]) -> dict[str, Any]:
-        return {
-            "code_bits": int(params["code_bits"]),
-            "data_bits": int(params["data_bits"]),
-            "table": [int(x) for x in params["table"]],
-        }
+    params_model = _CodebookParams
 
     def emit_rx(self, b: ProgramBuilder, params: Mapping[str, Any]) -> None:
-        b.add(framing.codebook_rx, **self._kw(params))
+        b.add(framing.codebook_rx, **_codebook_kw(params))
 
     def emit_tx(self, b: ProgramBuilder, params: Mapping[str, Any]) -> None:
-        b.add(framing.codebook_tx, **self._kw(params))
+        b.add(framing.codebook_tx, **_codebook_kw(params))
+
+
+class FrameCodebook(DuplexStage[ProgramBuilder]):
+    name = "frame_codebook"
+    from_level = Level.FRAMES
+    to_level = Level.FRAMES
+    family = "coding"
+
+    params_model = _CodebookParams
+
+    def emit_rx(self, b: ProgramBuilder, params: Mapping[str, Any]) -> None:
+        b.add(framing.frame_codebook_rx, **_codebook_kw(params))
+
+    def emit_tx(self, b: ProgramBuilder, params: Mapping[str, Any]) -> None:
+        b.add(framing.frame_codebook_tx, **_codebook_kw(params))
 
 
 class _SyncParams(StageParams):
@@ -284,6 +301,7 @@ FRAMING_STAGES: tuple[type[Stage[ProgramBuilder]], ...] = (
     DescrambleBits,
     Differential,
     FixedFrame,
+    FrameCodebook,
     HdlcDeframe,
     LengthFrame,
     NibbleSwap,
