@@ -6,6 +6,7 @@ from typing import Any
 from pydantic import StrictInt, model_validator
 from pydantic_core import PydanticCustomError
 
+from marconi.core.descriptor import Descriptor
 from marconi.core.levels import Level
 from marconi.core.params import StageParams
 from marconi.core.stages import RxStage
@@ -145,9 +146,72 @@ class ClockCorrect(RxStage[CompileContext]):
         return 1.0 / (1.0 + float(params["ppm"]) * 1e-6)
 
 
+class _AmParams(StageParams):
+    dc_block_len: StrictInt = 1024
+
+    @model_validator(mode="after")
+    def _ok(self) -> "_AmParams":
+        if self.dc_block_len < 2:
+            raise PydanticCustomError("value_error", "dc_block_len must be >= 2")
+        return self
+
+
+class Am(RxStage[CompileContext]):
+    """AM envelope to audio: stock complex_to_mag + dc_blocker. RX-only, IQ->AUDIO,
+    rate unchanged."""
+
+    name = "am"
+    from_level = Level.IQ
+    to_level = Level.AUDIO
+    family = "conditioning"
+    params_model = _AmParams
+
+    def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
+        p = _AmParams.model_validate(dict(params))
+        b.chain("complex_to_mag")
+        b.chain("dc_blocker_ff", d=p.dc_block_len)
+
+    def out_descriptor(
+        self, in_desc: Descriptor, params: Mapping[str, Any]
+    ) -> Descriptor:
+        return Descriptor(Level.AUDIO, "f", in_desc.layout, in_desc.carrier)
+
+
+class _AnalyticParams(StageParams):
+    ntaps: StrictInt = 65
+
+    @model_validator(mode="after")
+    def _ok(self) -> "_AnalyticParams":
+        if self.ntaps < 3 or self.ntaps % 2 == 0:
+            raise PydanticCustomError("value_error", "ntaps must be odd and >= 3")
+        return self
+
+
+class Analytic(RxStage[CompileContext]):
+    """Real audio to its analytic signal (stock hilbert_fc) so IQ demods compose
+    downstream. RX-only, AUDIO->IQ, rate unchanged."""
+
+    name = "analytic"
+    from_level = Level.AUDIO
+    to_level = Level.IQ
+    family = "conditioning"
+    params_model = _AnalyticParams
+
+    def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
+        p = _AnalyticParams.model_validate(dict(params))
+        b.chain("hilbert_fc", ntaps=p.ntaps)
+
+    def out_descriptor(
+        self, in_desc: Descriptor, params: Mapping[str, Any]
+    ) -> Descriptor:
+        return Descriptor(Level.IQ, "c", in_desc.layout, in_desc.carrier)
+
+
 CONDITIONING_STAGES: tuple[type[RxStage[CompileContext]], ...] = (
     Channelize,
     Invert,
     Resample,
     ClockCorrect,
+    Am,
+    Analytic,
 )

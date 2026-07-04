@@ -21,3 +21,8 @@ def test_non_adjacent_and_upward_are_rejected() -> None:
     assert not adjacent(Level.IQ, Level.BITS)  # skips a rung
     assert not adjacent(Level.BITS, Level.SYMBOLS)  # upward (RX moves down)
     assert not adjacent(Level.AUDIO, Level.SYMBOLS)
+
+
+def test_audio_is_a_through_station() -> None:
+    assert adjacent(Level.AUDIO, Level.IQ)
+    assert adjacent(Level.IQ, Level.AUDIO)
