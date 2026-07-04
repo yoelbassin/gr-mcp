@@ -19,15 +19,37 @@ _KNOWN_ACARS_HZ = [129.125e6, 130.025e6, 130.450e6, 131.550e6, 131.725e6]
 _CENTER_HZ = 129.535e6
 
 
+_NFFT = 4096
+_BLOCKS_PER_READ = 1024
+_SMOOTH_BINS = 8
+_HOT_RATIO = 4.0
+_CHANNEL_QUANTUM_HZ = 5e3  # this VHF band's channels sit on a 5 kHz raster
+
+
 def band_peaks() -> list[float]:
-    iq = np.fromfile(_CF32, dtype=np.complex64, count=_RATE)  # first second
-    spec = np.abs(np.fft.fftshift(np.fft.fft(iq))) ** 2
-    freqs = np.fft.fftshift(np.fft.fftfreq(iq.size, 1.0 / _RATE))
-    kernel = np.ones(2048) / 2048.0
-    smooth = np.convolve(spec, kernel, "same")
-    floor = np.median(smooth)
-    hot = freqs[smooth > 20 * floor]
-    return sorted(set(round(float(f) / 1e3) * 1e3 for f in hot))
+    # max-hold over the WHOLE capture: ACARS is bursty, so any single window
+    # (a fortiori the first second) can be all noise
+    freqs = np.fft.fftshift(np.fft.fftfreq(_NFFT, 1.0 / _RATE))
+    window = np.hanning(_NFFT)
+    peak_hold = np.zeros(_NFFT)
+    with open(_CF32, "rb") as f:
+        while True:
+            raw = np.fromfile(f, dtype=np.complex64, count=_NFFT * _BLOCKS_PER_READ)
+            n_blocks = raw.size // _NFFT
+            if n_blocks == 0:
+                break
+            blocks = raw[: n_blocks * _NFFT].reshape(n_blocks, _NFFT) * window
+            spec = np.abs(np.fft.fftshift(np.fft.fft(blocks, axis=1), axes=1)) ** 2
+            peak_hold = np.maximum(peak_hold, spec.max(axis=0))
+    smooth = np.convolve(peak_hold, np.ones(_SMOOTH_BINS) / _SMOOTH_BINS, "same")
+    hot = np.flatnonzero(smooth > _HOT_RATIO * np.median(smooth))
+    channels: set[float] = set()
+    for cluster in np.split(hot, np.flatnonzero(np.diff(hot) > 1) + 1):
+        if cluster.size == 0:
+            continue
+        peak_hz = float(freqs[cluster[np.argmax(smooth[cluster])]])
+        channels.add(round(peak_hz / _CHANNEL_QUANTUM_HZ) * _CHANNEL_QUANTUM_HZ)
+    return sorted(channels)
 
 
 def _lowpass(x: np.ndarray, decim: int, ntaps: int = 129) -> np.ndarray:
@@ -56,10 +78,10 @@ def demod_channel(offset_hz: float, out_wav: Path) -> None:
     audio = np.concatenate(chunks)
     audio = audio - np.mean(audio)
     n_out = int(audio.size * _AUDIO_RATE / (_RATE / 40))
-    audio48 = np.interp(
+    resampled = np.interp(
         np.linspace(0, audio.size - 1, n_out), np.arange(audio.size), audio
     )
-    pcm = np.clip(audio48 / (np.max(np.abs(audio48)) + 1e-9), -1, 1)
+    pcm = np.clip(resampled / (np.max(np.abs(resampled)) + 1e-9), -1, 1)
     with wave.open(str(out_wav), "wb") as w:
         w.setnchannels(1)
         w.setsampwidth(2)
