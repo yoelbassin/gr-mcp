@@ -310,6 +310,50 @@ class DescrambleBits(DuplexStage[ProgramBuilder]):
         b.add(framing.descramble_bits_tx, sequence=str(params["sequence"]))
 
 
+class BlockCode(RxStage[ProgramBuilder]):
+    name = "block_code"
+    from_level = Level.BITS
+    to_level = Level.BITS
+    family = "coding"
+
+    class _Params(StageParams):
+        code_bits: StrictInt = Field(ge=2)
+        data_bits: StrictInt = Field(ge=1)
+        parity_masks: list[int]
+        correct: bool | None = None
+
+        @model_validator(mode="after")
+        def _shaped(self) -> "BlockCode._Params":
+            if self.data_bits >= self.code_bits:
+                raise PydanticCustomError(
+                    "value_error", "data_bits must be < code_bits"
+                )
+            if len(self.parity_masks) != self.code_bits - self.data_bits:
+                raise PydanticCustomError(
+                    "value_error",
+                    "need {want} parity masks for ({n},{k}), got {have}",
+                    {
+                        "want": self.code_bits - self.data_bits,
+                        "n": self.code_bits,
+                        "k": self.data_bits,
+                        "have": len(self.parity_masks),
+                    },
+                )
+            return self
+
+    params_model = _Params
+
+    def emit_rx(self, b: ProgramBuilder, params: Mapping[str, Any]) -> None:
+        p = self._Params.model_validate(dict(params))
+        b.add(
+            framing.block_code_rx,
+            code_bits=p.code_bits,
+            data_bits=p.data_bits,
+            parity_masks=[int(x) for x in p.parity_masks],
+            correct=p.correct,
+        )
+
+
 class Realign(RxStage[ProgramBuilder]):
     name = "realign"
     from_level = Level.BITS
@@ -326,6 +370,7 @@ class Realign(RxStage[ProgramBuilder]):
 
 
 FRAMING_STAGES: tuple[type[Stage[ProgramBuilder]], ...] = (
+    BlockCode,
     Codebook,
     DelimiterFrame,
     Descramble,

@@ -11,6 +11,7 @@ from crc import Calculator, Configuration
 
 from marconi.bits.carriers import RxCarrier, TxCarrier, _Frame
 from marconi.bits.models import ParseField
+from marconi.core.coding import block_fec_decode, can_correct
 
 _HDLC_FLAG = np.array([0, 1, 1, 1, 1, 1, 1, 0], dtype=np.uint8)
 _BITREV = bytes(int(format(i, "08b")[::-1], 2) for i in range(256))
@@ -559,6 +560,32 @@ def frame_codebook_tx(
         )
         out.append(enc)
     return TxCarrier(out)
+
+
+def block_code_rx(
+    c: RxCarrier,
+    *,
+    code_bits: int,
+    data_bits: int,
+    parity_masks: list[int],
+    correct: bool | None = None,
+) -> RxCarrier:
+    if c.frames:
+        raise ValueError("block_code must run before any frame seeder")
+    n_parity = code_bits - data_bits
+    do_correct = can_correct(n_parity, data_bits) if correct is None else correct
+    bits = np.asarray(c.bits, np.uint8)
+    n_words = bits.size // code_bits
+    out = np.zeros(n_words * data_bits, np.uint8)
+    for w in range(n_words):
+        stride = bits[w * code_bits : (w + 1) * code_bits]
+        word = 0
+        for j in range(code_bits):
+            word |= int(stride[j]) << j
+        val = block_fec_decode(word, parity_masks, data_bits, do_correct)
+        for j in range(data_bits):
+            out[w * data_bits + j] = (val >> j) & 1
+    return RxCarrier(bits=out, frames=[])
 
 
 def _read_uint(bits: np.ndarray, start: int, width: int) -> int:
