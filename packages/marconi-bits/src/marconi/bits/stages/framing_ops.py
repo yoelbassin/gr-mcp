@@ -236,6 +236,36 @@ class LengthFrame(DuplexStage[ProgramBuilder]):
         b.add(framing.length_frame_tx, **self._kw(params))
 
 
+class DelimiterFrame(RxStage[ProgramBuilder]):
+    name = "delimiter_frame"
+    from_level = Level.FRAMES
+    to_level = Level.FRAMES
+    slices_body = True
+    family = "framing"
+
+    class _Params(StageParams):
+        delimiter: str
+        tail_bits: StrictInt = Field(default=0, ge=0)
+
+        @model_validator(mode="after")
+        def _hex(self) -> "DelimiterFrame._Params":
+            try:
+                if not bytes.fromhex(self.delimiter):
+                    raise ValueError
+            except ValueError:
+                raise PydanticCustomError(
+                    "value_error",
+                    "delimiter must be a non-empty even-length hex string",
+                ) from None
+            return self
+
+    params_model = _Params
+
+    def emit_rx(self, b: ProgramBuilder, params: Mapping[str, Any]) -> None:
+        p = self._Params.model_validate(dict(params))
+        b.add(framing.delimiter_frame_rx, delimiter=p.delimiter, tail_bits=p.tail_bits)
+
+
 class _SequenceParams(StageParams):
     sequence: str
 
@@ -297,6 +327,7 @@ class Realign(RxStage[ProgramBuilder]):
 
 FRAMING_STAGES: tuple[type[Stage[ProgramBuilder]], ...] = (
     Codebook,
+    DelimiterFrame,
     Descramble,
     DescrambleBits,
     Differential,

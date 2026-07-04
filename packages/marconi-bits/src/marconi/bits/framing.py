@@ -604,6 +604,31 @@ def length_frame_tx(
     return c  # the length field is assembled upstream (parse/crc); nothing to add
 
 
+def delimiter_frame_rx(
+    c: RxCarrier, *, delimiter: str, tail_bits: int = 0
+) -> RxCarrier:
+    """Carve each seeded frame's body up to the first occurrence of a delimiter
+    bit-pattern, inclusive, plus ``tail_bits`` trailing bits. Frames with no
+    in-bounds delimiter or whose tail runs past stream end are dropped."""
+    pat = bytes_to_bits(bytes.fromhex(delimiter))
+    bits = np.asarray(c.bits, dtype=np.uint8)
+    m = pat.size
+    out: list[_Frame] = []
+    for f in c.frames:
+        seg = bits[f.cursor :]
+        if seg.size < m:
+            continue
+        windows = np.lib.stride_tricks.sliding_window_view(seg, m)
+        hits = np.flatnonzero((windows != pat).sum(axis=1) == 0)
+        if hits.size == 0:
+            continue
+        end = f.cursor + int(hits[0]) + m + tail_bits
+        if end > bits.size:
+            continue
+        out.append(replace(f, payload=bits_to_bytes(bits[f.cursor : end]), cursor=end))
+    return RxCarrier(bits=bits, frames=out)
+
+
 def sync_word_rx(c: RxCarrier, *, sync: str, max_errors: int = 0) -> RxCarrier:
     """Correlating frame seeder: seed a frame just past every position where the
     bitstream matches ``sync`` within ``max_errors`` bit flips (a sync word is
