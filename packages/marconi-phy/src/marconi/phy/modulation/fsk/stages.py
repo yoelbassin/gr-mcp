@@ -56,7 +56,8 @@ class Msk(RxStage[CompileContext]):
     """Coherent MSK (h=0.5 CPFSK) demod -> one soft float per symbol. RX-only:
     an MSK transmitter is the fsk stage at deviation = symbol_rate/4 (h=0.5),
     so TX needs no new vocabulary. Several dB more sensitive than the
-    non-coherent fsk RX path (issue 22)."""
+    non-coherent fsk RX path (issue 22); guarded by
+    tests/phy/test_msk_snr_margin.py."""
 
     name = "msk"
     from_level = Level.IQ
