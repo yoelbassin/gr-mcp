@@ -16,6 +16,7 @@ from marconi.phy.backends.gnuradio.embedded.chirp import (
 )
 from marconi.phy.backends.gnuradio.embedded.coding import make_css_explicit_decode
 from marconi.phy.backends.gnuradio.embedded.depuncture import make_depuncture
+from marconi.phy.backends.gnuradio.embedded.msk import make_msk_demod
 from marconi.phy.backends.gnuradio.embedded.ofdm import make_ofdm_frame_sync
 from marconi.phy.backends.gnuradio.embedded.preamble import make_sym_strip, sym_prefix
 from marconi.phy.backends.gnuradio.embedded.trellis_fec import make_trellis_viterbi
@@ -157,6 +158,9 @@ GR_BLOCKS: dict[str, Callable[[_GrCtx, Params], Any]] = {
         c.gr.sizeof_short, str(p["path"]), False
     ),
     "quadrature_demod": lambda c, p: c.analog.quadrature_demod_cf(_as_float(p["gain"])),
+    "msk_demod": lambda c, p: make_msk_demod(
+        c.gr, sps=_as_float(p["sps"]), loop_bw=_as_float(p.get("loop_bw", 0.0038))
+    ),
     "symbol_sync_ff": lambda c, p: c.digital.symbol_sync_ff(
         c.digital.TED_GARDNER,
         _as_float(p["sps"]),
