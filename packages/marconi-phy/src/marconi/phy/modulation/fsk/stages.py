@@ -7,7 +7,7 @@ from typing import Any
 from marconi.core.descriptor import Carrier, Descriptor
 from marconi.core.levels import Level
 from marconi.core.params import StageParams
-from marconi.core.stages import DuplexStage
+from marconi.core.stages import DuplexStage, RxStage, Stage
 from marconi.phy.compile_context import CompileContext
 
 
@@ -48,4 +48,30 @@ class Fsk(DuplexStage[CompileContext]):
         return Descriptor(Level.SYMBOLS, "f", in_desc.layout, Carrier.SOFT)
 
 
-FSK_STAGES: tuple[type[DuplexStage[CompileContext]], ...] = (Fsk,)
+class _MskParams(StageParams):
+    loop_bw: float = 0.0038  # pinned: GR_BLOCKS["msk_demod"]'s registered default
+
+
+class Msk(RxStage[CompileContext]):
+    """Coherent MSK (h=0.5 CPFSK) demod -> one soft float per symbol. RX-only:
+    an MSK transmitter is the fsk stage at deviation = symbol_rate/4 (h=0.5),
+    so TX needs no new vocabulary. Several dB more sensitive than the
+    non-coherent fsk RX path (issue 22)."""
+
+    name = "msk"
+    from_level = Level.IQ
+    to_level = Level.SYMBOLS
+    family = "fsk"
+    params_model = _MskParams
+
+    def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
+        p = _MskParams.model_validate(dict(params))
+        b.chain("msk_demod", sps=b.sps, loop_bw=p.loop_bw)
+
+    def out_descriptor(
+        self, in_desc: Descriptor, params: Mapping[str, Any]
+    ) -> Descriptor:
+        return Descriptor(Level.SYMBOLS, "f", in_desc.layout, Carrier.SOFT)
+
+
+FSK_STAGES: tuple[type[Stage[CompileContext]], ...] = (Fsk, Msk)
