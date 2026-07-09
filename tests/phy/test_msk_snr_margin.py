@@ -24,11 +24,16 @@ fsk:
   S=18: 0.4503 0.2352 0.2416 0.3345 0.4147
   S=16: 0.3487 0.2778 0.3993 0.4566 0.4429
 
-Pin rule (highest S with msk BER==0 all 5 seeds AND fsk BER>0.02 all 5
-seeds, margin-checked at S-2): S=28 fails the fsk>0.02 condition (max
-0.0098); S=26 is the highest S where fsk clears 0.02 on every seed
-(0.0244-0.0333) while msk stays exactly 0 (as it does at every S down to
-16, well past the S-2=24 margin check). _SNR_DB = 26.0.
+Pin rule (amended in review): pin a MID-WATERFALL S where fsk BER >= 5x
+the 0.02 gate on all seeds and msk stays BER-0 with >= 2 notches of
+headroom -- NOT the highest qualifying S. The original highest-S rule
+selected 26 (fsk 0.0244-0.0333), leaving a worst-case margin of only
+0.0044 over the gate; with documented GR run-to-run numeric
+nondeterminism (which same-seed 10x reruns don't exercise), an
+edge-of-gate pin is fragile. S=22 is mid-waterfall: fsk 0.1134-0.1301
+(~6-9x the gate) on every seed, msk BER-0 there and at every notch below
+through S=16 (and to about -2 dB by probe). _SNR_DB = 22.0. (S=28 fails
+the gate outright, max fsk BER 0.0098.)
 
 Non-vacuity, checked once and reverted: pinning _SNR_DB = 28.0 fails the
 fsk assertion (min BER 0.0049 !> 0.02) -- the test is not vacuously true."""
@@ -50,7 +55,7 @@ from marconi.phy.stages import stage_registry
 
 IQ = Descriptor(Level.IQ, "c")
 _SR, _SYM = 20.0, 1.0
-_SNR_DB = 26.0
+_SNR_DB = 22.0
 _SEEDS = (0, 1, 2, 3, 4)
 
 
