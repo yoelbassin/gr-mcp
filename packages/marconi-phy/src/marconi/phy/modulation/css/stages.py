@@ -105,7 +105,43 @@ class Dechirp(DuplexStage[CompileContext]):
 
     def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
         p = _CssParams.model_validate(dict(params))
-        b.chain("chirp_demod", sf=p.sf, oversample=p.oversample, zero_pad=p.zero_pad)
+        n = 1 << p.sf
+        sn = p.oversample * n
+        bins = n * p.zero_pad
+        fft_len = p.oversample * n * p.zero_pad
+
+        dechirped = b.chain("multiply_cc")
+        ref = b.add("chirp_ref_source", sf=p.sf, oversample=p.oversample)
+        b.connect(ref, dechirped, dst_port=1)
+        padded = b.chain("stream_mux_c", lengths=[sn, fft_len - sn])
+        zeros = b.add("null_source_c")
+        b.connect(zeros, padded, dst_port=1)
+        b.chain("stream_to_vector", vlen=fft_len)
+        b.chain("fft_vcc", fft_len=fft_len)
+        b.chain("complex_to_mag", vlen=fft_len)
+        spectrum = b.chain("vector_to_stream_f", vlen=fft_len)
+        low_image = b.add("keep_m_in_n_f", m=bins, n=fft_len)
+        high_image = b.add(
+            "keep_m_in_n_f",
+            m=bins,
+            n=fft_len,
+            offset=fft_len - bins,
+            propagate_tags=False,
+        )
+        folded = b.add("add_ff")
+        b.connect(spectrum, low_image)
+        b.connect(spectrum, high_image)
+        b.connect(low_image, folded, dst_port=0)
+        b.connect(high_image, folded, dst_port=1)
+        b.set_tail(folded)
+        b.chain("stream_to_vector_f", vlen=bins)
+        peak = b.chain("argmax_fs", vlen=bins)
+        spare_port = b.add("null_sink_s")
+        b.connect(peak, spare_port, src_port=1)
+        b.chain("short_to_float")
+        b.chain("multiply_const_ff", value=1.0 / p.zero_pad)
+        b.chain("float_to_short")
+        b.chain("and_const_ss", value=n - 1)
 
     def emit_tx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
         p = _CssParams.model_validate(dict(params))
@@ -119,7 +155,7 @@ class Dechirp(DuplexStage[CompileContext]):
     def required_input_rate(
         self, params: Mapping[str, Any], symbol_rate: float
     ) -> float | None:
-        # chirp_demod's window is a fixed oversample*2^sf samples per symbol, so
+        # the dechirp window is a fixed oversample*2^sf samples per symbol, so
         # the input must arrive at exactly that many samples per symbol.
         p = _CssParams.model_validate(dict(params))
         return p.oversample * (1 << p.sf) * symbol_rate

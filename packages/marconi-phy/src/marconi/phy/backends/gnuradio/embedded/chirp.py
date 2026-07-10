@@ -162,14 +162,6 @@ def _modulate_symbol(s: int, sf: int, oversample: int) -> np.ndarray:
     )
 
 
-def _demod_symbol(chunk: np.ndarray, grid: _Grid) -> int:
-    """Dechirp one symbol chunk (len == grid.sample_num) and return symbol index.
-    Assumes CFO has already been removed (preamble_bin == 0 after chirp_sync)."""
-    _, fine = _fine_peak(chunk, 0, grid, up=True)
-    n = 1 << grid.sf
-    return int(round(fine % grid.bins / grid.zero_pad)) % n
-
-
 # Each GR class is defined INSIDE its builder so that `gr` is never a module-
 # level name (satisfies the phy ⊥ gnuradio invariant checked by test_invariants).
 
@@ -184,6 +176,10 @@ def chirp_prefix(
     frac = int(round((sfd_symbols - full) * sn))
     sfd = np.concatenate([np.tile(down, full), down[:frac]])
     return np.concatenate([np.tile(up, preamble_len), sfd]).astype(np.complex64)
+
+
+def dechirp_ref(sf: int, oversample: int) -> np.ndarray:
+    return np.conj(_base_upchirp(sf, oversample))
 
 
 def make_chirp_mod(gr: Any, sf: int, oversample: int) -> Any:
@@ -221,68 +217,6 @@ def make_chirp_mod(gr: Any, sf: int, oversample: int) -> Any:
             return self._out.drain(out)
 
     return _ChirpMod()
-
-
-def make_chirp_demod(gr: Any, sf: int, oversample: int, zero_pad: int) -> Any:
-    """RX: oversample*(1<<sf) complex64 chirp samples → int16 symbol index.
-    Translates upstream "burst" sample tags to symbol tags (chirp_sync emits
-    whole-symbol burst segments, so tagged offsets land on window boundaries)."""
-    pmt = gr.pmt
-    grid = _Grid(sf, oversample, zero_pad)
-    sn = grid.sample_num
-
-    class _ChirpDemod(gr.basic_block):
-        def __init__(self) -> None:
-            gr.basic_block.__init__(
-                self,
-                name="chirp_demod",
-                in_sig=[np.complex64],
-                out_sig=[np.int16],
-            )
-            self.set_tag_propagation_policy(gr.TPP_DONT)
-            self._buf = np.empty(0, dtype=np.complex64)
-            self._abs = 0  # absolute input offset of _buf[0]
-            self._syms = 0  # total symbols emitted
-            self._pend: list[int] = []  # symbol indices awaiting their tag
-
-        def forecast(self, noutput_items: int, ninputs: int) -> list[int]:
-            # A full-symbol input demand (sn) can exceed GR's default stream
-            # buffer for large sf; accumulate internally and announce
-            # drainability instead (the shared lifecycle contract).
-            return forecast_drain(self._buf.size >= sn, ninputs)
-
-        def general_work(self, input_items: Any, output_items: Any) -> int:
-            x = input_items[0]
-            if len(x):
-                if not self._buf.size:
-                    self._abs = self.nitems_read(0)
-                for t in self.get_tags_in_window(0, 0, len(x)):
-                    if pmt.symbol_to_string(t.key) == "burst":
-                        rel = int(t.offset) - self._abs
-                        self._pend.append(self._syms + rel // sn)
-                self._buf = np.concatenate([self._buf, np.asarray(x, np.complex64)])
-                self.consume(0, len(x))
-            out = output_items[0]
-            nsym = min(len(out), self._buf.size // sn)
-            for i in range(nsym):
-                out[i] = _demod_symbol(self._buf[i * sn : (i + 1) * sn], grid)
-            if nsym:
-                self._buf = self._buf[nsym * sn :]
-                self._abs += nsym * sn
-                emitted = self._syms + nsym
-                for s in self._pend:
-                    if s < emitted:
-                        self.add_item_tag(
-                            0,
-                            self.nitems_written(0) + (s - self._syms),
-                            pmt.intern("burst"),
-                            pmt.PMT_NIL,
-                        )
-                self._pend = [s for s in self._pend if s >= emitted]
-                self._syms = emitted
-            return nsym
-
-    return _ChirpDemod()
 
 
 def make_css_map(gr: Any, sf: int) -> Any:

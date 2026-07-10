@@ -2,7 +2,11 @@
 
 Chain under test:
     bits_file_source → css_map(sf) → chirp_mod(sf, os)
-                     → chirp_demod(sf, os, zp) → css_demap(sf) → bits_file_sink
+                     → [stock dechirp composition] → css_demap(sf) → bits_file_sink
+
+The dechirp RX is the production `Dechirp` stage's stock-GR composition
+(multiply_cc/fft_vcc/fold/argmax_fs — see stages.py), exercised here via
+CompileContext so the test stays DRY with production.
 
 All integer-output Python blocks (int16, uint8) are exercised only via the
 off-main-thread production runner to avoid the embedded-uint8-output SIGSEGV.
@@ -17,8 +21,12 @@ import numpy as np
 import pytest
 from phy._dsp import aligned_ber, read_bits, write_bits
 
+from marconi.core.descriptor import Descriptor
+from marconi.core.levels import Level
 from marconi.phy.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
+from marconi.phy.compile_context import CompileContext
 from marconi.phy.ir import GrBlock, GrConnection, GrPipeline
+from marconi.phy.modulation.css.stages import Dechirp
 
 SF, OS, ZP = 7, 2, 4
 SAMPLE_NUM = OS * (1 << SF)  # 256
@@ -27,40 +35,23 @@ PREAMBLE_LEN = 8
 # How many full CSS symbols to round-trip
 N_SYMS = 50
 
+_IQ = Descriptor(Level.IQ, "c")
+
 
 def _bits_to_bits_pipeline(
-    bits_in: Path,
-    bits_out: Path,
-    *,
-    sf: int = SF,
-    os: int = OS,
-    zp: int = ZP,
+    bits_in: Path, bits_out: Path, *, sf: int = SF, os: int = OS, zp: int = ZP
 ) -> GrPipeline:
-    """Build a GrPipeline: bits_src → css_map → chirp_mod → chirp_demod
-    → css_demap → bits_sink."""
-    return GrPipeline(
-        name="css_roundtrip",
-        sample_rate=float(os * (1 << sf)),
-        blocks=[
-            GrBlock(id="src", kind="bits_file_source", params={"path": str(bits_in)}),
-            GrBlock(id="map", kind="css_map", params={"sf": sf}),
-            GrBlock(id="mod", kind="chirp_mod", params={"sf": sf, "oversample": os}),
-            GrBlock(
-                id="demod",
-                kind="chirp_demod",
-                params={"sf": sf, "oversample": os, "zero_pad": zp},
-            ),
-            GrBlock(id="demap", kind="css_demap", params={"sf": sf}),
-            GrBlock(id="snk", kind="bits_file_sink", params={"path": str(bits_out)}),
-        ],
-        connections=[
-            GrConnection(src_block="src", dst_block="map"),
-            GrConnection(src_block="map", dst_block="mod"),
-            GrConnection(src_block="mod", dst_block="demod"),
-            GrConnection(src_block="demod", dst_block="demap"),
-            GrConnection(src_block="demap", dst_block="snk"),
-        ],
-    )
+    """bits_src → css_map → chirp_mod → [stock dechirp chain] → css_demap →
+    bits_sink."""
+    rate = float(os * (1 << sf))
+    ctx = CompileContext(_IQ, rate, 1.0)
+    ctx.chain("bits_file_source", path=str(bits_in))
+    ctx.chain("css_map", sf=sf)
+    ctx.chain("chirp_mod", sf=sf, oversample=os)
+    Dechirp().emit_rx(ctx, {"sf": sf, "oversample": os, "zero_pad": zp})
+    ctx.chain("css_demap", sf=sf)
+    ctx.chain("bits_file_sink", path=str(bits_out))
+    return ctx.build("css_roundtrip", rate)
 
 
 def _prepend_pipeline(
@@ -111,7 +102,7 @@ def _prepend_pipeline(
 def test_css_core_bits_roundtrip(
     sf: int, os_: int, n_syms: int, tmp_path: Path
 ) -> None:
-    """css_map → chirp_mod → chirp_demod → css_demap recovers bits exactly."""
+    """css_map → chirp_mod → [stock dechirp] → css_demap recovers bits exactly."""
     ensure_worker_warm()
     bits = np.random.default_rng(0).integers(0, 2, sf * n_syms).astype(np.uint8)
     bp = write_bits(tmp_path / "in.bits", bits)
@@ -135,60 +126,33 @@ def _full_chain_pipeline(
     zp: int = ZP,
     preamble_len: int = PREAMBLE_LEN,
 ) -> GrPipeline:
-    """bits_src → css_map → chirp_mod → chirp_prepend → chirp_sync → chirp_demod
-    → css_demap → bits_sink: the full TX+RX chain in one flowgraph."""
-    bw = float(1 << sf)  # symbol_rate == 1 here, so bandwidth == 2^sf
-    return GrPipeline(
-        name="css_full_chain",
-        sample_rate=float(os * (1 << sf)),
-        blocks=[
-            GrBlock(id="src", kind="bits_file_source", params={"path": str(bits_in)}),
-            GrBlock(id="map", kind="css_map", params={"sf": sf}),
-            GrBlock(id="mod", kind="chirp_mod", params={"sf": sf, "oversample": os}),
-            GrBlock(
-                id="pre",
-                kind="chirp_prepend",
-                params={
-                    "sf": sf,
-                    "oversample": os,
-                    "preamble_len": preamble_len,
-                    "sfd_symbols": 2.25,
-                },
-            ),
-            GrBlock(
-                id="sync",
-                kind="chirp_sync",
-                params={
-                    "sf": sf,
-                    "oversample": os,
-                    "zero_pad": zp,
-                    "preamble_len": preamble_len,
-                    "bandwidth": bw,
-                    "sfd_symbols": 2.25,
-                    "sync_symbols": 2,
-                },
-            ),
-            GrBlock(
-                id="demod",
-                kind="chirp_demod",
-                params={"sf": sf, "oversample": os, "zero_pad": zp},
-            ),
-            GrBlock(id="demap", kind="css_demap", params={"sf": sf}),
-            GrBlock(id="snk", kind="bits_file_sink", params={"path": str(bits_out)}),
-        ],
-        connections=[
-            GrConnection(src_block=a, dst_block=b)
-            for a, b in [
-                ("src", "map"),
-                ("map", "mod"),
-                ("mod", "pre"),
-                ("pre", "sync"),
-                ("sync", "demod"),
-                ("demod", "demap"),
-                ("demap", "snk"),
-            ]
-        ],
+    """TX+RX in one flowgraph: … chirp_prepend → chirp_sync → [stock dechirp] …"""
+    rate = float(os * (1 << sf))
+    ctx = CompileContext(_IQ, rate, 1.0)
+    ctx.chain("bits_file_source", path=str(bits_in))
+    ctx.chain("css_map", sf=sf)
+    ctx.chain("chirp_mod", sf=sf, oversample=os)
+    ctx.chain(
+        "chirp_prepend",
+        sf=sf,
+        oversample=os,
+        preamble_len=preamble_len,
+        sfd_symbols=2.25,
     )
+    ctx.chain(
+        "chirp_sync",
+        sf=sf,
+        oversample=os,
+        zero_pad=zp,
+        preamble_len=preamble_len,
+        bandwidth=float(1 << sf),
+        sfd_symbols=2.25,
+        sync_symbols=2,
+    )
+    Dechirp().emit_rx(ctx, {"sf": sf, "oversample": os, "zero_pad": zp})
+    ctx.chain("css_demap", sf=sf)
+    ctx.chain("bits_file_sink", path=str(bits_out))
+    return ctx.build("css_full_chain", rate)
 
 
 def test_chirp_sync_clean_roundtrip(tmp_path: Path) -> None:

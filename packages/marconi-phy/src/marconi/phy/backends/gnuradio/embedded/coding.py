@@ -77,7 +77,7 @@ def make_css_explicit_decode(
         """Decodes every frame in the stream. Without burst tags, frames are
         assumed back-to-back (a header parse follows the previous frame's end;
         a header failure stalls until a tag arrives). With upstream "burst"
-        tags (chirp_sync -> chirp_demod), headers parse only at tagged symbol
+        tags (chirp_sync -> dechirp), headers parse only at tagged symbol
         offsets, so inter-burst junk is never mistaken for a header and a
         corrupt header just skips to the next burst. Per-run counters are
         exposed as `diagnostics` and surfaced through RunResult."""

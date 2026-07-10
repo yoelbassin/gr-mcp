@@ -8,7 +8,7 @@ from marconi.core.params import ParamValue
 from marconi.phy.backends.base import BackendError
 from marconi.phy.backends.gnuradio.embedded.chirp import (
     chirp_prefix,
-    make_chirp_demod,
+    dechirp_ref,
     make_chirp_mod,
     make_chirp_sync,
     make_css_demap,
@@ -132,6 +132,15 @@ def _const(c: _GrCtx, scheme: str, order: int) -> Any:
     raise BackendError(f"unknown constellation scheme {scheme!r}")
 
 
+def _keep_m_in_n_f(c: _GrCtx, p: Params) -> Any:
+    blk = c.blocks.keep_m_in_n(
+        c.gr.sizeof_float, _as_int(p["m"]), _as_int(p["n"]), _as_int(p.get("offset", 0))
+    )
+    if not bool(p.get("propagate_tags", True)):
+        blk.set_tag_propagation_policy(c.gr.TPP_DONT)
+    return blk
+
+
 # kind -> (ctx, params) -> live GR block. The ONLY GR-aware vocabulary in phy.
 GR_BLOCKS: dict[str, Callable[[_GrCtx, Params], Any]] = {
     "iq_file_source": lambda c, p: c.blocks.file_source(
@@ -241,7 +250,7 @@ GR_BLOCKS: dict[str, Callable[[_GrCtx, Params], Any]] = {
     ),
     "pack_k_bits_bb": lambda c, p: c.blocks.pack_k_bits_bb(_as_int(p["k"])),
     "unpack_k_bits_bb": lambda c, p: c.blocks.unpack_k_bits_bb(_as_int(p["k"])),
-    "complex_to_mag": lambda c, p: c.blocks.complex_to_mag(1),
+    "complex_to_mag": lambda c, p: c.blocks.complex_to_mag(_as_int(p.get("vlen", 1))),
     "dc_blocker_ff": lambda c, p: c.gr_filter.dc_blocker_ff(_as_int(p["d"]), True),
     "hilbert_fc": lambda c, p: c.gr_filter.hilbert_fc(_as_int(p["ntaps"])),
     "multiply_const_ff": lambda c, p: c.blocks.multiply_const_ff(_as_float(p["value"])),
@@ -286,9 +295,27 @@ GR_BLOCKS: dict[str, Callable[[_GrCtx, Params], Any]] = {
     "chirp_mod": lambda c, p: make_chirp_mod(
         c.gr, _as_int(p["sf"]), _as_int(p["oversample"])
     ),
-    "chirp_demod": lambda c, p: make_chirp_demod(
-        c.gr, _as_int(p["sf"]), _as_int(p["oversample"]), _as_int(p["zero_pad"])
+    "chirp_ref_source": lambda c, p: c.blocks.vector_source_c(
+        dechirp_ref(_as_int(p["sf"]), _as_int(p["oversample"])).tolist(), True
     ),
+    "multiply_cc": lambda c, p: c.blocks.multiply_cc(),
+    "null_source_c": lambda c, p: c.blocks.null_source(c.gr.sizeof_gr_complex),
+    "null_sink_s": lambda c, p: c.blocks.null_sink(c.gr.sizeof_short),
+    "stream_mux_c": lambda c, p: c.blocks.stream_mux(
+        c.gr.sizeof_gr_complex, _as_int_list(p["lengths"])
+    ),
+    "vector_to_stream_f": lambda c, p: c.blocks.vector_to_stream(
+        c.gr.sizeof_float, _as_int(p["vlen"])
+    ),
+    "stream_to_vector_f": lambda c, p: c.blocks.stream_to_vector(
+        c.gr.sizeof_float, _as_int(p["vlen"])
+    ),
+    "keep_m_in_n_f": _keep_m_in_n_f,
+    "add_ff": lambda c, p: c.blocks.add_ff(),
+    "argmax_fs": lambda c, p: c.blocks.argmax_fs(_as_int(p["vlen"])),
+    "short_to_float": lambda c, p: c.blocks.short_to_float(),
+    "float_to_short": lambda c, p: c.blocks.float_to_short(),
+    "and_const_ss": lambda c, p: c.blocks.and_const_ss(_as_int(p["value"])),
     "css_map": lambda c, p: make_css_map(c.gr, _as_int(p["sf"])),
     "css_demap": lambda c, p: make_css_demap(c.gr, _as_int(p["sf"])),
     "css_explicit_decode": lambda c, p: make_css_explicit_decode(

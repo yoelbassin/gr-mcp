@@ -11,7 +11,7 @@ GR-scheduler contract these blocks live by (issues 01/05/16):
   a later call would.
 - a full-symbol/frame input demand can exceed GR's default stream buffer
   (8191 complex items): accumulate internally off forecast [1] instead of
-  demanding multiples (the chirp_demod failure class).
+  demanding multiples (the failure class that motivated OutQueue).
 
 Two block classes intentionally stay outside this module: fixed small-ratio
 converters (css_map/css_demap — bounded demands, no pending state) and pure
