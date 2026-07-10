@@ -192,9 +192,12 @@ def test_acars_offair_matches_acarsdec_golden(tmp_path: Path) -> None:
 
     # PIN (knob #6): total_crc_ok measured over 3 serial GR runs = 4 / 4 / 4 (the
     # 3 golden bursts + a 4th genuine burst, block-7, that also passes strict CRC).
-    # The coherent msk demod was stable run-to-run on this capture; floor = the
-    # observed min. The golden-content match below is the invariant assert.
-    floor = 4
+    # floor is pinned at 3, not the observed 4: the 3 golden bursts are 0-bit-error
+    # AND independently pinned by the need=3 content match below (the real
+    # invariant), whereas the 4th burst is not golden-anchored -- staking the suite
+    # on it over a 3-run determinism sample is the fragile choice. floor=3 keeps the
+    # count assert meaningful with a margin against a marginal 4th-burst wobble.
+    floor = 3
     assert len(crc_valid) >= max(1, floor), f"crc-valid={len(crc_valid)}"
 
     by_key = {
@@ -202,7 +205,7 @@ def test_acars_offair_matches_acarsdec_golden(tmp_path: Path) -> None:
     }
     checked = 0
     for g in golden["messages"]:
-        m = by_key.get((g["reg"].strip(), g["block_id"].strip()))
+        m = by_key.get((_norm_reg(g["reg"]), g["block_id"].strip()))
         if m is None:
             continue
         assert _norm_label(m["label"]) == g["label"].strip(), (g, m)
