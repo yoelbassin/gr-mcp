@@ -40,6 +40,15 @@ def read_bits(path: Path) -> np.ndarray:
     return np.fromfile(path, dtype=np.uint8)
 
 
+def write_symbols(path: Path, symbols: np.ndarray) -> None:
+    np.asarray(symbols, dtype=np.int16).tofile(path)
+
+
+def read_symbols(path: Path) -> np.ndarray:
+    _guard(path.stat().st_size // 2, path)
+    return np.fromfile(path, dtype=np.int16)
+
+
 def write_llrs(path: Path, llrs: np.ndarray) -> None:
     np.asarray(llrs, dtype=np.float32).tofile(path)
 

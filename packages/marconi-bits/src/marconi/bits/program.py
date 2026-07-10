@@ -14,6 +14,7 @@ class FrameProgram:
     direction: Literal["rx", "tx"]
     steps: list[Callable[..., Any]]
     requires_soft_input: bool = False
+    requires_symbol_input: bool = False
 
 
 @overload

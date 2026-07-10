@@ -17,7 +17,9 @@ def validate_codec(
     issues: list[ValidationIssue] = []
     if not codec.path:
         return [ValidationIssue(message="codec has no converters")]
-    validate_path(codec.path, registry, Level.BITS, "codec", issues)
+    first_conv = codec.path[0].conv
+    start = registry[first_conv].from_level if first_conv in registry else Level.BITS
+    validate_path(codec.path, registry, start, "codec", issues)
     stages = [registry[s.conv] for s in codec.path if s.conv in registry]
     if stages:
         # Capability comes from the stages' own flags, never from a name-set —

@@ -7,6 +7,7 @@ from marconi.bits.builder import ProgramBuilder
 from marconi.bits.models import CodecSpec
 from marconi.bits.program import FrameProgram
 from marconi.core.errors import register_error
+from marconi.core.levels import Level
 from marconi.core.models import ValidationIssue
 from marconi.core.stages import (
     SpecValidationError,
@@ -47,4 +48,9 @@ def compile_codec(
             raise StageDirectionError(stage.name, direction, stage.directions)
         emit = stage.emit_rx if direction == "rx" else stage.emit_tx
         emit(b, step.params)
-    return FrameProgram(direction=direction, steps=b.steps)
+    first = registry[codec.path[0].conv] if codec.path else None
+    return FrameProgram(
+        direction=direction,
+        steps=b.steps,
+        requires_symbol_input=first is not None and first.from_level is Level.SYMBOLS,
+    )
