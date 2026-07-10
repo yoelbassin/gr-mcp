@@ -135,13 +135,7 @@ class Dechirp(DuplexStage[CompileContext]):
         b.connect(high_image, folded, dst_port=1)
         b.set_tail(folded)
         b.chain("stream_to_vector_f", vlen=bins)
-        peak = b.chain("argmax_fs", vlen=bins)
-        spare_port = b.add("null_sink_s")
-        b.connect(peak, spare_port, src_port=1)
-        b.chain("short_to_float")
-        b.chain("multiply_const_ff", value=1.0 / p.zero_pad)
-        b.chain("float_to_short")
-        b.chain("and_const_ss", value=n - 1)
+        b.chain("peak_decision", vlen=bins, divisor=p.zero_pad, modulo=n)
 
     def emit_tx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
         p = _CssParams.model_validate(dict(params))

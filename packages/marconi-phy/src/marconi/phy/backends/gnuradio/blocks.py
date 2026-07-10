@@ -15,6 +15,7 @@ from marconi.phy.backends.gnuradio.embedded.chirp import (
     make_css_map,
 )
 from marconi.phy.backends.gnuradio.embedded.coding import make_css_explicit_decode
+from marconi.phy.backends.gnuradio.embedded.decision import make_peak_decision
 from marconi.phy.backends.gnuradio.embedded.depuncture import make_depuncture
 from marconi.phy.backends.gnuradio.embedded.msk import make_msk_demod
 from marconi.phy.backends.gnuradio.embedded.ofdm import make_ofdm_frame_sync
@@ -300,7 +301,6 @@ GR_BLOCKS: dict[str, Callable[[_GrCtx, Params], Any]] = {
     ),
     "multiply_cc": lambda c, p: c.blocks.multiply_cc(),
     "null_source_c": lambda c, p: c.blocks.null_source(c.gr.sizeof_gr_complex),
-    "null_sink_s": lambda c, p: c.blocks.null_sink(c.gr.sizeof_short),
     "stream_mux_c": lambda c, p: c.blocks.stream_mux(
         c.gr.sizeof_gr_complex, _as_int_list(p["lengths"])
     ),
@@ -312,10 +312,12 @@ GR_BLOCKS: dict[str, Callable[[_GrCtx, Params], Any]] = {
     ),
     "keep_m_in_n_f": _keep_m_in_n_f,
     "add_ff": lambda c, p: c.blocks.add_ff(),
-    "argmax_fs": lambda c, p: c.blocks.argmax_fs(_as_int(p["vlen"])),
-    "short_to_float": lambda c, p: c.blocks.short_to_float(),
-    "float_to_short": lambda c, p: c.blocks.float_to_short(),
-    "and_const_ss": lambda c, p: c.blocks.and_const_ss(_as_int(p["value"])),
+    "peak_decision": lambda c, p: make_peak_decision(
+        c.gr,
+        vlen=_as_int(p["vlen"]),
+        divisor=_as_int(p["divisor"]),
+        modulo=_as_int(p["modulo"]),
+    ),
     "css_map": lambda c, p: make_css_map(c.gr, _as_int(p["sf"])),
     "css_demap": lambda c, p: make_css_demap(c.gr, _as_int(p["sf"])),
     "css_explicit_decode": lambda c, p: make_css_explicit_decode(

@@ -5,7 +5,7 @@ Chain under test:
                      → [stock dechirp composition] → css_demap(sf) → bits_file_sink
 
 The dechirp RX is the production `Dechirp` stage's stock-GR composition
-(multiply_cc/fft_vcc/fold/argmax_fs — see stages.py), exercised here via
+(multiply_cc/fft_vcc/fold/peak_decision — see stages.py), exercised here via
 CompileContext so the test stays DRY with production.
 
 All integer-output Python blocks (int16, uint8) are exercised only via the
@@ -115,6 +115,30 @@ def test_css_core_bits_roundtrip(
     out = read_bits(op)
     assert len(out) == len(bits), f"length mismatch: {len(out)} != {len(bits)}"
     assert np.array_equal(out, bits), f"bits mismatch at {np.where(out != bits)}"
+
+
+@pytest.mark.parametrize(
+    ("sf", "os_", "zp", "n_syms"),
+    [
+        # bins = 2^sf * zp > 32768: overflows an int16 argmax index (the
+        # stock argmax_fs regression); decision must be full-precision.
+        (12, 2, 10, 12),
+        (14, 2, 10, 12),
+    ],
+)
+def test_css_roundtrip_wide_fold_bins(
+    sf: int, os_: int, zp: int, n_syms: int, tmp_path: Path
+) -> None:
+    ensure_worker_warm()
+    bits = np.random.default_rng(1).integers(0, 2, sf * n_syms).astype(np.uint8)
+    bp = write_bits(tmp_path / "in.bits", bits)
+    op = tmp_path / "out.bits"
+    be = GnuRadioBackend()
+    result = be.run_pipeline(_bits_to_bits_pipeline(bp, op, sf=sf, os=os_, zp=zp))
+    assert result.status == "ok", f"pipeline failed: {result}"
+    out = read_bits(op)
+    assert len(out) == len(bits)
+    assert np.array_equal(out, bits)
 
 
 def _full_chain_pipeline(
