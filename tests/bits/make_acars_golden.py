@@ -3,10 +3,10 @@
 JSON skeleton to fill from acarsdec's output. Throwaway numpy — deliberately not
 Marconi code, so the golden is independent of the system under test.
 
-Un-wired probe scaffolding for the deferred real-off-air ACARS proof (tracker
-issues 22 coherent-MSK-demod and 23 real-off-air-proof); not collected by pytest,
-no importer. The frozen golden it produces is the external oracle a future
-tests/bits/test_acars_offair.py will match once the phy MSK gap is closed.
+Not collected by pytest, no importer — run by hand to regenerate the golden.
+The frozen golden it produces is the external oracle that
+tests/bits/test_acars_offair.py matches (the real off-air ACARS proof, tracker
+issues 22/23).
 """
 
 from __future__ import annotations
