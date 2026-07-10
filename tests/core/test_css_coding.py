@@ -1,6 +1,6 @@
 from phy._css_lora import PARITY_MASKS
 
-from marconi.phy.modulation.css import coding
+from marconi.core import coding
 
 # data_bits=4 (Hamming 4+cr,4) is LoRa's; supplied here, never in production.
 _DB = 4

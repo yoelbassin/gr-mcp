@@ -5,8 +5,8 @@ from typing import Any
 
 import numpy as np
 
+from marconi.core.coding import gray_decode, gray_encode
 from marconi.phy.backends.gnuradio.embedded.lifecycle import OutQueue, forecast_drain
-from marconi.phy.modulation.css.coding import gray_decode, gray_encode
 
 
 def _base_upchirp(sf: int, oversample: int) -> np.ndarray:

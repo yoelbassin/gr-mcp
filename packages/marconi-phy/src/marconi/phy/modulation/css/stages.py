@@ -6,12 +6,12 @@ from typing import Any
 from pydantic import StrictFloat, StrictInt, model_validator
 from pydantic_core import PydanticCustomError
 
+from marconi.core import coding
 from marconi.core.descriptor import Carrier, Descriptor
 from marconi.core.levels import Level
 from marconi.core.params import StageParams
 from marconi.core.stages import DuplexStage, RxStage, Stage
 from marconi.phy.compile_context import CompileContext
-from marconi.phy.modulation.css import coding
 
 _SF_MIN, _SF_MAX = 5, 14
 _OSR_MAX = 8

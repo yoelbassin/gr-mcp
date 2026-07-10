@@ -69,7 +69,7 @@ def test_no_protocol_name_in_production_source() -> None:
 def test_css_coding_carries_no_parity_table() -> None:
     # The Hamming parity matrices are the protocol's FEC definition; they must
     # arrive as a parameter, never as a module constant.
-    coding = _PKGS / "marconi-phy/src/marconi/phy/modulation/css/coding.py"
+    coding = _PKGS / "marconi-core/src/marconi/core/coding.py"
     src = coding.read_text()
     assert "HAMMING_PARITY" not in src
     # no literal list-of-lists (a parity matrix) baked in
@@ -81,7 +81,7 @@ def test_frame_length_is_parameterized_not_datasheet() -> None:
     # implementation with the Semtech magic numbers inlined would not.
     import inspect
 
-    from marconi.phy.modulation.css import coding
+    from marconi.core import coding
 
     sig = inspect.signature(coding.css_explicit_frame_len)
     for needed in ("data_bits", "crc_bytes", "header_nibbles"):

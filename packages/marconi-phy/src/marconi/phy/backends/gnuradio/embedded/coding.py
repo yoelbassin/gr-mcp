@@ -4,8 +4,8 @@ from typing import Any
 
 import numpy as np
 
+from marconi.core import coding
 from marconi.phy.backends.gnuradio.embedded.lifecycle import OutQueue, forecast_drain
-from marconi.phy.modulation.css import coding
 
 
 def make_css_explicit_decode(
