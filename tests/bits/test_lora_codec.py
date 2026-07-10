@@ -28,9 +28,13 @@ _WHITEN = (
 #   cd /Users/joel/Clones/gr-mcp-rebuild
 #   .venv/bin/python -c "
 #     import sys; sys.path.insert(0, 'tests')
-#     from phy.test_css_explicit_decode import _run_block, _SF11_SYMBOLS
-#     bits = _run_block(_SF11_SYMBOLS); print(len(bits)); print(list(bits))"
-# Output: 2068 bits (4 carry nibbles + 513 payload-FEC nibbles).
+#     from bits.test_css_explicit_decode import _run, _SF11_SYMBOLS
+#     bits = _run(_SF11_SYMBOLS); print(len(bits)); print(list(bits))"
+# Output: 2056 bits (255-byte whitened payload + 2-byte CRC field, no trailing
+# FEC-pad — css_explicit_decode_rx trims exactly to the header-declared frame
+# length). The 12 bits below past index 2055 are inert legacy padding kept
+# from the pre-migration decoder; the codec's segment/fixed_frame steps
+# (frame_body_len=2056) never touch them.
 # The first 2040 bits are the 255-byte whitened LoRa payload; bits 2040..2055
 # are the 2-byte CRC field stored in unwhitened form in the bit stream.
 _GOLDEN_BITS: list[int] = [

@@ -94,6 +94,7 @@ def test_frame_length_is_parameterized_not_datasheet() -> None:
         "marconi-phy/src/marconi/phy/backends/gnuradio/embedded/chirp.py",
         "marconi-bits/src/marconi/bits/symbols.py",
         "marconi-bits/src/marconi/bits/stages/symbol_ops.py",
+        "marconi-core/src/marconi/core/coding.py",
     ],
 )
 def test_no_inline_sfd_or_demap_constants(path: str) -> None:

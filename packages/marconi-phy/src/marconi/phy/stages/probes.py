@@ -16,8 +16,7 @@ class _BurstProbeParams(StageParams):
 class BurstProbe(RxStage[CompileContext]):
     """Passthrough probe recording each upstream "burst" tag's symbol offset
     into run diagnostics ({"bursts": [...]}) — burst starts for an offline
-    consumer, since stream tags don't survive a file sink. SYMBOLS->SYMBOLS,
-    rate unchanged."""
+    consumer, since stream tags don't survive a file sink."""
 
     name = "burst_probe"
     from_level = Level.SYMBOLS

@@ -1,5 +1,5 @@
 import numpy as np
-from phy._css_lora import HEADER as _HEADER  # noqa: E402  (LoRa constants in tests)
+from phy._css_lora import HEADER as _HEADER
 
 from marconi.bits.carriers import RxCarrier
 from marconi.bits.symbols import css_explicit_decode_rx

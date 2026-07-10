@@ -699,9 +699,10 @@ def block_code_rx(
         raise ValueError("block_code must run before any frame seeder")
     # Codeword basis is LSB-first: stream bit j of a stride is codeword bit j,
     # so parity_masks and the emitted data bits are LSB-first too. The CSS
-    # embedded decoder assembles the same block_fec_decode input MSB-first
-    # (embedded/coding.py); re-expressing that path on this stage must reconcile
-    # the basis (supply masks LSB-first, or reverse each stride).
+    # explicit decoder assembles the same block_fec_decode input MSB-first
+    # (bits/symbols.py, _fec_nibbles); re-expressing that path on this stage
+    # must reconcile the basis (supply masks LSB-first, or reverse each
+    # stride).
     n_parity = code_bits - data_bits
     do_correct = can_correct(n_parity, data_bits) if correct is None else correct
     bits = np.asarray(c.bits, np.uint8)

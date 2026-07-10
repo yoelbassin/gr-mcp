@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 
@@ -40,11 +40,12 @@ def parse_bitstream(
             else "a Symbolstream was given but this codec starts at BITS"
         )
         raise SpecValidationError([ValidationIssue(message=msg)], kind="codec")
-    if isinstance(bitstream, Symbolstream):
+    if is_symbols:
+        symbolstream = cast(Symbolstream, bitstream)
         carrier = RxCarrier(
             bits=np.zeros(0, np.uint8),
-            symbols=read_symbols(bitstream.path),
-            marks=tuple(int(m) for m in bitstream.marks),
+            symbols=read_symbols(symbolstream.path),
+            marks=tuple(int(m) for m in symbolstream.marks),
         )
     elif is_soft:
         carrier = RxCarrier(bits=np.zeros(0, np.uint8), llrs=read_llrs(bitstream.path))

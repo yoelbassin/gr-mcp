@@ -28,7 +28,7 @@ _EMBEDDED = (
 )
 
 
-def test_final_frame_larger_than_output_window_drains_at_eof() -> None:
+def test_backlog_larger_than_output_window_drains_across_small_windows() -> None:
     """A backlog built from one large input push (far more pending output
     than fits in any single output window) must fully emerge across MANY
     SMALL output-window calls — the drain rides on forecast announcing

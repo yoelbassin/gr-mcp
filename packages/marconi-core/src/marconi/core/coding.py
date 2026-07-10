@@ -1,5 +1,7 @@
-"""Generic linear block-code primitives — pure bit math, no GR, no DSP. Every
-protocol-specific value (parity masks, data width) is caller-supplied."""
+"""Generic block-code and CSS-structure primitives — pure bit math, no GR, no
+DSP: linear block-code encode/decode, symbol demap, diagonal-interleave
+permutation, and explicit-header frame-length algebra. Every protocol-specific
+value (parity masks, data width, SF, header geometry) is caller-supplied."""
 
 from __future__ import annotations
 
