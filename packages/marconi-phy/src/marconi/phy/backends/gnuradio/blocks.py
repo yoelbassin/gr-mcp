@@ -20,6 +20,7 @@ from marconi.phy.backends.gnuradio.embedded.depuncture import make_depuncture
 from marconi.phy.backends.gnuradio.embedded.msk import make_msk_demod
 from marconi.phy.backends.gnuradio.embedded.ofdm import make_ofdm_frame_sync
 from marconi.phy.backends.gnuradio.embedded.preamble import make_sym_strip, sym_prefix
+from marconi.phy.backends.gnuradio.embedded.probe import make_burst_probe
 from marconi.phy.backends.gnuradio.embedded.trellis_fec import make_trellis_viterbi
 
 Params = dict[str, ParamValue]
@@ -394,6 +395,7 @@ GR_BLOCKS: dict[str, Callable[[_GrCtx, Params], Any]] = {
     "keep_m_in_n_b": lambda c, p: c.blocks.keep_m_in_n(
         c.gr.sizeof_char, _as_int(p["m"]), _as_int(p["n"]), 0
     ),
+    "burst_probe": lambda c, p: make_burst_probe(c.gr),
 }
 
 

@@ -73,12 +73,15 @@ def _arm_crash_trampoline(tb: Any, crashes: list[str]) -> None:
             blk.forecast = _trampolined_forecast(blk.forecast, tb, crashes)
 
 
-def _harvest_diagnostics(tb: Any) -> dict[str, dict[str, int]]:
-    out: dict[str, dict[str, int]] = {}
+def _harvest_diagnostics(tb: Any) -> dict[str, dict[str, int | list[int]]]:
+    out: dict[str, dict[str, int | list[int]]] = {}
     for bid, blk in getattr(tb, "_py_instances", {}).items():
         diag = getattr(blk, "diagnostics", None)
         if isinstance(diag, dict) and diag:
-            out[str(bid)] = {str(k): int(v) for k, v in diag.items()}
+            out[str(bid)] = {
+                str(k): [int(m) for m in v] if isinstance(v, list) else int(v)
+                for k, v in diag.items()
+            }
     return out
 
 

@@ -12,6 +12,7 @@ from marconi.phy.modulation.qam.stages import QAM_STAGES
 from marconi.phy.stages.acquisition import ACQUISITION_STAGES
 from marconi.phy.stages.conditioning import CONDITIONING_STAGES
 from marconi.phy.stages.general import GENERAL_STAGES
+from marconi.phy.stages.probes import PROBE_STAGES
 
 # Each entry is a tuple of stage CLASSES; the registry instantiates fresh per call
 # (no module-level mutable shared state). Family verticals append here.
@@ -26,6 +27,7 @@ _GROUPS: tuple[tuple[type[Stage[CompileContext]], ...], ...] = (
     CSS_STAGES,
     OFDM_STAGES,
     CODING_STAGES,
+    PROBE_STAGES,
 )
 
 
