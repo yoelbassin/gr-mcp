@@ -47,3 +47,10 @@ def test_explicit_params_sf_too_high_raises():
 def test_explicit_params_header_cr_absent_from_parity_table_raises():
     with pytest.raises(ValidationError):
         _ExplicitParams.model_validate({**_PARAMS, "header_cr": 5})
+
+
+def test_explicit_params_reject_sf_reduction_ge_sf_when_reduced():
+    with pytest.raises(ValidationError):
+        _ExplicitParams.model_validate(
+            {**_PARAMS, "sf": 7, "reduced": True, "sf_reduction": 7}
+        )

@@ -107,21 +107,6 @@ def test_css_params_bound_oversample() -> None:
         assert (not issues) is expect_ok, f"oversample={osr}: {issues}"
 
 
-def test_explicit_params_reject_sf_reduction_ge_sf_when_reduced() -> None:
-    from phy._css_lora import HEADER
-
-    from marconi.phy.modulation.css.stages import CssExplicitDecode
-
-    bad: list = []
-    validate_params(
-        "css_explicit_decode[0]",
-        CssExplicitDecode().params_model,
-        {**HEADER, "sf": 7, "reduced": True, "sf_reduction": 7},
-        bad,
-    )
-    assert bad, "sf_reduction >= sf with reduced should be rejected"
-
-
 # ─── Direction support ────────────────────────────────────────────────────────
 
 

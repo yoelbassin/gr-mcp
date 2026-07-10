@@ -1,7 +1,7 @@
-"""Real off-air LoRa SF11 (IQ_2), end-to-end through phy -> bits, CRC as the
-oracle. The slice holds TWO complete frames (~3.9 s and ~8.9 s into the
-capture); both must decode CRC-valid in one run — chirp_sync re-arms per
-preamble and css_explicit_decode loops per burst tag (issue 03)."""
+"""Real off-air LoRa SF11 (IQ_2), end-to-end phy -> bits, CRC as the oracle.
+The slice holds TWO complete frames; both must decode CRC-valid in one run —
+chirp_sync re-arms per preamble, burst_probe surfaces both burst marks, and
+the bits-layer css_explicit_decode carves one frame per mark (issue 03)."""
 
 from __future__ import annotations
 
@@ -11,12 +11,13 @@ import pytest
 from bits.test_lora_codec import _codec
 from phy._css_lora import HEADER as _LORA_HEADER
 
+from marconi.bits.models import CodecSpec, CodecStep
 from marconi.bits.registry import registry
 from marconi.bits.seam import parse_bitstream
-from marconi.core.bitfile import read_bits
+from marconi.core.bitfile import read_symbols
 from marconi.core.descriptor import Descriptor
 from marconi.core.levels import Level
-from marconi.core.models import Bitstream
+from marconi.core.models import Symbolstream
 from marconi.core.params import ParamValue
 from marconi.phy.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
 from marconi.phy.compiler import compile_modem
@@ -49,8 +50,16 @@ def _modem() -> ModemSpec:
             ModemStep(
                 conv="dechirp", params={"sf": 11, "oversample": 2, "zero_pad": 10}
             ),
-            ModemStep(conv="css_explicit_decode", params=_HEADER),
+            ModemStep(conv="burst_probe", params={}),
         ],
+    )
+
+
+def _lora_codec() -> CodecSpec:
+    return CodecSpec(
+        name="lora_sf11",
+        path=[CodecStep(conv="css_explicit_decode", params=dict(_HEADER))]
+        + _codec().path,
     )
 
 
@@ -59,7 +68,7 @@ def _modem() -> ModemSpec:
 )
 def test_iq2_decodes_crc_valid_rf_fingerpring(tmp_path: Path) -> None:
     ensure_worker_warm()
-    snk = tmp_path / "lora_bits.u8"
+    snk = tmp_path / "lora_syms.i16"
     pipe = compile_modem(
         _modem(),
         stage_registry(),
@@ -71,9 +80,17 @@ def test_iq2_decodes_crc_valid_rf_fingerpring(tmp_path: Path) -> None:
     )
     r = GnuRadioBackend().run_pipeline(pipe, timeout=180.0)
     assert r.status == "ok", r
-    n = int(read_bits(snk).size)
+    marks: list[int] = []
+    for d in r.diagnostics.values():
+        b = d.get("bursts")
+        if isinstance(b, list):
+            marks = [int(m) for m in b]
+    assert len(marks) >= 2, r.diagnostics
+    n = int(read_symbols(snk).size)
     res = parse_bitstream(
-        Bitstream(path=snk, num_bits=n, source_capture=_SLICE), _codec(), registry()
+        Symbolstream(path=snk, num_symbols=n, marks=marks, source_capture=_SLICE),
+        _lora_codec(),
+        registry(),
     )
     assert res.num_crc_ok >= 2, f"expected both frames CRC-valid, got {res.num_crc_ok}"
     for f in res.frames[:2]:

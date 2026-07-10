@@ -14,7 +14,6 @@ from marconi.phy.backends.gnuradio.embedded.chirp import (
     make_css_demap,
     make_css_map,
 )
-from marconi.phy.backends.gnuradio.embedded.coding import make_css_explicit_decode
 from marconi.phy.backends.gnuradio.embedded.decision import make_peak_decision
 from marconi.phy.backends.gnuradio.embedded.depuncture import make_depuncture
 from marconi.phy.backends.gnuradio.embedded.msk import make_msk_demod
@@ -321,26 +320,6 @@ GR_BLOCKS: dict[str, Callable[[_GrCtx, Params], Any]] = {
     ),
     "css_map": lambda c, p: make_css_map(c.gr, _as_int(p["sf"])),
     "css_demap": lambda c, p: make_css_demap(c.gr, _as_int(p["sf"])),
-    "css_explicit_decode": lambda c, p: make_css_explicit_decode(
-        c.gr,
-        sf=_as_int(p["sf"]),
-        header_cr=_as_int(p["header_cr"]),
-        reduced=bool(p["reduced"]),
-        header_symbols=_as_int(p["header_symbols"]),
-        header_nibbles=_as_int(p["header_nibbles"]),
-        sf_reduction=_as_int(p["sf_reduction"]),
-        header_data_bits=_as_int(p["header_data_bits"]),
-        header_parity=_as_int_list(p["header_parity"]),
-        field_payload_len=_as_int_list(p["field_payload_len"]),
-        field_cr=_as_int_list(p["field_cr"]),
-        field_has_crc=_as_int_list(p["field_has_crc"]),
-        field_parity=_as_int_list(p["field_parity"]),
-        data_bits=_as_int(p["data_bits"]),
-        crc_bytes=_as_int(p["crc_bytes"]),
-        parity_masks=_as_int_list(p["parity_masks"]),
-        reduced_offset=_as_int(p["reduced_offset"]),
-        full_offset=_as_int(p["full_offset"]),
-    ),
     "ofdm_frame_sync": lambda c, p: make_ofdm_frame_sync(
         c.gr,
         fft_len=_as_int(p["fft_len"]),

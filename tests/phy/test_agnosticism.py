@@ -91,8 +91,9 @@ def test_frame_length_is_parameterized_not_datasheet() -> None:
 @pytest.mark.parametrize(
     "path",
     [
-        "marconi-phy/src/marconi/phy/backends/gnuradio/embedded/coding.py",
         "marconi-phy/src/marconi/phy/backends/gnuradio/embedded/chirp.py",
+        "marconi-bits/src/marconi/bits/symbols.py",
+        "marconi-bits/src/marconi/bits/stages/symbol_ops.py",
     ],
 )
 def test_no_inline_sfd_or_demap_constants(path: str) -> None:

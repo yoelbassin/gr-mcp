@@ -1,7 +1,6 @@
 """The shared embedded-block lifecycle (issue 16): one forecast/EOF/drain
-discipline in lifecycle.py, and its two load-bearing properties — a final
-frame larger than one output window fully drains at EOF, and a slow consumer
-bounds chirp_sync's memory via backpressure instead of unbounded buffering."""
+discipline in lifecycle.py, load-bearing for a slow consumer bounding
+chirp_sync's memory via backpressure instead of unbounded buffering."""
 
 from __future__ import annotations
 
@@ -9,11 +8,9 @@ import re
 from pathlib import Path
 
 import numpy as np
-from phy._fakegr import FAKE_GR, drive
-from phy.test_css_explicit_decode import _HEADER, _SF11_SYMBOLS
+from phy._fakegr import FAKE_GR
 
 from marconi.phy.backends.gnuradio.embedded.chirp import chirp_prefix, make_chirp_sync
-from marconi.phy.backends.gnuradio.embedded.coding import make_css_explicit_decode
 
 _EMBEDDED = (
     Path(__file__).resolve().parents[2]
@@ -26,29 +23,6 @@ _EMBEDDED = (
     / "gnuradio"
     / "embedded"
 )
-
-
-def test_final_frame_larger_than_output_window_drains_at_eof() -> None:
-    """css_explicit_decode's decoded frame (2056 bits) must fully emerge even
-    when every granted output window is far smaller — the EOF flush rides on
-    forecast announcing drainability, never on more input arriving."""
-    blk = make_css_explicit_decode(FAKE_GR, **_HEADER)
-    big_out = drive(
-        make_css_explicit_decode(FAKE_GR, **_HEADER),
-        np.asarray(_SF11_SYMBOLS, np.int16),
-        chunk=1 << 16,
-        out_dtype=np.uint8,
-    )
-    tiny_out = drive(
-        blk,
-        np.asarray(_SF11_SYMBOLS, np.int16),
-        chunk=37,
-        out_len=64,  # 33 windows needed for one frame
-        out_dtype=np.uint8,
-    )
-    assert big_out.size == 2056
-    assert np.array_equal(tiny_out, big_out)
-    assert blk.diagnostics["frames_decoded"] == 1
 
 
 def test_chirp_sync_memory_bounded_under_slow_consumer() -> None:
@@ -88,7 +62,7 @@ def test_lifecycle_owned_by_shared_module() -> None:
     rather than a hand-rolled dialect. css_map/css_demap (fixed small-ratio
     converters) and sym_strip (streaming pass-through) are the documented
     exceptions with no pending state."""
-    users = {"chirp.py", "coding.py", "depuncture.py", "ofdm.py"}
+    users = {"chirp.py", "depuncture.py", "ofdm.py"}
     for name in users:
         src = (_EMBEDDED / name).read_text()
         assert "forecast_drain" in src, f"{name} does not use the shared forecast"
