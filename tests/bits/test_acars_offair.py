@@ -74,7 +74,7 @@ _PARITY_STRIP = [_bitrev8(c | ((1 ^ (bin(c).count("1") & 1)) << 7)) for c in ran
 # cosmetic renderings (dot-padded addr, DEL->'d' label, #CFB sublabel dropped from
 # text) are reconciled in the golden match below, not baked into the alphabet.
 _ASCII7 = "".join(chr(i) for i in range(128))
-_FIELDS: list = [
+_FIELDS: list[dict[str, object]] = [
     {"name": "mode", "bits": 7, "charset": _ASCII7, "char_bits": 7},
     {"name": "reg", "bits": 49, "charset": _ASCII7, "char_bits": 7},
     {"name": "ack", "bits": 7, "charset": _ASCII7, "char_bits": 7},

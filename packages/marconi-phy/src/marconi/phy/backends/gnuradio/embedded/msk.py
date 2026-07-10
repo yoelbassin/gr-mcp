@@ -82,7 +82,8 @@ def make_msk_demod(gr: Any, *, sps: float, loop_bw: float = 0.0038) -> Any:
     """Coherent MSK demod: rail de-rotation to OQPSK, matched integration over
     2T, alternating I/Q rail decisions with decision-directed carrier tracking.
     Measured several dB more sensitive than quadrature_demod+Gardner on weak
-    captures (issue 22); one soft float per symbol, sign = bit."""
+    captures (issue 22, guarded by tests/phy/test_msk_snr_margin.py); one soft
+    float per symbol, sign = bit."""
 
     flen = int(2.0 * sps) + 1
     taps = _polyphase_taps(sps, flen)
