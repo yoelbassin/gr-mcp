@@ -136,7 +136,7 @@ def css_explicit_decode_rx(
             frame_len, payload_cr, declared, carry = hdr
             need = start + header_symbols + frame_len
             if need > len(syms):
-                break
+                continue
             out.extend(_frame_bits(start, frame_len, payload_cr, declared, carry))
             nxt = next((m for m in marks[i + 1 :] if m > start), None)
             pos = need if nxt is None or nxt >= need else nxt

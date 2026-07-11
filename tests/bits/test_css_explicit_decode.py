@@ -1,8 +1,10 @@
 import numpy as np
 from phy._css_lora import HEADER as _HEADER
+from phy._css_lora import PARITY_MASKS as _PARITY_MASKS
 
 from marconi.bits.carriers import RxCarrier
 from marconi.bits.symbols import css_explicit_decode_rx
+from marconi.core import coding
 
 # IQ_2 SF11/BW125/CR4-5/LDRO explicit-header frame — raw dechirp argmax bins
 # (8 header + 285 payload), known-good (V1 tests/phy/test_header_demux_stage.py).
@@ -83,6 +85,64 @@ def test_explicit_decode_loops_back_to_back_frames():
     assert len(two) == 2 * len(one)
     assert _assemble(list(two[: len(one)])) == _assemble(list(one))
     assert _assemble(list(two[len(one) :])) == _assemble(list(one))
+
+
+def _encode_header(payload_len, cr, has_crc):
+    """Synthesize a parity-valid explicit header (carry nibbles zeroed) by
+    running the decoder's coding primitives in reverse."""
+    sf, sf_red = _HEADER["sf"], _HEADER["sf_reduction"]
+    sf_app = sf - sf_red
+    header_cr = _HEADER["header_cr"]
+    cw_len = header_cr + _HEADER["data_bits"]
+    data_int = (payload_len << 4) | (cr << 1) | has_crc
+    masks = _HEADER["header_parity"]
+    parity = 0
+    for i, m in enumerate(masks):
+        parity |= (bin(m & data_int).count("1") & 1) << (len(masks) - 1 - i)
+    hbits = [(data_int >> (11 - i)) & 1 for i in range(12)] + [0, 0, 0]
+    hbits += [(parity >> (4 - i)) & 1 for i in range(5)]
+    nibbles = [
+        (hbits[4 * i] << 3)
+        | (hbits[4 * i + 1] << 2)
+        | (hbits[4 * i + 2] << 1)
+        | hbits[4 * i + 3]
+        for i in range(5)
+    ] + [0] * (sf_app - 5)
+    fec = coding.parity_for_cr(_PARITY_MASKS, header_cr)
+    perm = coding.diag_deinterleave_perm(sf_app, cw_len)
+    deint = []
+    for nib in nibbles:
+        cw = nib
+        for p, m in enumerate(fec):
+            cw |= (bin(m & nib).count("1") & 1) << (4 + p)
+        deint.extend(((cw >> (cw_len - 1 - k)) & 1) for k in range(cw_len))
+    chunk = [0] * (sf_app * cw_len)
+    for i, src in enumerate(perm):
+        chunk[src] = deint[i]
+    syms = []
+    for s in range(_HEADER["header_symbols"]):
+        gv = 0
+        for j in range(sf_app):
+            gv = (gv << 1) | chunk[s * sf_app + j]
+        syms.append((coding.gray_decode(gv) * (1 << sf_red)) % (1 << sf))
+    return syms
+
+
+def test_explicit_decode_oversize_length_does_not_swallow_later_marks():
+    """A parity-valid header whose declared frame overruns the symbol array
+    must drop only its own mark — the pre-fix carve broke out of the marks
+    loop there, swallowing every later real burst (the module docstring's
+    'a corrupt length can never swallow a real burst')."""
+    one = _run(_SF11_SYMBOLS)
+    # fixture guard: the synthetic header must be parity-valid and decode,
+    # else the oversize case below would pass via the corrupt-header skip
+    # even without the fix (first 2 bytes differ: carry nibbles are zeroed)
+    swapped = _run(_encode_header(255, 1, 1) + _SF11_SYMBOLS[8:], marks=(0,))
+    assert _assemble(list(swapped))[2:] == _assemble(list(one))[2:]
+
+    oversize = _encode_header(255, 4, 1)
+    bits = _run(oversize + [0] * 60 + _SF11_SYMBOLS, marks=(0, len(oversize) + 60))
+    assert list(bits) == list(one)
 
 
 def test_explicit_decode_corrupt_header_skips_to_next_mark():
