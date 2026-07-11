@@ -134,7 +134,10 @@ def _captured_text(capture_path: str | None) -> str:
 def _flag_scheduler_abort(result: RunResult, captured: str) -> RunResult:
     """A scheduler abort (e.g. a block demanding more items than a stream
     buffer holds) lets tb.run() return normally with an empty sink; the only
-    trace is the block_executor message on the worker's stdio."""
+    trace is the block_executor message on the worker's stdio. Best-effort by
+    measurement, not contract: under load GR sometimes never prints the
+    message at all (probed 2026-07: 9/20 immediate-exit runs, 2/20 even after
+    a 1s settle), so ok + an empty sink is not proven-clean."""
     if result.status != "ok":
         return result
     hits = [ln.strip() for ln in captured.splitlines() if _SCHED_ABORT.search(ln)]

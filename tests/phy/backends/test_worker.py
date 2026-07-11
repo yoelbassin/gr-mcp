@@ -142,34 +142,56 @@ def test_embedded_raise_reports_error_and_keeps_sink(
     assert str(sink) in res.artifacts
 
 
-def test_scheduler_abort_flags_error(capfd: Any) -> None:
+def test_scheduler_abort_flags_error() -> None:
     """A block demanding more items than the stream buffer holds aborts the
     scheduler while tb.run() returns normally (probed, issue 01); the worker
-    must convert the captured block_executor message into status=error."""
-    from gnuradio import blocks as gb
-    from gnuradio import gr
+    must convert the captured block_executor message into status=error.
 
-    class _Greedy(gr.basic_block):
-        def __init__(self) -> None:
-            gr.basic_block.__init__(
-                self, name="greedy", in_sig=[np.complex64], out_sig=[np.complex64]
-            )
+    Statistical gate: the abort MESSAGE is racy inside GR itself — probed
+    2026-07 under load, 9/20 processes print nothing when exiting right after
+    tb.run(), and 2/20 still nothing after a 1s settle — so the mechanism
+    must fire in one of eight isolated attempts, and the detector it feeds is
+    best-effort by construction (see _flag_scheduler_abort)."""
+    code = textwrap.dedent(
+        """
+        import time
+        import numpy as np
+        from gnuradio import blocks as gb
+        from gnuradio import gr
 
-        def forecast(self, noutput_items: int, ninputs: int) -> list:
-            return [1 << 20] * ninputs
+        class _Greedy(gr.basic_block):
+            def __init__(self):
+                gr.basic_block.__init__(
+                    self, name="greedy",
+                    in_sig=[np.complex64], out_sig=[np.complex64],
+                )
 
-        def general_work(self, input_items: Any, output_items: Any) -> int:
-            self.consume(0, len(input_items[0]))
-            return 0
+            def forecast(self, noutput_items, ninputs):
+                return [1 << 20] * ninputs
 
-    tb = gr.top_block("greedy")
-    greedy = _Greedy()
-    snk = gb.vector_sink_c()
-    tb.connect(gb.vector_source_c([0j] * 4096, False), greedy)
-    tb.connect(greedy, snk)
-    tb.run()
-    text = "".join(capfd.readouterr())
-    assert "block_executor" in text, "expected a scheduler abort on stdio"
+            def general_work(self, input_items, output_items):
+                self.consume(0, len(input_items[0]))
+                return 0
+
+        tb = gr.top_block("greedy")
+        greedy = _Greedy()
+        snk = gb.vector_sink_c()
+        tb.connect(gb.vector_source_c([0j] * 4096, False), greedy)
+        tb.connect(greedy, snk)
+        tb.run()
+        time.sleep(0.5)
+        """
+    )
+    text = ""
+    for _ in range(8):
+        out = subprocess.run(
+            [sys.executable, "-c", code], capture_output=True, text=True, timeout=120
+        )
+        assert out.returncode == 0, out.stderr
+        text = out.stdout + out.stderr
+        if "block_executor" in text:
+            break
+    assert "block_executor" in text, "no scheduler abort on stdio in 8 attempts"
     flagged = worker_mod._flag_scheduler_abort(RunResult(status="ok"), text)
     assert flagged.status == "error"
     assert "scheduler abort" in (flagged.error or "")
