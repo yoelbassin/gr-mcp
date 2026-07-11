@@ -8,7 +8,7 @@ from pydantic import BaseModel, ValidationError
 
 from marconi.core.descriptor import Carrier, Descriptor
 from marconi.core.errors import register_error
-from marconi.core.levels import Level, adjacent
+from marconi.core.levels import Level
 from marconi.core.models import ValidationIssue
 from marconi.core.params import StageParams
 
@@ -171,12 +171,14 @@ def validate_path(
                     f"but {conv.name} starts at {conv.from_level.value}",
                 )
             )
-        elif idx > 0 and not adjacent(prev_level, conv.from_level):
+        elif idx > 0 and conv.from_level != prev_level:
             issues.append(
                 ValidationIssue(
                     block_id=sid,
-                    message=f"{conv.name} input level {conv.from_level.value} is not "
-                    f"adjacent to the previous level {prev_level.value}",
+                    message=f"{conv.name} input level {conv.from_level.value} does "
+                    f"not match the previous stage's output level "
+                    f"{prev_level.value}; rung moves happen inside a stage, so "
+                    f"boundary levels must be equal",
                 )
             )
         prev_level = conv.to_level

@@ -77,6 +77,21 @@ class Sink(RxStage["_FakeBuilder"]):
     def emit_rx(self, b: "_FakeBuilder", p: Mapping[str, Any]) -> None: ...
 
 
+class Fec(DuplexStage["_FakeBuilder"]):
+    name = "fec"
+    from_level = Level.BITS
+    to_level = Level.BITS
+    family = "coding"
+
+    class Params(StageParams):
+        pass
+
+    params_model = Params
+
+    def emit_rx(self, b: "_FakeBuilder", p: Mapping[str, Any]) -> None: ...
+    def emit_tx(self, b: "_FakeBuilder", p: Mapping[str, Any]) -> None: ...
+
+
 class _Step:
     def __init__(self, conv: str, **params: object) -> None:
         self.conv = conv
@@ -117,6 +132,21 @@ def test_nonadjacent_path_is_flagged() -> None:
     assert any(
         "not adjacent" in i.message or "must start at" in i.message for i in issues
     )
+
+
+def test_skipped_conversion_between_stages_is_flagged() -> None:
+    """demod ends at SYMBOLS, fec starts at BITS: the missing SYMBOLS->BITS
+    stage must fail validation. The old rung-successor allowance let this
+    compile — soft symbols punning as soft bits decoded garbage."""
+    issues: list[ValidationIssue] = []
+    validate_path(
+        [_Step("demod", sps=4), _Step("fec")],
+        {**_registry(), "fec": Fec()},
+        Level.IQ,
+        "modem",
+        issues,
+    )
+    assert any("does not match" in i.message for i in issues), issues
 
 
 def test_unknown_converter_is_flagged() -> None:
