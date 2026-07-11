@@ -19,7 +19,6 @@ class _Frame:
 class RxCarrier:
     bits: np.ndarray
     frames: list[_Frame] = field(default_factory=list)
-    llrs: np.ndarray | None = None
     symbols: np.ndarray | None = None
     marks: tuple[int, ...] = ()
 

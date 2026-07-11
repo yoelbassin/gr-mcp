@@ -10,7 +10,7 @@ from marconi.bits.compiler import compile_codec
 from marconi.bits.models import CodecSpec, DecodeResult, FrameResult
 from marconi.bits.program import run_program
 from marconi.bits.validate import validate_codec
-from marconi.core.bitfile import read_bits, read_llrs, read_symbols
+from marconi.core.bitfile import read_bits, read_symbols
 from marconi.core.models import Bitstream, SoftBitstream, Symbolstream, ValidationIssue
 from marconi.core.stages import SpecValidationError, Stage
 
@@ -20,18 +20,20 @@ def parse_bitstream(
     codec: CodecSpec,
     registry: Mapping[str, Stage[Any]],
 ) -> DecodeResult:
+    if isinstance(bitstream, SoftBitstream):
+        raise SpecValidationError(
+            [
+                ValidationIssue(
+                    message="no bits stage consumes soft input; harden the LLRs"
+                    " into a Bitstream first (marconi.core.bitfile.harden)"
+                )
+            ],
+            kind="codec",
+        )
     issues = validate_codec(codec, registry)
     if issues:
         raise SpecValidationError(issues, kind="codec")
     program = compile_codec(codec, registry, "rx")
-    is_soft = isinstance(bitstream, SoftBitstream)
-    if is_soft != program.requires_soft_input:
-        msg = (
-            "codec expects soft input (LLRs) but a hard Bitstream was given"
-            if program.requires_soft_input
-            else "a SoftBitstream was given but this codec expects hard bits"
-        )
-        raise SpecValidationError([ValidationIssue(message=msg)], kind="codec")
     is_symbols = isinstance(bitstream, Symbolstream)
     if is_symbols != program.requires_symbol_input:
         msg = (
@@ -47,8 +49,6 @@ def parse_bitstream(
             symbols=read_symbols(symbolstream.path),
             marks=tuple(int(m) for m in symbolstream.marks),
         )
-    elif is_soft:
-        carrier = RxCarrier(bits=np.zeros(0, np.uint8), llrs=read_llrs(bitstream.path))
     else:
         carrier = RxCarrier(bits=read_bits(bitstream.path))
     out = run_program(program, carrier)

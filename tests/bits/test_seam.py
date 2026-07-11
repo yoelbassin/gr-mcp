@@ -153,12 +153,16 @@ def test_compile_codec_rejects_bad_params_with_named_field() -> None:
     assert "bits" in str(e.value)
 
 
-def test_soft_bitstream_rejected(tmp_path: Path) -> None:
+def test_soft_bitstream_rejected_with_harden_pointer(tmp_path: Path) -> None:
+    """No bits stage consumes soft input, so the seam must say that and point
+    at the hard-bits bridge — not claim 'this codec expects hard bits' as if
+    some other codec could take LLRs."""
     p = tmp_path / "l.f32"
     write_llrs(p, np.array([1.0, -1.0], dtype=np.float32))
-    with pytest.raises(SpecValidationError):
+    with pytest.raises(SpecValidationError) as e:
         parse_bitstream(
             SoftBitstream(path=p, num_bits=2),
             CodecSpec(name="ais", path=AIS_PATH),
             registry(),
         )
+    assert "harden" in str(e.value)
