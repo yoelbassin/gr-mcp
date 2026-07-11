@@ -38,6 +38,22 @@ def validate_codec(
                     "self_slicing or slices_body)"
                 )
             )
+        self_slicing_seeder: str | None = None
+        for idx, step in enumerate(codec.path):
+            s = registry.get(step.conv)
+            if s is None:
+                continue
+            if s.seeds_frames:
+                self_slicing_seeder = s.name if s.self_slicing else None
+            elif s.slices_body and self_slicing_seeder is not None:
+                issues.append(
+                    ValidationIssue(
+                        block_id=f"{step.conv}[{idx}]",
+                        message=f"{s.name} slices frame bodies but "
+                        f"'{self_slicing_seeder}' already emits complete frames "
+                        "(self_slicing); there is no seeded region left to carve",
+                    )
+                )
         # parse is OPTIONAL: a deframe+integrity codec of an unknown protocol
         # (the reverse-engineering entry state) is a valid decode to frames.
         for idx, step in enumerate(codec.path):

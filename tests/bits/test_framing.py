@@ -20,6 +20,18 @@ from marconi.bits.framing import (
 )
 
 
+def test_hdlc_frame_start_is_a_raw_stream_offset() -> None:
+    """FrameResult.bit_offset maps a frame back to its position (and time) in
+    the capture — start must index the raw bit stream, not the synthetic
+    destuffed concatenation the pre-fix accumulator produced."""
+    payload = bytes([0x02, 0xAA, 0xBB])
+    framed = hdlc_deframe_tx(TxCarrier([payload]), bit_order="msb").items[0]
+    stream = np.concatenate([np.zeros(40, np.uint8), framed])
+    out = hdlc_deframe_rx(RxCarrier(bits=stream), bit_order="msb")
+    assert [f.payload for f in out.frames] == [payload]
+    assert out.frames[0].start == 48  # 40 noise bits + the 8-bit opening flag
+
+
 def test_differential_roundtrip() -> None:
     bits = np.array([1, 1, 0, 1, 0, 0, 1, 1, 1, 0, 1, 1, 1, 1, 1, 0], dtype=np.uint8)
     for invert in (False, True):

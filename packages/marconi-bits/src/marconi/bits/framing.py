@@ -487,7 +487,6 @@ def hdlc_deframe_rx(c: RxCarrier, *, bit_order: str = "msb") -> RxCarrier:
     bits = np.asarray(c.bits, dtype=np.uint8)
     flags = _find_flags(bits)
     frames: list[_Frame] = []
-    off = 0
     for a, b in zip(flags, flags[1:]):
         region = bits[a + 8 : b]
         if region.size == 0:
@@ -497,12 +496,11 @@ def hdlc_deframe_rx(c: RxCarrier, *, bit_order: str = "msb") -> RxCarrier:
             continue
         frames.append(
             _Frame(
-                start=off,
-                cursor=off + content.size,
+                start=a + 8,
+                cursor=b,
                 payload=bits_to_bytes(content, bit_order),
             )
         )
-        off += content.size
     return RxCarrier(bits=bits, frames=frames)
 
 

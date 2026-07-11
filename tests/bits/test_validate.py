@@ -27,6 +27,24 @@ def test_segment_fixed_frame_codec_validates():
     assert not issues, issues
 
 
+def test_body_slicer_after_self_slicing_seeder_is_rejected():
+    """hdlc_deframe emits complete frames whose cursors index its destuffed
+    payload space, not the raw bit stream — a body slicer after it reads
+    noise as frame content. Must be rejected at validation, not decoded."""
+    for slicer in (
+        CodecStep(conv="fixed_frame", params={"payload_bits": 16}),
+        CodecStep(conv="length_frame", params={"length_bits": 8, "base_bytes": 0}),
+    ):
+        codec = CodecSpec(
+            name="c", path=[CodecStep(conv="hdlc_deframe", params={}), slicer]
+        )
+        issues = validate_codec(codec, registry())
+        assert any("complete frames" in i.message for i in issues), (
+            slicer.conv,
+            issues,
+        )
+
+
 def test_segment_rejects_zero_and_negative_frame_body_len():
     for bad in (0, -8):
         issues: list = []
