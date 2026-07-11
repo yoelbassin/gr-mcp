@@ -3,6 +3,9 @@ from __future__ import annotations
 import multiprocessing
 import os
 import tempfile
+import time
+from collections.abc import Callable
+from multiprocessing.connection import Connection
 from multiprocessing.context import BaseContext
 from pathlib import Path
 from typing import Any
@@ -81,17 +84,36 @@ def _resolve_result(
     )
 
 
-def _run_in_subprocess(payload_json: str, timeout: float) -> RunResult:
+def _receive_payload(recv: Connection, timeout: float) -> str | None:
+    """Drain the pipe before reaping the worker: a result past the OS pipe
+    buffer blocks the worker in send until the parent reads, so join-first
+    turns every large successful run into a timeout. A frame truncated by a
+    kill mid-send surfaces as OSError, not just EOFError."""
+    try:
+        if recv.poll(timeout):
+            return str(recv.recv())
+    except (EOFError, OSError):
+        pass
+    return None
+
+
+def _run_in_subprocess(
+    payload_json: str,
+    timeout: float,
+    target: Callable[[str, Connection, str], None] = run_pipeline_worker,
+) -> RunResult:
     recv, send = _CTX.Pipe(duplex=False)
     cap_fd, cap_path = tempfile.mkstemp(prefix="marconi-gr-", suffix=".log")
     os.close(cap_fd)
     try:
         proc = _CTX.Process(  # type: ignore[attr-defined]
-            target=run_pipeline_worker, args=(payload_json, send, cap_path)
+            target=target, args=(payload_json, send, cap_path)
         )
+        deadline = time.monotonic() + timeout
         proc.start()
         send.close()
-        proc.join(timeout)
+        payload = _receive_payload(recv, timeout)
+        proc.join(max(0.0, deadline - time.monotonic()))
         timed_out = proc.is_alive()
         if timed_out:
             proc.terminate()
@@ -99,14 +121,9 @@ def _run_in_subprocess(payload_json: str, timeout: float) -> RunResult:
             if proc.is_alive():
                 proc.kill()
                 proc.join()
-        payload: str | None = None
-        try:
-            if recv.poll():
-                payload = recv.recv()
-        except EOFError:
-            payload = None
-        finally:
-            recv.close()
+            if payload is None:
+                payload = _receive_payload(recv, 0.0)
+        recv.close()
         return _resolve_result(timed_out, payload, proc.exitcode, _read_tail(cap_path))
     finally:
         try:

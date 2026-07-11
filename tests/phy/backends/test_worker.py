@@ -2,6 +2,7 @@ import subprocess
 import sys
 import textwrap
 import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -214,6 +215,27 @@ def test_abnormal_worker_exit_is_error_with_cause() -> None:
     assert "exitcode" in (res.error or "")
     # the child's traceback was captured and attached, not discarded
     assert "ValidationError" in (res.error or "")
+
+
+def _bulky_result_worker(payload_json: str, conn: Any, capture_path: str) -> None:
+    marks = list(range(60_000))
+    result = RunResult(status="ok", diagnostics={"probe": {"marks": marks}})
+    conn.send(result.model_dump_json())
+    conn.close()
+
+
+def test_result_larger_than_pipe_buffer_is_not_a_timeout() -> None:
+    """A result past the OS pipe buffer blocks the worker in conn.send until
+    the parent drains it; the pre-fix join-before-recv waited out the whole
+    deadline, killed the finished worker, and reported timeout — then raised
+    an uncaught OSError off the truncated frame."""
+    ensure_worker_warm()
+    t0 = time.monotonic()
+    res = _run_in_subprocess("{}", timeout=15.0, target=_bulky_result_worker)
+    elapsed = time.monotonic() - t0
+    assert res.status == "ok"
+    assert res.diagnostics["probe"]["marks"] == list(range(60_000))
+    assert elapsed < 10.0, f"large result waited out the deadline ({elapsed:.1f}s)"
 
 
 def test_result_pipe_outranks_timeout_kill() -> None:
