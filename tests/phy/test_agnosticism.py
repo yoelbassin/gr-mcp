@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-_PKGS = Path(__file__).resolve().parents[2] / "packages"
+_SRC = Path(__file__).resolve().parents[2] / "src" / "marconi"
 
 # Tokens that name a specific protocol/vendor/capture. Word-boundaried and
 # case-insensitive. "hdlc" is NOT here — HDLC framing is a generic mechanism;
@@ -47,7 +47,7 @@ _ALLOWED = re.compile(r"hamming bound|gray|viterbi|trellis", re.IGNORECASE)
 def _src_files() -> list[Path]:
     files = [
         p
-        for p in _PKGS.rglob("*.py")
+        for p in _SRC.rglob("*.py")
         if "__pycache__" not in p.parts and "/tests/" not in str(p)
     ]
     assert files, "no package source found — path wrong?"
@@ -61,7 +61,7 @@ def test_no_protocol_name_in_production_source() -> None:
             stripped = _ALLOWED.sub("", line)
             m = _PATTERN.search(stripped)
             if m:
-                rel = path.relative_to(_PKGS)
+                rel = path.relative_to(_SRC)
                 offenders.append(f"{rel}:{lineno}: {m.group(0)!r} in {line.strip()!r}")
     assert not offenders, "protocol names in production:\n" + "\n".join(offenders)
 
@@ -69,7 +69,7 @@ def test_no_protocol_name_in_production_source() -> None:
 def test_css_coding_carries_no_parity_table() -> None:
     # The Hamming parity matrices are the protocol's FEC definition; they must
     # arrive as a parameter, never as a module constant.
-    coding = _PKGS / "marconi-core/src/marconi/core/coding.py"
+    coding = _SRC / "core/coding.py"
     src = coding.read_text()
     assert "HAMMING_PARITY" not in src
     # no literal list-of-lists (a parity matrix) baked in
@@ -91,15 +91,15 @@ def test_frame_length_is_parameterized_not_datasheet() -> None:
 @pytest.mark.parametrize(
     "path",
     [
-        "marconi-phy/src/marconi/phy/backends/gnuradio/embedded/chirp.py",
-        "marconi-bits/src/marconi/bits/symbols.py",
-        "marconi-bits/src/marconi/bits/stages/symbol_ops.py",
-        "marconi-core/src/marconi/core/coding.py",
+        "phy/backends/gnuradio/embedded/chirp.py",
+        "bits/symbols.py",
+        "bits/stages/symbol_ops.py",
+        "core/coding.py",
     ],
 )
 def test_no_inline_sfd_or_demap_constants(path: str) -> None:
     # The 2.25 SFD, the reduced-rate //4, and the -1 demap offset were LoRa's;
     # each is now a parameter. Guard against a literal creeping back in.
-    src = (_PKGS / path).read_text()
+    src = (_SRC / path).read_text()
     assert "2.25" not in src, "the 2.25 SFD literal must be a parameter"
     assert "// 4" not in src and "//4" not in src, "the //4 demap must derive"

@@ -3,7 +3,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-PHY = Path("packages/marconi-phy/src/marconi/phy")
+PHY = Path("src/marconi/phy")
 BACKENDS = PHY / "backends"
 
 

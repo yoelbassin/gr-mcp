@@ -17,8 +17,6 @@ from marconi.phy.backends.gnuradio.embedded.depuncture import make_depuncture
 
 _EMBEDDED = (
     Path(__file__).resolve().parents[2]
-    / "packages"
-    / "marconi-phy"
     / "src"
     / "marconi"
     / "phy"

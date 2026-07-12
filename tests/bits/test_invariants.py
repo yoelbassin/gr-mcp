@@ -5,14 +5,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-_BITS_SRC = (
-    Path(__file__).resolve().parents[2]
-    / "packages"
-    / "marconi-bits"
-    / "src"
-    / "marconi"
-    / "bits"
-)
+_BITS_SRC = Path(__file__).resolve().parents[2] / "src" / "marconi" / "bits"
 
 
 def _bits_modules() -> list[str]:

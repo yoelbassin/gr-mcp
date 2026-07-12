@@ -6,8 +6,8 @@ from phy._fixtures import fixture_registry
 from marconi.phy.stages import stage_registry
 
 COMPILER_FILES = [
-    Path("packages/marconi-phy/src/marconi/phy/compiler.py"),
-    Path("packages/marconi-phy/src/marconi/phy/compile_context.py"),
+    Path("src/marconi/phy/compiler.py"),
+    Path("src/marconi/phy/compile_context.py"),
 ]
 
 

@@ -49,13 +49,7 @@ def test_ais_codec_roundtrip() -> None:
 
 def test_compiler_is_name_blind() -> None:
     compiler_py = (
-        Path(__file__).resolve().parents[2]
-        / "packages"
-        / "marconi-bits"
-        / "src"
-        / "marconi"
-        / "bits"
-        / "compiler.py"
+        Path(__file__).resolve().parents[2] / "src" / "marconi" / "bits" / "compiler.py"
     )
     names = set(registry())
     literals = {

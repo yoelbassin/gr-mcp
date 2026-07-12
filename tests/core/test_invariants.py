@@ -4,7 +4,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-CORE = Path("packages/marconi-core/src/marconi/core")
+CORE = Path("src/marconi/core")
 
 
 def test_core_imports_without_gnuradio_or_fastmcp() -> None:

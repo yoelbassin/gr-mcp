@@ -5,7 +5,7 @@ from marconi.phy.stages import stage_registry
 from marconi.phy.stages.general import GENERAL_STAGES
 
 _FAMILIES = {"fsk", "psk", "qam", "ask", "ook", "ppm", "css"}
-_GENERAL_SRC = Path("packages/marconi-phy/src/marconi/phy/stages/general.py")
+_GENERAL_SRC = Path("src/marconi/phy/stages/general.py")
 
 
 def test_general_stages_declare_general_family() -> None:
