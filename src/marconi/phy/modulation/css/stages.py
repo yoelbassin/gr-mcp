@@ -18,11 +18,11 @@ _OSR_MAX = 8
 
 class _CssParams(StageParams):
     sf: StrictInt
-    oversample: StrictInt = 2
-    zero_pad: StrictInt = 4
-    preamble_len: StrictInt = 8
-    sfd_symbols: StrictFloat = 2.25
-    sync_symbols: StrictInt = 2
+    oversample: StrictInt
+    zero_pad: StrictInt
+    preamble_len: StrictInt
+    sfd_symbols: StrictFloat
+    sync_symbols: StrictInt
 
     @model_validator(mode="after")
     def _ok(self) -> "_CssParams":

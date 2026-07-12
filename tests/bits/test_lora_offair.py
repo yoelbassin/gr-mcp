@@ -45,10 +45,25 @@ def _modem() -> ModemSpec:
             ModemStep(conv="resample", params={"interpolation": 2, "decimation": 8}),
             ModemStep(
                 conv="chirp_sync",
-                params={"sf": 11, "oversample": 2, "zero_pad": 10, "preamble_len": 8},
+                params={
+                    "sf": 11,
+                    "oversample": 2,
+                    "zero_pad": 10,
+                    "preamble_len": 8,
+                    "sfd_symbols": 2.25,
+                    "sync_symbols": 2,
+                },
             ),
             ModemStep(
-                conv="dechirp", params={"sf": 11, "oversample": 2, "zero_pad": 10}
+                conv="dechirp",
+                params={
+                    "sf": 11,
+                    "oversample": 2,
+                    "zero_pad": 10,
+                    "preamble_len": 8,
+                    "sfd_symbols": 2.25,
+                    "sync_symbols": 2,
+                },
             ),
             ModemStep(conv="burst_probe", params={}),
         ],

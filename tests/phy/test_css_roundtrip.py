@@ -21,6 +21,8 @@ def _modem(sf: int, oversample: int = _OS) -> ModemSpec:
         "oversample": oversample,
         "zero_pad": _ZP,
         "preamble_len": 8,
+        "sfd_symbols": 2.25,
+        "sync_symbols": 2,
     }
     return ModemSpec(
         symbol_rate=_SYM,
@@ -104,6 +106,8 @@ def test_dechirp_rate_check_tolerates_clock_correct_ppm(tmp_path: Path) -> None:
         "oversample": 2,
         "zero_pad": _ZP,
         "preamble_len": 8,
+        "sfd_symbols": 2.25,
+        "sync_symbols": 2,
     }
     m = ModemSpec(
         symbol_rate=_SYM,

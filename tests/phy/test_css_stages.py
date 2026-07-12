@@ -84,7 +84,15 @@ def test_css_params_accept_sf_11() -> None:
     from marconi.phy.modulation.css.stages import CssDemap
 
     ok: list = []
-    validate_params("css_demap[0]", CssDemap().params_model, {"sf": 11}, ok)
+    complete = {
+        "sf": 11,
+        "oversample": 2,
+        "zero_pad": 4,
+        "preamble_len": 8,
+        "sfd_symbols": 2.25,
+        "sync_symbols": 2,
+    }
+    validate_params("css_demap[0]", CssDemap().params_model, complete, ok)
     assert not ok, "sf=11 should be accepted"
 
 
@@ -101,9 +109,15 @@ def test_css_params_bound_oversample() -> None:
 
     for osr, expect_ok in ((0, False), (1, True), (8, True), (9, False)):
         issues: list = []
-        validate_params(
-            "dechirp[0]", Dechirp().params_model, {"sf": 7, "oversample": osr}, issues
-        )
+        complete = {
+            "sf": 7,
+            "oversample": osr,
+            "zero_pad": 4,
+            "preamble_len": 8,
+            "sfd_symbols": 2.25,
+            "sync_symbols": 2,
+        }
+        validate_params("dechirp[0]", Dechirp().params_model, complete, issues)
         assert (not issues) is expect_ok, f"oversample={osr}: {issues}"
 
 
@@ -166,7 +180,14 @@ def test_symbols_terminal_routing_smoke(tmp_path: Path) -> None:
     iq_path = tmp_path / "frame.iq"
     sym_path = tmp_path / "out.sym"
 
-    css_params: dict[str, ParamValue] = {"sf": SF, "oversample": OS}
+    css_params: dict[str, ParamValue] = {
+        "sf": SF,
+        "oversample": OS,
+        "zero_pad": 4,
+        "preamble_len": 8,
+        "sfd_symbols": 2.25,
+        "sync_symbols": 2,
+    }
 
     # --- TX: bits → IQ frame (via [chirp_sync, dechirp, css_demap]) ---
     tx_modem = ModemSpec(
@@ -252,9 +273,15 @@ def test_css_params_accept_preamble_len_5() -> None:
     from marconi.phy.modulation.css.stages import ChirpSync
 
     ok: list = []
-    validate_params(
-        "chirp_sync[0]", ChirpSync().params_model, {"sf": 7, "preamble_len": 5}, ok
-    )
+    complete = {
+        "sf": 7,
+        "oversample": 2,
+        "zero_pad": 4,
+        "preamble_len": 5,
+        "sfd_symbols": 2.25,
+        "sync_symbols": 2,
+    }
+    validate_params("chirp_sync[0]", ChirpSync().params_model, complete, ok)
     assert not ok, ok
 
 

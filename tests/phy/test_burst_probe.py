@@ -18,7 +18,14 @@ from marconi.phy.models import ModemSpec, ModemStep
 from marconi.phy.stages import stage_registry
 
 IQ = Descriptor(Level.IQ, "c")
-_P: dict[str, ParamValue] = {"sf": 7, "oversample": 2, "zero_pad": 4, "preamble_len": 8}
+_P: dict[str, ParamValue] = {
+    "sf": 7,
+    "oversample": 2,
+    "zero_pad": 4,
+    "preamble_len": 8,
+    "sfd_symbols": 2.25,
+    "sync_symbols": 2,
+}
 _SYM = 1.0
 _RATE = 2 * (1 << 7) * _SYM
 

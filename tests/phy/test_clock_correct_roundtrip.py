@@ -16,7 +16,14 @@ _SF, _OS, _ZP, _SYM = 9, 2, 4, 1.0
 
 
 def _p() -> dict[str, ParamValue]:
-    return {"sf": _SF, "oversample": _OS, "zero_pad": _ZP, "preamble_len": 8}
+    return {
+        "sf": _SF,
+        "oversample": _OS,
+        "zero_pad": _ZP,
+        "preamble_len": 8,
+        "sfd_symbols": 2.25,
+        "sync_symbols": 2,
+    }
 
 
 def _compile(path, direction, rate, src, snk):

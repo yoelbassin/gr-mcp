@@ -176,6 +176,8 @@ def test_css_offair_flinders_sf11_downchirp(tmp_path: Path) -> None:
         "oversample": os_,
         "zero_pad": zp,
         "preamble_len": pl,
+        "sfd_symbols": 2.25,
+        "sync_symbols": 2,
     }
     chan_p: dict[str, ParamValue] = {
         "decim": 4,
@@ -234,6 +236,8 @@ def test_css_offair_lora_sf7_upchirp(tmp_path: Path) -> None:
         "oversample": os_,
         "zero_pad": zp,
         "preamble_len": pl,
+        "sfd_symbols": 2.25,
+        "sync_symbols": 2,
     }
     chan_p: dict[str, ParamValue] = {
         "decim": 4,
@@ -276,6 +280,8 @@ def test_css_offair_iq2_sf11(tmp_path: Path) -> None:
         "oversample": 2,
         "zero_pad": 10,
         "preamble_len": 8,
+        "sfd_symbols": 2.25,
+        "sync_symbols": 2,
     }
     modem = ModemSpec(
         symbol_rate=125_000.0 / 2048,
@@ -310,6 +316,8 @@ def test_css_offair_iq12_sf11_sfo(tmp_path: Path) -> None:
         "oversample": 2,
         "zero_pad": 10,
         "preamble_len": 8,
+        "sfd_symbols": 2.25,
+        "sync_symbols": 2,
     }
 
     def run(ppm: float, name: str) -> np.ndarray:
