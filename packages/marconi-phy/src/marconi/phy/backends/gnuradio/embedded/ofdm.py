@@ -59,6 +59,7 @@ def make_ofdm_frame_sync(
     tol, max_corr = max(1, cp_len // 2), sym_len
 
     usefuls_len = (data_syms + 1) * sym_len
+    detect_cap = null_len + usefuls_len + 4 * frame_len
 
     class _OfdmFrameSync(gr.basic_block):
         def __init__(self) -> None:
@@ -90,7 +91,10 @@ def make_ofdm_frame_sync(
             # Detection scans fixed-length prefixes (a ladder growing by
             # frame_len) so the found base is a function of stream content,
             # never of how much extra data the scheduler happened to deliver
-            # (find_null's median threshold shifts with buffer length).
+            # (find_null's median threshold shifts with buffer length). Past
+            # detect_cap the window slides instead — the dropped front was
+            # already fully scanned — so a null-less wrong-band stream holds
+            # a bounded buffer, not the whole capture.
             while self._base is None and self._buf.size >= self._detect_len:
                 try:
                     self._base = prim.find_null(
@@ -100,7 +104,10 @@ def make_ofdm_frame_sync(
                         sym_len=sym_len,
                     )
                 except ValueError:
-                    self._detect_len += frame_len
+                    if self._detect_len + frame_len <= detect_cap:
+                        self._detect_len += frame_len
+                    else:
+                        self._buf = self._buf[frame_len:]
             # Every decision is keyed to buffered content alone, never to call
             # timing, so a zero-input wakeup emits exactly what a later call
             # would (the scheduler may wake the block whenever forecast

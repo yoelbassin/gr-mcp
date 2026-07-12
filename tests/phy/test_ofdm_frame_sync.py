@@ -172,6 +172,56 @@ def test_zero_input_wakeup_is_timing_invariant():
         assert np.array_equal(chunked, oneshot), f"chunk={chunk} diverged"
 
 
+def test_null_less_stream_holds_a_bounded_buffer():
+    """A wrong-band capture never contains a null: detection keeps failing and
+    the pre-fix block buffered the whole stream (GB capture -> OOM). Past the
+    ladder cap the detection window must slide instead — and a frame train
+    arriving after the null-less stretch must still acquire and decode."""
+    from marconi.phy.backends.gnuradio.embedded.ofdm import make_ofdm_frame_sync
+
+    rng = np.random.default_rng(11)
+    flat = np.exp(2j * np.pi * rng.random(50 * FRAME)).astype(np.complex64)
+
+    def mk():
+        return make_ofdm_frame_sync(
+            _FakeGr,
+            fft_len=FFT,
+            cp_len=CP,
+            sym_len=SYM,
+            null_len=NULL,
+            frame_len=FRAME,
+            data_syms=DS,
+        )
+
+    cap = NULL + (DS + 1) * SYM + 4 * FRAME
+    blk = mk()
+    _drive(blk, flat, chunk=FRAME)
+    assert blk._buf.size <= cap, f"buffer held {blk._buf.size}"
+
+    # the first null is 3*NULL: a mid-stream null flanked by signal on both
+    # sides needs headroom over find_null's smoother width (real captures
+    # have null_len >> win; the sibling tests' nulls sit at stream start
+    # where the convolution edge supplies it). seed 17: a strong first CP
+    # sample, dodging find_null's known one-late refine quirk.
+    frame_rng = np.random.default_rng(17)
+    usefuls, parts = [], [np.zeros(2 * NULL, complex)]
+    for _ in range(3):
+        parts.append(np.zeros(NULL, complex))
+        us = [
+            frame_rng.standard_normal(FFT) + 1j * frame_rng.standard_normal(FFT)
+            for _ in range(DS + 1)
+        ]
+        usefuls.append(np.concatenate(us))
+        for u in us:
+            parts.append(np.concatenate([u[-CP:], u]))
+    sig = np.concatenate([flat] + parts).astype(np.complex64)
+    expected = np.concatenate([(u / np.std(u)).astype(np.complex64) for u in usefuls])
+    for chunk in (sig.size, 173):
+        out = _drive(mk(), sig, chunk)
+        assert out.size == expected.size, f"chunk={chunk}: {out.size}"
+        assert np.allclose(out, expected, atol=1e-4), f"chunk={chunk} diverged"
+
+
 def test_resync_base_snaps_corrects_and_rejects():
     from marconi.phy.backends.gnuradio.embedded.ofdm import _resync_base
 
