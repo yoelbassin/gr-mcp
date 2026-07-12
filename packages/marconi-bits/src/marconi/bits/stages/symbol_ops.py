@@ -74,7 +74,12 @@ class CssExplicitDecode(RxStage[ProgramBuilder]):
     bits. Generic over CSS explicit-header frames: header geometry, field
     layout, block-FEC width and parity table, and demap offsets are all
     caller-supplied. Burst marks on the carrier key header parses to burst
-    starts; without marks, frames are assumed back-to-back."""
+    starts; without marks, frames are assumed back-to-back.
+
+    An orchestration fast-path, not new vocabulary: the composition proof
+    (tests/bits/test_css_explicit_composition.py) reproduces it bit-exactly
+    from the generic pieces — demap / deinterleave / block-FEC / parse — in
+    two agent-style passes."""
 
     name = "css_explicit_decode"
     from_level = Level.SYMBOLS
