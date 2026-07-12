@@ -68,7 +68,15 @@ def test_css_params_reject_sf_4() -> None:
     from marconi.phy.modulation.css.stages import ChirpSync
 
     bad: list = []
-    validate_params("chirp_sync[0]", ChirpSync().params_model, {"sf": 4}, bad)
+    complete = {
+        "sf": 4,
+        "oversample": 2,
+        "zero_pad": 4,
+        "preamble_len": 8,
+        "sfd_symbols": 2.25,
+        "sync_symbols": 2,
+    }
+    validate_params("chirp_sync[0]", ChirpSync().params_model, complete, bad)
     assert bad, "sf=4 should be rejected"
 
 
@@ -76,7 +84,15 @@ def test_css_params_reject_sf_15() -> None:
     from marconi.phy.modulation.css.stages import Dechirp
 
     bad: list = []
-    validate_params("dechirp[0]", Dechirp().params_model, {"sf": 15}, bad)
+    complete = {
+        "sf": 15,
+        "oversample": 2,
+        "zero_pad": 4,
+        "preamble_len": 8,
+        "sfd_symbols": 2.25,
+        "sync_symbols": 2,
+    }
+    validate_params("dechirp[0]", Dechirp().params_model, complete, bad)
     assert bad, "sf=15 should be rejected"
 
 
@@ -99,9 +115,16 @@ def test_css_params_accept_sf_11() -> None:
 def test_css_params_require_sf() -> None:
     from marconi.phy.modulation.css.stages import ChirpSync
 
-    missing: list = []
-    validate_params("chirp_sync[0]", ChirpSync().params_model, {}, missing)
-    assert missing, "sf is required"
+    issues: list = []
+    validate_params("chirp_sync[0]", ChirpSync().params_model, {}, issues)
+    assert {i.field for i in issues} >= {
+        "sf",
+        "oversample",
+        "zero_pad",
+        "preamble_len",
+        "sfd_symbols",
+        "sync_symbols",
+    }
 
 
 def test_css_params_bound_oversample() -> None:
@@ -260,10 +283,20 @@ def test_css_params_reject_preamble_len_below_5() -> None:
 
     for bad in (3, 4):  # 3 = IndexError in _DetectScan.step, 4 = single-peak mislock
         issues: list = []
+        # sync_symbols=1 (not baseline's 2): the _ok cross-field rule requires
+        # sync_symbols < preamble_len - 2, so isolate the preamble-floor error.
+        complete = {
+            "sf": 7,
+            "oversample": 2,
+            "zero_pad": 4,
+            "preamble_len": bad,
+            "sfd_symbols": 2.25,
+            "sync_symbols": 1,
+        }
         validate_params(
             "chirp_sync[0]",
             ChirpSync().params_model,
-            {"sf": 7, "preamble_len": bad},
+            complete,
             issues,
         )
         assert issues, f"preamble_len={bad} should be rejected"

@@ -5,11 +5,18 @@ from marconi.bits.registry import registry
 
 _BITS = Path(__file__).resolve().parents[2] / "src" / "marconi" / "bits"
 _ROUTING = [_BITS / "compiler.py", _BITS / "validate.py"]
+_SRC = Path(__file__).resolve().parents[2] / "src" / "marconi"
 
 
 def _bits_files() -> list[Path]:
     files = [p for p in _BITS.rglob("*.py") if "__pycache__" not in p.parts]
     assert files, f"no bits source under {_BITS}"
+    return files
+
+
+def _src_files() -> list[Path]:
+    files = [p for p in _SRC.rglob("*.py") if "__pycache__" not in p.parts]
+    assert files, f"no source under {_SRC}"
     return files
 
 
@@ -32,9 +39,9 @@ def test_routing_has_no_stage_name_literals() -> None:
 
 
 def test_no_conv_compared_to_a_literal() -> None:
-    # Forbid `step.conv == "<name>"` anywhere in bits (Yoda form too). A comparison
+    # Forbid `step.conv == "<name>"` anywhere in marconi (Yoda form too). A comparison
     # of .conv against a VARIABLE (e.g. models.py's `step.conv == conv`) is allowed.
-    for path in _bits_files():
+    for path in _src_files():
         tree = ast.parse(path.read_text())
         for node in ast.walk(tree):
             if not isinstance(node, ast.Compare):

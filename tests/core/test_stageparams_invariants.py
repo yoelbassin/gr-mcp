@@ -17,8 +17,10 @@ def _is_allowed_default(value: ast.expr | None) -> bool:
         return True
     if isinstance(value, ast.List):  # literal list default: only [] is neutral
         return len(value.elts) == 0
-    if isinstance(value, ast.Call):  # Field(...) — allowed iff no default= kwarg
-        return not any(k.arg == "default" for k in value.keywords)
+    if isinstance(value, ast.Call):  # Field(...) — no default, no positional arg
+        return not value.args and not any(
+            k.arg in ("default", "default_factory") for k in value.keywords
+        )
     return False
 
 
