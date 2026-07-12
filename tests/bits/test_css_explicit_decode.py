@@ -61,13 +61,13 @@ def _assemble(bits, payload_len=255):
     return bytes(raw[:payload_len])
 
 
-def _run(symbols, marks=()):
+def _run(symbols, marks=(), params=_HEADER):
     carrier = RxCarrier(
         bits=np.zeros(0, np.uint8),
         symbols=np.asarray(symbols, dtype=np.int16),
         marks=tuple(marks),
     )
-    return css_explicit_decode_rx(carrier, **_HEADER).bits
+    return css_explicit_decode_rx(carrier, **params).bits
 
 
 def test_explicit_decode_yields_rf_fingerpring_payload():
@@ -126,6 +126,54 @@ def _encode_header(payload_len, cr, has_crc):
             gv = (gv << 1) | chunk[s * sf_app + j]
         syms.append((coding.gray_decode(gv) * (1 << sf_red)) % (1 << sf))
     return syms
+
+
+def _encode_payload(nibbles, cr, sf_app):
+    """Synthesize payload symbols by running the decoder's coding primitives
+    in reverse; full-rate (sf_app == sf) uses the divisor=1 bin-offset lane."""
+    sf, data_bits = _HEADER["sf"], _HEADER["data_bits"]
+    cw_len = cr + data_bits
+    fec = coding.parity_for_cr(_PARITY_MASKS, cr)
+    perm = coding.diag_deinterleave_perm(sf_app, cw_len)
+    syms = []
+    for b in range(len(nibbles) // sf_app):
+        deint = []
+        for nib in nibbles[b * sf_app : (b + 1) * sf_app]:
+            cw = nib
+            for p, m in enumerate(fec):
+                cw |= (bin(m & nib).count("1") & 1) << (data_bits + p)
+            deint.extend(((cw >> (cw_len - 1 - k)) & 1) for k in range(cw_len))
+        chunk = [0] * (sf_app * cw_len)
+        for i, src in enumerate(perm):
+            chunk[src] = deint[i]
+        for s in range(cw_len):
+            gv = 0
+            for j in range(sf_app):
+                gv = (gv << 1) | chunk[s * sf_app + j]
+            if sf_app == sf:
+                syms.append(
+                    (coding.gray_decode(gv) + _HEADER["full_offset"]) % (1 << sf)
+                )
+            else:
+                syms.append((coding.gray_decode(gv) * (1 << (sf - sf_app))) % (1 << sf))
+    return syms
+
+
+def test_explicit_decode_full_rate_payload_lane():
+    """reduced=False routes the payload demap through the divisor=1/full-offset
+    lane — the common non-LDRO config (SF7-9); the off-air fixtures are all
+    LDRO, so only the reduced lane had coverage."""
+    sf, cr, payload_len = _HEADER["sf"], 1, 16
+    # 3 interleave blocks of sf nibbles: ceil((32-4)/11) — a count that differs
+    # from the reduced-denominator ceil(28/9)=4, pinning the non-LDRO frame
+    # algebra too
+    nibbles = [(3 * i + 1) % 16 for i in range(3 * sf)]
+    syms = _encode_header(payload_len, cr, 0) + _encode_payload(nibbles, cr, sf)
+    bits = _run(syms, params={**_HEADER, "reduced": False})
+    expected = [0] * 16  # the header block's carry nibbles are zeroed
+    for nib in nibbles:
+        expected.extend((nib >> (3 - j)) & 1 for j in range(4))
+    assert list(bits) == expected[: 8 * payload_len]
 
 
 def test_explicit_decode_oversize_length_does_not_swallow_later_marks():
