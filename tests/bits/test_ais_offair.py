@@ -151,3 +151,22 @@ def test_ais_offair_crc(tmp_path: Path) -> None:
     for m in msgs:
         if "sog" in m:
             assert int(m["msg_type"]) in (1, 2, 3), f"body on wrong type: {m}"
+    # content invariants against the capture's ground truth (CRC alone cannot
+    # catch a parse-layer field misalignment): the 30-bit MMSI field must hold
+    # a 9-digit value, distinct vessels rule out one lucky frame decoded
+    # repeatedly (probed 9-11 per run at counts 13-16; floor scaled to the
+    # count gate), and every position report must sit within VHF range of the
+    # one receiver (probed spread: lat 51.44-51.48, lon 0.25-0.37).
+    mmsis = {int(m["mmsi"]) for m in msgs}
+    assert all(0 < v < 1_000_000_000 for v in mmsis), f"non-MMSI value: {mmsis}"
+    assert len(mmsis) >= 3, f"too few distinct vessels: {sorted(mmsis)}"
+    # every probed frame was a type-1/2/3 position report; a layout that no
+    # longer fits the frame drops the body silently, so its absence is itself
+    # the regression signal
+    assert any("lat" in m for m in msgs), f"no position reports decoded: {msgs}"
+    for m in msgs:
+        if "lat" in m:
+            lat, lon = int(m["lat"]) / 600000.0, int(m["lon"]) / 600000.0
+            assert (
+                50.9 < lat < 52.0 and -0.5 < lon < 1.2
+            ), f"position outside the receiver's range: {m}"
