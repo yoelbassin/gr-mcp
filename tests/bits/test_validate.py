@@ -94,3 +94,16 @@ def test_segment_zero_frame_body_len_fails_codec_validation():
         ],
     )
     assert validate_codec(codec, registry()), "0-len segment must not validate"
+
+
+def test_malformed_parse_field_is_rejected():
+    # A parse field missing its required 'bits' must produce a validation issue.
+    codec = CodecSpec(
+        name="c",
+        path=[
+            CodecStep(conv="fixed_frame", params={"payload_bits": 8}),
+            CodecStep(conv="parse", params={"fields": [{"name": "p"}]}),
+        ],
+    )
+    issues = validate_codec(codec, registry())
+    assert any("fields" in (i.field or "") for i in issues), issues

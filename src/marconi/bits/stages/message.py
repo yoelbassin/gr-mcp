@@ -18,7 +18,7 @@ class Parse(DuplexStage[ProgramBuilder]):
     family = "message"
 
     class _Params(StageParams):
-        fields: list
+        fields: list[ParseField]
         bit_order: str = "msb"
         discriminator: str | None = None
         cases: list = []

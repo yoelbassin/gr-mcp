@@ -3,9 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from pydantic import ValidationError
-
-from marconi.bits.models import CodecSpec, ParseField
+from marconi.bits.models import CodecSpec
 from marconi.core.levels import Level
 from marconi.core.models import ValidationIssue
 from marconi.core.stages import Stage, validate_path
@@ -54,22 +52,4 @@ def validate_codec(
                         "(self_slicing); there is no seeded region left to carve",
                     )
                 )
-        # parse is OPTIONAL: a deframe+integrity codec of an unknown protocol
-        # (the reverse-engineering entry state) is a valid decode to frames.
-        for idx, step in enumerate(codec.path):
-            if step.conv == "parse":
-                fields = step.params.get("fields")
-                if isinstance(fields, list):
-                    for fi, f in enumerate(fields):
-                        try:
-                            ParseField.model_validate(f)
-                        except ValidationError:
-                            issues.append(
-                                ValidationIssue(
-                                    block_id=f"parse[{idx}]",
-                                    field=f"fields[{fi}]",
-                                    message="each parse field needs a string 'name' "
-                                    "and an int 'bits'",
-                                )
-                            )
     return issues
