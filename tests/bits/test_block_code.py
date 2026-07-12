@@ -87,6 +87,49 @@ def test_block_code_corrects_single_error_without_2n_tables() -> None:
     _assert_corrects_every_single_error((data << 10) | _bch_check(data))
 
 
+def _scalar_reference(
+    bits: np.ndarray,
+    code_bits: int,
+    data_bits: int,
+    masks: list[int],
+    correct: bool | None,
+) -> list[int]:
+    from marconi.core.coding import block_fec_decode, can_correct
+
+    do = can_correct(code_bits - data_bits, data_bits) if correct is None else correct
+    out: list[int] = []
+    for w in range(bits.size // code_bits):
+        word = 0
+        for j in range(code_bits):
+            word |= int(bits[w * code_bits + j]) << j
+        val = block_fec_decode(word, masks, data_bits, do)
+        out.extend((val >> j) & 1 for j in range(data_bits))
+    return out
+
+
+def test_block_code_rx_matches_scalar_reference() -> None:
+    """Random streams pin the whole per-word semantics — no-match syndromes
+    (no flip), data-column flips, parity-column flips (data untouched),
+    detect-only pass-through, and trailing partial-word truncation."""
+    rng = np.random.default_rng(3)
+    for code_bits, data_bits, masks, correct in (
+        (31, 21, _masks_stream_basis(), None),
+        (31, 21, _masks_stream_basis(), False),
+        (8, 4, [7, 14, 11, 13], None),
+    ):
+        bits = rng.integers(0, 2, code_bits * 200 + 5, dtype=np.uint8)
+        out = framing.block_code_rx(
+            RxCarrier(bits=bits),
+            code_bits=code_bits,
+            data_bits=data_bits,
+            parity_masks=masks,
+            correct=correct,
+        )
+        assert out.bits.tolist() == _scalar_reference(
+            bits, code_bits, data_bits, masks, correct
+        )
+
+
 def test_block_code_rejects_seeded_carrier() -> None:
     with pytest.raises(ValueError, match="before any frame seeder"):
         framing.block_code_rx(

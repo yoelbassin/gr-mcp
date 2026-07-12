@@ -11,7 +11,7 @@ from crc import Calculator, Configuration
 
 from marconi.bits.carriers import RxCarrier, TxCarrier, _Frame
 from marconi.bits.models import ParseField
-from marconi.core.coding import block_fec_decode, can_correct
+from marconi.core.coding import can_correct
 
 _HDLC_FLAG = np.array([0, 1, 1, 1, 1, 1, 1, 0], dtype=np.uint8)
 _BITREV = bytes(int(format(i, "08b")[::-1], 2) for i in range(256))
@@ -705,16 +705,26 @@ def block_code_rx(
     do_correct = can_correct(n_parity, data_bits) if correct is None else correct
     bits = np.asarray(c.bits, np.uint8)
     n_words = bits.size // code_bits
-    out = np.zeros(n_words * data_bits, np.uint8)
-    for w in range(n_words):
-        stride = bits[w * code_bits : (w + 1) * code_bits]
-        word = 0
-        for j in range(code_bits):
-            word |= int(stride[j]) << j
-        val = block_fec_decode(word, parity_masks, data_bits, do_correct)
-        for j in range(data_bits):
-            out[w * data_bits + j] = (val >> j) & 1
-    return RxCarrier(bits=out, frames=[])
+    words = bits[: n_words * code_bits].reshape(n_words, code_bits)
+    data = words[:, :data_bits].copy()
+    if do_correct and n_words and parity_masks:
+        rows = np.array(
+            [[(m >> b) & 1 for b in range(data_bits)] for m in parity_masks],
+            np.int64,
+        )
+        syndrome = (data.astype(np.int64) @ rows.T + words[:, data_bits:]) & 1
+        weights = np.left_shift(1, np.arange(n_parity, dtype=np.int64))
+        s_int = syndrome @ weights
+        # a column's syndrome signature, data columns then the parity identity;
+        # first ascending match flips, matching the scalar column scan
+        col_sig = np.concatenate([rows.T @ weights, weights])
+        bad = np.flatnonzero(s_int)
+        if bad.size:
+            match = s_int[bad, None] == col_sig[None, :]
+            col = match.argmax(axis=1)
+            fixable = match.any(axis=1) & (col < data_bits)
+            data[bad[fixable], col[fixable]] ^= 1
+    return RxCarrier(bits=data.reshape(-1), frames=[])
 
 
 def _read_uint(bits: np.ndarray, start: int, width: int) -> int:

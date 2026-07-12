@@ -3,7 +3,8 @@ import time
 import numpy as np
 import pytest
 
-from marconi.bits.framing import _find_flags, crc_value
+from marconi.bits.carriers import RxCarrier
+from marconi.bits.framing import _find_flags, block_code_rx, crc_value
 from marconi.core import bitfile
 from marconi.core.bitfile import CaptureTooLarge, read_bits
 
@@ -46,6 +47,22 @@ def test_flag_scan_throughput():
     secs = _best_of(lambda: _find_flags(bits))
     mbit_per_s = (bits.size / 1e6) / secs
     assert mbit_per_s >= 100.0, f"{mbit_per_s:.0f} Mbit/s -- flag scan not vectorized?"
+
+
+@pytest.mark.perf
+def test_block_code_throughput_is_vectorized():
+    bits = np.random.default_rng(4).integers(0, 2, 1_000_000, dtype=np.uint8)
+    secs = _best_of(
+        lambda: block_code_rx(
+            RxCarrier(bits=bits),
+            code_bits=8,
+            data_bits=4,
+            parity_masks=[7, 14, 11, 13],
+        )
+    )
+    mbit_per_s = (bits.size / 1e6) / secs
+    # per-word python loop ~1 Mbit/s, vectorized ~50+; 10 cleanly separates.
+    assert mbit_per_s >= 10.0, f"{mbit_per_s:.1f} Mbit/s -- per-word python loop?"
 
 
 def test_find_flags_matches_greedy_reference():
