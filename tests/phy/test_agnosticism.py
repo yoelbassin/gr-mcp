@@ -36,6 +36,11 @@ _PROTOCOL_TOKENS = [
     r"ads-?b",
     r"acars",
     r"flinders",
+    r"pocsag",
+    r"bluetooth",
+    r"\bble\b",
+    r"nordic",
+    r"nrf5[0-9]",
 ]
 _PATTERN = re.compile("|".join(_PROTOCOL_TOKENS), re.IGNORECASE)
 
