@@ -17,6 +17,7 @@ from marconi.phy.backends.gnuradio.embedded.chirp import (
 from marconi.phy.backends.gnuradio.embedded.decision import make_peak_decision
 from marconi.phy.backends.gnuradio.embedded.depuncture import make_depuncture
 from marconi.phy.backends.gnuradio.embedded.msk import make_msk_demod
+from marconi.phy.backends.gnuradio.embedded.mslice import make_mslice
 from marconi.phy.backends.gnuradio.embedded.ofdm import make_ofdm_frame_sync
 from marconi.phy.backends.gnuradio.embedded.preamble import make_sym_strip, sym_prefix
 from marconi.phy.backends.gnuradio.embedded.probe import make_burst_probe
@@ -170,6 +171,12 @@ GR_BLOCKS: dict[str, Callable[[_GrCtx, Params], Any]] = {
     "quadrature_demod": lambda c, p: c.analog.quadrature_demod_cf(_as_float(p["gain"])),
     "msk_demod": lambda c, p: make_msk_demod(
         c.gr, sps=_as_float(p["sps"]), loop_bw=_as_float(p.get("loop_bw", 0.0038))
+    ),
+    "mslice": lambda c, p: make_mslice(
+        c.gr,
+        thresholds=_as_float_list(p["thresholds"]),
+        code=_as_int_list(p["code"]),
+        bits=_as_int(p["bits"]),
     ),
     "symbol_sync_ff": lambda c, p: c.digital.symbol_sync_ff(
         c.digital.TED_GARDNER,
