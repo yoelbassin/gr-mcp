@@ -41,6 +41,12 @@ _PROTOCOL_TOKENS = [
     r"\bble\b",
     r"nordic",
     r"nrf5[0-9]",
+    r"\bdmr\b",
+    r"mototrbo",
+    r"\bbptc\b",
+    r"\bcsbk\b",
+    r"capacity\s*plus",
+    r"\bdsd\b",
 ]
 _PATTERN = re.compile("|".join(_PROTOCOL_TOKENS), re.IGNORECASE)
 
