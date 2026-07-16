@@ -46,9 +46,7 @@ def can_correct(cr: int, data_bits: int) -> bool:
     return (1 << cr) >= data_bits + cr + 1
 
 
-def block_fec_decode(
-    codeword: int, parity_masks: list[int], data_bits: int, correct: bool
-) -> int:
+def correct_codeword(codeword: int, parity_masks: list[int], data_bits: int) -> int:
     parity = parity_rows(parity_masks, data_bits)
     data = [int(bool(codeword & (1 << i))) for i in range(data_bits)]
     par = [int(bool(codeword & (1 << (data_bits + p)))) for p in range(len(parity))]
@@ -56,7 +54,7 @@ def block_fec_decode(
         (sum(d * r for d, r in zip(data, row)) + par[p]) % 2
         for p, row in enumerate(parity)
     ]
-    if correct and any(syndrome):
+    if any(syndrome):
         total = data_bits + len(parity)
         for col in range(total):
             column = [
@@ -66,6 +64,14 @@ def block_fec_decode(
             if column == syndrome:
                 codeword ^= 1 << col
                 break
+    return codeword
+
+
+def block_fec_decode(
+    codeword: int, parity_masks: list[int], data_bits: int, correct: bool
+) -> int:
+    if correct:
+        codeword = correct_codeword(codeword, parity_masks, data_bits)
     return codeword & ((1 << data_bits) - 1)
 
 
