@@ -146,6 +146,31 @@ class ClockCorrect(RxStage[CompileContext]):
         return 1.0 / (1.0 + float(params["ppm"]) * 1e-6)
 
 
+class _DcBlockParams(StageParams):
+    dc_block_len: StrictInt
+
+    @model_validator(mode="after")
+    def _ok(self) -> "_DcBlockParams":
+        if self.dc_block_len < 1:
+            raise PydanticCustomError("value_error", "dc_block_len must be >= 1")
+        return self
+
+
+class DcBlock(RxStage[CompileContext]):
+    """Notch out a DC offset (e.g. LO leakage) via stock dc_blocker_cc. RX-only,
+    IQ->IQ, rate unchanged."""
+
+    name = "dc_block"
+    from_level = Level.IQ
+    to_level = Level.IQ
+    family = "conditioning"
+    params_model = _DcBlockParams
+
+    def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
+        p = _DcBlockParams.model_validate(dict(params))
+        b.chain("dc_blocker_cc", d=p.dc_block_len)
+
+
 class _AmParams(StageParams):
     dc_block_len: StrictInt = 1024
 
@@ -212,6 +237,7 @@ CONDITIONING_STAGES: tuple[type[RxStage[CompileContext]], ...] = (
     Invert,
     Resample,
     ClockCorrect,
+    DcBlock,
     Am,
     Analytic,
 )
