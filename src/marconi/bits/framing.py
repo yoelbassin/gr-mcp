@@ -589,6 +589,17 @@ def realign_rx(c: RxCarrier, *, bit_offset: int) -> RxCarrier:
     return RxCarrier(bits=np.asarray(c.bits, np.uint8)[bit_offset:], frames=[])
 
 
+def permute_rx(c: RxCarrier, *, perm: list[int]) -> RxCarrier:
+    if c.frames:
+        raise ValueError("permute must run before any frame seeder")
+    bits = np.asarray(c.bits, np.uint8)
+    block = len(perm)
+    n = bits.size // block
+    idx = np.asarray(perm, np.int64)
+    out = bits[: n * block].reshape(n, block)[:, idx].reshape(-1)
+    return RxCarrier(bits=out, frames=[])
+
+
 def _codebook_maps(
     code_bits: int, data_bits: int, table: list[int]
 ) -> tuple[np.ndarray, np.ndarray]:

@@ -358,6 +358,22 @@ class BlockCode(RxStage[ProgramBuilder]):
         )
 
 
+class Permute(RxStage[ProgramBuilder]):
+    name = "permute"
+    from_level = Level.BITS
+    to_level = Level.BITS
+    family = "coding"
+
+    class _Params(StageParams):
+        perm: list[int]
+
+    params_model = _Params
+
+    def emit_rx(self, b: ProgramBuilder, params: Mapping[str, Any]) -> None:
+        p = self._Params.model_validate(dict(params))
+        b.add(framing.permute_rx, perm=[int(x) for x in p.perm])
+
+
 class Realign(RxStage[ProgramBuilder]):
     name = "realign"
     from_level = Level.BITS
@@ -385,6 +401,7 @@ FRAMING_STAGES: tuple[type[Stage[ProgramBuilder]], ...] = (
     HdlcDeframe,
     LengthFrame,
     NibbleSwap,
+    Permute,
     Realign,
     Segment,
     SyncWord,
