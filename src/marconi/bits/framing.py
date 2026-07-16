@@ -692,6 +692,7 @@ def block_code_rx(
     data_bits: int,
     parity_masks: list[int],
     correct: bool | None = None,
+    emit: str = "data",
 ) -> RxCarrier:
     if c.frames:
         raise ValueError("block_code must run before any frame seeder")
@@ -705,14 +706,14 @@ def block_code_rx(
     do_correct = can_correct(n_parity, data_bits) if correct is None else correct
     bits = np.asarray(c.bits, np.uint8)
     n_words = bits.size // code_bits
-    words = bits[: n_words * code_bits].reshape(n_words, code_bits)
-    data = words[:, :data_bits].copy()
+    words = bits[: n_words * code_bits].reshape(n_words, code_bits).copy()
     if do_correct and n_words and parity_masks:
         rows = np.array(
             [[(m >> b) & 1 for b in range(data_bits)] for m in parity_masks],
             np.int64,
         )
-        syndrome = (data.astype(np.int64) @ rows.T + words[:, data_bits:]) & 1
+        data64 = words[:, :data_bits].astype(np.int64)
+        syndrome = (data64 @ rows.T + words[:, data_bits:]) & 1
         weights = np.left_shift(1, np.arange(n_parity, dtype=np.int64))
         s_int = syndrome @ weights
         # a column's syndrome signature, data columns then the parity identity;
@@ -722,9 +723,10 @@ def block_code_rx(
         if bad.size:
             match = s_int[bad, None] == col_sig[None, :]
             col = match.argmax(axis=1)
-            fixable = match.any(axis=1) & (col < data_bits)
-            data[bad[fixable], col[fixable]] ^= 1
-    return RxCarrier(bits=data.reshape(-1), frames=[])
+            fixable = match.any(axis=1)
+            words[bad[fixable], col[fixable]] ^= 1
+    out = words if emit == "codeword" else words[:, :data_bits]
+    return RxCarrier(bits=out.reshape(-1), frames=[])
 
 
 def _read_uint(bits: np.ndarray, start: int, width: int) -> int:

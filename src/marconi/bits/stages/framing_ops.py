@@ -321,6 +321,7 @@ class BlockCode(RxStage[ProgramBuilder]):
         data_bits: StrictInt = Field(ge=1)
         parity_masks: list[int]
         correct: bool | None = None
+        emit: str = "data"
 
         @model_validator(mode="after")
         def _shaped(self) -> "BlockCode._Params":
@@ -339,6 +340,8 @@ class BlockCode(RxStage[ProgramBuilder]):
                         "have": len(self.parity_masks),
                     },
                 )
+            if self.emit not in ("data", "codeword"):
+                raise PydanticCustomError("value_error", "emit must be data|codeword")
             return self
 
     params_model = _Params
@@ -351,6 +354,7 @@ class BlockCode(RxStage[ProgramBuilder]):
             data_bits=p.data_bits,
             parity_masks=[int(x) for x in p.parity_masks],
             correct=p.correct,
+            emit=p.emit,
         )
 
 
