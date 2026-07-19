@@ -253,7 +253,6 @@ GR_BLOCKS: dict[str, Callable[[_GrCtx, Params], Any]] = {
     "unpack_k_bits_bb": lambda c, p: c.blocks.unpack_k_bits_bb(_as_int(p["k"])),
     "complex_to_mag": lambda c, p: c.blocks.complex_to_mag(_as_int(p.get("vlen", 1))),
     "dc_blocker_ff": lambda c, p: c.gr_filter.dc_blocker_ff(_as_int(p["d"]), True),
-    "dc_blocker_cc": lambda c, p: c.gr_filter.dc_blocker_cc(_as_int(p["d"]), True),
     "hilbert_fc": lambda c, p: c.gr_filter.hilbert_fc(_as_int(p["ntaps"])),
     "multiply_const_ff": lambda c, p: c.blocks.multiply_const_ff(_as_float(p["value"])),
     "add_const_ff": lambda c, p: c.blocks.add_const_ff(_as_float(p["value"])),
