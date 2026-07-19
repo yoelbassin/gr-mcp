@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
+from pydantic import ValidationError
 
+from marconi.bits.builder import ProgramBuilder
 from marconi.bits.carriers import RxCarrier
 from marconi.bits.framing import block_code_rx
+from marconi.bits.registry import registry
 from marconi.core.coding import correct_codeword
 
 # Self-contained systematic codes (caller data, NOT DMR-specific — this task proves the
@@ -57,3 +61,33 @@ def test_data_mode_unchanged() -> None:
         emit="data",
     ).bits
     assert np.array_equal(a, b)
+
+
+def test_block_code_stage_emits_full_codeword() -> None:
+    reg = registry()
+    assert "block_code" in reg
+    b = ProgramBuilder()
+    reg["block_code"].emit_rx(
+        b,
+        {
+            "code_bits": 7,
+            "data_bits": 4,
+            "parity_masks": [0b1011, 0b1101, 0b1110],
+            "correct": True,
+            "emit": "codeword",
+        },
+    )
+    out = b.steps[0](RxCarrier(bits=np.array([1, 0, 1, 1, 0, 1, 0], np.uint8))).bits
+    assert out.size == 7  # full codeword, not masked to the 4 data bits
+
+
+def test_block_code_emit_validator_rejects_unknown() -> None:
+    with pytest.raises(ValidationError):
+        registry()["block_code"].params_model.model_validate(
+            {
+                "code_bits": 7,
+                "data_bits": 4,
+                "parity_masks": [0b1011, 0b1101, 0b1110],
+                "emit": "bogus",
+            }
+        )

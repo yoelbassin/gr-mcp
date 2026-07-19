@@ -1,12 +1,12 @@
 """Real off-air DMR closure gate: Marconi's front-end (channelize -> fsk) turns the
 capture into soft symbols, and the test carves DMR framing as caller data. The capture
-has a strong LO-leakage DC spike co-located with the baseband signal, so a streaming
-DC-blocker would notch the signal itself; DC is removed by whole-signal mean subtraction
-(thin capture prep) before the modem. The FM discriminator also has per-burst DC wander
-that a memoryless global slicer cannot follow, so slicing is local: detect syncs on the
-soft-symbol signs, then per-burst remove DC and rescale before the M-ary decision. The
-generic BPTC helper (Task 4) decodes each 132-dibit burst; the oracle is dsd-neo's
-independently CRC-confirmed subscriber-ID pairs.
+carries a LO-leakage DC offset co-located with the baseband signal at 0 Hz, so a
+streaming DC-blocker would notch the signal itself; DC is removed by whole-signal mean
+subtraction (thin capture prep) before the modem. The FM discriminator also has a
+per-burst DC wander that a memoryless global slicer cannot follow, so slicing is local:
+detect syncs on the soft-symbol signs, then per-burst remove DC and rescale before the
+M-ary decision. The generic BPTC helper (Task 4) decodes each 132-dibit burst; the
+oracle is dsd-neo's independently CRC-confirmed subscriber-ID pairs.
 
 Polarity is fixed at asset-generation time (make_dmr_slice.py), so the gate does not
 search it. All DMR values (sync pattern, thresholds, oracle pairs, field offsets) are

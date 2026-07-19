@@ -3,8 +3,10 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from marconi.bits.builder import ProgramBuilder
 from marconi.bits.carriers import RxCarrier, _Frame
 from marconi.bits.framing import permute_rx
+from marconi.bits.registry import registry
 
 
 def test_permute_gathers_per_block() -> None:
@@ -38,3 +40,12 @@ def test_permute_before_seeder_guard() -> None:
             RxCarrier(bits=np.zeros(4, np.uint8), frames=[_Frame(start=0, cursor=0)]),
             perm=[0, 1, 2, 3],
         )
+
+
+def test_permute_stage_registered_and_wired() -> None:
+    reg = registry()
+    assert "permute" in reg
+    b = ProgramBuilder()
+    reg["permute"].emit_rx(b, {"perm": [2, 0, 3, 1]})
+    out = b.steps[0](RxCarrier(bits=np.array([1, 0, 0, 1], np.uint8))).bits
+    assert list(out) == [0, 1, 1, 0]  # in[2], in[0], in[3], in[1]
