@@ -1,15 +1,16 @@
-"""Real off-air DMR closure gate: Marconi's full front-end (dc_block ->
-channelize -> fsk -> mslice) turns the capture into hard dibits, the test
-carves DMR framing (sync-from-sign, burst extraction, info-bit gather) as
-caller data, and the generic BPTC helper (Task 4) decodes each burst. The
-oracle is dsd-neo's independently CRC-confirmed subscriber-ID pairs.
+"""Real off-air DMR closure gate: Marconi's front-end (channelize -> fsk) turns the
+capture into soft symbols, and the test carves DMR framing as caller data. The capture
+has a strong LO-leakage DC spike co-located with the baseband signal, so a streaming
+DC-blocker would notch the signal itself; DC is removed by whole-signal mean subtraction
+(thin capture prep) before the modem. The FM discriminator also has per-burst DC wander
+that a memoryless global slicer cannot follow, so slicing is local: detect syncs on the
+soft-symbol signs, then per-burst remove DC and rescale before the M-ary decision. The
+generic BPTC helper (Task 4) decodes each 132-dibit burst; the oracle is dsd-neo's
+independently CRC-confirmed subscriber-ID pairs.
 
-mslice's code=[3,2,0,1] is chosen so each dibit's high bit equals the symbol
-sign; bits[0::2] is therefore the per-symbol sign, and correlating it against
-_dmr.SYNC_SIGNS reproduces the proven soft-sign sync detection from one GR run.
-Polarity is fixed at asset-generation time (make_dmr_slice.py), so the gate does
-not search it. All DMR values (sync pattern, thresholds, oracle pairs, field
-offsets) are caller data in tests/; none enter src/marconi (test_agnosticism).
+Polarity is fixed at asset-generation time (make_dmr_slice.py), so the gate does not
+search it. All DMR values (sync pattern, thresholds, oracle pairs, field offsets) are
+caller data in tests/; none enter src/marconi (test_agnosticism).
 """
 
 from __future__ import annotations
@@ -20,7 +21,6 @@ import numpy as np
 import pytest
 from bits import _dmr
 
-from marconi.core.bitfile import read_bits
 from marconi.core.descriptor import Descriptor
 from marconi.core.levels import Level
 from marconi.phy.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
@@ -41,34 +41,33 @@ def _dmr_modem() -> ModemSpec:
     return ModemSpec(
         symbol_rate=4800.0,
         path=[
-            ModemStep(conv="dc_block", params={"dc_block_len": 32}),
             ModemStep(
                 conv="channelize",
                 params={"decim": 1, "bandwidth_hz": 12500.0, "center_hz": 0.0},
             ),
             ModemStep(conv="fsk", params={"deviation": 1944.0, "loop_bw": 0.01}),
-            ModemStep(
-                conv="mslice",
-                params={
-                    "thresholds": [-0.667, 0.0, 0.667],
-                    "code": [3, 2, 0, 1],
-                    "bits": 2,
-                },
-            ),
         ],
     )
 
 
-def _decode(bits: np.ndarray) -> list[dict[str, int | str]]:
-    signs = 1 - 2 * bits[0::2].astype(np.int64)  # dibit high bit == symbol sign
+def _decode(sym: np.ndarray) -> list[dict[str, int | str]]:
+    signs = np.sign(sym - np.median(sym))
     w = np.lib.stride_tricks.sliding_window_view(signs, _dmr.SYNC_SIGNS.size)
     syncs = np.flatnonzero((w == _dmr.SYNC_SIGNS).sum(axis=1) >= 21)
     out: list[dict[str, int | str]] = []
     for s in syncs:
-        b0 = 2 * (int(s) - 54)
-        if b0 < 0 or b0 + 264 > bits.size:
+        lo = int(s) - 54
+        if lo < 0 or lo + 132 > sym.size:
             continue
-        r = _dmr.decode_burst_from_bits(bits[b0 : b0 + 264])
+        c = sym[lo : lo + 132] - np.median(sym[lo : lo + 132])
+        mag = np.abs(c)
+        outer = float(np.mean(mag[mag > np.percentile(mag, 60)]) or 1.0)
+        n = c / outer
+        dibits = np.array(
+            [[3, 2, 0, 1][int(np.searchsorted([-0.667, 0.0, 0.667], v))] for v in n],
+            np.uint8,
+        )
+        r = _dmr.decode_burst(dibits)
         if r:
             out.append(r)
     return out
@@ -80,20 +79,24 @@ def _decode(bits: np.ndarray) -> list[dict[str, int | str]]:
 )
 def test_dmr_offair(tmp_path: Path) -> None:
     ensure_worker_warm()
-    snk = tmp_path / "dmr_bits.u8"
+    iq = np.fromfile(_SLICE, np.complex64)
+    iq = (iq - iq.mean()).astype(np.complex64)  # strip the LO-leakage DC spike
+    src = tmp_path / "dmr_dc.cf32"
+    src.write_bytes(iq.tobytes())
+    snk = tmp_path / "dmr_sym.f32"
     pipe = compile_modem(
         _dmr_modem(),
         stage_registry(),
         direction="rx",
         sample_rate=RATE,
         start=IQ,
-        source_io={"path": str(_SLICE)},
+        source_io={"path": str(src)},
         sink_io={"path": str(snk)},
     )
     r = GnuRadioBackend().run_pipeline(pipe, timeout=180.0)
     assert r.status == "ok", r
 
-    decoded = _decode(read_bits(snk))
+    decoded = _decode(np.fromfile(snk, np.float32))
     pairs = {
         (int(d["source"]), int(d["target"]))
         for d in decoded
