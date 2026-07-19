@@ -2,9 +2,9 @@
 (SDRSharp IQ .wav, 39062 Hz, 450.176 MHz, Motorola Capacity Plus). The source is
 not committed (.gitignore artifacts/); place the downloaded wav at SRC, then run:
     uv run python tests/bits/make_dmr_slice.py
-Polarity is committed here, before mslice hard-slices: this capture's sync pattern
-correlates at native polarity, so the IQ is written un-conjugated. If the gate finds
-no syncs on a re-derived capture, wrap the IQ in np.conjugate to flip every dibit."""
+Polarity is fixed here: this capture's sync pattern correlates at native polarity, so
+the IQ is written un-conjugated. If the gate finds no syncs on a re-derived capture,
+wrap the IQ in np.conjugate to flip every dibit's sign."""
 
 from __future__ import annotations
 
