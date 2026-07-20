@@ -47,6 +47,14 @@ _PROTOCOL_TOKENS = [
     r"\bcsbk\b",
     r"capacity\s*plus",
     r"\bdsd\b",
+    r"\bdrm\b",
+    r"\bmode\s*b\b",
+    r"deutsche\s*welle",
+    r"\bdw\s*drm\b",
+    r"journaline",
+    r"1024-?phase",
+    r"gain\s*reference",
+    r"168,\s*255,\s*161",  # DRM scattered-pilot Z-row literal
 ]
 _PATTERN = re.compile("|".join(_PROTOCOL_TOKENS), re.IGNORECASE)
 
