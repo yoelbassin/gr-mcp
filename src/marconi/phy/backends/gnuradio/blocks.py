@@ -18,6 +18,9 @@ from marconi.phy.backends.gnuradio.embedded.decision import make_peak_decision
 from marconi.phy.backends.gnuradio.embedded.depuncture import make_depuncture
 from marconi.phy.backends.gnuradio.embedded.msk import make_msk_demod
 from marconi.phy.backends.gnuradio.embedded.ofdm import make_ofdm_frame_sync
+from marconi.phy.backends.gnuradio.embedded.ofdm_coherent import (
+    make_ofdm_coherent_sync,
+)
 from marconi.phy.backends.gnuradio.embedded.preamble import make_sym_strip, sym_prefix
 from marconi.phy.backends.gnuradio.embedded.probe import make_burst_probe
 from marconi.phy.backends.gnuradio.embedded.trellis_fec import make_trellis_viterbi
@@ -328,6 +331,24 @@ GR_BLOCKS: dict[str, Callable[[_GrCtx, Params], Any]] = {
         null_len=_as_int(p["null_len"]),
         frame_len=_as_int(p["frame_len"]),
         data_syms=_as_int(p["data_syms"]),
+    ),
+    "ofdm_coherent_sync": lambda c, p: make_ofdm_coherent_sync(
+        c.gr,
+        fft_len=_as_int(p["fft_len"]),
+        cp_len=_as_int(p["cp_len"]),
+        sym_len=_as_int(p["sym_len"]),
+        n_frame_syms=_as_int(p["n_frame_syms"]),
+        n_carriers=_as_int(p["n_carriers"]),
+        kmin=_as_int(p["kmin"]),
+        dc_search=_as_int(p["dc_search"]),
+        warmup_syms=_as_int(p["warmup_syms"]),
+        pilot_lens=_as_int_list(p["pilot_lens"]),
+        pilot_carriers=_as_int_list(p["pilot_carriers"]),
+        pilot_i=_as_float_list(p["pilot_i"]),
+        pilot_q=_as_float_list(p["pilot_q"]),
+        fp_carriers=_as_int_list(p["fp_carriers"]),
+        fp_i=_as_float_list(p["fp_i"]),
+        fp_q=_as_float_list(p["fp_q"]),
     ),
     "stream_to_vector": lambda c, p: c.blocks.stream_to_vector(
         c.gr.sizeof_gr_complex, _as_int(p["vlen"])

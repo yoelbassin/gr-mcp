@@ -131,8 +131,51 @@ class DqpskSoftDemap(RxStage[CompileContext]):
         return Descriptor(Level.BITS, "f", in_desc.layout, Carrier.SOFT)
 
 
+class _CoherentParams(StageParams):
+    fft_len: StrictInt
+    cp_len: StrictInt
+    sym_len: StrictInt
+    n_frame_syms: StrictInt
+    n_carriers: StrictInt
+    kmin: StrictInt
+    dc_search: StrictInt
+    warmup_syms: StrictInt
+    pilot_lens: list[int]
+    pilot_carriers: list[int]
+    pilot_i: list[float]
+    pilot_q: list[float]
+    fp_carriers: list[int]
+    fp_i: list[float]
+    fp_q: list[float]
+
+
+class OfdmCoherentSync(RxStage[CompileContext]):
+    """Coherent scattered-pilot OFDM demod, IQ->SYMBOLS (RX-only). One embedded
+    block: CP-correlation symbol timing, FFT, fine-CFO derotation off the
+    frequency pilots, 2-D scattered-pilot channel estimation, and equalization
+    to symbol-major active carriers. Generic over the OFDM geometry and pilot
+    lattice; the geometry, the scattered/frequency pilot carriers, and their
+    reference values are all parameters."""
+
+    name = "ofdm_coherent_sync"
+    from_level = Level.IQ
+    to_level = Level.SYMBOLS
+    family = "ofdm"
+    params_model = _CoherentParams
+
+    def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
+        p = _CoherentParams.model_validate(dict(params))
+        b.chain("ofdm_coherent_sync", **p.model_dump())
+
+    def out_descriptor(
+        self, in_desc: Descriptor, params: Mapping[str, Any]
+    ) -> Descriptor:
+        return Descriptor(Level.SYMBOLS, "c", in_desc.layout, Carrier.SOFT)
+
+
 OFDM_STAGES: tuple[type[Stage[CompileContext]], ...] = (
     OfdmDemod,
     DqpskSoftDemap,
     OfdmFrameSyncProbe,
+    OfdmCoherentSync,
 )

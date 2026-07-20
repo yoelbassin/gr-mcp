@@ -7,6 +7,8 @@ Every value is ported verbatim from the Dream-verified scratch scripts
 
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
 
 FFT_LEN = 256
@@ -52,6 +54,31 @@ FP_VALUES = [
     complex(np.sqrt(2.0) * np.exp(1j * 2 * np.pi * p / 1024)) for p in FP_PHASES
 ]
 
+_DC_SEARCH = 4
+_WARMUP_SYMS = 300
+
+
+def sync_params() -> dict[str, Any]:
+    carriers, values = pilot_tables()
+    return {
+        "fft_len": FFT_LEN,
+        "cp_len": CP_LEN,
+        "sym_len": SYM_LEN,
+        "n_frame_syms": NS,
+        "n_carriers": N_CARRIERS,
+        "kmin": KMIN,
+        "dc_search": _DC_SEARCH,
+        "warmup_syms": _WARMUP_SYMS,
+        "pilot_lens": [len(ks) for ks in carriers],
+        "pilot_carriers": [int(k) for ks in carriers for k in ks],
+        "pilot_i": [float(v.real) for vs in values for v in vs],
+        "pilot_q": [float(v.imag) for vs in values for v in vs],
+        "fp_carriers": [int(k) for k in FP_CARRIERS],
+        "fp_i": [float(v.real) for v in FP_VALUES],
+        "fp_q": [float(v.imag) for v in FP_VALUES],
+    }
+
+
 # fmt: off
 # iTableFACRobModB: 65 fixed (frame_sym, carrier) positions, symbols 2..13.
 FAC_CELLS: list[tuple[int, int]] = [
@@ -94,6 +121,19 @@ assert len(SDC_CELLS) == 322
 
 ACTIVE_CARRIERS = [k for k in range(KMIN, KMAX + 1) if k != 0]
 _CARRIER_INDEX = {k: i for i, k in enumerate(ACTIVE_CARRIERS)}
+
+
+def gather_fac_cells(carr: np.ndarray) -> np.ndarray:
+    """Select the 65 FAC cells per frame from the frame-aligned equalized
+    carrier grid [n_symbols, N_CARRIERS] the coherent sync emits (symbol-major,
+    ascending active-carrier index; output symbol 0 is frame-symbol 0)."""
+    n_frames = carr.shape[0] // NS
+    out = np.empty((n_frames, len(FAC_CELLS)), dtype=complex)
+    for f in range(n_frames):
+        for i, (s, c) in enumerate(FAC_CELLS):
+            out[f, i] = carr[NS * f + s, _CARRIER_INDEX[c]]
+    return out
+
 
 # blockinterleaver_cc requires len(perm) == the repeating block it gathers
 # over, so a cell-select perm spans a WHOLE frame/super-frame carrier block
