@@ -7,9 +7,20 @@ Every value is ported verbatim from the Dream-verified scratch scripts
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 import numpy as np
+from pydantic import StrictInt
+
+from marconi.bits.models import CodecSpec, CodecStep
+from marconi.core.descriptor import Carrier, Descriptor
+from marconi.core.levels import Level
+from marconi.core.params import StageParams
+from marconi.core.stages import RxStage, Stage
+from marconi.phy.compile_context import CompileContext
+from marconi.phy.models import ModemStep
+from marconi.phy.stages.registry import stage_registry
 
 FFT_LEN = 256
 CP_LEN = 64
@@ -227,6 +238,15 @@ def sdc_bit_perm() -> list[int]:
     return _inverse_perm(_interleave_table(SDC_CODED_BITS, INTERLEAVER_T0))
 
 
+# gnuradio's constellation_soft_decoder for QPSK emits the imaginary-axis soft
+# bit before the real-axis one, transposing every coded (Re, Im) pair relative to
+# Dream's coded-bit order; xor-1 undoes that transpose. Composing it with the
+# pure inverse-interleave gives the single gather that carries GR's soft output
+# straight to mother-code bit order (verified: 109/109 CRC-8-valid FAC blocks).
+def fac_deinterleave_perm() -> list[int]:
+    return [p ^ 1 for p in fac_bit_perm()]
+
+
 def energy_prbs(n: int) -> np.ndarray:
     reg = (1 << 32) - 1
     out = np.zeros(n, dtype=np.int64)
@@ -337,3 +357,104 @@ def parse_sdc_label(block316: bytes) -> str:
             return raw.decode("utf-8", errors="replace")
         pos = body_start + length * 8 + 4
     return ""
+
+
+class _CellSelectDemapParams(StageParams):
+    select_perm: list[int]
+    keep: StrictInt
+    scheme: str
+    order: StrictInt
+
+
+class CellSelectSoftDemap(RxStage[CompileContext]):
+    """SYMBOLS(complex)->BITS(soft): gather the wanted cells to the front of each
+    equalized carrier block (blockinterleaver_cc over a full-block select perm),
+    keep them (keep_m_in_n_c), then soft-demap (constellation_soft_decoder). The
+    select perm, keep count and constellation are caller data — FAC and SDC differ
+    only there. Composed from stock GR blocks, so it lives test-side, never src/."""
+
+    name = "cell_select_soft_demap"
+    from_level = Level.SYMBOLS
+    to_level = Level.BITS
+    family = "ofdm"
+    params_model = _CellSelectDemapParams
+    accepts_item_type = "c"
+    accepts_carrier = Carrier.SOFT
+
+    def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
+        p = _CellSelectDemapParams.model_validate(dict(params))
+        b.chain("blockinterleaver_cc", perm=[int(x) for x in p.select_perm], mode=True)
+        b.chain("keep_m_in_n_c", m=int(p.keep), n=len(p.select_perm))
+        b.chain("constellation_soft_decoder", scheme=p.scheme, order=int(p.order))
+
+    def out_descriptor(
+        self, in_desc: Descriptor, params: Mapping[str, Any]
+    ) -> Descriptor:
+        return Descriptor(Level.BITS, "f", in_desc.layout, Carrier.SOFT)
+
+
+def fac_stage_registry() -> dict[str, Stage[CompileContext]]:
+    return {**stage_registry(), CellSelectSoftDemap.name: CellSelectSoftDemap()}
+
+
+def fac_phy_steps() -> list[ModemStep]:
+    return [
+        ModemStep(conv="ofdm_coherent_sync", params=sync_params()),
+        ModemStep(
+            conv=CellSelectSoftDemap.name,
+            params={
+                "select_perm": list(fac_select_perm()),
+                "keep": len(FAC_CELLS),
+                "scheme": "psk",
+                "order": 4,
+            },
+        ),
+        ModemStep(conv="deinterleave", params={"perm": list(fac_deinterleave_perm())}),
+        ModemStep(conv="depuncture", params={"keep_mask": list(FAC_PUNCTURE_KEEP)}),
+        ModemStep(
+            conv="fec",
+            params={
+                "scheme": "cc",
+                "rate_inv": CONV_RATE_INV,
+                "polys": list(CONV_POLYS),
+                "frame_bits": FAC_FRAME_BITS,
+                "tail": TAIL,
+            },
+        ),
+    ]
+
+
+def energy_prbs_hex(n_bits: int) -> str:
+    return np.packbits(energy_prbs(n_bits).astype(np.uint8)).tobytes().hex()
+
+
+# CRC-8 in the crc-library parameterization equivalent to crc8() above (Dream
+# CRC.cpp G=0x11D, init all-ones, output complemented). The bits-layer `crc`
+# stage checks the trailing byte over the 64 info bits of each 72-bit FAC block.
+FAC_CRC_POLY = 0x1D
+FAC_CRC_INIT = 0xFF
+FAC_CRC_XOROUT = 0xFF
+
+
+def fac_codec() -> CodecSpec:
+    return CodecSpec(
+        name="drm_fac",
+        path=[
+            CodecStep(
+                conv="descramble_bits",
+                params={"sequence": energy_prbs_hex(FAC_FRAME_BITS)},
+            ),
+            CodecStep(conv="segment", params={"frame_body_len": FAC_FRAME_BITS}),
+            CodecStep(conv="fixed_frame", params={"payload_bits": FAC_FRAME_BITS}),
+            CodecStep(
+                conv="crc",
+                params={
+                    "poly": FAC_CRC_POLY,
+                    "bits": 8,
+                    "init": FAC_CRC_INIT,
+                    "reflected": False,
+                    "xorout": FAC_CRC_XOROUT,
+                },
+            ),
+        ],
+    )
