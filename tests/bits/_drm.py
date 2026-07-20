@@ -7,13 +7,19 @@ Every value is ported verbatim from the Dream-verified scratch scripts
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping
+from dataclasses import replace
 from typing import Any
 
 import numpy as np
-from pydantic import StrictInt
+from pydantic import StrictInt, model_validator
 
+from marconi.bits import framing
+from marconi.bits.builder import ProgramBuilder
+from marconi.bits.carriers import RxCarrier, _Frame
 from marconi.bits.models import CodecSpec, CodecStep
+from marconi.bits.registry import registry
 from marconi.core.descriptor import Carrier, Descriptor
 from marconi.core.levels import Level
 from marconi.core.params import StageParams
@@ -156,8 +162,10 @@ FAC_SELECT_BLOCK = NS * N_CARRIERS
 SDC_SELECT_BLOCK = 3 * NS * N_CARRIERS
 
 
-def _select_perm(cells: list[tuple[int, int]], block_size: int) -> list[int]:
-    selected = [fs * N_CARRIERS + _CARRIER_INDEX[k] for fs, k in cells]
+def _select_perm(
+    cells: list[tuple[int, int]], block_size: int, offset: int = 0
+) -> list[int]:
+    selected = [offset + fs * N_CARRIERS + _CARRIER_INDEX[k] for fs, k in cells]
     rest = [i for i in range(block_size) if i not in set(selected)]
     return selected + rest
 
@@ -166,8 +174,14 @@ def fac_select_perm() -> list[int]:
     return _select_perm(FAC_CELLS, FAC_SELECT_BLOCK)
 
 
-def sdc_select_perm() -> list[int]:
-    return _select_perm(SDC_CELLS, SDC_SELECT_BLOCK)
+# The coherent sync emits FRAME-aligned symbols but not SUPER-frame-aligned: the
+# SDC (symbols 0-1 of the super-frame's frame 0) sits at one of 3 frame positions
+# within each 45-symbol (3-frame) super-frame block, unknown a priori. `phase`
+# picks that position — offset the gather by phase whole frames so the select perm
+# lifts the SDC cells from block-symbols {phase*15, phase*15+1}. The caller sweeps
+# phase 0/1/2 and keeps the one that yields CRC-16-valid SDC (scratch: phase 2).
+def sdc_select_perm(phase: int = 0) -> list[int]:
+    return _select_perm(SDC_CELLS, SDC_SELECT_BLOCK, phase * NS * N_CARRIERS)
 
 
 # Standard (non-Dream-reversed) octal generators for the shared DAB/DRM K=7
@@ -245,6 +259,10 @@ def sdc_bit_perm() -> list[int]:
 # straight to mother-code bit order (verified: 109/109 CRC-8-valid FAC blocks).
 def fac_deinterleave_perm() -> list[int]:
     return [p ^ 1 for p in fac_bit_perm()]
+
+
+def sdc_deinterleave_perm() -> list[int]:
+    return [p ^ 1 for p in sdc_bit_perm()]
 
 
 def energy_prbs(n: int) -> np.ndarray:
@@ -424,8 +442,41 @@ def fac_phy_steps() -> list[ModemStep]:
     ]
 
 
+def sdc_phy_steps(phase: int) -> list[ModemStep]:
+    return [
+        ModemStep(conv="ofdm_coherent_sync", params=sync_params()),
+        ModemStep(
+            conv=CellSelectSoftDemap.name,
+            params={
+                "select_perm": list(sdc_select_perm(phase)),
+                "keep": len(SDC_CELLS),
+                "scheme": "psk",
+                "order": 4,
+            },
+        ),
+        ModemStep(conv="deinterleave", params={"perm": list(sdc_deinterleave_perm())}),
+        ModemStep(conv="depuncture", params={"keep_mask": list(SDC_PUNCTURE_KEEP)}),
+        ModemStep(
+            conv="fec",
+            params={
+                "scheme": "cc",
+                "rate_inv": CONV_RATE_INV,
+                "polys": list(CONV_POLYS),
+                "frame_bits": SDC_FRAME_BITS,
+                "tail": TAIL,
+            },
+        ),
+    ]
+
+
 def energy_prbs_hex(n_bits: int) -> str:
-    return np.packbits(energy_prbs(n_bits).astype(np.uint8)).tobytes().hex()
+    # descramble_bits tiles a byte-granular hex sequence over the bit stream, so a
+    # PRBS whose period isn't a byte multiple (SDC's 316) would drift by its pad
+    # bits every block. Repeat it to the least byte-aligned multiple (LCM(n, 8)) so
+    # each block re-aligns on PRBS[0]. FAC's 72 is already byte-aligned (reps=1).
+    reps = 8 // math.gcd(n_bits, 8)
+    tiled = np.tile(energy_prbs(n_bits), reps).astype(np.uint8)
+    return np.packbits(tiled).tobytes().hex()
 
 
 # CRC-8 in the crc-library parameterization equivalent to crc8() above (Dream
@@ -458,3 +509,112 @@ def fac_codec() -> CodecSpec:
             ),
         ],
     )
+
+
+# SDC's CRC-16 rides the SAME crc-library parameterization proven for FAC's CRC-8
+# (poly 0x1021, init all-ones, output ones-complement), but DRM computes it over a
+# zero-nibble-prefixed scope — zeros(4) ++ block[:300], the 16-bit check at
+# [300:316]. That sub-byte framing can't ride the byte-aligned `crc` stage, so a
+# thin gather re-expresses the exact scope over the stock crc-library check and
+# leaves the raw 316-bit block payload for parse_sdc_label.
+SDC_CRC_POLY = 0x1021
+SDC_CRC_INIT = 0xFFFF
+SDC_CRC_XOROUT = 0xFFFF
+SDC_CRC_BITS = 16
+SDC_CRC_PREFIX_ZEROS = 4
+SDC_CRC_SCOPE_BITS = 300
+
+
+class _SdcCrcParams(StageParams):
+    poly: StrictInt
+    init: StrictInt
+    xorout: StrictInt
+    bits: StrictInt
+    prefix_zeros: StrictInt
+    scope_bits: StrictInt
+
+    @model_validator(mode="after")
+    def _byte_aligned_scope(self) -> "_SdcCrcParams":
+        if (self.prefix_zeros + self.scope_bits) % 8:
+            raise ValueError("prefix_zeros + scope_bits must be a multiple of 8")
+        return self
+
+
+def _sdc_crc_rx(
+    c: RxCarrier,
+    *,
+    poly: int,
+    init: int,
+    xorout: int,
+    bits: int,
+    prefix_zeros: int,
+    scope_bits: int,
+) -> RxCarrier:
+    total = scope_bits + bits
+    weights = 1 << np.arange(bits - 1, -1, -1, dtype=np.int64)
+    prefix = np.zeros(prefix_zeros, dtype=np.uint8)
+    out: list[_Frame] = []
+    for f in c.frames:
+        block = framing.bytes_to_bits(f.payload)[:total]
+        if block.size < total:
+            continue
+        scope = framing.bits_to_bytes(np.concatenate([prefix, block[:scope_bits]]))
+        computed = framing.crc_value(
+            scope, poly=poly, bits=bits, init=init, xorout=xorout
+        )
+        received = int(block[scope_bits:total].astype(np.int64).dot(weights))
+        out.append(replace(f, crc_ok=computed == received))
+    return RxCarrier(bits=c.bits, frames=out)
+
+
+class SdcCrc16(RxStage[ProgramBuilder]):
+    """FRAMES->FRAMES: check each SDC block's CRC-16 over its zero-nibble-prefixed
+    scope, leaving the raw block payload intact for parse_sdc_label. Composed from
+    the stock crc-library check, so it lives test-side, never src/."""
+
+    name = "sdc_crc16"
+    from_level = Level.FRAMES
+    to_level = Level.FRAMES
+    family = "integrity"
+    params_model = _SdcCrcParams
+
+    def emit_rx(self, b: ProgramBuilder, params: Mapping[str, Any]) -> None:
+        p = _SdcCrcParams.model_validate(dict(params))
+        b.add(
+            _sdc_crc_rx,
+            poly=p.poly,
+            init=p.init,
+            xorout=p.xorout,
+            bits=p.bits,
+            prefix_zeros=p.prefix_zeros,
+            scope_bits=p.scope_bits,
+        )
+
+
+def sdc_codec() -> CodecSpec:
+    return CodecSpec(
+        name="drm_sdc",
+        path=[
+            CodecStep(
+                conv="descramble_bits",
+                params={"sequence": energy_prbs_hex(SDC_FRAME_BITS)},
+            ),
+            CodecStep(conv="segment", params={"frame_body_len": SDC_FRAME_BITS}),
+            CodecStep(conv="fixed_frame", params={"payload_bits": SDC_FRAME_BITS}),
+            CodecStep(
+                conv=SdcCrc16.name,
+                params={
+                    "poly": SDC_CRC_POLY,
+                    "init": SDC_CRC_INIT,
+                    "xorout": SDC_CRC_XOROUT,
+                    "bits": SDC_CRC_BITS,
+                    "prefix_zeros": SDC_CRC_PREFIX_ZEROS,
+                    "scope_bits": SDC_CRC_SCOPE_BITS,
+                },
+            ),
+        ],
+    )
+
+
+def sdc_bits_registry() -> dict[str, Stage[ProgramBuilder]]:
+    return {**registry(), SdcCrc16.name: SdcCrc16()}

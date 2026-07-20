@@ -64,3 +64,51 @@ def test_drm_fac(tmp_path: Path) -> None:
     assert all(f["occupancy"] == "0011" for f in fields)  # occ 3 / 10 kHz
     ids = {str(f["identity"]) for f in fields}
     assert {"01", "10", "11"} <= ids  # super-frame identity cycle
+
+
+@pytest.mark.skipif(
+    not _SLICE.exists(), reason="DRM slice absent — run tests/bits/make_drm_slice.py"
+)
+def test_drm_sdc(tmp_path: Path) -> None:
+    # SDC lives in symbols 0-1 of the SUPER-frame; the coherent sync emits only
+    # FRAME-aligned symbols, so which of the 3 frame positions is super-frame-frame-0
+    # is unknown. Sweep all 3 phases and keep the one that yields CRC-16-valid SDC —
+    # the honest, generic form of the scratch's brute-force (winner: phase 2).
+    ensure_worker_warm()
+    best_phase, best = 0, None
+    for phase in range(3):
+        snk = tmp_path / f"sdc_{phase}.u8"
+        modem = ModemSpec(
+            name="drm_sdc",
+            symbol_rate=_drm.RATE / _drm.SYM_LEN,
+            path=_drm.sdc_phy_steps(phase),
+        )
+        pipe = compile_modem(
+            modem,
+            _drm.fac_stage_registry(),
+            direction="rx",
+            sample_rate=_drm.RATE,
+            start=Descriptor(Level.IQ, "c"),
+            source_io={"path": str(_SLICE)},
+            sink_io={"path": str(snk)},
+        )
+        assert GnuRadioBackend().run_pipeline(pipe, timeout=180.0).status == "ok"
+        n = int(read_bits(snk).size)
+        res = parse_bitstream(
+            Bitstream(path=snk, num_bits=n, source_capture=_SLICE),
+            _drm.sdc_codec(),
+            _drm.sdc_bits_registry(),
+        )
+        if best is None or res.num_crc_ok > best.num_crc_ok:
+            best_phase, best = phase, res
+    assert best is not None
+    labels = {
+        _drm.parse_sdc_label(bytes.fromhex(f.payload_hex))
+        for f in best.frames
+        if f.crc_ok
+    }
+    assert best.num_crc_ok >= 30, (
+        f"expected >=30 CRC-16-valid SDC super-frames (scratch 36/36), got "
+        f"{best.num_crc_ok} at winning phase {best_phase}"
+    )
+    assert "DW DRM" in labels, (best_phase, labels)
