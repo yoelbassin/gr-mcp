@@ -14,6 +14,7 @@ from marconi.phy.backends.gnuradio.embedded.chirp import (
     make_css_demap,
     make_css_map,
 )
+from marconi.phy.backends.gnuradio.embedded.cp_sync import make_cp_symbol_sync
 from marconi.phy.backends.gnuradio.embedded.decision import make_peak_decision
 from marconi.phy.backends.gnuradio.embedded.depuncture import make_depuncture
 from marconi.phy.backends.gnuradio.embedded.msk import make_msk_demod
@@ -350,6 +351,12 @@ GR_BLOCKS: dict[str, Callable[[_GrCtx, Params], Any]] = {
         fp_i=_as_float_list(p["fp_i"]),
         fp_q=_as_float_list(p["fp_q"]),
     ),
+    "cp_symbol_sync": lambda c, p: make_cp_symbol_sync(
+        c.gr,
+        fft_len=_as_int(p["fft_len"]),
+        cp_len=_as_int(p["cp_len"]),
+        warmup_syms=_as_int(p["warmup_syms"]),
+    ),
     "stream_to_vector": lambda c, p: c.blocks.stream_to_vector(
         c.gr.sizeof_gr_complex, _as_int(p["vlen"])
     ),
@@ -360,7 +367,7 @@ GR_BLOCKS: dict[str, Callable[[_GrCtx, Params], Any]] = {
         _as_int(p["fft_len"]),
         bool(p.get("forward", True)),
         c.fft.window.rectangular(_as_int(p["fft_len"])),
-        False,
+        bool(p.get("shift", False)),
         1,
     ),
     "blockinterleaver_cc": lambda c, p: c.blocks.blockinterleaver_cc(
