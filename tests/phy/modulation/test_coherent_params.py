@@ -34,7 +34,7 @@ def test_valid_params_pass() -> None:
     "patch",
     [
         {"sym_len": 81},
-        {"pilot_lens": [1, 1, 1]},
+        {"pilot_lens": [2, 1, 1]},  # sum stays 4: isolates the length check
         {"pilot_carriers": [-24, -23, -22]},
         {"pilot_i": [1.0, 1.0, 1.0]},
         {"fp_i": [1.0, 2.0]},
