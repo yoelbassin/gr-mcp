@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from pydantic import StrictInt
+from pydantic import StrictInt, model_validator
 
 from marconi.core.descriptor import Carrier, Descriptor
 from marconi.core.levels import Level
@@ -147,6 +147,29 @@ class _CoherentParams(StageParams):
     fp_carriers: list[int]
     fp_i: list[float]
     fp_q: list[float]
+
+    @model_validator(mode="after")
+    def _geometry(self) -> "_CoherentParams":
+        n = sum(self.pilot_lens)
+        checks = {
+            "sym_len must equal fft_len + cp_len": self.sym_len
+            == self.fft_len + self.cp_len,
+            "pilot_lens needs one entry per frame symbol": len(self.pilot_lens)
+            == self.n_frame_syms,
+            "pilot arrays must match sum(pilot_lens)": len(self.pilot_carriers)
+            == len(self.pilot_i)
+            == len(self.pilot_q)
+            == n,
+            "fp arrays must be equal length": len(self.fp_carriers)
+            == len(self.fp_i)
+            == len(self.fp_q),
+            "n_carriers must be positive": self.n_carriers > 0,
+            "warmup_syms must exceed one frame": self.warmup_syms > self.n_frame_syms,
+        }
+        bad = [msg for msg, ok in checks.items() if not ok]
+        if bad:
+            raise ValueError("; ".join(bad))
+        return self
 
 
 class OfdmCoherentSync(RxStage[CompileContext]):
