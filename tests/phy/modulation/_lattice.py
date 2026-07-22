@@ -136,6 +136,9 @@ def make_iq(
     t = clean_symbols(n_syms, seed)
     sig = np.concatenate([np.hstack([s[-CP_LEN:], s]) for s in t])
     sig = np.convolve(sig, [1.0, 0.0, 0.0, 0.25j])[: sig.size]
+    # snr_db is referenced to actual signal power (IFFT spreads unit cells
+    # to ~0.012/sample; without this the label overstates SNR by ~18 dB)
+    sig = sig / np.sqrt(np.mean(np.abs(sig) ** 2))
     n = np.arange(sig.size)
     sig = sig * np.exp(2j * np.pi * cfo_hz * n / RATE)
     if sto_frac:
