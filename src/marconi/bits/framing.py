@@ -856,6 +856,19 @@ def sync_symbols_rx(
     return replace(c, marks=marks)
 
 
+def m_slice_rx(
+    c: RxCarrier, *, thresholds: list[float], levels: list[int]
+) -> RxCarrier:
+    sym = c.symbols
+    if sym is None:
+        return c
+    regions = np.searchsorted(
+        np.asarray(thresholds, np.float64), np.asarray(sym, np.float64)
+    )
+    mapped = np.asarray(levels, np.int16)[regions]
+    return replace(c, symbols=mapped.astype(np.int16))
+
+
 def normalize_rx(
     c: RxCarrier,
     *,

@@ -165,8 +165,41 @@ class Normalize(RxStage[ProgramBuilder]):
         )
 
 
+class _MSliceParams(StageParams):
+    thresholds: list[float]
+    levels: list[int]
+
+    @model_validator(mode="after")
+    def _shaped(self) -> "_MSliceParams":
+        if len(self.levels) != len(self.thresholds) + 1:
+            raise PydanticCustomError(
+                "value_error", "levels must be one longer than thresholds"
+            )
+        if list(self.thresholds) != sorted(self.thresholds):
+            raise PydanticCustomError("value_error", "thresholds must be ascending")
+        return self
+
+
+class MSlice(RxStage[ProgramBuilder]):
+    name = "m_slice"
+    from_level = Level.SYMBOLS
+    to_level = Level.SYMBOLS
+    family = "symbols"
+    params_model = _MSliceParams
+    accepts_item_type = "f"
+
+    def emit_rx(self, b: ProgramBuilder, params: Mapping[str, Any]) -> None:
+        p = _MSliceParams.model_validate(dict(params))
+        b.add(
+            framing.m_slice_rx,
+            thresholds=[float(x) for x in p.thresholds],
+            levels=[int(x) for x in p.levels],
+        )
+
+
 SYMBOL_STAGES: tuple[type[Stage[ProgramBuilder]], ...] = (
     CssExplicitDecode,
     SyncSymbols,
     Normalize,
+    MSlice,
 )
