@@ -149,6 +149,22 @@ class SyncWord(DuplexStage[ProgramBuilder]):
         b.add(framing.sync_word_tx, sync=p.sync)
 
 
+class MarkFrame(RxStage[ProgramBuilder]):
+    name = "mark_frame"
+    from_level = Level.BITS
+    to_level = Level.FRAMES
+    seeds_frames = True  # seeds a frame per symbol-domain mark; a body slicer carves it
+    family = "framing"
+
+    class _Params(StageParams):
+        offset_bits: StrictInt = Field(default=0, ge=0)
+
+    params_model = _Params
+
+    def emit_rx(self, b: ProgramBuilder, params: Mapping[str, Any]) -> None:
+        b.add(framing.mark_frame_rx, offset_bits=int(params.get("offset_bits", 0)))
+
+
 class NibbleSwap(DuplexStage[ProgramBuilder]):
     name = "nibble_swap"
     from_level = Level.BITS
@@ -400,6 +416,7 @@ FRAMING_STAGES: tuple[type[Stage[ProgramBuilder]], ...] = (
     FrameCodebook,
     HdlcDeframe,
     LengthFrame,
+    MarkFrame,
     NibbleSwap,
     Permute,
     Realign,

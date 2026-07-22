@@ -821,6 +821,16 @@ def delimiter_frame_rx(
     return RxCarrier(bits=bits, frames=out)
 
 
+def mark_frame_rx(c: RxCarrier, *, offset_bits: int = 0) -> RxCarrier:
+    bits = np.asarray(c.bits, np.uint8)
+    frames: list[_Frame] = []
+    for m in c.marks:
+        start = int(m) + offset_bits
+        if 0 <= start < bits.size:
+            frames.append(_Frame(start=start, cursor=start))
+    return RxCarrier(bits=bits, frames=frames, marks=c.marks)
+
+
 def sync_word_rx(c: RxCarrier, *, sync: str, max_errors: int = 0) -> RxCarrier:
     """Correlating frame seeder: seed a frame just past every position where the
     bitstream matches ``sync`` within ``max_errors`` bit flips (a sync word is
