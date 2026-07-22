@@ -709,17 +709,14 @@ def frame_codebook_tx(
     return TxCarrier(out)
 
 
-def block_code_rx(
-    c: RxCarrier,
-    *,
+def _block_decode(
+    bits: np.ndarray,
     code_bits: int,
     data_bits: int,
     parity_masks: list[int],
-    correct: bool | None = None,
-    emit: str = "data",
-) -> RxCarrier:
-    if c.frames:
-        raise ValueError("block_code must run before any frame seeder")
+    correct: bool | None,
+    emit: str,
+) -> np.ndarray:
     # Codeword basis is LSB-first: stream bit j of a stride is codeword bit j,
     # so parity_masks and the emitted data bits are LSB-first too. The CSS
     # explicit decoder assembles the same block_fec_decode input MSB-first
@@ -728,7 +725,6 @@ def block_code_rx(
     # stride).
     n_parity = code_bits - data_bits
     do_correct = can_correct(n_parity, data_bits) if correct is None else correct
-    bits = np.asarray(c.bits, np.uint8)
     n_words = bits.size // code_bits
     words = bits[: n_words * code_bits].reshape(n_words, code_bits).copy()
     if do_correct and n_words and parity_masks:
@@ -750,7 +746,42 @@ def block_code_rx(
             fixable = match.any(axis=1)
             words[bad[fixable], col[fixable]] ^= 1
     out = words if emit == "codeword" else words[:, :data_bits]
-    return RxCarrier(bits=out.reshape(-1), frames=[])
+    return out.reshape(-1)
+
+
+def block_code_rx(
+    c: RxCarrier,
+    *,
+    code_bits: int,
+    data_bits: int,
+    parity_masks: list[int],
+    correct: bool | None = None,
+    emit: str = "data",
+) -> RxCarrier:
+    if not c.frames:
+        decoded = _block_decode(
+            np.asarray(c.bits, np.uint8),
+            code_bits,
+            data_bits,
+            parity_masks,
+            correct,
+            emit,
+        )
+        return RxCarrier(bits=decoded, marks=c.marks)
+    bits = np.asarray(c.bits, np.uint8)
+    cursors = [f.cursor for f in c.frames]
+    bounds = cursors[1:] + [int(bits.size)]
+    pieces: list[np.ndarray] = []
+    frames: list[_Frame] = []
+    pos = 0
+    for f, hi in zip(c.frames, bounds):
+        window = bits[f.cursor : hi]
+        dec = _block_decode(window, code_bits, data_bits, parity_masks, correct, emit)
+        frames.append(replace(f, start=pos, cursor=pos))
+        pieces.append(dec)
+        pos += int(dec.size)
+    joined = np.concatenate(pieces) if pieces else np.zeros(0, np.uint8)
+    return RxCarrier(bits=joined, frames=frames, marks=c.marks)
 
 
 def _read_uint(bits: np.ndarray, start: int, width: int) -> int:

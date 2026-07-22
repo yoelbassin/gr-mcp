@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import numpy as np
-import pytest
 
 from marconi.bits import framing
 from marconi.bits.carriers import RxCarrier, _Frame
@@ -130,11 +129,18 @@ def test_block_code_rx_matches_scalar_reference() -> None:
         )
 
 
-def test_block_code_rejects_seeded_carrier() -> None:
-    with pytest.raises(ValueError, match="before any frame seeder"):
-        framing.block_code_rx(
-            RxCarrier(bits=np.zeros(31, np.uint8), frames=[_Frame(0, 0)]),
-            code_bits=31,
-            data_bits=21,
-            parity_masks=_masks_stream_basis(),
-        )
+def test_block_code_seeded_decodes_within_frame_window() -> None:
+    # two frames, each one (3,2) codeword [d0 d1 p]; parity mask p = d0^d1 => 0b11
+    # frame A bits: 1 0 1 (valid), frame B bits: 0 1 1 (valid)
+    bits = np.array([1, 0, 1, 0, 1, 1], np.uint8)
+    c = RxCarrier(bits=bits, frames=[_Frame(0, 0), _Frame(3, 3)])
+    out = framing.block_code_rx(
+        c,
+        code_bits=3,
+        data_bits=2,
+        parity_masks=[0b11],
+        correct=False,
+        emit="data",
+    )
+    assert out.bits.tolist() == [1, 0, 0, 1]
+    assert [f.cursor for f in out.frames] == [0, 2]  # remapped after shrink
