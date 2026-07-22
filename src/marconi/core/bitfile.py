@@ -44,7 +44,10 @@ def write_symbols(path: Path, symbols: np.ndarray) -> None:
     np.asarray(symbols, dtype=np.int16).tofile(path)
 
 
-def read_symbols(path: Path) -> np.ndarray:
+def read_symbols(path: Path, item_type: str = "s") -> np.ndarray:
+    if item_type == "f":
+        _guard(path.stat().st_size // 4, path)
+        return np.fromfile(path, dtype=np.float32)
     _guard(path.stat().st_size // 2, path)
     return np.fromfile(path, dtype=np.int16)
 

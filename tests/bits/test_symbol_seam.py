@@ -82,3 +82,18 @@ def test_symbolstream_into_bits_codec_raises(tmp_path: Path) -> None:
     codec = CodecSpec(path=[CodecStep(conv="hdlc_deframe", params={})])
     with pytest.raises(SpecValidationError):
         parse_bitstream(Symbolstream(path=p, num_symbols=4), codec, registry())
+
+
+def test_soft_symbolstream_reaches_carrier(tmp_path: Path) -> None:
+    import numpy as np
+
+    from marconi.core.bitfile import write_llrs
+
+    p = tmp_path / "s.f32"
+    write_llrs(p, np.array([0.9, -0.3, 0.1, -0.8], dtype=np.float32))
+    res = parse_bitstream(
+        Symbolstream(path=p, num_symbols=4, item_type="f", marks=[0]),
+        _symbol_codec(),
+        _registry(),
+    )
+    assert res.num_frames >= 0

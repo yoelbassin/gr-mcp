@@ -46,7 +46,7 @@ def parse_bitstream(
         symbolstream = cast(Symbolstream, bitstream)
         carrier = RxCarrier(
             bits=np.zeros(0, np.uint8),
-            symbols=read_symbols(symbolstream.path),
+            symbols=read_symbols(symbolstream.path, symbolstream.item_type),
             marks=tuple(int(m) for m in symbolstream.marks),
         )
     else:
