@@ -6,7 +6,7 @@ from typing import Any
 from pydantic import StrictInt, model_validator
 from pydantic_core import PydanticCustomError
 
-from marconi.bits import symbols
+from marconi.bits import framing, symbols
 from marconi.bits.builder import ProgramBuilder
 from marconi.core import coding
 from marconi.core.levels import Level
@@ -111,4 +111,31 @@ class CssExplicitDecode(RxStage[ProgramBuilder]):
         )
 
 
-SYMBOL_STAGES: tuple[type[Stage[ProgramBuilder]], ...] = (CssExplicitDecode,)
+class _SyncSymbolsParams(StageParams):
+    pattern: list[int]
+    max_errors: StrictInt = 0
+    pre_symbols: StrictInt = 0
+
+
+class SyncSymbols(RxStage[ProgramBuilder]):
+    name = "sync_symbols"
+    from_level = Level.SYMBOLS
+    to_level = Level.SYMBOLS
+    family = "symbols"
+    params_model = _SyncSymbolsParams
+    accepts_item_type = "f"
+
+    def emit_rx(self, b: ProgramBuilder, params: Mapping[str, Any]) -> None:
+        p = _SyncSymbolsParams.model_validate(dict(params))
+        b.add(
+            framing.sync_symbols_rx,
+            pattern=[int(x) for x in p.pattern],
+            max_errors=p.max_errors,
+            pre_symbols=p.pre_symbols,
+        )
+
+
+SYMBOL_STAGES: tuple[type[Stage[ProgramBuilder]], ...] = (
+    CssExplicitDecode,
+    SyncSymbols,
+)

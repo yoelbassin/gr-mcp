@@ -839,6 +839,23 @@ def sync_word_tx(c: TxCarrier, *, sync: str, max_errors: int = 0) -> TxCarrier:
     return TxCarrier(out)
 
 
+def sync_symbols_rx(
+    c: RxCarrier, *, pattern: list[int], max_errors: int, pre_symbols: int
+) -> RxCarrier:
+    sym = c.symbols
+    if sym is None or sym.size < len(pattern):
+        return c
+    pat = np.asarray(pattern, np.int64)
+    want = pat != 0
+    n_care = int(want.sum())
+    signs = np.sign(np.asarray(sym, np.float64))
+    win = np.lib.stride_tricks.sliding_window_view(signs, pat.size)
+    agree = ((win == pat) & want).sum(axis=1)
+    hits = np.flatnonzero(agree >= n_care - max_errors)
+    marks = tuple(int(h) - pre_symbols for h in hits if int(h) - pre_symbols >= 0)
+    return replace(c, marks=marks)
+
+
 def differential_rx(c: RxCarrier, *, invert: bool = False) -> RxCarrier:
     b = np.asarray(c.bits, dtype=np.uint8)
     if b.size == 0:
