@@ -175,8 +175,10 @@ class _MSliceParams(StageParams):
             raise PydanticCustomError(
                 "value_error", "levels must be one longer than thresholds"
             )
-        if list(self.thresholds) != sorted(self.thresholds):
-            raise PydanticCustomError("value_error", "thresholds must be ascending")
+        if any(b <= a for a, b in zip(self.thresholds, self.thresholds[1:])):
+            raise PydanticCustomError(
+                "value_error", "thresholds must be strictly ascending"
+            )
         return self
 
 
