@@ -74,7 +74,9 @@ def make_pilot_lattice_equalizer(
             self._reset_lock()
 
         def _reset_lock(self) -> None:
-            self._drained_baseline = self._out.drained_total
+            # FIFO: everything pushed before this reset drains before any
+            # new-epoch item, so the push watermark is the stale/new boundary
+            self._drained_baseline = self._out.pushed_total
             self._ready = False
             self._warm: list[np.ndarray] = []
             self._theta = 0.0
@@ -234,12 +236,13 @@ def make_pilot_lattice_equalizer(
             return out
 
         def _prune(self) -> None:
+            # retain until DRAINED, not merely pushed — pushed-keyed pruning
+            # keeps vecs flat while _out grows unbounded (vec_cap never gates)
             frame_size = n_frame_syms * emit.size
-            drained_frames = (
-                self._out.drained_total - self._drained_baseline
-            ) // frame_size
+            epoch_drained = max(0, self._out.drained_total - self._drained_baseline)
+            drained_frames = epoch_drained // frame_size
             keep_from = self._phi + n_frame_syms * drained_frames - keep_margin
-            drop = keep_from - self._first
+            drop = min(keep_from - self._first, len(self._vecs))
             if drop > 0:
                 del self._vecs[:drop]
                 self._first += drop

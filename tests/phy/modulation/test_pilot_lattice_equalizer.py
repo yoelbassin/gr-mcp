@@ -52,6 +52,43 @@ def test_sync_start_tag_forces_relock() -> None:
     assert out.size > 0
 
 
+def test_relock_during_undrained_backlog_stays_sane() -> None:
+    _, a = _lattice.make_spectra(30, seed=4)
+    _, b = _lattice.make_spectra(60, seed=5)
+    spec = np.concatenate([a, b])
+    blk = make_pilot_lattice_equalizer(FAKE_GR, **_lattice.eq_params())
+    blk.in_tags = [FakeTag(30, "sync_start", 1)]
+    pos = 0
+    while pos < 35:  # feed through the tag with NO output capacity
+        out = np.zeros(0, np.complex64)
+        before = blk.nitems_read(0)
+        blk.general_work([spec[pos : pos + 5]], [out])
+        pos += blk.nitems_read(0) - before
+    got = []
+    stalls = 0
+    while pos < len(spec) and stalls < 64:
+        out = np.zeros(1 << 15, np.complex64)
+        before = blk.nitems_read(0)
+        k = int(blk.general_work([spec[pos : pos + 5]], [out]))
+        blk._nwritten += k
+        got.append(out[:k].copy())
+        consumed = blk.nitems_read(0) - before
+        pos += consumed
+        stalls = stalls + 1 if (consumed == 0 and k == 0) else 0
+        assert blk._first <= blk._m
+    k = 1
+    while k:
+        out = np.zeros(1 << 15, np.complex64)
+        k = int(blk.general_work([spec[0:0]], [out]))
+        blk._nwritten += k
+        got.append(out[:k].copy())
+        assert blk._first <= blk._m
+    total = np.concatenate(got)
+    assert blk.diagnostics["locks"] == 2
+    assert blk.diagnostics["relocks"] == 1
+    assert total.size > 0 and total.size % len(_lattice.EMIT) == 0
+
+
 def test_memory_bounded_under_slow_consumer() -> None:
     _, spec = _lattice.make_spectra(600, seed=6)
     blk = make_pilot_lattice_equalizer(FAKE_GR, **_lattice.eq_params())
