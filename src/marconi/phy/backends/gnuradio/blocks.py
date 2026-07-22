@@ -16,7 +16,6 @@ from marconi.phy.backends.gnuradio.embedded.chirp import (
 )
 from marconi.phy.backends.gnuradio.embedded.cp_sync import make_cp_symbol_sync
 from marconi.phy.backends.gnuradio.embedded.decision import make_peak_decision
-from marconi.phy.backends.gnuradio.embedded.depuncture import make_depuncture
 from marconi.phy.backends.gnuradio.embedded.msk import make_msk_demod
 from marconi.phy.backends.gnuradio.embedded.ofdm import make_ofdm_frame_sync
 from marconi.phy.backends.gnuradio.embedded.pilot_lattice import (
@@ -387,9 +386,10 @@ GR_BLOCKS: dict[str, Callable[[_GrCtx, Params], Any]] = {
     "constellation_soft_decoder": lambda c, p: c.digital.constellation_soft_decoder_cf(
         _const(c, str(p["scheme"]), _as_int(p["order"])).base()
     ),
-    "depuncture": lambda c, p: make_depuncture(
-        c.gr, keep_mask=_as_int_list(p["keep_mask"])
+    "patterned_interleaver_f": lambda c, p: c.blocks.patterned_interleaver(
+        c.gr.sizeof_float, _as_int_list(p["pattern"])
     ),
+    "null_source_f": lambda c, p: c.blocks.null_source(c.gr.sizeof_float),
     "trellis_viterbi": lambda c, p: make_trellis_viterbi(
         c,
         rate_inv=_as_int(p["rate_inv"]),

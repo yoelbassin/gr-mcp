@@ -13,7 +13,7 @@ import numpy as np
 from phy._fakegr import FAKE_GR, drive
 
 from marconi.phy.backends.gnuradio.embedded.chirp import chirp_prefix, make_chirp_sync
-from marconi.phy.backends.gnuradio.embedded.depuncture import make_depuncture
+from marconi.phy.backends.gnuradio.embedded.lifecycle import OutQueue, forecast_drain
 
 _EMBEDDED = (
     Path(__file__).resolve().parents[2]
@@ -26,13 +26,42 @@ _EMBEDDED = (
 )
 
 
+def _make_expander(gr, block_in: int, block_out: int):
+    """Minimal OutQueue consumer: zero-pads each block_in items to block_out.
+    The test-owned vehicle for exercising the shared drain discipline."""
+
+    class _Expander(gr.basic_block):
+        def __init__(self) -> None:
+            gr.basic_block.__init__(
+                self, name="expander", in_sig=[np.float32], out_sig=[np.float32]
+            )
+            self._buf = np.empty(0, dtype=np.float32)
+            self._out = OutQueue(np.float32)
+
+        def forecast(self, noutput_items: int, ninputs: int) -> list:
+            return forecast_drain(self._out.pending, ninputs)
+
+        def general_work(self, input_items, output_items) -> int:
+            inp = input_items[0]
+            if inp.size:
+                self._buf = np.concatenate([self._buf, np.asarray(inp, np.float32)])
+                self.consume(0, len(inp))
+            while self._buf.size >= block_in:
+                blk = np.zeros(block_out, dtype=np.float32)
+                blk[:block_in] = self._buf[:block_in]
+                self._buf = self._buf[block_in:]
+                self._out.push(blk)
+            return self._out.drain(output_items[0])
+
+    return _Expander()
+
+
 def test_backlog_larger_than_output_window_drains_across_small_windows() -> None:
     """A backlog built from one large input push (far more pending output
     than fits in any single output window) must fully emerge across MANY
     SMALL output-window calls — the drain rides on forecast announcing
     drainability, never on a single oversized window that would hide a
     small-window drain bug."""
-    keep_mask = [1, 1, 1, 0]
     block_in, block_out = 3, 4
     n_blocks = 514  # 514*4 = 2056 pending items, >> the out_len=64 window
     rng = np.random.default_rng(4)
@@ -43,13 +72,13 @@ def test_backlog_larger_than_output_window_drains_across_small_windows() -> None
     expected = expected_blocks.reshape(-1)
 
     big_out = drive(
-        make_depuncture(FAKE_GR, keep_mask=keep_mask),
+        _make_expander(FAKE_GR, block_in, block_out),
         payload,
         chunk=payload.size,
         out_dtype=np.float32,
     )
     tiny_out = drive(
-        make_depuncture(FAKE_GR, keep_mask=keep_mask),
+        _make_expander(FAKE_GR, block_in, block_out),
         payload,
         chunk=payload.size,
         out_len=64,  # 33 windows needed to drain the 2056-item backlog
@@ -99,7 +128,6 @@ def test_lifecycle_owned_by_shared_module() -> None:
     exceptions with no pending state."""
     users = {
         "chirp.py",
-        "depuncture.py",
         "msk.py",
         "ofdm.py",
         "cp_sync.py",

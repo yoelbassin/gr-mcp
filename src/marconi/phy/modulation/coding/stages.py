@@ -36,10 +36,21 @@ class Deinterleave(RxStage[CompileContext]):
 class _DepunctureParams(StageParams):
     keep_mask: list[int]
 
+    @model_validator(mode="after")
+    def _keeps_something(self) -> "_DepunctureParams":
+        if not any(self.keep_mask):
+            raise ValueError(
+                "keep_mask must keep at least one position: an all-erasure "
+                "mask consumes no input and the flowgraph never terminates"
+            )
+        return self
+
 
 class Depuncture(RxStage[CompileContext]):
     """Generic depuncture, BITS->BITS soft. Scatters soft into a wider codeword per
-    a keep-mask (0 = erasure). Protocol puncture tables are params."""
+    a keep-mask (0 = erasure), from STOCK GR blocks: patterned_interleaver pulls
+    kept positions from the stream and erasures from a null_source.
+    Protocol puncture tables are params."""
 
     name = "depuncture"
     from_level = Level.BITS
@@ -50,7 +61,15 @@ class Depuncture(RxStage[CompileContext]):
     accepts_carrier = Carrier.SOFT
 
     def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
-        b.chain("depuncture", keep_mask=[int(x) for x in params["keep_mask"]])
+        p = _DepunctureParams.model_validate(dict(params))
+        src = b.tail  # incoming soft stream (never None after IO source)
+        assert src is not None
+        il = b.add(
+            "patterned_interleaver_f", pattern=[0 if m else 1 for m in p.keep_mask]
+        )
+        b.connect(src, il, dst_port=0)
+        b.connect(b.add("null_source_f"), il, dst_port=1)
+        b.set_tail(il)
 
 
 class _ConvParams(StageParams):
