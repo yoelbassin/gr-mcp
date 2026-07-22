@@ -19,8 +19,8 @@ from marconi.phy.backends.gnuradio.embedded.decision import make_peak_decision
 from marconi.phy.backends.gnuradio.embedded.depuncture import make_depuncture
 from marconi.phy.backends.gnuradio.embedded.msk import make_msk_demod
 from marconi.phy.backends.gnuradio.embedded.ofdm import make_ofdm_frame_sync
-from marconi.phy.backends.gnuradio.embedded.ofdm_coherent import (
-    make_ofdm_coherent_sync,
+from marconi.phy.backends.gnuradio.embedded.pilot_lattice import (
+    make_pilot_lattice_equalizer,
 )
 from marconi.phy.backends.gnuradio.embedded.preamble import make_sym_strip, sym_prefix
 from marconi.phy.backends.gnuradio.embedded.probe import make_burst_probe
@@ -333,11 +333,9 @@ GR_BLOCKS: dict[str, Callable[[_GrCtx, Params], Any]] = {
         frame_len=_as_int(p["frame_len"]),
         data_syms=_as_int(p["data_syms"]),
     ),
-    "ofdm_coherent_sync": lambda c, p: make_ofdm_coherent_sync(
+    "pilot_lattice_equalizer": lambda c, p: make_pilot_lattice_equalizer(
         c.gr,
         fft_len=_as_int(p["fft_len"]),
-        cp_len=_as_int(p["cp_len"]),
-        sym_len=_as_int(p["sym_len"]),
         n_frame_syms=_as_int(p["n_frame_syms"]),
         n_carriers=_as_int(p["n_carriers"]),
         kmin=_as_int(p["kmin"]),

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import _lattice  # same-dir helper; no __init__.py here, pytest prepends the dir
 import numpy as np
 import pytest
 from bits import _drm
@@ -49,3 +50,41 @@ def test_ofdm_coherent_equalizes_to_clean_qpsk(tmp_path: Path) -> None:
     corners = np.array([1 + 1j, 1 - 1j, -1 + 1j, -1 - 1j]) / np.sqrt(2)
     evm = np.mean(np.min(np.abs(fac.ravel()[:, None] - corners[None, :]), axis=1) ** 2)
     assert evm < 0.10, f"equalized FAC EVM {evm:.3f} (scratch reference 0.048)"
+
+
+def test_synthetic_lattice_full_chain_equalizes(tmp_path: Path) -> None:
+    ensure_worker_warm()
+    iq = _lattice.make_iq(
+        200, cfo_hz=9.0, snr_db=28.0, lead_noise=1200, sto_frac=0.4, seed=11
+    )
+    src = tmp_path / "lat.cf32"
+    iq.tofile(src)
+    snk = tmp_path / "eq.cf32"
+    modem = ModemSpec(
+        name="lattice_sync",
+        symbol_rate=_lattice.RATE / _lattice.SYM_LEN,
+        path=[ModemStep(conv="ofdm_coherent_sync", params=_lattice.sync_params())],
+    )
+    pipe = compile_modem(
+        modem,
+        stage_registry(),
+        direction="rx",
+        sample_rate=_lattice.RATE,
+        start=Descriptor(Level.IQ, "c"),
+        source_io={"path": str(src)},
+        sink_io={"path": str(snk)},
+    )
+    result = GnuRadioBackend().run_pipeline(pipe, timeout=120.0)
+    assert result.status == "ok"
+    ncell = len(_lattice.EMIT)
+    eq = np.fromfile(snk, np.complex64).reshape(-1, ncell)
+    assert len(eq) >= 40 * _lattice.NS
+    mask = _lattice.data_mask()
+    cells = np.concatenate([eq[i][mask[i % _lattice.NS]] for i in range(len(eq))])
+    cells = cells / np.sqrt(np.mean(np.abs(cells) ** 2))
+    corners = np.array([1 + 1j, 1 - 1j, -1 + 1j, -1 - 1j]) / np.sqrt(2)
+    evm = np.mean(np.min(np.abs(cells[:, None] - corners[None, :]), axis=1) ** 2)
+    assert evm < 0.10, f"synthetic full-chain EVM {evm:.3f}"
+    diags = [d for d in result.diagnostics.values() if "frames_emitted" in d]
+    locks = diags[0]["locks"] if diags else 0
+    assert diags and isinstance(locks, int) and locks >= 1

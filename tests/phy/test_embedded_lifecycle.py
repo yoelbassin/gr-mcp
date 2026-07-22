@@ -97,7 +97,14 @@ def test_lifecycle_owned_by_shared_module() -> None:
     rather than a hand-rolled dialect. css_map/css_demap (fixed small-ratio
     converters) and sym_strip (streaming pass-through) are the documented
     exceptions with no pending state."""
-    users = {"chirp.py", "depuncture.py", "msk.py", "ofdm.py"}
+    users = {
+        "chirp.py",
+        "depuncture.py",
+        "msk.py",
+        "ofdm.py",
+        "cp_sync.py",
+        "pilot_lattice.py",
+    }
     for name in users:
         src = (_EMBEDDED / name).read_text()
         assert "forecast_drain" in src, f"{name} does not use the shared forecast"

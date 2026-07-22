@@ -173,12 +173,13 @@ class _CoherentParams(StageParams):
 
 
 class OfdmCoherentSync(RxStage[CompileContext]):
-    """Coherent scattered-pilot OFDM demod, IQ->SYMBOLS (RX-only). One embedded
-    block: CP-correlation symbol timing, FFT, fine-CFO derotation off the
-    frequency pilots, 2-D scattered-pilot channel estimation, and equalization
-    to symbol-major active carriers. Generic over the OFDM geometry and pilot
-    lattice; the geometry, the scattered/frequency pilot carriers, and their
-    reference values are all parameters."""
+    """Coherent scattered-pilot OFDM demod, IQ->SYMBOLS (RX-only). Streaming
+    CP-correlation symbol tracker, stock vectorize + FFT, and a scattered-pilot
+    lattice equalizer: fine-CFO derotation off the frequency pilots, 2-D
+    channel estimation, and equalization to symbol-major active carriers.
+    Generic over the OFDM geometry and pilot lattice; the geometry, the
+    scattered/frequency pilot carriers, and their reference values are all
+    parameters."""
 
     name = "ofdm_coherent_sync"
     from_level = Level.IQ
@@ -188,7 +189,18 @@ class OfdmCoherentSync(RxStage[CompileContext]):
 
     def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
         p = _CoherentParams.model_validate(dict(params))
-        b.chain("ofdm_coherent_sync", **p.model_dump())
+        b.chain(
+            "cp_symbol_sync",
+            fft_len=p.fft_len,
+            cp_len=p.cp_len,
+            warmup_syms=p.warmup_syms,
+        )
+        b.chain("stream_to_vector", vlen=p.fft_len)
+        b.chain("fft_vcc", fft_len=p.fft_len, shift=True)
+        eq = p.model_dump()
+        for k in ("cp_len", "sym_len"):
+            del eq[k]
+        b.chain("pilot_lattice_equalizer", **eq)
 
     def out_descriptor(
         self, in_desc: Descriptor, params: Mapping[str, Any]
