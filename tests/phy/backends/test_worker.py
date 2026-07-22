@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+import pytest
 
 from marconi.phy.backends.base import RunResult
 from marconi.phy.backends.gnuradio import worker as worker_mod
@@ -84,7 +85,7 @@ def test_parent_process_stays_gnuradio_free() -> None:
 # ─── Failure paths (issue 02) ────────────────────────────────────────────────
 
 
-def _raising_flowgraph(sink: Path) -> Any:
+def _raising_basic_flowgraph(sink: Path) -> Any:
     from gnuradio import blocks as gb
     from gnuradio import gr
 
@@ -108,8 +109,34 @@ def _raising_flowgraph(sink: Path) -> Any:
     return tb
 
 
+def _raising_sync_flowgraph(sink: Path) -> Any:
+    from gnuradio import blocks as gb
+    from gnuradio import gr
+
+    class _SyncBoom(gr.sync_block):
+        def __init__(self) -> None:
+            gr.sync_block.__init__(
+                self, name="syncboom", in_sig=[np.complex64], out_sig=[np.complex64]
+            )
+
+        def work(self, input_items: Any, output_items: Any) -> int:
+            raise RuntimeError("boom-marker")
+
+    tb = gr.top_block("syncboom")
+    boom = _SyncBoom()
+    tb.connect(gb.vector_source_c([0.1 + 0.1j] * 4096, False), boom)
+    tb.connect(boom, gb.file_sink(gr.sizeof_gr_complex, str(sink), False))
+    tb._py_instances = {"syncboom": boom}
+    return tb
+
+
+@pytest.mark.parametrize(
+    "build_raising",
+    [_raising_basic_flowgraph, _raising_sync_flowgraph],
+    ids=["general_work", "sync_work"],
+)
 def test_embedded_raise_reports_error_and_keeps_sink(
-    tmp_path: Path, monkeypatch: Any
+    tmp_path: Path, monkeypatch: Any, build_raising: Any
 ) -> None:
     """A raise on a GR block thread must not hang tb.run() (the pre-trampoline
     behavior) and must surface as status=error with the traceback, with the
@@ -118,7 +145,7 @@ def test_embedded_raise_reports_error_and_keeps_sink(
 
     sink = tmp_path / "out.iq"
     monkeypatch.setattr(
-        build_mod, "build_top_block", lambda pipeline: _raising_flowgraph(sink)
+        build_mod, "build_top_block", lambda pipeline: build_raising(sink)
     )
     pipe = GrPipeline(
         name="boom",

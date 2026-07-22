@@ -69,6 +69,8 @@ def _arm_crash_trampoline(tb: Any, crashes: list[str]) -> None:
         cls = type(blk)
         if inspect.isfunction(vars(cls).get("general_work")):
             blk.general_work = _trampolined_work(blk.general_work, tb, crashes)
+        if inspect.isfunction(vars(cls).get("work")):
+            blk.work = _trampolined_work(blk.work, tb, crashes)
         if inspect.isfunction(vars(cls).get("forecast")):
             blk.forecast = _trampolined_forecast(blk.forecast, tb, crashes)
 
