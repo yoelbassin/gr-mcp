@@ -8,6 +8,7 @@ from pydantic_core import PydanticCustomError
 
 from marconi.bits import framing, symbols
 from marconi.bits.builder import ProgramBuilder
+from marconi.bits.stages.framing_ops import _CodebookParams
 from marconi.core import coding
 from marconi.core.levels import Level
 from marconi.core.params import StageParams
@@ -199,9 +200,28 @@ class MSlice(RxStage[ProgramBuilder]):
         )
 
 
+class SymbolMap(RxStage[ProgramBuilder]):
+    name = "symbol_map"
+    from_level = Level.SYMBOLS
+    to_level = Level.BITS
+    family = "coding"
+    params_model = _CodebookParams
+    accepts_item_type = "s"
+
+    def emit_rx(self, b: ProgramBuilder, params: Mapping[str, Any]) -> None:
+        b.add(
+            framing.codebook_rx,
+            code_bits=int(params["code_bits"]),
+            data_bits=int(params["data_bits"]),
+            table=[int(x) for x in params["table"]],
+            symbol_input=True,
+        )
+
+
 SYMBOL_STAGES: tuple[type[Stage[ProgramBuilder]], ...] = (
     CssExplicitDecode,
     SyncSymbols,
     Normalize,
     MSlice,
+    SymbolMap,
 )

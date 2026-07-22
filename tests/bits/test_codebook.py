@@ -3,6 +3,9 @@ import pytest
 
 from marconi.bits import framing
 from marconi.bits.carriers import RxCarrier, TxCarrier
+from marconi.bits.compiler import compile_codec
+from marconi.bits.models import CodecSpec, CodecStep
+from marconi.bits.program import run_program
 from marconi.bits.registry import registry
 
 # 3-of-6 line code (one generic op expresses it; the table is caller data).
@@ -57,3 +60,47 @@ def test_codebook_registered_and_validates_table_size():
         stage.params_model.model_validate(
             {"code_bits": 6, "data_bits": 4, "table": [1, 2, 3]}
         )
+
+
+def test_codebook_symbol_input_maps_and_scales_marks() -> None:
+    out = framing.codebook_rx(
+        RxCarrier(
+            bits=np.zeros(0, np.uint8),
+            symbols=np.array([3, 2, 0, 1], np.int16),
+            marks=(0, 2),
+        ),
+        code_bits=2,
+        data_bits=2,
+        table=[0, 1, 2, 3],
+        symbol_input=True,
+    )
+    assert out.bits.tolist() == [1, 1, 1, 0, 0, 0, 0, 1]
+    assert out.marks == (0, 4)
+    assert out.symbols is None
+
+
+def test_symbol_map_stage_registered() -> None:
+    assert "symbol_map" in registry()
+
+
+def test_symbol_map_decodes_symbols_through_registered_stage() -> None:
+    codec = CodecSpec(
+        path=[
+            CodecStep(
+                conv="symbol_map",
+                params={"code_bits": 2, "data_bits": 2, "table": [0, 1, 2, 3]},
+            ),
+        ],
+    )
+    prog = compile_codec(codec, registry(), "rx")
+    out = run_program(
+        prog,
+        RxCarrier(
+            bits=np.zeros(0, np.uint8),
+            symbols=np.array([3, 2, 0, 1], np.int16),
+            marks=(0, 2),
+        ),
+    )
+    assert out.bits.tolist() == [1, 1, 1, 0, 0, 0, 0, 1]
+    assert out.marks == (0, 4)
+    assert out.symbols is None

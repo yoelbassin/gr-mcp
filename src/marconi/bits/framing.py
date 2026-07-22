@@ -629,12 +629,49 @@ def _pack_symbols(values: np.ndarray, width: int) -> np.ndarray:
 
 
 def codebook_rx(
-    c: RxCarrier, *, code_bits: int, data_bits: int, table: list[int]
+    c: RxCarrier,
+    *,
+    code_bits: int,
+    data_bits: int,
+    table: list[int],
+    symbol_input: bool = False,
 ) -> RxCarrier:
     """Fixed-width symbol substitution (a line/block code): each ``code_bits``
     input symbol maps to its ``data_bits`` inverse-table value. One op expresses
     3-of-6, Manchester, PPM chip-pairs — the table and widths are caller data."""
     _, inv = _codebook_maps(code_bits, data_bits, table)
+    if symbol_input:
+        syms = np.asarray(c.symbols, np.int64)
+        bits = (
+            _pack_symbols(inv[syms], data_bits) if syms.size else np.zeros(0, np.uint8)
+        )
+        marks = tuple(int(m) * data_bits for m in c.marks)
+        return RxCarrier(bits=bits, marks=marks)
+    if c.frames:
+
+        def _decode(bits: np.ndarray) -> np.ndarray:
+            return _pack_symbols(inv[_unpack_symbols(bits, code_bits)], data_bits)
+
+        if any(len(f.payload) for f in c.frames):
+            done = [
+                replace(f, payload=bits_to_bytes(_decode(bytes_to_bits(f.payload))))
+                for f in c.frames
+            ]
+            return RxCarrier(bits=c.bits, frames=done)
+        bits_arr = np.asarray(c.bits, np.uint8)
+        cursors = [f.cursor for f in c.frames]
+        if any(b <= a for a, b in zip(cursors, cursors[1:])):
+            raise ValueError("frame_codebook needs strictly increasing frame cursors")
+        pieces: list[np.ndarray] = []
+        frames: list[_Frame] = []
+        pos = 0
+        for f, hi in zip(c.frames, cursors[1:] + [int(bits_arr.size)]):
+            dec = _decode(bits_arr[f.cursor : hi])
+            frames.append(replace(f, start=pos, cursor=pos))
+            pieces.append(dec)
+            pos += int(dec.size)
+        joined = np.concatenate(pieces) if pieces else np.zeros(0, np.uint8)
+        return RxCarrier(bits=joined, frames=frames)
     data = inv[_unpack_symbols(np.asarray(c.bits, np.uint8), code_bits)]
     return RxCarrier(bits=_pack_symbols(data, data_bits), frames=c.frames)
 
@@ -655,31 +692,7 @@ def codebook_tx(
 def frame_codebook_rx(
     c: RxCarrier, *, code_bits: int, data_bits: int, table: list[int]
 ) -> RxCarrier:
-    _, inv = _codebook_maps(code_bits, data_bits, table)
-
-    def _decode(bits: np.ndarray) -> np.ndarray:
-        return _pack_symbols(inv[_unpack_symbols(bits, code_bits)], data_bits)
-
-    if any(len(f.payload) for f in c.frames):
-        done = [
-            replace(f, payload=bits_to_bytes(_decode(bytes_to_bits(f.payload))))
-            for f in c.frames
-        ]
-        return RxCarrier(bits=c.bits, frames=done)
-    bits = np.asarray(c.bits, np.uint8)
-    cursors = [f.cursor for f in c.frames]
-    if any(b <= a for a, b in zip(cursors, cursors[1:])):
-        raise ValueError("frame_codebook needs strictly increasing frame cursors")
-    pieces: list[np.ndarray] = []
-    frames: list[_Frame] = []
-    pos = 0
-    for f, hi in zip(c.frames, cursors[1:] + [int(bits.size)]):
-        dec = _decode(bits[f.cursor : hi])
-        frames.append(replace(f, start=pos, cursor=pos))
-        pieces.append(dec)
-        pos += int(dec.size)
-    joined = np.concatenate(pieces) if pieces else np.zeros(0, np.uint8)
-    return RxCarrier(bits=joined, frames=frames)
+    return codebook_rx(c, code_bits=code_bits, data_bits=data_bits, table=table)
 
 
 def frame_codebook_tx(
