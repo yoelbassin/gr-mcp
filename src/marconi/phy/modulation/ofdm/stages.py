@@ -164,6 +164,9 @@ class _CoherentParams(StageParams):
             == len(self.fp_i)
             == len(self.fp_q),
             "n_carriers must be positive": self.n_carriers > 0,
+            "carrier span must straddle DC (kmin <= 0 <= kmin + n_carriers)": self.kmin
+            <= 0
+            <= self.kmin + self.n_carriers,
             "warmup_syms must exceed one frame": self.warmup_syms > self.n_frame_syms,
         }
         bad = [msg for msg, ok in checks.items() if not ok]

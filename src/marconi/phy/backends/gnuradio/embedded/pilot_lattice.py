@@ -36,6 +36,11 @@ def make_pilot_lattice_equalizer(
     fp_i: list[float],
     fp_q: list[float],
 ) -> Any:
+    if not kmin <= 0 <= kmin + n_carriers:
+        raise ValueError(
+            "carrier span must straddle DC (kmin <= 0 <= kmin + n_carriers): "
+            f"kmin={kmin}, n_carriers={n_carriers}"
+        )
     dc0 = fft_len // 2
     pilot_sets: list[frozenset[int]] = []
     pilot_vals: list[dict[int, complex]] = []

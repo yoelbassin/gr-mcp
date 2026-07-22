@@ -14,6 +14,15 @@ def _evm(eq: np.ndarray, truth: np.ndarray) -> float:
     return float(err / np.mean(np.abs(truth) ** 2))
 
 
+def test_non_dc_straddling_span_rejected_at_construction() -> None:
+    """The emit grid spans kmin..kmin+n_carriers minus exactly one DC skip;
+    a span that misses DC would silently emit n_carriers+1 bins per symbol."""
+    import pytest
+
+    with pytest.raises(ValueError, match="straddle DC"):
+        make_pilot_lattice_equalizer(FAKE_GR, **{**_lattice.eq_params(), "kmin": 4})
+
+
 def test_locks_and_equalizes_with_frame_phase_discovery() -> None:
     start_fs = 2
     grid, spec = _lattice.make_spectra(60, start_fs=start_fs, theta=0.01, seed=3)

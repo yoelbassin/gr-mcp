@@ -40,6 +40,8 @@ def test_valid_params_pass() -> None:
         {"fp_i": [1.0, 2.0]},
         {"n_carriers": 0},
         {"warmup_syms": 4},
+        {"kmin": 5},  # span 5..53 excludes DC: emit grid gains a bin
+        {"kmin": -60},  # span -60..-12 excludes DC
     ],
 )
 def test_inconsistent_geometry_rejected(patch: dict) -> None:
