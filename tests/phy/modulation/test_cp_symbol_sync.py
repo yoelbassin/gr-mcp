@@ -63,7 +63,9 @@ def test_dropout_emits_sync_start_and_relocks() -> None:
     blk = _blk()
     out = drive(blk, np.concatenate([a, gap, b]), chunk=811, out_dtype=np.complex64)
     assert blk.diagnostics["locks"] == 2
-    assert any(t.key == "sync_start" for t in blk.out_tags)
+    starts = [t for t in blk.out_tags if t.key == "sync_start"]
+    assert starts
+    assert all(t.offset % _lattice.FFT_LEN == 0 for t in starts)
     assert out.size > 0
 
 
