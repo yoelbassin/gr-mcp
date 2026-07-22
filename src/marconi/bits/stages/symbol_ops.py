@@ -138,7 +138,7 @@ class SyncSymbols(RxStage[ProgramBuilder]):
 class _NormalizeParams(StageParams):
     span_symbols: StrictInt = Field(ge=1)
     dc: str = "median"
-    gain_percentile: float | None = None
+    gain_percentile: float | None = Field(default=None, ge=0.0, le=100.0)
 
     @model_validator(mode="after")
     def _dc(self) -> "_NormalizeParams":
