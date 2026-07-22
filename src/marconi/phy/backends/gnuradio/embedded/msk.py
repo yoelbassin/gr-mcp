@@ -17,6 +17,7 @@ Constants are pinned from the task-1/2 validated reference detector.
 
 from __future__ import annotations
 
+import cmath
 import math
 from typing import Any
 
@@ -86,7 +87,7 @@ def make_msk_demod(gr: Any, *, sps: float, loop_bw: float = 0.0038) -> Any:
     float per symbol, sign = bit."""
 
     flen = int(2.0 * sps) + 1
-    taps = _polyphase_taps(sps, flen)
+    taps_rows = [tuple(float(t) for t in row) for row in _polyphase_taps(sps, flen)]
     gain = float(loop_bw)
 
     class _MskDemod(gr.basic_block):
@@ -96,7 +97,7 @@ def make_msk_demod(gr: Any, *, sps: float, loop_bw: float = 0.0038) -> Any:
             )
             self._out = OutQueue(np.float32)
             self._buf = np.empty(0, np.complex64)
-            self._history = np.zeros(flen - 1, np.complex128)  # matched-filter tail
+            self._win: list[complex] = [0j] * flen  # derotated matched-filter window
             self._carrier_phase = 0.0
             self._freq_corr = 0.0  # PLL frequency correction (rad/sample)
             self._bit = 0  # running bit index: rail parity + π/2 derotation
@@ -114,37 +115,55 @@ def make_msk_demod(gr: Any, *, sps: float, loop_bw: float = 0.0038) -> Any:
             return self._out.drain(output_items[0])
 
         def _process(self) -> None:
+            # The decision-directed feedback (each bit's err retunes the next
+            # bit's derotation) makes this loop irreducibly sequential, so it
+            # runs on Python scalars: per-bit numpy ufunc dispatch on the
+            # ~sps-sample segments measures 2x slower than the scalar rotor.
             softs: list[float] = []
+            samples: list[complex] = self._buf.tolist()
+            pos, n = 0, len(samples)
+            win = self._win
+            phase = self._carrier_phase
+            fc = self._freq_corr  # baseband: nominal VCO is 0
+            bit = self._bit
+            consumed = self._consumed
+            two_pi = 2.0 * math.pi
             while True:
-                step = _dump_index(self._bit, sps) + 1 - self._consumed
-                if len(self._buf) < step:
+                step = _dump_index(bit, sps) + 1 - consumed
+                if n - pos < step:
                     break
-                seg = self._buf[:step].astype(np.complex128)
-                self._buf = self._buf[step:]
-                self._consumed += step
+                r = cmath.exp(-1j * fc)
+                rot = cmath.exp(-1j * phase)
+                new = []
+                for s in samples[pos : pos + step]:
+                    rot *= r
+                    new.append(s * rot)
+                pos += step
+                consumed += step
+                phase = (phase + fc * step) % two_pi
 
-                increment = self._freq_corr  # baseband: nominal VCO is 0
-                phase = self._carrier_phase + increment * np.arange(1, step + 1)
-                baseband = seg * np.exp(-1j * phase)
-                self._carrier_phase = float((phase[-1]) % (2.0 * math.pi))
-
-                window = np.concatenate([self._history, baseband])[-flen:]
-                self._history = window[-(flen - 1) :]
-                v = complex(np.dot(taps[_branch(self._bit, sps)], window))
+                win = win[step:] + new
+                v = 0j
+                for t, w in zip(taps_rows[_branch(bit, sps)], win):
+                    v += t * w
                 z = v / (abs(v) + _NORM_EPS)
 
-                if self._bit & 1:
+                if bit & 1:
                     rail = z.imag
                     err = -z.real if z.imag >= 0.0 else z.real
                 else:
                     rail = z.real
                     err = z.imag if z.real >= 0.0 else -z.imag
-                softs.append(-rail if (self._bit & 2) else rail)
+                softs.append(-rail if (bit & 2) else rail)
 
-                self._freq_corr = (
-                    _LOOP_POLE * self._freq_corr + (1.0 - _LOOP_POLE) * gain * err
-                )
-                self._bit += 1
+                fc = _LOOP_POLE * fc + (1.0 - _LOOP_POLE) * gain * err
+                bit += 1
+            self._buf = self._buf[pos:]
+            self._win = win
+            self._carrier_phase = phase
+            self._freq_corr = fc
+            self._bit = bit
+            self._consumed = consumed
             if softs:
                 self._out.push(np.asarray(softs, np.float32))
 

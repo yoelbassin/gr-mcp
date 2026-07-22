@@ -5,6 +5,7 @@ wakeups; the real-scheduler path is covered by test_msk_roundtrip."""
 from __future__ import annotations
 
 import numpy as np
+import pytest
 from phy._dsp import aligned_ber
 from phy._fakegr import FAKE_GR, drive
 
@@ -82,6 +83,30 @@ def test_eof_drains_pending_tail() -> None:
         out_dtype=np.float32,
     )
     assert out.size >= bits.size - 8
+
+
+def test_no_per_bit_numpy_dispatch(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The decision-directed loop is per-bit sequential; the measured perf
+    # killer is per-bit numpy ufunc dispatch on ~sps-sample arrays
+    # (165 kbit/s vs 310 for the scalar rotor). A wall-clock gate cannot
+    # hold a 2x margin under xdist load and P/E-core variance, so gate the
+    # mechanism: numpy invocations must scale with work calls, not bits.
+    calls = {"n": 0}
+
+    def counted(fn):  # type: ignore[no-untyped-def]
+        def wrapper(*a, **k):  # type: ignore[no-untyped-def]
+            calls["n"] += 1
+            return fn(*a, **k)
+
+        return wrapper
+
+    for name in ("exp", "arange", "dot", "concatenate", "asarray", "zeros"):
+        monkeypatch.setattr(np, name, counted(getattr(np, name)))
+    rng = np.random.default_rng(4)
+    n = 40_000  # 4000 bits at sps=10
+    iq = (rng.standard_normal(n) + 1j * rng.standard_normal(n)).astype(np.complex64)
+    drive(make_msk_demod(FAKE_GR, sps=10.0), iq, chunk=8192, out_dtype=np.float32)
+    assert calls["n"] < 400, f"{calls['n']} numpy calls for 4000 bits"
 
 
 def test_burst_between_noise_keeps_lock() -> None:
