@@ -856,6 +856,36 @@ def sync_symbols_rx(
     return replace(c, marks=marks)
 
 
+def normalize_rx(
+    c: RxCarrier,
+    *,
+    span_symbols: int,
+    dc: str = "median",
+    gain_percentile: float | None = None,
+) -> RxCarrier:
+    sym = c.symbols
+    if sym is None or not c.marks:
+        return c
+    out = np.asarray(sym, np.float32).copy()
+    for m in c.marks:
+        lo, hi = int(m), min(int(m) + span_symbols, out.size)
+        if hi - lo < 1:
+            continue
+        seg = out[lo:hi].astype(np.float64)
+        if dc == "median":
+            seg = seg - np.median(seg)
+        elif dc == "mean":
+            seg = seg - seg.mean()
+        if gain_percentile is not None:
+            mag = np.abs(seg)
+            scale = float(
+                np.mean(mag[mag > np.percentile(mag, gain_percentile)]) or 1.0
+            )
+            seg = seg / (scale or 1.0)
+        out[lo:hi] = seg.astype(np.float32)
+    return replace(c, symbols=out)
+
+
 def differential_rx(c: RxCarrier, *, invert: bool = False) -> RxCarrier:
     b = np.asarray(c.bits, dtype=np.uint8)
     if b.size == 0:

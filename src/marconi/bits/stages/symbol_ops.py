@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from pydantic import StrictInt, model_validator
+from pydantic import Field, StrictInt, model_validator
 from pydantic_core import PydanticCustomError
 
 from marconi.bits import framing, symbols
@@ -135,7 +135,38 @@ class SyncSymbols(RxStage[ProgramBuilder]):
         )
 
 
+class _NormalizeParams(StageParams):
+    span_symbols: StrictInt = Field(ge=1)
+    dc: str = "median"
+    gain_percentile: float | None = None
+
+    @model_validator(mode="after")
+    def _dc(self) -> "_NormalizeParams":
+        if self.dc not in ("median", "mean", "none"):
+            raise PydanticCustomError("value_error", "dc must be median|mean|none")
+        return self
+
+
+class Normalize(RxStage[ProgramBuilder]):
+    name = "normalize"
+    from_level = Level.SYMBOLS
+    to_level = Level.SYMBOLS
+    family = "symbols"
+    params_model = _NormalizeParams
+    accepts_item_type = "f"
+
+    def emit_rx(self, b: ProgramBuilder, params: Mapping[str, Any]) -> None:
+        p = _NormalizeParams.model_validate(dict(params))
+        b.add(
+            framing.normalize_rx,
+            span_symbols=p.span_symbols,
+            dc=p.dc,
+            gain_percentile=p.gain_percentile,
+        )
+
+
 SYMBOL_STAGES: tuple[type[Stage[ProgramBuilder]], ...] = (
     CssExplicitDecode,
     SyncSymbols,
+    Normalize,
 )
