@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Literal
 
 import numpy as np
 
@@ -44,7 +45,7 @@ def write_symbols(path: Path, symbols: np.ndarray) -> None:
     np.asarray(symbols, dtype=np.int16).tofile(path)
 
 
-def read_symbols(path: Path, item_type: str = "s") -> np.ndarray:
+def read_symbols(path: Path, item_type: Literal["s", "f"] = "s") -> np.ndarray:
     if item_type == "f":
         _guard(path.stat().st_size // 4, path)
         return np.fromfile(path, dtype=np.float32)

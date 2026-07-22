@@ -8,7 +8,7 @@ from marconi.bits.compiler import compile_codec
 from marconi.bits.models import CodecSpec, CodecStep
 from marconi.bits.registry import registry
 from marconi.bits.seam import parse_bitstream
-from marconi.core.bitfile import write_bits, write_symbols
+from marconi.core.bitfile import write_bits, write_llrs, write_symbols
 from marconi.core.levels import Level
 from marconi.core.models import Bitstream, Symbolstream
 from marconi.core.params import StageParams
@@ -85,10 +85,6 @@ def test_symbolstream_into_bits_codec_raises(tmp_path: Path) -> None:
 
 
 def test_soft_symbolstream_reaches_carrier(tmp_path: Path) -> None:
-    import numpy as np
-
-    from marconi.core.bitfile import write_llrs
-
     p = tmp_path / "s.f32"
     write_llrs(p, np.array([0.9, -0.3, 0.1, -0.8], dtype=np.float32))
     res = parse_bitstream(

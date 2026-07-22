@@ -45,10 +45,10 @@ class SoftBitstream(BaseModel):
 
 
 class Symbolstream(BaseModel):
-    """Symbol indices at the SYMBOLS rung: an int16 ("s") or float32 soft ("f")
-    file of one value per symbol, plus burst-start marks (symbol offsets) when
-    acquisition tagged them. Sibling to Bitstream, never an optional field on
-    it."""
+    """Values at the SYMBOLS rung: hard int16 symbol indices for "s", soft
+    float32 symbol values for "f", one per symbol, plus burst-start marks
+    (symbol offsets) when acquisition tagged them. Sibling to Bitstream,
+    never an optional field on it."""
 
     path: Path
     num_symbols: int = Field(ge=0)
