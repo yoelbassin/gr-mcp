@@ -52,6 +52,7 @@ class Channelize(RxStage[CompileContext]):
     to_level = Level.IQ
     family = "conditioning"
     params_model = _ChannelizeParams
+    alters_amplitude = True
 
     def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
         p = _ChannelizeParams.model_validate(dict(params))
@@ -106,6 +107,7 @@ class Resample(RxStage[CompileContext]):
     to_level = Level.IQ
     family = "conditioning"
     params_model = _ResampleParams
+    alters_amplitude = True
 
     def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
         b.chain(
@@ -138,6 +140,7 @@ class ClockCorrect(RxStage[CompileContext]):
     to_level = Level.IQ
     family = "conditioning"
     params_model = _ClockCorrectParams
+    alters_amplitude = True
 
     def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
         b.chain("pfb_arb_resampler_ccf", rate=1.0 / (1.0 + float(params["ppm"]) * 1e-6))
