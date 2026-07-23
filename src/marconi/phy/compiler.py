@@ -84,6 +84,7 @@ def _validate_descriptors(
     boundaries: Sequence[Descriptor],
     rates: Sequence[float],
     symbol_rate: float,
+    direction: str,
 ) -> None:
     for i, step in enumerate(steps):
         stage = _resolve(step, registry)
@@ -105,6 +106,17 @@ def _validate_descriptors(
             raise CompileError(
                 f"stage '{step.conv}' accepts {stage.accepts_carrier.value} "
                 f"carrier but '{producer}' produces {in_desc.carrier.value}"
+            )
+        if (
+            direction == "rx"
+            and stage.accepts_amplitude is not None
+            and in_desc.amplitude != stage.accepts_amplitude
+        ):
+            raise CompileError(
+                f"stage '{step.conv}' requires {stage.accepts_amplitude.value} "
+                f"input amplitude but '{producer}' produces "
+                f"{in_desc.amplitude.value}; insert an 'agc' stage after any "
+                "channelization or resampling"
             )
         required = stage.required_input_rate(step.params, symbol_rate)
         if required is not None and required > 0:
@@ -154,7 +166,9 @@ def compile_modem(
     steps = modem.path
     n = len(steps)
     boundaries, rates = _forward_pass(steps, registry, start, sample_rate)
-    _validate_descriptors(steps, registry, boundaries, rates, modem.symbol_rate)
+    _validate_descriptors(
+        steps, registry, boundaries, rates, modem.symbol_rate, direction
+    )
     ctx = CompileContext(start, sample_rate, modem.symbol_rate)
 
     if direction == "rx":

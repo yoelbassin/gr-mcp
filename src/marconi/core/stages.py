@@ -6,7 +6,7 @@ from typing import Any, Generic, Protocol, TypeVar
 
 from pydantic import BaseModel, ValidationError
 
-from marconi.core.descriptor import Carrier, Descriptor
+from marconi.core.descriptor import Amplitude, Carrier, Descriptor
 from marconi.core.errors import register_error
 from marconi.core.levels import Level
 from marconi.core.models import ValidationIssue
@@ -75,6 +75,8 @@ class Stage(ABC, Generic[B]):
     # except the soft-LLR lane ("f"/SOFT).
     accepts_item_type: str | None = None
     accepts_carrier: Carrier | None = None
+    accepts_amplitude: Amplitude | None = None
+    alters_amplitude: bool = False
 
     @abstractmethod
     def emit_rx(self, b: B, params: Mapping[str, Any]) -> None: ...
@@ -85,8 +87,17 @@ class Stage(ABC, Generic[B]):
     def out_descriptor(
         self, in_desc: Descriptor, params: Mapping[str, Any]
     ) -> Descriptor:
+        amplitude = (
+            in_desc.amplitude
+            if self.to_level is Level.IQ and not self.alters_amplitude
+            else Amplitude.UNKNOWN
+        )
         return Descriptor(
-            self.to_level, in_desc.item_type, in_desc.layout, in_desc.carrier
+            self.to_level,
+            in_desc.item_type,
+            in_desc.layout,
+            in_desc.carrier,
+            amplitude,
         )
 
     def rate_factor(self, params: Mapping[str, Any]) -> float:

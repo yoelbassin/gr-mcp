@@ -16,9 +16,15 @@ class Carrier(str, Enum):
     SOFT = "soft"
 
 
+class Amplitude(str, Enum):
+    UNKNOWN = "unknown"
+    NORMALIZED = "normalized"
+
+
 @dataclass(frozen=True)
 class Descriptor:
     level: Level
     item_type: str  # GR wire type "c/f/b/s"; selects IO blocks
     layout: Layout = Layout.STREAM
     carrier: Carrier = Carrier.HARD  # decision-hardness, a seam invariant
+    amplitude: Amplitude = Amplitude.UNKNOWN
