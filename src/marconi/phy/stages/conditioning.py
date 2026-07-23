@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
-from typing import Any
+from collections.abc import Callable, Mapping
+from typing import Any, Literal
 
 from pydantic import StrictInt, model_validator
 from pydantic_core import PydanticCustomError
 
-from marconi.core.descriptor import Descriptor
+from marconi.core.descriptor import Amplitude, Descriptor
 from marconi.core.levels import Level
 from marconi.core.params import StageParams
 from marconi.core.stages import RxStage
@@ -149,6 +149,89 @@ class ClockCorrect(RxStage[CompileContext]):
         return 1.0 / (1.0 + float(params["ppm"]) * 1e-6)
 
 
+class _AgcParams(StageParams):
+    mode: Literal["feedforward", "feedback"] = "feedforward"
+    reference: float = 1.0
+    window_symbols: float = 16.0
+    attack_symbols: float = 1.0
+    decay_symbols: float = 16.0
+    max_gain: float = 0.0
+
+    @model_validator(mode="after")
+    def _ok(self) -> "_AgcParams":
+        if self.reference <= 0.0:
+            raise PydanticCustomError("value_error", "reference must be > 0")
+        if self.window_symbols <= 0.0:
+            raise PydanticCustomError("value_error", "window_symbols must be > 0")
+        if self.attack_symbols <= 0.0 or self.decay_symbols <= 0.0:
+            raise PydanticCustomError(
+                "value_error", "attack_symbols and decay_symbols must be > 0"
+            )
+        if self.max_gain < 0.0:
+            raise PydanticCustomError("value_error", "max_gain must be >= 0")
+        unused = set().union(*(f for m, f in _MODE_FIELDS.items() if m != self.mode))
+        supplied = self.model_fields_set & unused
+        if supplied:
+            raise PydanticCustomError(
+                "value_error",
+                f"mode '{self.mode}' does not use {sorted(supplied)}",
+            )
+        return self
+
+
+_MODE_FIELDS: dict[str, set[str]] = {
+    "feedforward": {"window_symbols"},
+    "feedback": {"attack_symbols", "decay_symbols", "max_gain"},
+}
+
+
+def _agc_feedforward(b: CompileContext, p: _AgcParams) -> None:
+    b.chain(
+        "feedforward_agc_cc",
+        nsamples=max(1, round(p.window_symbols * b.sps)),
+        reference=p.reference,
+    )
+
+
+def _agc_feedback(b: CompileContext, p: _AgcParams) -> None:
+    b.chain(
+        "agc2_cc",
+        attack_rate=1.0 / (p.attack_symbols * b.sps),
+        decay_rate=1.0 / (p.decay_symbols * b.sps),
+        reference=p.reference,
+        max_gain=p.max_gain,
+    )
+
+
+_AGC_MODES: dict[str, Callable[[CompileContext, _AgcParams], None]] = {
+    "feedforward": _agc_feedforward,
+    "feedback": _agc_feedback,
+}
+
+
+class Agc(RxStage[CompileContext]):
+    name = "agc"
+    from_level = Level.IQ
+    to_level = Level.IQ
+    family = "conditioning"
+    params_model = _AgcParams
+
+    def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
+        p = _AgcParams.model_validate(dict(params))
+        _AGC_MODES[p.mode](b, p)
+
+    def out_descriptor(
+        self, in_desc: Descriptor, params: Mapping[str, Any]
+    ) -> Descriptor:
+        return Descriptor(
+            Level.IQ,
+            in_desc.item_type,
+            in_desc.layout,
+            in_desc.carrier,
+            Amplitude.NORMALIZED,
+        )
+
+
 class _AmParams(StageParams):
     dc_block_len: StrictInt = 1024
 
@@ -215,6 +298,7 @@ CONDITIONING_STAGES: tuple[type[RxStage[CompileContext]], ...] = (
     Invert,
     Resample,
     ClockCorrect,
+    Agc,
     Am,
     Analytic,
 )
