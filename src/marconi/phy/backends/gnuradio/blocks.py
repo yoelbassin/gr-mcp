@@ -145,6 +145,19 @@ def _keep_m_in_n_f(c: _GrCtx, p: Params) -> Any:
     return blk
 
 
+def _agc2(c: _GrCtx, p: Params) -> Any:
+    blk = c.analog.agc2_cc(
+        _as_float(p["attack_rate"]),
+        _as_float(p["decay_rate"]),
+        _as_float(p["reference"]),
+        1.0,
+    )
+    max_gain = _as_float(p["max_gain"])
+    if max_gain > 0.0:
+        blk.set_max_gain(max_gain)
+    return blk
+
+
 # kind -> (ctx, params) -> live GR block. The ONLY GR-aware vocabulary in phy.
 GR_BLOCKS: dict[str, Callable[[_GrCtx, Params], Any]] = {
     "iq_file_source": lambda c, p: c.blocks.file_source(
@@ -171,6 +184,10 @@ GR_BLOCKS: dict[str, Callable[[_GrCtx, Params], Any]] = {
         c.gr.sizeof_short, str(p["path"]), False
     ),
     "quadrature_demod": lambda c, p: c.analog.quadrature_demod_cf(_as_float(p["gain"])),
+    "feedforward_agc_cc": lambda c, p: c.analog.feedforward_agc_cc(
+        _as_int(p["nsamples"]), _as_float(p["reference"])
+    ),
+    "agc2_cc": _agc2,
     "msk_demod": lambda c, p: make_msk_demod(
         c.gr, sps=_as_float(p["sps"]), loop_bw=_as_float(p.get("loop_bw", 0.0038))
     ),
