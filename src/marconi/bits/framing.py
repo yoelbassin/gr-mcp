@@ -584,20 +584,32 @@ def nibble_swap_tx(c: TxCarrier) -> TxCarrier:
 
 
 def realign_rx(c: RxCarrier, *, bit_offset: int) -> RxCarrier:
-    if c.frames:
-        raise ValueError("realign must run before any frame seeder")
-    return RxCarrier(bits=np.asarray(c.bits, np.uint8)[bit_offset:], frames=[])
+    if not c.frames:
+        return RxCarrier(bits=np.asarray(c.bits, np.uint8)[bit_offset:])
+    frames = [replace(f, cursor=f.cursor + bit_offset) for f in c.frames]
+    return RxCarrier(bits=np.asarray(c.bits, np.uint8), frames=frames)
 
 
 def permute_rx(c: RxCarrier, *, perm: list[int]) -> RxCarrier:
-    if c.frames:
-        raise ValueError("permute must run before any frame seeder")
-    bits = np.asarray(c.bits, np.uint8)
-    block = len(perm)
-    n = bits.size // block
     idx = np.asarray(perm, np.int64)
-    out = bits[: n * block].reshape(n, block)[:, idx].reshape(-1)
-    return RxCarrier(bits=out, frames=[])
+    if not c.frames:
+        bits = np.asarray(c.bits, np.uint8)
+        block = idx.size
+        n = bits.size // block
+        out = bits[: n * block].reshape(n, block)[:, idx].reshape(-1)
+        return RxCarrier(bits=out)
+    bits = np.asarray(c.bits, np.uint8)
+    span = int(idx.max()) + 1 if idx.size else 0
+    pieces, frames, pos = [], [], 0
+    for f in c.frames:
+        if f.cursor + span > bits.size:
+            continue
+        dec = bits[f.cursor + idx]
+        frames.append(replace(f, start=pos, cursor=pos))
+        pieces.append(dec)
+        pos += int(dec.size)
+    joined = np.concatenate(pieces) if pieces else np.zeros(0, np.uint8)
+    return RxCarrier(bits=joined, frames=frames)
 
 
 def _codebook_maps(

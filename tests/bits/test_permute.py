@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import numpy as np
-import pytest
 
 from marconi.bits.builder import ProgramBuilder
 from marconi.bits.carriers import RxCarrier, _Frame
@@ -34,12 +33,13 @@ def test_permute_is_invertible_with_inverse_perm() -> None:
     assert np.array_equal(back, src)
 
 
-def test_permute_before_seeder_guard() -> None:
-    with pytest.raises(ValueError):
-        permute_rx(
-            RxCarrier(bits=np.zeros(4, np.uint8), frames=[_Frame(start=0, cursor=0)]),
-            perm=[0, 1, 2, 3],
-        )
+def test_permute_seeded_gathers_relative_to_cursor_and_can_drop_bits() -> None:
+    # frame window has a trailing bit to drop: gather indices 0,1,3 of a 4-bit slot
+    bits = np.array([1, 0, 9 % 2, 1, 0, 1, 0, 1], np.uint8)  # two 4-bit slots
+    c = RxCarrier(bits=bits, frames=[_Frame(0, 0)])
+    out = permute_rx(c, perm=[0, 1, 3, 4, 5, 7])  # drop indices 2 and 6
+    assert out.bits.tolist() == [1, 0, 1, 0, 1, 1]
+    assert out.frames[0].cursor == 0
 
 
 def test_permute_stage_registered_and_wired() -> None:

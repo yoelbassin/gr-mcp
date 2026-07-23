@@ -18,10 +18,10 @@ def test_realign_drops_leading_bits() -> None:
     assert out.frames == []
 
 
-def test_realign_rejects_seeded_carrier() -> None:
-    c = RxCarrier(bits=np.zeros(8, np.uint8), frames=[_Frame(start=0, cursor=0)])
-    with pytest.raises(ValueError, match="before any frame seeder"):
-        framing.realign_rx(c, bit_offset=1)
+def test_realign_seeded_advances_cursor() -> None:
+    c = RxCarrier(bits=np.zeros(10, np.uint8), frames=[_Frame(2, 2)])
+    out = framing.realign_rx(c, bit_offset=3)
+    assert [(f.start, f.cursor) for f in out.frames] == [(2, 5)]
 
 
 def test_realign_registered_rx_only() -> None:
