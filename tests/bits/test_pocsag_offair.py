@@ -13,8 +13,8 @@ pre-seed-only.
 Residual, test-side by design: selecting address codewords (flag bit == 0) and
 dropping idle over the DECODED 21-bit words needs a generic "select frames
 where bit N == value" primitive that is out of scope for this plan. That
-selection is the short loop below; idle (flag 0, non-oracle prefix) and any
-noise decode fall to the oracle-membership compare.
+selection is the short loop below; it explicitly excludes idle's decoded
+value, so any other decode must exactly match the oracle.
 
 multimon-ng 1.5.0 on the same slice decodes three pages, all function 3: RICs
 1920569, 1234567, 1209871 (one carrying "THIS IS A TEST PERIODIC PAGE SEQUENTIAL
@@ -60,6 +60,8 @@ CODE_BITS, DATA_BITS = 31, 21
 NPAR = CODE_BITS - DATA_BITS
 BATCH_CODEWORDS = 16
 PERM = [slot * 32 + b for slot in range(BATCH_CODEWORDS) for b in range(CODE_BITS)]
+IDLE = 0x7A89C197  # idle/filler codeword
+IDLE_DATA = IDLE >> (NPAR + 1)  # its decoded 21-bit word (drop parity + trailing bit)
 
 # Oracle: multimon-ng's RICs on this slice, as (18-bit prefix, function).
 ORACLE = {240071: 3, 154320: 3, 151233: 3}  # 1920569>>3, 1234567>>3, 1209871>>3
@@ -154,16 +156,15 @@ def test_pocsag_offair(tmp_path: Path) -> None:
     for fr in result.frames:
         words = np.unpackbits(np.frombuffer(bytes.fromhex(fr.payload_hex), np.uint8))
         for d in words.reshape(-1, DATA_BITS):
-            if int(d[0]) == 0:  # residual select: address codeword (flag bit 0)
-                ric, fn = _word(d, 1, 19), _word(d, 19, 21)
-                if ric:
-                    found[ric] = fn
-    found = {ric: fn for ric, fn in found.items() if ric in ORACLE}
+            if int(d[0]) != 0:  # not an address codeword (flag bit 0)
+                continue
+            if _word(d, 0, DATA_BITS) == IDLE_DATA:
+                continue
+            found[_word(d, 1, 19)] = _word(d, 19, 21)
 
-    # Closure: the codec's decoded address prefixes are exactly multimon-ng's
-    # RICs (>>3), each with the function it reported. A mis-seeded batch, a bad
-    # permute gather, or a miscorrected codeword would perturb this set, so
-    # exact equality is the oracle. Determinism rests on each RIC recurring
-    # across the capture's batches (a dropped clean instance would fail, never
-    # falsely pass); observed stable over many runs.
+    # Closure: excluding idle's decoded value, the codec's decoded address
+    # prefixes must be exactly multimon-ng's RICs (>>3), each with the
+    # function it reported — a spurious extra decode or a dropped oracle RIC
+    # both fail this exact-set equality. Determinism rests on the demod
+    # reliably yielding every batch across runs.
     assert found == ORACLE, f"decoded {found}, oracle {ORACLE}"
