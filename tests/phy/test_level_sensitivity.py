@@ -1,4 +1,7 @@
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 import numpy as np
 import pytest
@@ -11,6 +14,15 @@ from marconi.phy.compiler import compile_modem
 from marconi.phy.ir import GrPipeline
 from marconi.phy.models import ModemSpec, ModemStep
 from marconi.phy.stages import stage_registry
+
+_Status = Literal["ok", "error", "timeout"]
+
+
+@dataclass(frozen=True)
+class GainResult:
+    status: _Status
+    ber: float
+
 
 IQ = Descriptor(Level.IQ, "c")
 _SR, _SYM = 8.0, 1.0
@@ -28,7 +40,7 @@ _CHAINS = {
 }
 
 
-def _ber_at_gain(tmp_path: Path, name: str, gain: float) -> float:
+def _ber_at_gain(tmp_path: Path, name: str, gain: float) -> GainResult:
     be = GnuRadioBackend()
     spec = ModemSpec(symbol_rate=_SYM, path=_CHAINS[name])
     bits = np.random.default_rng(0).integers(0, 2, 4096).astype(np.uint8)
@@ -51,24 +63,33 @@ def _ber_at_gain(tmp_path: Path, name: str, gain: float) -> float:
     assert be.run_pipeline(_compile("tx", bp, iq)).status == "ok"
     (np.fromfile(iq, dtype=np.complex64) * np.complex64(gain)).tofile(scaled)
     rx = be.run_pipeline(_compile("rx", scaled, out))
-    # A non-ok RX run (e.g. a hung loop) never decodes anything: worst-case BER.
+    # A non-ok RX run (e.g. a hung loop) never decodes anything: worst-case BER,
+    # but the status itself is kept so a crash is never mistaken for a decode.
     if rx.status != "ok":
-        return 1.0
-    return aligned_ber(read_bits(out), bits)
+        return GainResult(status=rx.status, ber=1.0)
+    return GainResult(status="ok", ber=aligned_ber(read_bits(out), bits))
 
 
-def _assert_level_invariant(name: str, table: dict[float, float]) -> None:
-    assert all(b == 0.0 for b in table.values()), f"{name} is level-sensitive: {table}"
+def _assert_level_invariant(name: str, table: dict[float, GainResult]) -> None:
+    for gain, result in table.items():
+        assert result.status == "ok", f"{name}@{gain} status {result.status}: {table}"
+    assert all(
+        r.ber == 0.0 for r in table.values()
+    ), f"{name} is level-sensitive: {table}"
 
 
-def _assert_loop_gain_sensitive(name: str, table: dict[float, float]) -> None:
-    assert table[1.0] == 0.0, f"{name} baseline is not BER-0: {table}"
-    assert table[1e-3] > 0.01, f"{name} pattern changed: {table}"
-    assert table[1e1] > 0.3, f"{name} pattern changed: {table}"
-    assert table[1e3] > 0.3, f"{name} pattern changed: {table}"
+def _assert_loop_gain_sensitive(name: str, table: dict[float, GainResult]) -> None:
+    for gain, result in table.items():
+        expected: _Status = "timeout" if gain == 1e3 else "ok"
+        want = f"{name}@{gain} status {result.status}, expected {expected}: {table}"
+        assert result.status == expected, want
+    assert table[1.0].ber == 0.0, f"{name} baseline is not BER-0: {table}"
+    assert table[1e-3].ber > 0.01, f"{name} pattern changed: {table}"
+    assert table[1e1].ber > 0.3, f"{name} pattern changed: {table}"
+    assert table[1e3].ber > 0.3, f"{name} pattern changed: {table}"
 
 
-_EXPECT = {
+_EXPECT: dict[str, Callable[[str, dict[float, GainResult]], None]] = {
     "fsk": _assert_level_invariant,
     "psk": _assert_loop_gain_sensitive,
 }
