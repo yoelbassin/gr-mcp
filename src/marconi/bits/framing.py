@@ -779,7 +779,7 @@ def block_code_rx(
             correct,
             emit,
         )
-        return RxCarrier(bits=decoded, marks=c.marks)
+        return RxCarrier(bits=decoded)
     bits = np.asarray(c.bits, np.uint8)
     cursors = [f.cursor for f in c.frames]
     bounds = cursors[1:] + [int(bits.size)]
@@ -793,7 +793,7 @@ def block_code_rx(
         pieces.append(dec)
         pos += int(dec.size)
     joined = np.concatenate(pieces) if pieces else np.zeros(0, np.uint8)
-    return RxCarrier(bits=joined, frames=frames, marks=c.marks)
+    return RxCarrier(bits=joined, frames=frames)
 
 
 def _read_uint(bits: np.ndarray, start: int, width: int) -> int:

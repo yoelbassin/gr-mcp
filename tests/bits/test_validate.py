@@ -1,4 +1,10 @@
+import numpy as np
+
+from marconi.bits import framing
+from marconi.bits.carriers import RxCarrier
+from marconi.bits.compiler import compile_codec
 from marconi.bits.models import CodecSpec, CodecStep
+from marconi.bits.program import run_program
 from marconi.bits.registry import registry
 from marconi.bits.stages.framing_ops import (
     Descramble,
@@ -94,6 +100,59 @@ def test_segment_zero_frame_body_len_fails_codec_validation():
         ],
     )
     assert validate_codec(codec, registry()), "0-len segment must not validate"
+
+
+def test_seeded_transforms_validate_after_a_seeder():
+    codec = CodecSpec(
+        name="c",
+        path=[
+            CodecStep(conv="sync_word", params={"sync": "2d"}),
+            CodecStep(conv="permute", params={"perm": [0, 1, 2]}),
+            CodecStep(
+                conv="block_code",
+                params={
+                    "code_bits": 3,
+                    "data_bits": 2,
+                    "parity_masks": [0b11],
+                    "correct": False,
+                    "emit": "data",
+                },
+            ),
+            CodecStep(conv="fixed_frame", params={"payload_bits": 2}),
+        ],
+    )
+    issues = validate_codec(codec, registry())
+    assert issues == [], issues
+
+
+def test_seeded_transforms_run_end_to_end():
+    sync = framing.bytes_to_bits(bytes.fromhex("2d"))
+    codeword_a = np.array([1, 0, 1], np.uint8)  # data=10, parity 1^0 matches 0b11
+    codeword_b = np.array([0, 1, 1], np.uint8)  # data=01, parity 0^1 matches 0b11
+    bits = np.concatenate([sync, codeword_a, sync, codeword_b]).astype(np.uint8)
+
+    spec = CodecSpec(
+        name="c",
+        path=[
+            CodecStep(conv="sync_word", params={"sync": "2d"}),
+            CodecStep(conv="permute", params={"perm": [0, 1, 2]}),
+            CodecStep(
+                conv="block_code",
+                params={
+                    "code_bits": 3,
+                    "data_bits": 2,
+                    "parity_masks": [0b11],
+                    "correct": False,
+                    "emit": "data",
+                },
+            ),
+            CodecStep(conv="fixed_frame", params={"payload_bits": 2}),
+        ],
+    )
+    assert validate_codec(spec, registry()) == []
+    program = compile_codec(spec, registry(), "rx")
+    out = run_program(program, RxCarrier(bits=bits))
+    assert [f.payload for f in out.frames] == [b"\x80", b"@"]
 
 
 def test_malformed_parse_field_is_rejected():

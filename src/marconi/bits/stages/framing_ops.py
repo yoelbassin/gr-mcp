@@ -330,6 +330,7 @@ class BlockCode(RxStage[ProgramBuilder]):
     name = "block_code"
     from_level = Level.BITS
     to_level = Level.BITS
+    level_preserving = True
     family = "coding"
 
     class _Params(StageParams):
@@ -378,6 +379,7 @@ class Permute(RxStage[ProgramBuilder]):
     name = "permute"
     from_level = Level.BITS
     to_level = Level.BITS
+    level_preserving = True
     family = "coding"
 
     class _Params(StageParams):
@@ -394,6 +396,7 @@ class Realign(RxStage[ProgramBuilder]):
     name = "realign"
     from_level = Level.BITS
     to_level = Level.BITS
+    level_preserving = True
     family = "framing"
 
     class _Params(StageParams):

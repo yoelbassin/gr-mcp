@@ -62,6 +62,10 @@ class Stage(ABC, Generic[B]):
     seeds_frames: bool = False
     self_slicing: bool = False
     slices_body: bool = False
+    # A level-preserving stage accepts whatever level the previous stage emits
+    # and passes it through unchanged (its runtime dispatches on carrier state).
+    # Used by transforms that work in both stream (BITS) and seeded (FRAMES) scope.
+    level_preserving: bool = False
 
     # Seam invariant (issue 06): the wire item_type / decision-carrier a stage
     # accepts on input. The phy compiler checks them against the upstream
@@ -163,7 +167,9 @@ def validate_path(
                     f"'{direction}'; supports {sorted(conv.directions)}",
                 )
             )
-        if idx == 0 and conv.from_level != start_level:
+        if conv.level_preserving:
+            pass  # transparent: emits whatever level it received
+        elif idx == 0 and conv.from_level != start_level:
             issues.append(
                 ValidationIssue(
                     block_id=sid,
@@ -181,4 +187,5 @@ def validate_path(
                     f"boundary levels must be equal",
                 )
             )
-        prev_level = conv.to_level
+        if not conv.level_preserving:
+            prev_level = conv.to_level
