@@ -1,12 +1,14 @@
 """Real off-air DMR closure gate: Marconi's front-end (channelize -> fsk) turns the
-capture into soft symbols, and the test carves DMR framing as caller data. The capture
-carries a LO-leakage DC offset co-located with the baseband signal at 0 Hz, so a
-streaming DC-blocker would notch the signal itself; DC is removed by whole-signal mean
-subtraction (thin capture prep) before the modem. The FM discriminator also has a
-per-burst DC wander that a memoryless global slicer cannot follow, so slicing is local:
-detect syncs on the soft-symbol signs, then per-burst remove DC and rescale before the
-M-ary decision. The generic BPTC helper (Task 4) decodes each 132-dibit burst; the
-oracle is dsd-neo's independently CRC-confirmed subscriber-ID pairs.
+capture into soft symbols, and a composed codec of generic stages carves DMR framing
+as caller data. The capture carries a LO-leakage DC offset co-located with the
+baseband signal at 0 Hz, so a streaming DC-blocker would notch the signal itself; DC
+is removed by whole-signal mean subtraction (thin capture prep) before the modem. The
+FM discriminator also has a per-burst DC wander that a memoryless global slicer cannot
+follow, so slicing is local: sync_symbols marks bursts on the soft-symbol signs, then
+normalize per-burst removes DC and rescales before the m_slice M-ary decision;
+symbol_map / mark_frame / fixed_frame carve each 264-bit burst. The generic BPTC
+helper (Task 4) decodes each burst; the oracle is dsd-neo's independently
+CRC-confirmed subscriber-ID pairs.
 
 Polarity is fixed at asset-generation time (make_dmr_slice.py), so the gate does not
 search it. All DMR values (sync pattern, thresholds, oracle pairs, field offsets) are
@@ -21,8 +23,12 @@ import numpy as np
 import pytest
 from bits import _dmr
 
+from marconi.bits.models import CodecSpec, CodecStep
+from marconi.bits.registry import registry
+from marconi.bits.seam import parse_bitstream
 from marconi.core.descriptor import Descriptor
 from marconi.core.levels import Level
+from marconi.core.models import Symbolstream
 from marconi.phy.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
 from marconi.phy.compiler import compile_modem
 from marconi.phy.models import ModemSpec, ModemStep
@@ -35,6 +41,7 @@ _SLICE = (
 )
 
 ORACLE_PAIRS = {(3109836, 2247700), (3109823, 2247700), (3169855, 2247700)}
+SYNC_PATTERN = _dmr.SYNC_SIGNS.astype(int).tolist()
 
 
 def _dmr_modem() -> ModemSpec:
@@ -50,24 +57,39 @@ def _dmr_modem() -> ModemSpec:
     )
 
 
-def _decode(sym: np.ndarray) -> list[dict[str, int | str]]:
-    signs = np.sign(sym - np.median(sym))
-    w = np.lib.stride_tricks.sliding_window_view(signs, _dmr.SYNC_SIGNS.size)
-    syncs = np.flatnonzero((w == _dmr.SYNC_SIGNS).sum(axis=1) >= 21)
+def _dmr_codec() -> CodecSpec:
+    return CodecSpec(
+        path=[
+            CodecStep(
+                conv="sync_symbols",
+                params={"pattern": SYNC_PATTERN, "max_errors": 3, "pre_symbols": 54},
+            ),
+            CodecStep(
+                conv="normalize",
+                params={"span_symbols": 132, "dc": "median", "gain_percentile": 60.0},
+            ),
+            CodecStep(
+                conv="m_slice",
+                params={"thresholds": [-0.667, 0.0, 0.667], "levels": [3, 2, 0, 1]},
+            ),
+            CodecStep(
+                conv="symbol_map",
+                params={"code_bits": 2, "data_bits": 2, "table": [0, 1, 2, 3]},
+            ),
+            CodecStep(conv="mark_frame", params={"offset_bits": 0}),
+            CodecStep(conv="fixed_frame", params={"payload_bits": 264}),
+        ]
+    )
+
+
+def _decode(snk: Path) -> list[dict[str, int | str]]:
+    sym = np.fromfile(snk, np.float32)
+    stream = Symbolstream(path=snk, num_symbols=sym.size, item_type="f")
+    result = parse_bitstream(stream, _dmr_codec(), registry())
     out: list[dict[str, int | str]] = []
-    for s in syncs:
-        lo = int(s) - 54
-        if lo < 0 or lo + 132 > sym.size:
-            continue
-        c = sym[lo : lo + 132] - np.median(sym[lo : lo + 132])
-        mag = np.abs(c)
-        outer = float(np.mean(mag[mag > np.percentile(mag, 60)]) or 1.0)
-        n = c / outer
-        dibits = np.array(
-            [[3, 2, 0, 1][int(np.searchsorted([-0.667, 0.0, 0.667], v))] for v in n],
-            np.uint8,
-        )
-        r = _dmr.decode_burst(dibits)
+    for fr in result.frames:
+        burst = np.unpackbits(np.frombuffer(bytes.fromhex(fr.payload_hex), np.uint8))
+        r = _dmr.decode_burst_from_bits(burst[:264])
         if r:
             out.append(r)
     return out
@@ -96,7 +118,7 @@ def test_dmr_offair(tmp_path: Path) -> None:
     r = GnuRadioBackend().run_pipeline(pipe, timeout=180.0)
     assert r.status == "ok", r
 
-    decoded = _decode(np.fromfile(snk, np.float32))
+    decoded = _decode(snk)
     pairs = {
         (int(d["source"]), int(d["target"]))
         for d in decoded

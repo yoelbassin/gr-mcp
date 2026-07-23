@@ -7,8 +7,8 @@ from __future__ import annotations
 
 import numpy as np
 
-from marconi.bits.carriers import RxCarrier, _Frame
-from marconi.bits.framing import bits_to_bytes, block_code_rx, crc_rx, permute_rx
+from marconi.bits.carriers import RxCarrier
+from marconi.bits.framing import bits_to_bytes, block_code_rx, crc_value, permute_rx
 
 # fmt: off
 DEINTERLEAVE = [
@@ -109,18 +109,13 @@ def _u(bits: np.ndarray, start: int, length: int) -> int:
 
 
 def _crc_ok(payload: np.ndarray, xorout: int) -> bool:
-    frame = _Frame(
-        start=0, cursor=0, payload=bits_to_bytes(payload, "msb"), crc_ok=True
+    data = bits_to_bytes(payload, "msb")
+    body, checksum = data[:-2], data[-2:]
+    rx = int.from_bytes(checksum, "big")
+    return (
+        crc_value(body, poly=0x1021, bits=16, init=0, reflected=False, xorout=xorout)
+        == rx
     )
-    result = crc_rx(
-        RxCarrier(bits=np.zeros(0, np.uint8), frames=[frame]),
-        poly=0x1021,
-        bits=16,
-        init=0,
-        reflected=False,
-        xorout=xorout,
-    )
-    return bool(result.frames[0].crc_ok)
 
 
 def _dibits_to_bits(dibits: np.ndarray) -> np.ndarray:
