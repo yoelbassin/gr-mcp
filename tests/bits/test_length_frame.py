@@ -51,3 +51,15 @@ def test_tx_is_passthrough():
 def test_registered_and_declares_body_slicer():
     stage = registry()["length_frame"]
     assert stage.slices_body is True
+
+
+def test_length_frame_carved_recarves_payload_by_embedded_length() -> None:
+    # payload: [hdr, len=2, d0, d1, crc0, crc1, junk]; base=4 (hdr+crc), len units=2
+    payload = bytes([0x00, 0x02, 0xAA, 0xBB, 0xC0, 0xDE, 0xFF, 0xFF])
+    c = RxCarrier(bits=np.zeros(0, np.uint8), frames=[_Frame(0, 0, payload=payload)])
+    out = framing.length_frame_rx(
+        c, length_bits=8, base_bytes=4, unit_bytes=1, offset_bits=8, bit_order="msb"
+    )
+    # need = base(4) + len(2) = 6 bytes
+    assert len(out.frames[0].payload) == 6
+    assert out.frames[0].payload == payload[:6]

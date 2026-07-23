@@ -8,8 +8,10 @@ from marconi.bits.framing import (
     _decode_charset,
     _destuff,
     _find_flags,
+    _seq_bits,
     build_struct,
     crc_value,
+    descramble_bits_rx,
     differential_rx,
     differential_tx,
     hdlc_deframe_rx,
@@ -46,6 +48,20 @@ def test_hdlc_frame_deframe_roundtrip() -> None:
     out = hdlc_deframe_rx(RxCarrier(bits=framed), bit_order="msb")
     assert len(out.frames) == 1
     assert out.frames[0].payload == payload
+
+
+def test_descramble_bits_restarts_sequence_at_each_frame_cursor() -> None:
+    # seeded scope: two frames at cursors 0 and 5 over a 13-bit all-zero stream,
+    # sequence "f0" (11110000) restarts at each cursor rather than tiling once
+    # over the whole stream.
+    bits = np.zeros(13, dtype=np.uint8)
+    frames = [_Frame(start=0, cursor=0), _Frame(start=5, cursor=5)]
+    out = descramble_bits_rx(RxCarrier(bits=bits, frames=frames), sequence="f0")
+    seq = _seq_bits("f0")
+    expected = np.concatenate([seq[:5], seq[:8]])
+    assert np.array_equal(out.bits, expected)
+    whole_stream = np.bitwise_xor(bits, np.resize(seq, bits.size))
+    assert not np.array_equal(out.bits, whole_stream)
 
 
 def test_destuff_rejects_sixth_consecutive_one() -> None:

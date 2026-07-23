@@ -233,6 +233,7 @@ class LengthFrame(DuplexStage[ProgramBuilder]):
         base_bytes: StrictInt = Field(ge=0)
         unit_bytes: StrictInt = Field(default=1, ge=1)
         bit_order: str = "msb"
+        offset_bits: StrictInt = Field(default=0, ge=0)
 
     params_model = _Params
 
@@ -243,6 +244,7 @@ class LengthFrame(DuplexStage[ProgramBuilder]):
             "base_bytes": p.base_bytes,
             "unit_bytes": p.unit_bytes,
             "bit_order": p.bit_order,
+            "offset_bits": p.offset_bits,
         }
 
     def emit_rx(self, b: ProgramBuilder, params: Mapping[str, Any]) -> None:

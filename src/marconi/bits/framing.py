@@ -531,9 +531,15 @@ def descramble_bits_rx(c: RxCarrier, *, sequence: str = "") -> RxCarrier:
     bits = np.asarray(c.bits, dtype=np.uint8)
     if seq.size == 0 or bits.size == 0:
         return c
-    return RxCarrier(
-        bits=np.bitwise_xor(bits, np.resize(seq, bits.size)), frames=c.frames
-    )
+    if not c.frames:
+        return replace(c, bits=np.bitwise_xor(bits, np.resize(seq, bits.size)))
+    out = bits.copy()
+    cursors = [f.cursor for f in c.frames]
+    bounds = cursors[1:] + [int(bits.size)]
+    for lo, hi in zip(cursors, bounds):
+        span = out[lo:hi]
+        out[lo:hi] = np.bitwise_xor(span, np.resize(seq, span.size))
+    return replace(c, bits=out)
 
 
 def descramble_bits_tx(c: TxCarrier, *, sequence: str = "") -> TxCarrier:
@@ -796,9 +802,33 @@ def block_code_rx(
     return RxCarrier(bits=joined, frames=frames)
 
 
-def _read_uint(bits: np.ndarray, start: int, width: int) -> int:
+def _read_uint(bits: np.ndarray, start: int, width: int, bit_order: str = "msb") -> int:
     field = bits[start : start + width]
+    if bit_order == "lsb":
+        field = field[::-1]
     return int(field.dot(1 << np.arange(width - 1, -1, -1, dtype=np.int64)))
+
+
+def _length_frame_carved(
+    c: RxCarrier,
+    *,
+    length_bits: int,
+    base_bytes: int,
+    unit_bytes: int,
+    bit_order: str,
+    offset_bits: int,
+) -> RxCarrier:
+    out: list[_Frame] = []
+    for f in c.frames:
+        pbits = bytes_to_bits(f.payload, bit_order)
+        if offset_bits + length_bits > pbits.size:
+            continue
+        length = _read_uint(pbits, offset_bits, length_bits, bit_order)
+        nbytes = base_bytes + unit_bytes * length
+        if nbytes <= 0 or nbytes > len(f.payload):
+            continue
+        out.append(replace(f, payload=f.payload[:nbytes]))
+    return RxCarrier(bits=c.bits, frames=out, marks=c.marks)
 
 
 def length_frame_rx(
@@ -808,18 +838,32 @@ def length_frame_rx(
     base_bytes: int,
     unit_bytes: int,
     bit_order: str = "msb",
+    offset_bits: int = 0,
 ) -> RxCarrier:
-    """Carve each seeded frame's body using a length field it carries: read a
-    ``length_bits`` integer L at the cursor, then take ``base_bytes + unit_bytes*L``
-    bytes as the payload (the length field and any trailing checkword included).
-    Closes the header->length plumbing gap: a decoded length drives framing
-    instead of a hardcoded stride."""
+    """Carve a frame's body using a length field it carries: read a
+    ``length_bits`` integer L at ``offset_bits``, then take
+    ``base_bytes + unit_bytes*L`` bytes as the payload (the length field and any
+    trailing checkword included). Closes the header->length plumbing gap: a
+    decoded length drives framing instead of a hardcoded stride. Carved scope
+    (frames already carry a payload) re-carves that payload by the embedded
+    length; seeded scope reads the field straight off the bit stream at the
+    frame's cursor."""
+    if any(len(f.payload) for f in c.frames):
+        return _length_frame_carved(
+            c,
+            length_bits=length_bits,
+            base_bytes=base_bytes,
+            unit_bytes=unit_bytes,
+            bit_order=bit_order,
+            offset_bits=offset_bits,
+        )
     bits = np.asarray(c.bits, dtype=np.uint8)
     out: list[_Frame] = []
     for f in c.frames:
-        if f.cursor + length_bits > bits.size:
+        start = f.cursor + offset_bits
+        if start + length_bits > bits.size:
             continue
-        length = _read_uint(bits, f.cursor, length_bits)
+        length = _read_uint(bits, start, length_bits, bit_order)
         nbits = (base_bytes + unit_bytes * length) * 8
         if nbits <= 0 or f.cursor + nbits > bits.size:
             continue
@@ -835,6 +879,7 @@ def length_frame_tx(
     base_bytes: int,
     unit_bytes: int,
     bit_order: str = "msb",
+    offset_bits: int = 0,
 ) -> TxCarrier:
     return c  # the length field is assembled upstream (parse/crc); nothing to add
 
