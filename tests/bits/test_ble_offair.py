@@ -1,13 +1,14 @@
-"""Real off-air Bluetooth LE advertising, phy through the generic descramble + crc
-stages, with BLE's own CRC-24 as the self-validating oracle.
+"""Real off-air Bluetooth LE advertising decoded by a composed codec — the proof
+that a length-under-scrambling protocol fits the generic framing vocabulary.
 
 The PHY (channelize/fsk/slice) closes with zero new production code — the bursts
 are too short for Gardner timing (it rails, recovering 1/7 packets), so the fsk
-runs open-loop (loop_bw=0), the same sampler ADS-B needs. descramble dewhitens each
-PDU (BLE whitening is a data-independent per-channel LFSR sequence) and crc checks
-the CRC-24 — both exercised as generic stages. BLE's batch-free framing (per-PDU
-whitening reset, length at a byte offset, length-driven CRC) exceeds the generic
-framing vocabulary, so the AA-anchored carve is thin test-side code, per the roadmap.
+runs open-loop (loop_bw=0), the same sampler ADS-B needs. The codec then carves
+each PDU without protocol code: sync_word seeds on the access address,
+fixed_frame carves the max span, frame_codebook bridges BLE's LSB-first on-air
+byte order to the stages' MSB packing, descramble dewhitens (the per-PDU
+whitening reset falls out of carved scope), length_frame re-carves by the
+length byte read from the DEWHITENED payload, and crc checks the CRC-24.
 
 Capture: Zenodo SDR4IoT dataset (Rtone/imec, CC-BY) — Nordic nRF52 advertising
 beacons + an ambient Apple device, channel 37. The oracle needs no external decoder:
@@ -22,11 +23,13 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from marconi.bits.carriers import RxCarrier, _Frame
-from marconi.bits.framing import bits_to_bytes, crc_rx, descramble_rx
+from marconi.bits.models import CodecSpec, CodecStep
+from marconi.bits.registry import registry
+from marconi.bits.seam import parse_bitstream
 from marconi.core.bitfile import read_bits
 from marconi.core.descriptor import Descriptor
 from marconi.core.levels import Level
+from marconi.core.models import Bitstream
 from marconi.phy.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
 from marconi.phy.compiler import compile_modem
 from marconi.phy.models import ModemSpec, ModemStep
@@ -44,8 +47,12 @@ AA = 0x8E89BED6  # advertising access address
 AA_BITS = np.unpackbits(
     np.frombuffer(AA.to_bytes(4, "little"), np.uint8), bitorder="little"
 )
+AA_HEX = np.packbits(AA_BITS).tobytes().hex()  # on-air bits in sync_word's MSB packing
 CRC_POLY, CRC_INIT = 0x65B, 0x555555  # BLE CRC-24
 MAX_PDU_BYTES = 2 + 37 + 3  # header + max advertising payload + CRC
+# BLE is LSB-first on air; an 8-bit codebook expresses the per-byte bridge to the
+# stages' MSB byte packing.
+BIT_REVERSE = [int(f"{i:08b}"[::-1], 2) for i in range(256)]
 
 # Oracle: BLE CRC-24 self-validates; these 5 distinct advertising payloads (AdvA + AD
 # structures) were cross-checked by an independent decoder that read "Nordic_Blinky".
@@ -95,44 +102,37 @@ def _ble_modem() -> ModemSpec:
     )
 
 
-def _frame(payload: bytes) -> RxCarrier:
-    return RxCarrier(
-        bits=np.zeros(0, np.uint8),
-        frames=[_Frame(start=0, cursor=0, payload=payload)],
+def _ble_codec() -> CodecSpec:
+    return CodecSpec(
+        path=[
+            CodecStep(conv="sync_word", params={"sync": AA_HEX, "max_errors": 0}),
+            CodecStep(conv="fixed_frame", params={"payload_bits": MAX_PDU_BYTES * 8}),
+            CodecStep(
+                conv="frame_codebook",
+                params={"code_bits": 8, "data_bits": 8, "table": BIT_REVERSE},
+            ),
+            CodecStep(conv="descramble", params={"sequence": WHITEN.hex()}),
+            CodecStep(
+                conv="length_frame",
+                params={
+                    "length_bits": 8,
+                    "offset_bits": 8,
+                    "base_bytes": 2 + 3,
+                    "unit_bytes": 1,
+                },
+            ),
+            CodecStep(
+                conv="crc",
+                params={
+                    "poly": CRC_POLY,
+                    "bits": 24,
+                    "init": CRC_INIT,
+                    "reflected": True,
+                    "checksum_le": True,
+                },
+            ),
+        ]
     )
-
-
-def _aa_positions(bits: np.ndarray) -> list[int]:
-    win = np.lib.stride_tricks.sliding_window_view(bits, 32)
-    return np.flatnonzero((win != AA_BITS).sum(axis=1) == 0).tolist()
-
-
-def _pdus(bits: np.ndarray) -> list[tuple[bool, str]]:
-    """Thin AA-anchored carve; the generic descramble + crc stages do the work: per
-    access address, dewhiten a max span, read the length, validate the exact PDU."""
-    out: list[tuple[bool, str]] = []
-    for aa in _aa_positions(bits):
-        span = bits[aa + 32 : aa + 32 + MAX_PDU_BYTES * 8]
-        nbytes = int(span.size) // 8
-        if nbytes < 2:
-            continue
-        raw = bits_to_bytes(span[: nbytes * 8], "lsb")
-        dw = (
-            descramble_rx(_frame(raw), sequence=WHITEN[:nbytes].hex()).frames[0].payload
-        )
-        need = 2 + (dw[1] & 0x3F) + 3
-        if nbytes < need:
-            continue
-        f = crc_rx(
-            _frame(dw[:need]),
-            poly=CRC_POLY,
-            bits=24,
-            init=CRC_INIT,
-            reflected=True,
-            checksum_le=True,
-        ).frames[0]
-        out.append((bool(f.crc_ok), f.payload[2:].hex()))
-    return out
 
 
 @pytest.mark.skipif(
@@ -153,8 +153,10 @@ def test_ble_offair(tmp_path: Path) -> None:
     r = GnuRadioBackend().run_pipeline(pipe, timeout=180.0)
     assert r.status == "ok", r
 
-    valid = [payload for ok, payload in _pdus(read_bits(snk)) if ok]
-    # Closure: BLE PDUs decode phy -> descramble -> crc to CRC-valid, matching the
+    stream = Bitstream(path=snk, num_bits=read_bits(snk).size)
+    result = parse_bitstream(stream, _ble_codec(), registry())
+    valid = [fr.payload_hex[4:] for fr in result.frames if fr.crc_ok]
+    # Closure: BLE PDUs decode phy -> composed codec to CRC-valid, matching the
     # independently-decoded oracle. >=5 of 7 (the marginal Apple burst carries a
     # stable 1-byte demod error); a mis-decode fails CRC or lands off-oracle.
     assert len(valid) >= 5, f"only {len(valid)} CRC-valid BLE PDUs: {valid}"
