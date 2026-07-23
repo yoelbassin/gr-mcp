@@ -225,7 +225,7 @@ class LengthFrame(DuplexStage[ProgramBuilder]):
     name = "length_frame"
     from_level = Level.FRAMES
     to_level = Level.FRAMES
-    slices_body = True  # carves the seeded region using a decoded length field
+    slices_body = True  # carves (or re-carves) the region by a decoded length field
     family = "framing"
 
     class _Params(StageParams):
