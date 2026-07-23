@@ -317,6 +317,7 @@ class DescrambleBits(DuplexStage[ProgramBuilder]):
     name = "descramble_bits"
     from_level = Level.BITS
     to_level = Level.BITS
+    level_preserving = True
     family = "framing"
 
     params_model = _SequenceParams

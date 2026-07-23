@@ -167,7 +167,11 @@ def validate_path(
                     f"'{direction}'; supports {sorted(conv.directions)}",
                 )
             )
-        if conv.level_preserving:
+        transparent = conv.level_preserving and prev_level in (
+            conv.from_level,
+            Level.FRAMES,
+        )
+        if transparent:
             pass  # transparent: emits whatever level it received
         elif idx == 0 and conv.from_level != start_level:
             issues.append(
@@ -187,5 +191,5 @@ def validate_path(
                     f"boundary levels must be equal",
                 )
             )
-        if not conv.level_preserving:
+        if not transparent:
             prev_level = conv.to_level

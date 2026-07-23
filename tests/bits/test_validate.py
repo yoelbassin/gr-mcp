@@ -125,6 +125,19 @@ def test_seeded_transforms_validate_after_a_seeder():
     assert issues == [], issues
 
 
+def test_descramble_bits_seeded_scope_validates_after_a_seeder():
+    codec = CodecSpec(
+        name="c",
+        path=[
+            CodecStep(conv="sync_word", params={"sync": "2d"}),
+            CodecStep(conv="descramble_bits", params={"sequence": "f0"}),
+            CodecStep(conv="fixed_frame", params={"payload_bits": 8}),
+        ],
+    )
+    issues = validate_codec(codec, registry())
+    assert issues == [], issues
+
+
 def test_seeded_transforms_run_end_to_end():
     sync = framing.bytes_to_bits(bytes.fromhex("2d"))
     codeword_a = np.array([1, 0, 1], np.uint8)  # data=10, parity 1^0 matches 0b11
@@ -153,6 +166,20 @@ def test_seeded_transforms_run_end_to_end():
     program = compile_codec(spec, registry(), "rx")
     out = run_program(program, RxCarrier(bits=bits))
     assert [f.payload for f in out.frames] == [b"\x80", b"@"]
+
+
+def test_level_preserving_stage_rejected_at_mismatched_level():
+    codec = CodecSpec(
+        name="c",
+        path=[
+            CodecStep(conv="sync_symbols", params={"pattern": [1, 0, 1]}),
+            CodecStep(conv="permute", params={"perm": [0, 1, 2]}),
+        ],
+    )
+    issues = validate_codec(codec, registry())
+    assert any(
+        "permute" in i.message and "does not match" in i.message for i in issues
+    ), issues
 
 
 def test_malformed_parse_field_is_rejected():

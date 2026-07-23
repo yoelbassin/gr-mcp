@@ -533,6 +533,11 @@ def descramble_bits_rx(c: RxCarrier, *, sequence: str = "") -> RxCarrier:
         return c
     if not c.frames:
         return replace(c, bits=np.bitwise_xor(bits, np.resize(seq, bits.size)))
+    if any(len(f.payload) for f in c.frames):
+        raise ValueError(
+            "descramble_bits has no carved scope; run it in the seeded region "
+            "before a body slicer"
+        )
     out = bits.copy()
     cursors = [f.cursor for f in c.frames]
     bounds = cursors[1:] + [int(bits.size)]
@@ -592,6 +597,11 @@ def nibble_swap_tx(c: TxCarrier) -> TxCarrier:
 def realign_rx(c: RxCarrier, *, bit_offset: int) -> RxCarrier:
     if not c.frames:
         return RxCarrier(bits=np.asarray(c.bits, np.uint8)[bit_offset:])
+    if any(len(f.payload) for f in c.frames):
+        raise ValueError(
+            "realign has no carved scope; run it in the seeded region before a "
+            "body slicer"
+        )
     frames = [replace(f, cursor=f.cursor + bit_offset) for f in c.frames]
     return RxCarrier(bits=np.asarray(c.bits, np.uint8), frames=frames)
 
@@ -604,6 +614,11 @@ def permute_rx(c: RxCarrier, *, perm: list[int]) -> RxCarrier:
         n = bits.size // block
         out = bits[: n * block].reshape(n, block)[:, idx].reshape(-1)
         return RxCarrier(bits=out)
+    if any(len(f.payload) for f in c.frames):
+        raise ValueError(
+            "permute has no carved scope; run it in the seeded region before a "
+            "body slicer"
+        )
     bits = np.asarray(c.bits, np.uint8)
     span = int(idx.max()) + 1 if idx.size else 0
     pieces, frames, pos = [], [], 0
@@ -786,6 +801,11 @@ def block_code_rx(
             emit,
         )
         return RxCarrier(bits=decoded)
+    if any(len(f.payload) for f in c.frames):
+        raise ValueError(
+            "block_code has no carved scope; run it in the seeded region before "
+            "a body slicer"
+        )
     bits = np.asarray(c.bits, np.uint8)
     cursors = [f.cursor for f in c.frames]
     bounds = cursors[1:] + [int(bits.size)]

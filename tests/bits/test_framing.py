@@ -9,6 +9,7 @@ from marconi.bits.framing import (
     _destuff,
     _find_flags,
     _seq_bits,
+    block_code_rx,
     build_struct,
     crc_value,
     descramble_bits_rx,
@@ -19,6 +20,8 @@ from marconi.bits.framing import (
     parse_fields,
     parse_rx,
     parse_tx,
+    permute_rx,
+    realign_rx,
 )
 
 
@@ -62,6 +65,39 @@ def test_descramble_bits_restarts_sequence_at_each_frame_cursor() -> None:
     assert np.array_equal(out.bits, expected)
     whole_stream = np.bitwise_xor(bits, np.resize(seq, bits.size))
     assert not np.array_equal(out.bits, whole_stream)
+
+
+def _carved_carrier() -> RxCarrier:
+    bits = np.zeros(16, dtype=np.uint8)
+    frames = [_Frame(start=0, cursor=0, payload=b"\x01")]
+    return RxCarrier(bits=bits, frames=frames)
+
+
+def test_descramble_bits_rejects_carved_carrier() -> None:
+    with pytest.raises(ValueError, match="no carved scope"):
+        descramble_bits_rx(_carved_carrier(), sequence="f0")
+
+
+def test_realign_rejects_carved_carrier() -> None:
+    with pytest.raises(ValueError, match="no carved scope"):
+        realign_rx(_carved_carrier(), bit_offset=1)
+
+
+def test_permute_rejects_carved_carrier() -> None:
+    with pytest.raises(ValueError, match="no carved scope"):
+        permute_rx(_carved_carrier(), perm=[0, 1, 2, 3])
+
+
+def test_block_code_rejects_carved_carrier() -> None:
+    with pytest.raises(ValueError, match="no carved scope"):
+        block_code_rx(
+            _carved_carrier(),
+            code_bits=3,
+            data_bits=2,
+            parity_masks=[0b11],
+            correct=False,
+            emit="data",
+        )
 
 
 def test_destuff_rejects_sixth_consecutive_one() -> None:
