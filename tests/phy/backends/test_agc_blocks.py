@@ -87,10 +87,15 @@ def test_v1_characterize_feedforward(tmp_path: Path) -> None:
     z = _run_block(tmp_path, "feedforward_agc_cc", {"nsamples": 1024, "reference": 1.0})
     stats = _statistics(z)
     print(f"\nV1 feedforward -> {stats}")
-    # measured: feedforward_agc_cc's alpha-max-beta-min envelope (coeffs 1,
-    # 0.4) overestimates true magnitude by up to ~7.7% off-axis, biasing
-    # peak-normalized output ~7% below the reference rather than settling on it
-    assert stats["peak"] == pytest.approx(0.9306, abs=0.01), stats
+    # feedforward_agc_cc drives the window PEAK (not mean-magnitude, not RMS)
+    # toward the reference; GR's alpha-max-beta-min envelope approximation
+    # overestimates true magnitude off-axis, so peak settles modestly below
+    # the reference instead of exactly on it. Assert the qualitative shape
+    # (peak is closest to 1.0, within a version-tolerant band) rather than an
+    # exact machine/VOLK-dependent constant.
+    closest = min(stats, key=lambda k: abs(stats[k] - 1.0))
+    assert closest == "peak", stats
+    assert 0.85 < stats["peak"] < 1.0, stats
 
 
 def test_v1_characterize_feedback(tmp_path: Path) -> None:

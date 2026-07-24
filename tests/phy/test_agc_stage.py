@@ -152,6 +152,11 @@ def test_power_mode_rejects_feedback_only_params(bad_param: str) -> None:
         _emit({"mode": "power", bad_param: 2.0})
 
 
+def test_feedback_mode_rejects_window_symbols() -> None:
+    with pytest.raises(Exception, match="does not use"):
+        _emit({"mode": "feedback", "window_symbols": 4.0})
+
+
 def test_power_mode_rejects_reference() -> None:
     with pytest.raises(Exception, match="does not use"):
         _emit({"mode": "power", "reference": 2.0})

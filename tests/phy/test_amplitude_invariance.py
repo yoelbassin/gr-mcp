@@ -62,7 +62,8 @@ _OFDM_BIN_PERM = cast(
     _OFDM_ACTIVE + [b for b in range(_OFDM_FFT) if b not in _OFDM_ACTIVE],
 )
 _OFDM_FRAME_SYMS = 4
-_OFDM_N_FRAMES = 4  # >=5 back-to-back frames trip an unrelated resync issue (report)
+_OFDM_N_FRAMES = 4  # >=5 back-to-back frames trip an unrelated resync issue:
+# artifacts/superpowers/issues/28-ofdm-demod-multiframe-resync.md
 _OFDM_PARAMS: dict[str, ParamValue] = {
     "fft_len": _OFDM_FFT,
     "cp_len": _OFDM_CP,
@@ -289,21 +290,41 @@ _QAM_STO = 1.5
 _QAM_SETTLE_SYMS = 1500
 
 
+def _qam_oracle(order: int) -> tuple[np.ndarray, int]:
+    from gnuradio import digital  # in-process GR for oracle ground truth (allowed)
+
+    if order == 16:
+        c = digital.constellation_16qam()
+    else:
+        from gnuradio.digital import mod_codes, qam
+
+        c = qam.qam_constellation(
+            constellation_points=order,
+            differential=False,
+            mod_code=mod_codes.GRAY_CODE,
+            large_ampls_to_corners=False,
+        )
+    return np.asarray(c.points()), int(c.bits_per_symbol())
+
+
 def _qam_ser(
     tmp_path: Path,
     gain: float,
     with_agc: bool,
     condition: str,
     agc_override: ModemStep | None,
+    order: int = _QAM_ORDER,
 ) -> float:
-    from gnuradio import digital  # in-process GR for oracle ground truth (allowed)
-
     be = GnuRadioBackend()
     rate = _sample_rate("qam_demod")
     bits = np.random.default_rng(0).integers(0, 2, _QAM_N_BITS).astype(np.uint8)
     bp = write_bits(tmp_path / "qam_in.bits", bits)
     clean = tmp_path / "qam_clean.iq"
-    tx_pipe = _compile_pipeline("tx", _tx_path("qam_demod"), rate, _SYM, IQ, bp, clean)
+    tx_path = [
+        ModemStep(conv="qam_demod", params={"order": order}),
+        ModemStep(conv="qam_demap", params={"order": order}),
+    ]
+    tx_pipe = _compile_pipeline("tx", tx_path, rate, _SYM, IQ, bp, clean)
     assert be.run_pipeline(tx_pipe).status == "ok"
 
     # constellation_receiver_cb's decision-directed loop needs SOME channel
@@ -317,7 +338,7 @@ def _qam_ser(
     scaled = tmp_path / f"qam_scaled_{gain}_{with_agc}_{condition}.iq"
     z.astype(np.complex64).tofile(scaled)
 
-    rx_path = [ModemStep(conv="qam_demod", params={"order": _QAM_ORDER})]
+    rx_path = [ModemStep(conv="qam_demod", params={"order": order})]
     if with_agc:
         rx_path = [_agc_for("qam_demod", agc_override)] + rx_path
     out = tmp_path / f"qam_out_{gain}_{with_agc}_{condition}.u8"
@@ -325,9 +346,7 @@ def _qam_ser(
     assert be.run_pipeline(rx_pipe).status == "ok"
 
     rx_idx = read_bits(out)
-    c = digital.constellation_16qam()
-    points = np.asarray(c.points())
-    k = c.bits_per_symbol()
+    points, k = _qam_oracle(order)
     tsi = tx_sym_indices(bits, k)
     return resolved_ser_hard(rx_idx, tsi, points, settle=_QAM_SETTLE_SYMS)
 
@@ -551,3 +570,22 @@ def test_feedforward_is_no_worse_than_feedback_under_gaps(tmp_path: Path) -> Non
     fb = _burst_ber(tmp_path, "feedback")
     print(f"\nburst {_BURST_RECIPE} -> feedforward {ff}, feedback {fb}")
     assert ff <= fb + 0.05, f"feedforward {ff} worse than feedback {fb}"
+
+
+def test_qam_wrong_agc_mode_mis_decodes(tmp_path: Path) -> None:
+    ensure_worker_warm()
+    ser = _qam_ser(
+        tmp_path,
+        gain=1.0,
+        with_agc=True,
+        condition="static",
+        agc_override=_agc("feedforward"),
+        order=64,
+    )
+    print(f"\nQAM-64, wrong agc mode (feedforward) -> SER {ser}")
+    # Amplitude has a single NORMALIZED member by design, so [agc(mode=any),
+    # qam_demod] type-checks regardless of mode -- only `power` mode delivers
+    # the unit-RMS scale QAM's fixed-radius geometry needs. This substantiates
+    # that a wrong-mode QAM recipe is still caught at the test layer, since the
+    # type system intentionally does not distinguish normalization statistics.
+    assert ser > 0.3, f"expected catastrophic SER for wrong-mode QAM, got {ser}"
