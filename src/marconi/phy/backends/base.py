@@ -26,6 +26,8 @@ class BlockCensus(BaseModel):
     kind: str
     items_in: int | None = None
     items_out: int | None = None
+    windows_in: int | None = None
+    windows_out: int | None = None
 
 
 class RunResult(BaseModel):

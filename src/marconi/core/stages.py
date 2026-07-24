@@ -66,6 +66,11 @@ class Stage(ABC, Generic[B]):
     # and passes it through unchanged (its runtime dispatches on carrier state).
     # Used by transforms that work in both stream (BITS) and seeded (FRAMES) scope.
     level_preserving: bool = False
+    # Execution flavor: "gr" emits into the GR graph, "coding" into the numpy
+    # coding program. The compiler partitions the path on this, never on names.
+    engine: str = "gr"
+    # Establishes burst windows on the coding carrier (PHY sync, not framing).
+    seeds_windows: bool = False
 
     # Seam invariant (issue 06): the wire item_type / decision-carrier a stage
     # accepts on input. The phy compiler checks them against the upstream
