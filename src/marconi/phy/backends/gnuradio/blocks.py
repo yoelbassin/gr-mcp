@@ -112,31 +112,63 @@ def _make_ctx(rate: float) -> _GrCtx:
     )
 
 
-def _const(c: _GrCtx, scheme: str, order: int) -> Any:
-    if scheme == "psk":
-        builders = {
-            2: c.digital.constellation_bpsk,
-            4: c.digital.constellation_qpsk,
-            8: c.digital.constellation_8psk,
-        }
-        if order not in builders:
-            raise BackendError(f"unsupported psk order {order}")
-        return builders[order]()
-    if scheme == "qam":
-        if order == 16:
-            con = c.digital.constellation_16qam()
-        elif order == 64:
-            con = c.digital.qam.qam_constellation(
-                constellation_points=64,
-                differential=False,
-                mod_code=c.digital.mod_codes.GRAY_CODE,
-                large_ampls_to_corners=False,
-            )
-        else:
-            raise BackendError(f"unsupported qam order {order}")
-        con.normalize(c.digital.constellation.POWER_NORMALIZATION)
-        return con
-    raise BackendError(f"unknown constellation scheme {scheme!r}")
+def _const_psk(c: _GrCtx, p: Params) -> Any:
+    builders = {
+        2: c.digital.constellation_bpsk,
+        4: c.digital.constellation_qpsk,
+        8: c.digital.constellation_8psk,
+    }
+    order = _as_int(p["order"])
+    if order not in builders:
+        raise BackendError(f"unsupported psk order {order}")
+    return builders[order]()
+
+
+def _const_qam(c: _GrCtx, p: Params) -> Any:
+    order = _as_int(p["order"])
+    if order == 16:
+        con = c.digital.constellation_16qam()
+    elif order == 64:
+        con = c.digital.qam.qam_constellation(
+            constellation_points=64,
+            differential=False,
+            mod_code=c.digital.mod_codes.GRAY_CODE,
+            large_ampls_to_corners=False,
+        )
+    else:
+        raise BackendError(f"unsupported qam order {order}")
+    con.normalize(c.digital.constellation.POWER_NORMALIZATION)
+    return con
+
+
+def _const_explicit(c: _GrCtx, p: Params) -> Any:
+    """Arbitrary constellation from caller-supplied points; the bit pattern of a
+    point is its index (MSB-first). Covers the 1-D real case (M-PAM / M-ary FSK
+    levels, imaginary part zero) as well as any 2-D layout the named schemes
+    don't offer. Points are POWER_NORMALIZED, so a consumer must present its
+    input at unit RMS."""
+    points = _complex_syms(_as_float_list(p["points_i"]), _as_float_list(p["points_q"]))
+    con = c.digital.constellation_calcdist(points, [], 1, 1)
+    con.normalize(c.digital.constellation.POWER_NORMALIZATION)
+    return con
+
+
+_CONSTELLATIONS: dict[str, Callable[[_GrCtx, Params], Any]] = {
+    "psk": _const_psk,
+    "qam": _const_qam,
+    "explicit": _const_explicit,
+}
+
+
+def _const(c: _GrCtx, p: Params) -> Any:
+    scheme = str(p["scheme"])
+    build = _CONSTELLATIONS.get(scheme)
+    if build is None:
+        raise BackendError(
+            f"unknown constellation scheme {scheme!r}; "
+            f"known: {sorted(_CONSTELLATIONS)}"
+        )
+    return build(c, p)
 
 
 def _keep_m_in_n_f(c: _GrCtx, p: Params) -> Any:
@@ -261,16 +293,16 @@ GR_BLOCKS: dict[str, Callable[[_GrCtx, Params], Any]] = {
         _as_float(p.get("loop_bw", 0.045)), _as_int(p["order"]), False
     ),
     "constellation_receiver_cb": lambda c, p: c.digital.constellation_receiver_cb(
-        _const(c, str(p["scheme"]), _as_int(p["order"])).base(),
+        _const(c, p).base(),
         _as_float(p.get("loop_bw", 0.04)),
         _as_float(p.get("fmin", -0.5)),
         _as_float(p.get("fmax", 0.5)),
     ),
     "chunks_to_symbols_bc": lambda c, p: c.digital.chunks_to_symbols_bc(
-        _const(c, str(p["scheme"]), _as_int(p["order"])).points()
+        _const(c, p).points()
     ),
     "constellation_decoder_cb": lambda c, p: c.digital.constellation_decoder_cb(
-        _const(c, str(p["scheme"]), _as_int(p["order"])).base()
+        _const(c, p).base()
     ),
     "pack_k_bits_bb": lambda c, p: c.blocks.pack_k_bits_bb(_as_int(p["k"])),
     "unpack_k_bits_bb": lambda c, p: c.blocks.unpack_k_bits_bb(_as_int(p["k"])),
@@ -407,7 +439,7 @@ GR_BLOCKS: dict[str, Callable[[_GrCtx, Params], Any]] = {
     ),
     "multiply_conjugate_cc": lambda c, p: c.blocks.multiply_conjugate_cc(),
     "constellation_soft_decoder": lambda c, p: c.digital.constellation_soft_decoder_cf(
-        _const(c, str(p["scheme"]), _as_int(p["order"])).base()
+        _const(c, p).base()
     ),
     "patterned_interleaver_f": lambda c, p: c.blocks.patterned_interleaver(
         c.gr.sizeof_float, _as_int_list(p["pattern"])

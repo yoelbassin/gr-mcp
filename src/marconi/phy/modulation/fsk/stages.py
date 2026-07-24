@@ -4,6 +4,9 @@ import math
 from collections.abc import Mapping
 from typing import Any
 
+from pydantic import model_validator
+from pydantic_core import PydanticCustomError
+
 from marconi.core.descriptor import Carrier, Descriptor
 from marconi.core.levels import Level
 from marconi.core.params import StageParams
@@ -75,4 +78,71 @@ class Msk(RxStage[CompileContext]):
         return Descriptor(Level.SYMBOLS, "f", in_desc.layout, Carrier.SOFT)
 
 
-FSK_STAGES: tuple[type[Stage[CompileContext]], ...] = (Fsk, Msk)
+class _MfskSoftDemapParams(StageParams):
+    levels: list[float]
+
+    @model_validator(mode="after")
+    def _ok(self) -> "_MfskSoftDemapParams":
+        m = len(self.levels)
+        if m < 2 or m & (m - 1):
+            raise PydanticCustomError(
+                "value_error",
+                "levels needs a power-of-two count >= 2, got {m}",
+                {"m": m, "field": "levels"},
+            )
+        if len(set(self.levels)) != m:
+            raise PydanticCustomError("value_error", "levels must be distinct")
+        if not self.rms:
+            raise PydanticCustomError("value_error", "levels must not be all zero")
+        return self
+
+    @property
+    def rms(self) -> float:
+        return math.sqrt(sum(x * x for x in self.levels) / len(self.levels))
+
+
+class MfskSoftDemap(RxStage[CompileContext]):
+    """M-ary soft demap, SYMBOLS->BITS soft. Turns the one-soft-float-per-symbol
+    stream an fsk/msk discriminator emits into log2(M) LLRs per symbol, which is
+    what the coding lane (deinterleave/depuncture/fec) consumes. Before this the
+    only SYMBOLS->BITS stage accepting "f" was the binary `slice`, so every
+    M-ary FSK signal had to leave phy as hard decisions.
+
+    `levels` is the discriminator output value for each symbol index, so the
+    bit pattern of a level is its index (MSB-first) and any level->dibit map is
+    a parameter. Built from stock blocks: the levels become a 1-D real
+    constellation and the decision is constellation_soft_decoder, the same block
+    psk_soft_demap uses, with the same sign correction.
+
+    Amplitude: no agc precondition. The discriminator's scale is set by its own
+    gain (rate/2*pi*deviation), not by the capture level, so the caller's
+    `levels` ARE the scale reference; the stage normalizes the stream to the
+    constellation's unit-RMS by construction."""
+
+    name = "mfsk_soft_demap"
+    from_level = Level.SYMBOLS
+    to_level = Level.BITS
+    family = "fsk"
+    params_model = _MfskSoftDemapParams
+    accepts_item_type = "f"
+    accepts_carrier = Carrier.SOFT
+
+    def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
+        p = _MfskSoftDemapParams.model_validate(dict(params))
+        b.chain("multiply_const_ff", value=1.0 / p.rms)
+        b.chain("float_to_complex")
+        b.chain(
+            "constellation_soft_decoder",
+            scheme="explicit",
+            points_i=list(p.levels),
+            points_q=[0.0] * len(p.levels),
+        )
+        b.chain("multiply_const_ff", value=-1.0)
+
+    def out_descriptor(
+        self, in_desc: Descriptor, params: Mapping[str, Any]
+    ) -> Descriptor:
+        return Descriptor(Level.BITS, "f", in_desc.layout, Carrier.SOFT)
+
+
+FSK_STAGES: tuple[type[Stage[CompileContext]], ...] = (Fsk, Msk, MfskSoftDemap)
