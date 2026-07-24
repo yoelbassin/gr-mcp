@@ -1,0 +1,179 @@
+"""Per-block item counts, so an empty sink says which stage emptied it.
+
+GR keeps exact per-block counters and they outlive the run, so the whole chain
+is measurable without inserting a probe -- no topology change, no cost. Before
+this a chain that acquired nothing returned status="ok" with a silent empty
+file and the operator had no way to tell which stage stopped passing data.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import numpy as np
+import pytest
+from phy._dsp import write_bits
+
+from marconi.core.descriptor import Amplitude, Descriptor
+from marconi.core.levels import Level
+from marconi.core.params import ParamValue
+from marconi.phy.backends.base import RunResult
+from marconi.phy.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
+from marconi.phy.compiler import compile_modem
+from marconi.phy.models import ModemSpec, ModemStep
+from marconi.phy.stages import stage_registry
+
+IQ = Descriptor(Level.IQ, "c")
+# a clean synthetic transmitter output, so the scale is known without an agc --
+# which would otherwise add blocks to the very census under test
+IQ_NORMALIZED = Descriptor(Level.IQ, "c", amplitude=Amplitude.PEAK_UNITY)
+_SR, _SYM, _NBITS = 8.0, 1.0, 4096
+_QPSK: dict[str, ParamValue] = {"order": 4}
+
+
+def _run(
+    path: list[ModemStep], src: Path, snk: Path, direction: str = "rx"
+) -> RunResult:
+    pipe = compile_modem(
+        ModemSpec(symbol_rate=_SYM, path=path),
+        stage_registry(),
+        direction=direction,
+        sample_rate=_SR,
+        start=IQ if direction == "tx" else IQ_NORMALIZED,
+        source_io={"path": str(src)},
+        sink_io={"path": str(snk)},
+    )
+    return GnuRadioBackend().run_pipeline(pipe, timeout=180.0)
+
+
+def _signal(tmp_path: Path) -> Path:
+    bits = np.random.default_rng(0).integers(0, 2, _NBITS).astype(np.uint8)
+    bp = write_bits(tmp_path / "in.bits", bits)
+    iq = tmp_path / "sig.iq"
+    tx = [
+        ModemStep(conv="psk_demod", params=_QPSK),
+        ModemStep(conv="psk_demap", params=_QPSK),
+    ]
+    assert _run(tx, bp, iq, "tx").status == "ok"
+    return iq
+
+
+def _by_kind(res: RunResult, kind: str) -> list[int | None]:
+    return [c.items_out for c in res.census if c.kind == kind]
+
+
+def test_census_covers_the_whole_pipeline_in_order(tmp_path: Path) -> None:
+    ensure_worker_warm()
+    res = _run(
+        [ModemStep(conv="psk_demod", params=_QPSK)],
+        _signal(tmp_path),
+        tmp_path / "out.cf32",
+    )
+    assert res.status == "ok"
+    assert [c.kind for c in res.census] == [
+        "iq_file_source",
+        "rrc_filter_ccf",
+        "symbol_sync_cc",
+        "costas_loop_cc",
+        "iq_file_sink",
+    ]
+    assert all(c.block for c in res.census)
+
+
+def test_a_missing_port_reads_as_none_not_zero(tmp_path: Path) -> None:
+    """A source has no input and a sink no output; that must not be reported as
+    'consumed nothing', which is the failure signature."""
+    ensure_worker_warm()
+    res = _run(
+        [ModemStep(conv="psk_demod", params=_QPSK)],
+        _signal(tmp_path),
+        tmp_path / "out.cf32",
+    )
+    source, sink = res.census[0], res.census[-1]
+    assert source.items_in is None
+    assert source.items_out == 8 * _NBITS // 2
+    assert sink.items_out is None and sink.items_in is not None
+
+
+def test_census_measures_a_rate_change_exactly(tmp_path: Path) -> None:
+    ensure_worker_warm()
+    decim = 4
+    res = _run(
+        [
+            ModemStep(
+                conv="channelize",
+                params={"decim": decim, "bandwidth_hz": 1.0, "center_hz": 0.0},
+            )
+        ],
+        _signal(tmp_path),
+        tmp_path / "out.cf32",
+    )
+    assert res.status == "ok"
+    (produced,) = _by_kind(res, "freq_xlating_fir_filter_ccf")
+    arrived = res.census[0].items_out
+    assert arrived is not None
+    assert produced == arrived // decim
+
+
+def test_census_names_the_stage_that_produced_nothing(tmp_path: Path) -> None:
+    """A preamble that is not in the signal: acquisition withholds everything
+    and the sink is empty, but the run is still 'ok'. The census is the only
+    thing that says where the data stopped."""
+    ensure_worker_warm()
+    path = [
+        ModemStep(conv="psk_demod", params=_QPSK),
+        ModemStep(
+            conv="preamble_sync",
+            params={
+                "preamble_i": [1.0, -1.0] * 16,
+                "preamble_q": [0.0] * 32,
+                "threshold": 0.99,
+            },
+        ),
+    ]
+    res = _run(path, _signal(tmp_path), tmp_path / "out.cf32")
+    assert res.status == "ok"
+    dead = [c for c in res.census if c.items_out == 0]
+    assert [c.kind for c in dead] == ["sym_strip"]
+    upstream = next(c for c in res.census if c.kind == "corr_est_cc")
+    assert upstream.items_out is not None and upstream.items_out > 0
+
+
+def test_a_block_without_counters_does_not_fail_the_run(tmp_path: Path) -> None:
+    """pfb_arb_resampler exposes no nitems_read at all. A diagnostic must never
+    be able to fail a run that otherwise worked -- it reports None instead."""
+    ensure_worker_warm()
+    res = _run(
+        [ModemStep(conv="clock_correct", params={"ppm": 5.0})],
+        _signal(tmp_path),
+        tmp_path / "out.cf32",
+    )
+    assert res.status == "ok", res.error
+    arb = next(c for c in res.census if c.kind == "pfb_arb_resampler_ccf")
+    assert arb.items_in is None
+
+
+def test_an_all_stock_chain_is_observable_too(tmp_path: Path) -> None:
+    """The blind spot this closes: diagnostics only ever carried counters that
+    a Python block published, so a chain of nothing but stock GR blocks -- the
+    common case, and the one the design prefers -- reported nothing at all."""
+    ensure_worker_warm()
+    res = _run(
+        [ModemStep(conv="psk_demod", params=_QPSK)],
+        _signal(tmp_path),
+        tmp_path / "out.cf32",
+    )
+    assert res.diagnostics == {}
+    assert len(res.census) == 5
+
+
+@pytest.mark.parametrize("kind", ["iq_file_source", "rrc_filter_ccf"])
+def test_counts_are_non_negative(kind: str, tmp_path: Path) -> None:
+    ensure_worker_warm()
+    res = _run(
+        [ModemStep(conv="psk_demod", params=_QPSK)],
+        _signal(tmp_path),
+        tmp_path / "out.cf32",
+    )
+    row = next(c for c in res.census if c.kind == kind)
+    assert all(v is None or v >= 0 for v in (row.items_in, row.items_out))

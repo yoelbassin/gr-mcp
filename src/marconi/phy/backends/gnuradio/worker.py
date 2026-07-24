@@ -10,7 +10,7 @@ from multiprocessing.connection import Connection
 from pathlib import Path
 from typing import Any
 
-from marconi.phy.backends.base import BackendError, RunResult
+from marconi.phy.backends.base import BackendError, BlockCensus, RunResult
 from marconi.phy.ir import GrPipeline
 
 _SINK_KINDS = {
@@ -87,6 +87,35 @@ def _harvest_diagnostics(tb: Any) -> dict[str, dict[str, int | list[int]]]:
     return out
 
 
+def _port_count(blk: Any, counter: str) -> int | None:
+    """None where the count is unavailable: an absent port raises, and some
+    blocks (pfb_arb_resampler) do not expose the counter at all."""
+    try:
+        return int(getattr(blk, counter)(0))
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _harvest_census(tb: Any, pipeline: GrPipeline) -> list[BlockCensus]:
+    """GR keeps exact per-block item counters and they outlive the run, so the
+    whole chain can be measured without inserting a single probe. Never let a
+    diagnostic fail a run that otherwise worked."""
+    try:
+        instances = getattr(tb, "_py_instances", {})
+        return [
+            BlockCensus(
+                block=b.id,
+                kind=b.kind,
+                items_in=_port_count(instances[b.id], "nitems_read"),
+                items_out=_port_count(instances[b.id], "nitems_written"),
+            )
+            for b in pipeline.blocks
+            if b.id in instances
+        ]
+    except Exception:  # noqa: BLE001
+        return []
+
+
 def _run_flowgraph(pipeline: GrPipeline) -> RunResult:
     from marconi.phy.backends.gnuradio.build import build_top_block  # lazy
 
@@ -104,6 +133,7 @@ def _run_flowgraph(pipeline: GrPipeline) -> RunResult:
             error=f"flowgraph raised: {e}",
             artifacts=sink_paths(pipeline),
             diagnostics=_harvest_diagnostics(tb),
+            census=_harvest_census(tb, pipeline),
         )
     if crashes:
         return RunResult(
@@ -111,11 +141,13 @@ def _run_flowgraph(pipeline: GrPipeline) -> RunResult:
             error="embedded block raised:\n" + "\n".join(crashes),
             artifacts=sink_paths(pipeline),
             diagnostics=_harvest_diagnostics(tb),
+            census=_harvest_census(tb, pipeline),
         )
     return RunResult(
         status="ok",
         artifacts=sink_paths(pipeline),
         diagnostics=_harvest_diagnostics(tb),
+        census=_harvest_census(tb, pipeline),
     )
 
 
@@ -149,6 +181,8 @@ def _flag_scheduler_abort(result: RunResult, captured: str) -> RunResult:
         status="error",
         error="scheduler abort: " + "\n".join(hits),
         artifacts=result.artifacts,
+        diagnostics=result.diagnostics,
+        census=result.census,
     )
 
 

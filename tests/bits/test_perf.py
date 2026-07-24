@@ -2,6 +2,7 @@ import time
 
 import numpy as np
 import pytest
+from crc import Calculator, Configuration
 
 from marconi.bits.carriers import RxCarrier
 from marconi.bits.framing import _find_flags, block_code_rx, crc_value
@@ -33,20 +34,39 @@ def _reference_find_flags(bits):
 
 
 @pytest.mark.perf
-def test_crc_throughput_uses_table_engine():
-    data = bytes(1 << 19)  # 512 KiB
-    secs = _best_of(lambda: crc_value(data, poly=0x1021, bits=16, init=0xFFFF))
-    mb_per_s = (len(data) / 1e6) / secs
-    # bit-by-bit engine ~0.30 MB/s, table engine ~2.1; 1.0 cleanly separates them.
-    assert mb_per_s >= 1.0, f"{mb_per_s:.2f} MB/s -- optimized=True not in effect?"
+def test_crc_uses_the_table_engine_not_the_bitwise_one():
+    """Against an in-process control, not the clock: a wall-clock threshold
+    measures the machine, so it fails whenever the suite gets busier. Both arms
+    feel the same contention, so their ratio does not (measured 6.6-7.2x)."""
+    data = bytes(1 << 17)
+    config = Configuration(
+        width=16,
+        polynomial=0x1021,
+        init_value=0xFFFF,
+        final_xor_value=0,
+        reverse_input=False,
+        reverse_output=False,
+    )
+    bitwise = Calculator(config, optimized=False)
+    fast = _best_of(lambda: crc_value(data, poly=0x1021, bits=16, init=0xFFFF))
+    slow = _best_of(lambda: bitwise.checksum(data))
+    assert crc_value(data, poly=0x1021, bits=16, init=0xFFFF) == bitwise.checksum(data)
+    assert slow / fast >= 3.0, (
+        f"only {slow / fast:.1f}x the bit-by-bit engine -- optimized=True not in "
+        "effect?"
+    )
 
 
 @pytest.mark.perf
-def test_flag_scan_throughput():
-    bits = np.random.default_rng(0).integers(0, 2, 10_000_000, dtype=np.uint8)
-    secs = _best_of(lambda: _find_flags(bits))
-    mbit_per_s = (bits.size / 1e6) / secs
-    assert mbit_per_s >= 100.0, f"{mbit_per_s:.0f} Mbit/s -- flag scan not vectorized?"
+def test_flag_scan_beats_the_greedy_python_scan():
+    """Same ratio discipline: the reference below is the per-bit loop the
+    vectorized scan replaced (measured 253-357x)."""
+    bits = np.random.default_rng(0).integers(0, 2, 200_000, dtype=np.uint8)
+    fast = _best_of(lambda: _find_flags(bits))
+    slow = _best_of(lambda: _reference_find_flags(bits), n=1)
+    assert (
+        slow / fast >= 20.0
+    ), f"only {slow / fast:.0f}x the per-bit scan -- flag scan not vectorized?"
 
 
 @pytest.mark.perf

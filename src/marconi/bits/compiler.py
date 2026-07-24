@@ -41,11 +41,12 @@ def compile_codec(
         raise SpecValidationError(issues, "codec")
 
     b = ProgramBuilder()
-    steps = codec.path if direction == "rx" else list(reversed(codec.path))
-    for step in steps:
+    indexed = list(enumerate(codec.path))
+    for idx, step in indexed if direction == "rx" else list(reversed(indexed)):
         stage = registry[step.conv]
         if direction not in stage.directions:
             raise StageDirectionError(stage.name, direction, stage.directions)
+        b.label = f"{step.conv}[{idx}]"
         emit = stage.emit_rx if direction == "rx" else stage.emit_tx
         emit(b, step.params)
     first = registry[codec.path[0].conv] if codec.path else None

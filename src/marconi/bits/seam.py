@@ -7,7 +7,7 @@ import numpy as np
 
 from marconi.bits.carriers import RxCarrier
 from marconi.bits.compiler import compile_codec
-from marconi.bits.models import CodecSpec, DecodeResult, FrameResult
+from marconi.bits.models import CodecSpec, DecodeResult, FrameResult, StageCensus
 from marconi.bits.program import run_program
 from marconi.bits.validate import validate_codec
 from marconi.core.bitfile import read_bits, read_symbols
@@ -51,7 +51,8 @@ def parse_bitstream(
         )
     else:
         carrier = RxCarrier(bits=read_bits(bitstream.path))
-    out = run_program(program, carrier)
+    census: list[StageCensus] = []
+    out = run_program(program, carrier, census)
     frames = [
         FrameResult(
             bit_offset=f.start,
@@ -67,4 +68,5 @@ def parse_bitstream(
         num_frames=len(frames),
         num_crc_ok=sum(1 for f in frames if f.crc_ok is True),
         num_unchecked=sum(1 for f in frames if f.crc_ok is None),
+        census=census,
     )

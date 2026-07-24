@@ -156,6 +156,12 @@ def test_ais_offair_crc(tmp_path: Path) -> None:
         res = parse_bitstream(
             Bitstream(path=snk, num_bits=n, source_capture=_SLICE), _ais_codec(), reg
         )
+        # the counters have to agree with a real decode, not just a synthetic
+        # one: every block passed data, and the census sees the same frames the
+        # result reports
+        assert r.census and all(c.items_out != 0 for c in r.census), r.census
+        assert r.census[-1].items_in == n
+        assert res.census[-1].crc_ok_out == res.num_crc_ok
         total += res.num_crc_ok
         msgs.extend(res.messages)
     # The frame COUNT is the noisy statistic (158..313 over 15 runs), so it is

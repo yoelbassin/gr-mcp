@@ -18,6 +18,16 @@ class BackendError(Exception):
 register_error(BackendError, "invalid_argument")
 
 
+class BlockCensus(BaseModel):
+    """How many items a block consumed and produced. None where the port does
+    not exist (a source has no input, a sink no output)."""
+
+    block: str
+    kind: str
+    items_in: int | None = None
+    items_out: int | None = None
+
+
 class RunResult(BaseModel):
     status: Literal["ok", "error", "timeout"]
     artifacts: list[str] = []
@@ -26,6 +36,9 @@ class RunResult(BaseModel):
     # e.g. {"b4": {"locks": 2}} or {"b7": {"bursts": [0, 512]}} — lets a caller
     # tell "no signal found" from silence, or recover per-burst symbol offsets
     diagnostics: dict[str, dict[str, int | list[int]]] = {}
+    # in pipeline order, so the row where items_out falls to zero is the stage
+    # that consumed the signal — the gradient a parameter search needs
+    census: list[BlockCensus] = []
 
 
 class Backend(ABC):

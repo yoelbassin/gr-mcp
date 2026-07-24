@@ -45,9 +45,25 @@ class FrameResult(BaseModel):
     message: dict[str, int | str] | None = None
 
 
+class StageCensus(BaseModel):
+    """What survived one codec step. Named for the step in the spec, so several
+    rows can share a name when one stage emits several ops."""
+
+    stage: str
+    frames_in: int
+    frames_out: int
+    bits_in: int
+    bits_out: int
+    crc_ok_out: int
+
+
 class DecodeResult(BaseModel):
     messages: list[dict[str, int | str]]
     frames: list[FrameResult]
     num_frames: int
     num_crc_ok: int
     num_unchecked: int = 0
+    # in codec order: the row where frames_out falls to zero is the step that
+    # dropped them, and frames surviving with crc_ok_out == 0 says the framing
+    # was right and the check parameters were wrong
+    census: list[StageCensus] = []
