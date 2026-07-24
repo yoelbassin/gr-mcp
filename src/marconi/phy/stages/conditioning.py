@@ -181,8 +181,8 @@ class _AgcParams(StageParams):
 
 
 _MODE_FIELDS: dict[str, set[str]] = {
-    "feedforward": {"window_symbols"},
-    "feedback": {"attack_symbols", "decay_symbols", "max_gain"},
+    "feedforward": {"window_symbols", "reference"},
+    "feedback": {"attack_symbols", "decay_symbols", "max_gain", "reference"},
     "power": {"window_symbols"},
 }
 

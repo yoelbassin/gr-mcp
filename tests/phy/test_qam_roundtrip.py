@@ -47,6 +47,11 @@ def _full(order: int) -> ModemSpec:
 
 
 def _demod(order: int) -> ModemSpec:
+    # window_symbols=128: empirically SER-0 for orders 16/64 under this test's
+    # impairments (fine-grained sweep, both n_bits x1 and x4). NOT a robust band:
+    # rms_cf zero-inits its running estimate, so its startup transient (shaped by
+    # alpha=1/(window*sps)) perturbs constellation_receiver_cb's lock chaotically
+    # and non-monotonically in window -- see review-fix report for the sweep.
     return ModemSpec(
         symbol_rate=_SYM,
         path=[

@@ -92,7 +92,6 @@ def test_v2_level_sensitivity(name: str, tmp_path: Path) -> None:
 
 
 def test_psk_without_agc_rejected_at_compile() -> None:
-    """The measured loop-gain sensitivity is now a compile-time guarantee."""
     with pytest.raises(CompileError):
         compile_modem(
             ModemSpec(symbol_rate=_SYM, path=_CHAINS["psk"]),

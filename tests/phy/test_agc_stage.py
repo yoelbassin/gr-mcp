@@ -152,6 +152,24 @@ def test_power_mode_rejects_feedback_only_params(bad_param: str) -> None:
         _emit({"mode": "power", bad_param: 2.0})
 
 
+def test_power_mode_rejects_reference() -> None:
+    with pytest.raises(Exception, match="does not use"):
+        _emit({"mode": "power", "reference": 2.0})
+
+
+def test_power_mode_accepts_window_symbols_only() -> None:
+    kinds = [b.kind for b in _compile_agc({"mode": "power", "window_symbols": 64.0})]
+    assert kinds == [
+        "iq_file_source",
+        "complex_to_float",
+        "rms_cf",
+        "divide_ff",
+        "divide_ff",
+        "float_to_complex",
+        "iq_file_sink",
+    ]
+
+
 @pytest.mark.parametrize("mode", ["feedforward", "feedback", "power"])
 def test_agc_runs_and_normalizes_a_scaled_stream(mode: str, tmp_path: Path) -> None:
     ensure_worker_warm()

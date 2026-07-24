@@ -38,6 +38,9 @@ def _modem(order: int, direction: str) -> ModemSpec:
     pi, pq = make_preamble(_const_points(order))
     demod = [ModemStep(conv="psk_demod", params={"order": order})]
     if direction == "rx":
+        # window_symbols=320: empirically measured; BER-0 across a real ~80-wide
+        # robust band (272-352) under this test's impairments (see review-fix
+        # report's sweep).
         demod = [
             ModemStep(conv="agc", params={"mode": "power", "window_symbols": 320.0})
         ] + demod
