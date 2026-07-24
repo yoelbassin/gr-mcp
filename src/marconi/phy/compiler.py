@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from typing import Any
 
 from marconi.core.descriptor import Amplitude, Descriptor
 from marconi.core.errors import register_error
@@ -47,9 +48,7 @@ def _sink_kind(desc: Descriptor) -> str:
     return _io_kinds(desc)[1]
 
 
-def _resolve(
-    step: SpecStep, registry: Mapping[str, Stage[CompileContext]]
-) -> Stage[CompileContext]:
+def _resolve(step: SpecStep, registry: Mapping[str, Stage[Any]]) -> Stage[Any]:
     stage = registry.get(step.conv)
     if stage is None:
         raise CompileError(f"unknown stage '{step.conv}'; known: {sorted(registry)}")
@@ -58,7 +57,7 @@ def _resolve(
 
 def _forward_pass(
     steps: Sequence[SpecStep],
-    registry: Mapping[str, Stage[CompileContext]],
+    registry: Mapping[str, Stage[Any]],
     start: Descriptor,
     sample_rate: float,
 ) -> tuple[list[Descriptor], list[float]]:
@@ -80,7 +79,7 @@ _RATE_TOL = 0.02
 
 def _validate_descriptors(
     steps: Sequence[SpecStep],
-    registry: Mapping[str, Stage[CompileContext]],
+    registry: Mapping[str, Stage[Any]],
     boundaries: Sequence[Descriptor],
     rates: Sequence[float],
     symbol_rate: float,
@@ -135,7 +134,7 @@ def _validate_descriptors(
 
 def _validate(
     modem: ModemSpec,
-    registry: Mapping[str, Stage[CompileContext]],
+    registry: Mapping[str, Stage[Any]],
     start: Descriptor,
     direction: str,
 ) -> None:
@@ -156,7 +155,7 @@ def _validate(
 
 def compile_modem(
     modem: ModemSpec,
-    registry: Mapping[str, Stage[CompileContext]],
+    registry: Mapping[str, Stage[Any]],
     *,
     direction: str,
     sample_rate: float,
