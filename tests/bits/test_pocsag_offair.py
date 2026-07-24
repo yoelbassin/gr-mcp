@@ -94,6 +94,7 @@ def _pocsag_modem() -> ModemSpec:
                 conv="channelize",
                 params={"decim": 4, "bandwidth_hz": 14000.0, "center_hz": -10250.0},
             ),
+            ModemStep(conv="agc", params={"window_symbols": 64.0}),
             ModemStep(conv="fsk", params={"deviation": 4500.0}),
             ModemStep(conv="slice", params={}),
         ],

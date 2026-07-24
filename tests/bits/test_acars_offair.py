@@ -102,6 +102,7 @@ def _acars_modem(offset_hz: float) -> ModemSpec:
                 conv="channelize",
                 params={"decim": 1, "bandwidth_hz": 2400.0, "center_hz": 1800.0},
             ),
+            ModemStep(conv="agc", params={"window_symbols": 64.0}),
             ModemStep(conv="msk", params={}),
             ModemStep(conv="slice", params={}),
         ],
