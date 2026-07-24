@@ -63,7 +63,10 @@ class QamDemod(DuplexStage[CompileContext]):
     from_level = Level.IQ
     to_level = Level.SYMBOLS
     family = "qam"
-    accepts_amplitude = Amplitude.NORMALIZED
+    # MEASURED across a 1e-3..1e3 gain sweep: peak-normalized input is SER
+    # 0.91 at every gain and mean-mag is 0.87/0.00/0.92 (invariant only at
+    # unity). A fixed-radius constellation needs the RMS statistic.
+    accepts_amplitude = frozenset({Amplitude.RMS_UNITY})
     params_model = _QamDemodParams
 
     def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:

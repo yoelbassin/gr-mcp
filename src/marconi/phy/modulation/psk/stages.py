@@ -56,7 +56,12 @@ class PskDemod(DuplexStage[CompileContext]):
     from_level = Level.IQ
     to_level = Level.SYMBOLS
     family = "psk"
-    accepts_amplitude = Amplitude.NORMALIZED
+    # MEASURED across a 1e-3..1e3 gain sweep: BER 0 for every statistic. A
+    # constant-modulus constellation has no absolute radius to hit; the
+    # requirement is only that SOME normalization bounded the scale.
+    accepts_amplitude = frozenset(
+        {Amplitude.PEAK_UNITY, Amplitude.MEAN_MAG_UNITY, Amplitude.RMS_UNITY}
+    )
     params_model = _PskDemodParams
 
     def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:

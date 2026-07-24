@@ -24,7 +24,10 @@ class OokEnvelope(DuplexStage[CompileContext]):
     from_level = Level.IQ
     to_level = Level.SYMBOLS
     family = "ook"
-    accepts_amplitude = Amplitude.NORMALIZED
+    # MEASURED across a 1e-3..1e3 gain sweep: peak and RMS are BER 0; the
+    # mean-mag statistic is not gain-invariant for an on/off envelope
+    # (0.51/0.00/1.00), whose duty cycle sets the mean.
+    accepts_amplitude = frozenset({Amplitude.PEAK_UNITY, Amplitude.RMS_UNITY})
     params_model = _OokParams
 
     def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:

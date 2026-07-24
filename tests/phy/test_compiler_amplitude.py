@@ -24,7 +24,7 @@ class _NeedsNormalized(DuplexStage[CompileContext]):
     from_level = Level.IQ
     to_level = Level.SYMBOLS
     family = "test"
-    accepts_amplitude = Amplitude.NORMALIZED
+    accepts_amplitude = frozenset({Amplitude.RMS_UNITY})
     params_model = _NoParams
 
     def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
@@ -52,7 +52,7 @@ class _Establishes(RxStage[CompileContext]):
             in_desc.item_type,
             in_desc.layout,
             in_desc.carrier,
-            Amplitude.NORMALIZED,
+            Amplitude.RMS_UNITY,
         )
 
 
@@ -91,11 +91,20 @@ def test_amplitude_check_does_not_apply_to_tx() -> None:
     _compile([ModemStep(conv="needs_normalized")], direction="tx")
 
 
-def test_amplitude_requiring_stages_are_declared() -> None:
+def test_amplitude_requiring_stages_declare_measured_statistics() -> None:
+    """Each set is the measured gain-invariant subset, not a guess.
+
+    See tests/phy/test_amplitude_invariance.py::test_declared_amplitude_
+    statistics_are_the_ones_that_work, which re-derives these by measurement.
+    """
     reg = stage_registry()
-    assert reg["ook_envelope"].accepts_amplitude is Amplitude.NORMALIZED
-    assert reg["qam_demod"].accepts_amplitude is Amplitude.NORMALIZED
-    assert reg["psk_demod"].accepts_amplitude is Amplitude.NORMALIZED
+    assert reg["qam_demod"].accepts_amplitude == frozenset({Amplitude.RMS_UNITY})
+    assert reg["ook_envelope"].accepts_amplitude == frozenset(
+        {Amplitude.PEAK_UNITY, Amplitude.RMS_UNITY}
+    )
+    assert reg["psk_demod"].accepts_amplitude == frozenset(
+        {Amplitude.PEAK_UNITY, Amplitude.MEAN_MAG_UNITY, Amplitude.RMS_UNITY}
+    )
 
 
 def test_fsk_does_not_require_amplitude() -> None:

@@ -27,7 +27,7 @@ class _Demod(_PassThrough):
 
 
 _NORMALIZED = Descriptor(
-    Level.IQ, "c", Layout.STREAM, Carrier.HARD, Amplitude.NORMALIZED
+    Level.IQ, "c", Layout.STREAM, Carrier.HARD, Amplitude.RMS_UNITY
 )
 
 
@@ -37,7 +37,7 @@ def test_descriptor_defaults_to_unknown_amplitude() -> None:
 
 def test_iq_stage_passes_amplitude_through() -> None:
     out = _PassThrough().out_descriptor(_NORMALIZED, {})
-    assert out.amplitude is Amplitude.NORMALIZED
+    assert out.amplitude is Amplitude.RMS_UNITY
 
 
 def test_altering_stage_invalidates_amplitude() -> None:

@@ -18,7 +18,7 @@ from phy._dsp import (  # noqa: E402
     write_bits,
 )
 
-from marconi.core.descriptor import Carrier, Descriptor  # noqa: E402
+from marconi.core.descriptor import Amplitude, Carrier, Descriptor  # noqa: E402
 from marconi.core.levels import Level  # noqa: E402
 from marconi.core.params import ParamValue  # noqa: E402
 from marconi.phy.backends.gnuradio.runner import (  # noqa: E402
@@ -550,10 +550,7 @@ _BURST_RECIPE = "ook_envelope"
 
 
 def _burst_ber(tmp_path: Path, mode: str) -> float:
-    params: dict[str, float] = {}
-    if mode == "feedback":
-        params = {"attack_symbols": 1.0, "decay_symbols": 4.0}
-    override = ModemStep(conv="agc", params={"mode": mode, **params})
+    override = ModemStep(conv="agc", params={"mode": mode})
     return _roundtrip_ber(
         tmp_path,
         _BURST_RECIPE,
@@ -564,28 +561,72 @@ def _burst_ber(tmp_path: Path, mode: str) -> float:
     )
 
 
-def test_feedforward_is_no_worse_than_feedback_under_gaps(tmp_path: Path) -> None:
+def test_default_statistic_is_no_worse_than_the_other_allowed_one(
+    tmp_path: Path,
+) -> None:
+    """Among the statistics ook_envelope ACCEPTS, the default is not the worse
+    one under burst gaps. The statistic it rejects (mean-mag, whose value an
+    on/off duty cycle moves) is now a compile error, not a quality trade-off."""
     ensure_worker_warm()
-    ff = _burst_ber(tmp_path, "feedforward")
-    fb = _burst_ber(tmp_path, "feedback")
-    print(f"\nburst {_BURST_RECIPE} -> feedforward {ff}, feedback {fb}")
-    assert ff <= fb + 0.05, f"feedforward {ff} worse than feedback {fb}"
+    peak = _burst_ber(tmp_path, "feedforward")
+    rms = _burst_ber(tmp_path, "power")
+    print(f"\nburst {_BURST_RECIPE} -> peak {peak}, rms {rms}")
+    assert peak <= rms + 0.05, f"peak {peak} worse than rms {rms}"
 
 
-def test_qam_wrong_agc_mode_mis_decodes(tmp_path: Path) -> None:
-    ensure_worker_warm()
-    ser = _qam_ser(
-        tmp_path,
-        gain=1.0,
-        with_agc=True,
-        condition="static",
-        agc_override=_agc("feedforward"),
-        order=64,
-    )
-    print(f"\nQAM-64, wrong agc mode (feedforward) -> SER {ser}")
-    # Amplitude has a single NORMALIZED member by design, so [agc(mode=any),
-    # qam_demod] type-checks regardless of mode -- only `power` mode delivers
-    # the unit-RMS scale QAM's fixed-radius geometry needs. This substantiates
-    # that a wrong-mode QAM recipe is still caught at the test layer, since the
-    # type system intentionally does not distinguish normalization statistics.
-    assert ser > 0.3, f"expected catastrophic SER for wrong-mode QAM, got {ser}"
+_STATISTIC_MODE = {
+    Amplitude.PEAK_UNITY: "feedforward",
+    Amplitude.MEAN_MAG_UNITY: "feedback",
+    Amplitude.RMS_UNITY: "power",
+}
+
+
+def _compiles_with(name: str, mode: str) -> bool:
+    path = [ModemStep(conv="agc", params={"mode": mode})] + _recipe_path(name)
+    try:
+        _compile_pipeline(
+            "rx",
+            path,
+            _sample_rate(name),
+            _SYM,
+            IQ,
+            Path("in.cf32"),
+            Path("out.bin"),
+        )
+        return True
+    except CompileError:
+        return False
+
+
+@pytest.mark.parametrize("name", sorted(_RECIPES))
+def test_amplitude_acceptance_matches_the_declared_set(name: str) -> None:
+    """A chain compiles iff the agc mode produces a statistic the stage declares.
+
+    This is what makes the contract non-vacuous: qam_demod accepted any
+    "normalized" input before, and a peak-normalized stream mis-decoded at SER
+    0.91 across every gain with no error. The declared sets are measured, not
+    assumed -- see the comments on each stage's accepts_amplitude.
+    """
+    accepts = stage_registry()[name].accepts_amplitude
+    if accepts is None:
+        pytest.skip(f"{name} is scale-invariant")
+    for statistic, mode in _STATISTIC_MODE.items():
+        assert _compiles_with(name, mode) is (statistic in accepts), (
+            f"{name} with agc mode {mode!r} ({statistic.value}): "
+            f"compiles={_compiles_with(name, mode)}, declared={statistic in accepts}"
+        )
+
+
+def test_wrong_statistic_for_qam_is_a_compile_error_naming_the_requirement() -> None:
+    for mode in ("feedforward", "feedback"):
+        with pytest.raises(CompileError, match="rms_unity"):
+            _compile_pipeline(
+                "rx",
+                [ModemStep(conv="agc", params={"mode": mode})]
+                + _recipe_path("qam_demod"),
+                _sample_rate("qam_demod"),
+                _SYM,
+                IQ,
+                Path("in.cf32"),
+                Path("out.bin"),
+            )

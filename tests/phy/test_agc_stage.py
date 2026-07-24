@@ -14,7 +14,7 @@ from marconi.phy.models import ModemSpec, ModemStep
 from marconi.phy.stages import stage_registry
 
 _NORMALIZED = Descriptor(
-    Level.IQ, "c", Layout.STREAM, Carrier.HARD, Amplitude.NORMALIZED
+    Level.IQ, "c", Layout.STREAM, Carrier.HARD, Amplitude.RMS_UNITY
 )
 
 _PARAMS: dict[str, dict[str, Any]] = {
@@ -33,7 +33,7 @@ def test_scale_changing_stages_invalidate_amplitude(name: str) -> None:
 
 def test_invert_preserves_amplitude() -> None:
     out = stage_registry()["invert"].out_descriptor(_NORMALIZED, {})
-    assert out.amplitude is Amplitude.NORMALIZED
+    assert out.amplitude is Amplitude.RMS_UNITY
 
 
 def test_analytic_yields_unknown_amplitude() -> None:
@@ -55,10 +55,20 @@ def test_agc_is_registered_as_conditioning() -> None:
     assert stage.rate_factor({}) == 1.0
 
 
-def test_agc_establishes_normalized_amplitude() -> None:
+@pytest.mark.parametrize(
+    "mode,statistic",
+    [
+        ("feedforward", Amplitude.PEAK_UNITY),
+        ("feedback", Amplitude.MEAN_MAG_UNITY),
+        ("power", Amplitude.RMS_UNITY),
+    ],
+)
+def test_agc_mode_selects_the_amplitude_statistic(
+    mode: str, statistic: Amplitude
+) -> None:
     unknown = Descriptor(Level.IQ, "c")
-    out = stage_registry()["agc"].out_descriptor(unknown, {})
-    assert out.amplitude is Amplitude.NORMALIZED
+    out = stage_registry()["agc"].out_descriptor(unknown, {"mode": mode})
+    assert out.amplitude is statistic
 
 
 def test_feedforward_is_the_default_mode() -> None:

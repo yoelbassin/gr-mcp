@@ -231,8 +231,21 @@ _AGC_MODES: dict[str, Callable[[CompileContext, _AgcParams], None]] = {
     "power": _agc_power,
 }
 
+# Which statistic each mode drives to `reference`. A consumer declares the
+# statistic it needs, so a mode that normalizes the wrong one is a compile
+# error instead of a silent mis-decode.
+_MODE_AMPLITUDE: dict[str, Amplitude] = {
+    "feedforward": Amplitude.PEAK_UNITY,
+    "feedback": Amplitude.MEAN_MAG_UNITY,
+    "power": Amplitude.RMS_UNITY,
+}
+
 
 class Agc(RxStage[CompileContext]):
+    """Normalize IQ amplitude. `mode` selects WHICH statistic is driven to
+    `reference`, and that choice is part of the output contract:
+    feedforward -> peak_unity, feedback -> mean_mag_unity, power -> rms_unity."""
+
     name = "agc"
     from_level = Level.IQ
     to_level = Level.IQ
@@ -246,12 +259,13 @@ class Agc(RxStage[CompileContext]):
     def out_descriptor(
         self, in_desc: Descriptor, params: Mapping[str, Any]
     ) -> Descriptor:
+        p = _AgcParams.model_validate(dict(params))
         return Descriptor(
             Level.IQ,
             in_desc.item_type,
             in_desc.layout,
             in_desc.carrier,
-            Amplitude.NORMALIZED,
+            _MODE_AMPLITUDE[p.mode],
         )
 
 

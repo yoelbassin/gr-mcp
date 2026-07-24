@@ -75,7 +75,11 @@ class Stage(ABC, Generic[B]):
     # except the soft-LLR lane ("f"/SOFT).
     accepts_item_type: str | None = None
     accepts_carrier: Carrier | None = None
-    accepts_amplitude: Amplitude | None = None
+    # The amplitude statistics this stage can decode from, or None if it is
+    # scale-invariant. A set, not one value: a constant-modulus demod tolerates
+    # several, a fixed-radius one tolerates exactly its own. Each member must be
+    # measured across a gain sweep, not assumed.
+    accepts_amplitude: frozenset[Amplitude] | None = None
     alters_amplitude: bool = False
 
     @abstractmethod

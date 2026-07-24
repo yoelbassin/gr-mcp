@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 
-from marconi.core.descriptor import Descriptor
+from marconi.core.descriptor import Amplitude, Descriptor
 from marconi.core.errors import register_error
 from marconi.core.models import ValidationIssue
 from marconi.core.params import ParamValue
@@ -110,13 +110,18 @@ def _validate_descriptors(
         if (
             direction == "rx"
             and stage.accepts_amplitude is not None
-            and in_desc.amplitude != stage.accepts_amplitude
+            and in_desc.amplitude not in stage.accepts_amplitude
         ):
+            wanted = ", ".join(sorted(a.value for a in stage.accepts_amplitude))
+            fix = (
+                "insert an 'agc' stage after any channelization or resampling"
+                if in_desc.amplitude is Amplitude.UNKNOWN
+                else f"'{producer}' normalizes the wrong statistic — change its mode"
+            )
             raise CompileError(
-                f"stage '{step.conv}' requires {stage.accepts_amplitude.value} "
-                f"input amplitude but '{producer}' produces "
-                f"{in_desc.amplitude.value}; insert an 'agc' stage after any "
-                "channelization or resampling"
+                f"stage '{step.conv}' requires input amplitude normalized to "
+                f"{wanted} but '{producer}' produces {in_desc.amplitude.value}; "
+                f"{fix} (the agc stage's `mode` selects the statistic)"
             )
         required = stage.required_input_rate(step.params, symbol_rate)
         if required is not None and required > 0:

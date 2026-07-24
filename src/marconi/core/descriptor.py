@@ -17,8 +17,16 @@ class Carrier(str, Enum):
 
 
 class Amplitude(str, Enum):
+    """Which amplitude STATISTIC a stream has been normalized to. "Normalized"
+    alone is not a contract: a demod with absolute decision boundaries needs a
+    specific statistic, and the wrong one is silent garbage rather than a
+    tolerable offset (measured: qam_demod is SER 0.91 at every gain on a
+    peak-normalized stream, SER 0 on an RMS-normalized one)."""
+
     UNKNOWN = "unknown"
-    NORMALIZED = "normalized"
+    PEAK_UNITY = "peak_unity"  # max |x| -> reference
+    MEAN_MAG_UNITY = "mean_mag_unity"  # mean |x| -> reference
+    RMS_UNITY = "rms_unity"  # sqrt(mean |x|^2) -> reference
 
 
 @dataclass(frozen=True)
