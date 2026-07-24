@@ -89,3 +89,59 @@ def test_established_amplitude_satisfies_the_requirement() -> None:
 
 def test_amplitude_check_does_not_apply_to_tx() -> None:
     _compile([ModemStep(conv="needs_normalized")], direction="tx")
+
+
+def test_amplitude_requiring_stages_are_declared() -> None:
+    reg = stage_registry()
+    assert reg["ook_envelope"].accepts_amplitude is Amplitude.NORMALIZED
+    assert reg["qam_demod"].accepts_amplitude is Amplitude.NORMALIZED
+    assert reg["psk_demod"].accepts_amplitude is Amplitude.NORMALIZED
+
+
+def test_fsk_does_not_require_amplitude() -> None:
+    assert stage_registry()["fsk"].accepts_amplitude is None
+
+
+def test_agc_after_channelize_satisfies_a_requiring_stage() -> None:
+    compile_modem(
+        ModemSpec(
+            symbol_rate=1.0,
+            path=[
+                ModemStep(conv="channelize", params={"decim": 1, "bandwidth_hz": 1.0}),
+                ModemStep(conv="agc"),
+                ModemStep(conv="ook_envelope"),
+                ModemStep(conv="slice"),
+            ],
+        ),
+        stage_registry(),
+        direction="rx",
+        sample_rate=4.0,
+        start=IQ,
+        source_io={"path": "/dev/null"},
+        sink_io={"path": "/dev/null"},
+    )
+
+
+def test_agc_before_channelize_is_rejected() -> None:
+    with pytest.raises(CompileError) as exc:
+        compile_modem(
+            ModemSpec(
+                symbol_rate=1.0,
+                path=[
+                    ModemStep(conv="agc"),
+                    ModemStep(
+                        conv="channelize", params={"decim": 1, "bandwidth_hz": 1.0}
+                    ),
+                    ModemStep(conv="ook_envelope"),
+                    ModemStep(conv="slice"),
+                ],
+            ),
+            stage_registry(),
+            direction="rx",
+            sample_rate=4.0,
+            start=IQ,
+            source_io={"path": "/dev/null"},
+            sink_io={"path": "/dev/null"},
+        )
+    assert "ook_envelope" in str(exc.value)
+    assert "channelize" in str(exc.value)

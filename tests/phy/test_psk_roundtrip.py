@@ -49,7 +49,18 @@ def _full(order: int) -> ModemSpec:
 
 def _demod(order: int) -> ModemSpec:
     return ModemSpec(
-        symbol_rate=_SYM, path=[ModemStep(conv="psk_demod", params={"order": order})]
+        symbol_rate=_SYM,
+        path=[
+            ModemStep(
+                conv="agc",
+                params={
+                    "mode": "feedback",
+                    "attack_symbols": 1.0,
+                    "decay_symbols": 4.0,
+                },
+            ),
+            ModemStep(conv="psk_demod", params={"order": order}),
+        ],
     )
 
 

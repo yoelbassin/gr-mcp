@@ -7,7 +7,7 @@ from typing import Any
 from pydantic import StrictInt, model_validator
 from pydantic_core import PydanticCustomError
 
-from marconi.core.descriptor import Carrier, Descriptor
+from marconi.core.descriptor import Amplitude, Carrier, Descriptor
 from marconi.core.levels import Level
 from marconi.core.params import StageParams
 from marconi.core.stages import DuplexStage
@@ -56,6 +56,7 @@ class PskDemod(DuplexStage[CompileContext]):
     from_level = Level.IQ
     to_level = Level.SYMBOLS
     family = "psk"
+    accepts_amplitude = Amplitude.NORMALIZED
     params_model = _PskDemodParams
 
     def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:

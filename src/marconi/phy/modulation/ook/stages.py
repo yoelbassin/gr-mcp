@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from marconi.core.descriptor import Carrier, Descriptor
+from marconi.core.descriptor import Amplitude, Carrier, Descriptor
 from marconi.core.levels import Level
 from marconi.core.params import StageParams
 from marconi.core.stages import DuplexStage
@@ -24,6 +24,7 @@ class OokEnvelope(DuplexStage[CompileContext]):
     from_level = Level.IQ
     to_level = Level.SYMBOLS
     family = "ook"
+    accepts_amplitude = Amplitude.NORMALIZED
     params_model = _OokParams
 
     def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:

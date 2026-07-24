@@ -14,15 +14,19 @@ IQ = Descriptor(Level.IQ, "c")
 _SR, _SYM = 4.0, 1.0
 
 
-def _modem() -> ModemSpec:
-    return ModemSpec(
-        symbol_rate=_SYM, path=[ModemStep(conv="ook_envelope"), ModemStep(conv="slice")]
-    )
+def _modem(direction: str) -> ModemSpec:
+    rx = [
+        ModemStep(conv="agc"),
+        ModemStep(conv="ook_envelope"),
+        ModemStep(conv="slice"),
+    ]
+    tx = [ModemStep(conv="ook_envelope"), ModemStep(conv="slice")]
+    return ModemSpec(symbol_rate=_SYM, path=rx if direction == "rx" else tx)
 
 
 def _compile(direction: str, src: Path, snk: Path):
     return compile_modem(
-        _modem(),
+        _modem(direction),
         stage_registry(),
         direction=direction,
         sample_rate=_SR,

@@ -10,7 +10,7 @@ from phy._dsp import aligned_ber, read_bits, write_bits
 from marconi.core.descriptor import Descriptor
 from marconi.core.levels import Level
 from marconi.phy.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
-from marconi.phy.compiler import compile_modem
+from marconi.phy.compiler import CompileError, compile_modem
 from marconi.phy.ir import GrPipeline
 from marconi.phy.models import ModemSpec, ModemStep
 from marconi.phy.stages import stage_registry
@@ -78,26 +78,28 @@ def _assert_level_invariant(name: str, table: dict[float, GainResult]) -> None:
     ), f"{name} is level-sensitive: {table}"
 
 
-def _assert_loop_gain_sensitive(name: str, table: dict[float, GainResult]) -> None:
-    for gain, result in table.items():
-        expected: _Status = "timeout" if gain == 1e3 else "ok"
-        want = f"{name}@{gain} status {result.status}, expected {expected}: {table}"
-        assert result.status == expected, want
-    assert table[1.0].ber == 0.0, f"{name} baseline is not BER-0: {table}"
-    assert table[1e-3].ber > 0.01, f"{name} pattern changed: {table}"
-    assert table[1e1].ber > 0.3, f"{name} pattern changed: {table}"
-    assert table[1e3].ber > 0.3, f"{name} pattern changed: {table}"
-
-
 _EXPECT: dict[str, Callable[[str, dict[float, GainResult]], None]] = {
     "fsk": _assert_level_invariant,
-    "psk": _assert_loop_gain_sensitive,
 }
 
 
-@pytest.mark.parametrize("name", sorted(_CHAINS))
+@pytest.mark.parametrize("name", sorted(_EXPECT))
 def test_v2_level_sensitivity(name: str, tmp_path: Path) -> None:
     ensure_worker_warm()
     table = {g: _ber_at_gain(tmp_path, name, g) for g in _GAINS}
     print(f"\nV2 {name} BER vs gain -> {table}")
     _EXPECT[name](name, table)
+
+
+def test_psk_without_agc_rejected_at_compile() -> None:
+    """The measured loop-gain sensitivity is now a compile-time guarantee."""
+    with pytest.raises(CompileError):
+        compile_modem(
+            ModemSpec(symbol_rate=_SYM, path=_CHAINS["psk"]),
+            stage_registry(),
+            direction="rx",
+            sample_rate=_SR,
+            start=IQ,
+            source_io={"path": "/dev/null"},
+            sink_io={"path": "/dev/null"},
+        )

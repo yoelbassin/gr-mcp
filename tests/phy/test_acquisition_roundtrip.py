@@ -34,12 +34,17 @@ def _const_points(order: int) -> np.ndarray:
     return np.asarray(c.points())
 
 
-def _modem(order: int) -> ModemSpec:
+def _modem(order: int, direction: str) -> ModemSpec:
     pi, pq = make_preamble(_const_points(order))
+    demod = [ModemStep(conv="psk_demod", params={"order": order})]
+    if direction == "rx":
+        demod = [
+            ModemStep(conv="agc", params={"mode": "power", "window_symbols": 320.0})
+        ] + demod
     return ModemSpec(
         symbol_rate=_SYM,
-        path=[
-            ModemStep(conv="psk_demod", params={"order": order}),
+        path=demod
+        + [
             ModemStep(
                 conv="preamble_sync",
                 params={"preamble_i": pi, "preamble_q": pq, "pad_symbols": 192},
@@ -75,8 +80,9 @@ def test_preamble_sync_ber0_no_oracle(order: int, tmp_path: Path) -> None:
     bits = np.random.default_rng(order).integers(0, 2, n_bits).astype(np.uint8)
     bp = write_bits(tmp_path / "in.bits", bits)
     clean, imp, op = tmp_path / "c.iq", tmp_path / "i.iq", tmp_path / "out.bits"
-    modem = _modem(order)
-    assert be.run_pipeline(_compile(modem, "tx", bp, clean)).status == "ok"
+    assert (
+        be.run_pipeline(_compile(_modem(order, "tx"), "tx", bp, clean)).status == "ok"
+    )
     channel(
         clean,
         imp,
@@ -87,7 +93,7 @@ def test_preamble_sync_ber0_no_oracle(order: int, tmp_path: Path) -> None:
         sample_rate=_SR,
         seed=order,
     )
-    assert be.run_pipeline(_compile(modem, "rx", imp, op)).status == "ok"
+    assert be.run_pipeline(_compile(_modem(order, "rx"), "rx", imp, op)).status == "ok"
     out = read_bits(op)
     # preamble stripped: output is the payload minus the demod end-transient and
     # corr_est_cc's withheld filter tail (~104 syms), not payload+ramp+preamble;
@@ -111,7 +117,7 @@ def test_two_burst_capture_decodes_both(tmp_path: Path) -> None:
     rng = np.random.default_rng(11)
     bits1 = rng.integers(0, 2, n_bits).astype(np.uint8)
     bits2 = rng.integers(0, 2, n_bits).astype(np.uint8)
-    modem = _modem(order)
+    tx_modem = _modem(order, "tx")
     f1, f2 = tmp_path / "f1.iq", tmp_path / "f2.iq"
     # 16 pad bits absorb the RRC pulse tail truncated at each burst's end (in
     # single-burst tests those edge symbols hide inside corr_est's withheld
@@ -119,8 +125,8 @@ def test_two_burst_capture_decodes_both(tmp_path: Path) -> None:
     pad = np.zeros(16, dtype=np.uint8)
     b1 = write_bits(tmp_path / "b1.bits", np.concatenate([bits1, pad]))
     b2 = write_bits(tmp_path / "b2.bits", np.concatenate([bits2, pad]))
-    assert be.run_pipeline(_compile(modem, "tx", b1, f1)).status == "ok"
-    assert be.run_pipeline(_compile(modem, "tx", b2, f2)).status == "ok"
+    assert be.run_pipeline(_compile(tx_modem, "tx", b1, f1)).status == "ok"
+    assert be.run_pipeline(_compile(tx_modem, "tx", b2, f2)).status == "ok"
     noise = 0.02 * (rng.standard_normal(2048) + 1j * rng.standard_normal(2048))
     gap, tail = noise[:1024], noise[1024:]
     cap = np.concatenate(
@@ -134,7 +140,7 @@ def test_two_burst_capture_decodes_both(tmp_path: Path) -> None:
     cap_p, imp, op = tmp_path / "cap.iq", tmp_path / "imp.iq", tmp_path / "out.bits"
     cap.tofile(cap_p)
     channel(cap_p, imp, snr_db=25.0, cfo_hz=0.004 * _SR, sample_rate=_SR, seed=3)
-    assert be.run_pipeline(_compile(modem, "rx", imp, op)).status == "ok"
+    assert be.run_pipeline(_compile(_modem(order, "rx"), "rx", imp, op)).status == "ok"
     out = read_bits(op)
     assert len(out) > 2 * n_bits  # both payloads present (plus inter-burst junk)
     assert aligned_ber(out[: n_bits + 64 * k], bits1, max_shift=16 * k) == 0.0

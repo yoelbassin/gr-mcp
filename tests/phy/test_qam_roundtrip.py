@@ -48,7 +48,11 @@ def _full(order: int) -> ModemSpec:
 
 def _demod(order: int) -> ModemSpec:
     return ModemSpec(
-        symbol_rate=_SYM, path=[ModemStep(conv="qam_demod", params={"order": order})]
+        symbol_rate=_SYM,
+        path=[
+            ModemStep(conv="agc", params={"mode": "power", "window_symbols": 128.0}),
+            ModemStep(conv="qam_demod", params={"order": order}),
+        ],
     )
 
 
