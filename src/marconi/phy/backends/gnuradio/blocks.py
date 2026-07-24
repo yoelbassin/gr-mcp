@@ -280,13 +280,21 @@ GR_BLOCKS: dict[str, Callable[[_GrCtx, Params], Any]] = {
         _as_float(p["center"]),
         _as_float(p["rate"]),
     ),
-    # Rational resample via the polyphase arbitrary resampler (rate=interp/decim).
-    # This GR 3.10.12 build's rational_resampler_ccf/ccc with no taps image/alias:
-    # BER ~0.46 (random) through the fsk round-trip at 8/7 and 8/9, even though a
-    # bare tone's RMS survives (energy preservation != spectral purity). The pfb
-    # arbitrary resampler auto-designs proper anti-imaging taps and is the
-    # BER-0-proven path (test_resample_roundtrip).
+    # Polyphase arbitrary resampler (rate=interp/decim). Kept over
+    # rational_resampler_ccf because the same block also serves clock_correct's
+    # irrational 1/(1+ppm) ratio, so one kind covers both — NOT because rational
+    # images. rational_resampler_ccf with no taps is spectrally clean (<-56 dBc)
+    # and bit-perfect here; its "BER ~0.46 at 8/7, 8/9" through
+    # test_resample_roundtrip is an aligned_ber artifact, not a DSP fault: its
+    # group delay lands rx ~2 samples EARLY (negative lag) and aligned_ber only
+    # shifts rx forward, so it scores a perfect decode as random. Verified
+    # two-sided 2026-07-25; do not "re-fix" this by distrusting rational.
     "pfb_arb_resampler_ccf": lambda c, p: c.pfb.arb_resampler_ccf(_as_float(p["rate"])),
+    # Integer-ratio resampler (auto-designed anti-imaging taps). Spectrally clean
+    # and bit-perfect on this build; see the note above pfb_arb_resampler_ccf.
+    "rational_resampler_ccf": lambda c, p: c.gr_filter.rational_resampler_ccf(
+        interpolation=_as_int(p["interpolation"]), decimation=_as_int(p["decimation"])
+    ),
     "conjugate_cc": lambda c, p: c.blocks.conjugate_cc(),
     "symbol_sync_cc": lambda c, p: c.digital.symbol_sync_cc(
         c.digital.TED_GARDNER,

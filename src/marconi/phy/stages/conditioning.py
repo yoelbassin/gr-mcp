@@ -97,10 +97,10 @@ class _ResampleParams(StageParams):
 
 
 class Resample(RxStage[CompileContext]):
-    """Rational resample by interpolation/decimation via the polyphase arbitrary
-    resampler. The first non-unity rate_factor that is not 1/decim: lands an
-    arbitrary capture rate exactly on a target (CSS needs oversample*bandwidth).
-    RX-only conditioning."""
+    """Rational resample by interpolation/decimation via rational_resampler_ccf
+    (integer ratio, auto-designed anti-imaging taps). The first non-unity
+    rate_factor that is not 1/decim: lands an arbitrary capture rate exactly on a
+    target (CSS needs oversample*bandwidth). RX-only conditioning."""
 
     name = "resample"
     from_level = Level.IQ
@@ -111,8 +111,9 @@ class Resample(RxStage[CompileContext]):
 
     def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
         b.chain(
-            "pfb_arb_resampler_ccf",
-            rate=int(params["interpolation"]) / int(params["decimation"]),
+            "rational_resampler_ccf",
+            interpolation=int(params["interpolation"]),
+            decimation=int(params["decimation"]),
         )
 
     def rate_factor(self, params: Mapping[str, Any]) -> float:
