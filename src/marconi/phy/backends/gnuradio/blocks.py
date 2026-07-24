@@ -124,15 +124,18 @@ def _const(c: _GrCtx, scheme: str, order: int) -> Any:
         return builders[order]()
     if scheme == "qam":
         if order == 16:
-            return c.digital.constellation_16qam()
-        if order == 64:
-            return c.digital.qam.qam_constellation(
+            con = c.digital.constellation_16qam()
+        elif order == 64:
+            con = c.digital.qam.qam_constellation(
                 constellation_points=64,
                 differential=False,
                 mod_code=c.digital.mod_codes.GRAY_CODE,
                 large_ampls_to_corners=False,
             )
-        raise BackendError(f"unsupported qam order {order}")
+        else:
+            raise BackendError(f"unsupported qam order {order}")
+        con.normalize(c.digital.constellation.POWER_NORMALIZATION)
+        return con
     raise BackendError(f"unknown constellation scheme {scheme!r}")
 
 
@@ -277,6 +280,9 @@ GR_BLOCKS: dict[str, Callable[[_GrCtx, Params], Any]] = {
     "multiply_const_ff": lambda c, p: c.blocks.multiply_const_ff(_as_float(p["value"])),
     "add_const_ff": lambda c, p: c.blocks.add_const_ff(_as_float(p["value"])),
     "float_to_complex": lambda c, p: c.blocks.float_to_complex(1),
+    "complex_to_float": lambda c, p: c.blocks.complex_to_float(1),
+    "rms_cf": lambda c, p: c.blocks.rms_cf(_as_float(p["alpha"])),
+    "divide_ff": lambda c, p: c.blocks.divide_ff(1),
     "sym_prepend": lambda c, p: c.blocks.vector_insert_c(
         sym_prefix(
             _as_float_list(p["preamble_i"]),

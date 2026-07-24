@@ -18,6 +18,9 @@ _KINDS = [
             "max_gain": 0.0,
         },
     ),
+    ("complex_to_float", {}),
+    ("rms_cf", {"alpha": 0.1}),
+    ("divide_ff", {}),
 ]
 
 

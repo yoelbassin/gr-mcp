@@ -103,7 +103,56 @@ def test_unknown_param_is_rejected() -> None:
         _emit({"bogus": 1.0})
 
 
-@pytest.mark.parametrize("mode", ["feedforward", "feedback"])
+def _compile_agc(
+    params: Mapping[str, Any], rate: float = 8.0, symbol_rate: float = 1.0
+):
+    return compile_modem(
+        ModemSpec(
+            symbol_rate=symbol_rate, path=[ModemStep(conv="agc", params=dict(params))]
+        ),
+        stage_registry(),
+        direction="rx",
+        sample_rate=rate,
+        start=Descriptor(Level.IQ, "c"),
+        source_io={"path": "/dev/null"},
+        sink_io={"path": "/dev/null"},
+    ).blocks
+
+
+def test_power_mode_emits_the_rms_normalization_dag() -> None:
+    kinds = [b.kind for b in _compile_agc({"mode": "power"})]
+    assert kinds == [
+        "iq_file_source",
+        "complex_to_float",
+        "rms_cf",
+        "divide_ff",
+        "divide_ff",
+        "float_to_complex",
+        "iq_file_sink",
+    ]
+
+
+def test_power_mode_alpha_converts_via_sps() -> None:
+    def _rms_alpha(rate: float, symbol_rate: float) -> float:
+        blocks = _compile_agc(
+            {"mode": "power", "window_symbols": 64.0},
+            rate=rate,
+            symbol_rate=symbol_rate,
+        )
+        rms = next(b for b in blocks if b.kind == "rms_cf")
+        return float(rms.params["alpha"])
+
+    assert _rms_alpha(rate=8.0, symbol_rate=1.0) == pytest.approx(1.0 / 512.0)
+    assert _rms_alpha(rate=100.0, symbol_rate=25.0) == pytest.approx(1.0 / 256.0)
+
+
+@pytest.mark.parametrize("bad_param", ["max_gain", "attack_symbols", "decay_symbols"])
+def test_power_mode_rejects_feedback_only_params(bad_param: str) -> None:
+    with pytest.raises(Exception, match="does not use"):
+        _emit({"mode": "power", bad_param: 2.0})
+
+
+@pytest.mark.parametrize("mode", ["feedforward", "feedback", "power"])
 def test_agc_runs_and_normalizes_a_scaled_stream(mode: str, tmp_path: Path) -> None:
     ensure_worker_warm()
     src, snk = tmp_path / "in.cf32", tmp_path / "out.cf32"

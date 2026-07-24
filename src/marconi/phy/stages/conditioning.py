@@ -150,7 +150,7 @@ class ClockCorrect(RxStage[CompileContext]):
 
 
 class _AgcParams(StageParams):
-    mode: Literal["feedforward", "feedback"] = "feedforward"
+    mode: Literal["feedforward", "feedback", "power"] = "feedforward"
     reference: float = 1.0
     window_symbols: float = 16.0
     attack_symbols: float = 1.0
@@ -169,7 +169,8 @@ class _AgcParams(StageParams):
             )
         if self.max_gain < 0.0:
             raise PydanticCustomError("value_error", "max_gain must be >= 0")
-        unused = set().union(*(f for m, f in _MODE_FIELDS.items() if m != self.mode))
+        allowed = _MODE_FIELDS[self.mode]
+        unused = set().union(*_MODE_FIELDS.values()) - allowed
         supplied = self.model_fields_set & unused
         if supplied:
             raise PydanticCustomError(
@@ -182,6 +183,7 @@ class _AgcParams(StageParams):
 _MODE_FIELDS: dict[str, set[str]] = {
     "feedforward": {"window_symbols"},
     "feedback": {"attack_symbols", "decay_symbols", "max_gain"},
+    "power": {"window_symbols"},
 }
 
 
@@ -203,9 +205,30 @@ def _agc_feedback(b: CompileContext, p: _AgcParams) -> None:
     )
 
 
+def _agc_power(b: CompileContext, p: _AgcParams) -> None:
+    src = b.tail
+    assert src is not None
+    alpha = 1.0 / (p.window_symbols * b.sps)
+    c2f = b.add("complex_to_float")
+    rms = b.add("rms_cf", alpha=alpha)
+    b.connect(src, c2f)
+    b.connect(src, rms)
+    dre = b.add("divide_ff")
+    b.connect(c2f, dre, src_port=0, dst_port=0)
+    b.connect(rms, dre, src_port=0, dst_port=1)
+    dim = b.add("divide_ff")
+    b.connect(c2f, dim, src_port=1, dst_port=0)
+    b.connect(rms, dim, src_port=0, dst_port=1)
+    f2c = b.add("float_to_complex")
+    b.connect(dre, f2c, src_port=0, dst_port=0)
+    b.connect(dim, f2c, src_port=0, dst_port=1)
+    b.set_tail(f2c)
+
+
 _AGC_MODES: dict[str, Callable[[CompileContext, _AgcParams], None]] = {
     "feedforward": _agc_feedforward,
     "feedback": _agc_feedback,
+    "power": _agc_power,
 }
 
 
