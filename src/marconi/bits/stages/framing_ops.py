@@ -386,7 +386,17 @@ class Permute(RxStage[ProgramBuilder]):
     family = "coding"
 
     class _Params(StageParams):
-        perm: list[int]
+        perm: list[int] = Field(min_length=1)
+
+        @model_validator(mode="after")
+        def _non_negative(self) -> "Permute._Params":
+            if any(i < 0 for i in self.perm):
+                raise PydanticCustomError(
+                    "value_error",
+                    "perm indices must be >= 0; a negative index would wrap and "
+                    "understate the input stride",
+                )
+            return self
 
     params_model = _Params
 

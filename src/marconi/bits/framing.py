@@ -606,13 +606,21 @@ def realign_rx(c: RxCarrier, *, bit_offset: int) -> RxCarrier:
     return RxCarrier(bits=np.asarray(c.bits, np.uint8), frames=frames)
 
 
+def _perm_span(idx: np.ndarray) -> int:
+    """Input stride a gather consumes: one past its highest index, NOT its
+    length. A dropping gather (one that skips per-slot bits, so it spans more
+    input than it emits) reads further than it writes, and assuming
+    stride == len(perm) indexes out of bounds. Both scopes must agree on this."""
+    return int(idx.max()) + 1 if idx.size else 0
+
+
 def permute_rx(c: RxCarrier, *, perm: list[int]) -> RxCarrier:
     idx = np.asarray(perm, np.int64)
+    span = _perm_span(idx)
     if not c.frames:
         bits = np.asarray(c.bits, np.uint8)
-        block = idx.size
-        n = bits.size // block
-        out = bits[: n * block].reshape(n, block)[:, idx].reshape(-1)
+        n = bits.size // span if span else 0
+        out = bits[: n * span].reshape(n, span)[:, idx].reshape(-1)
         return RxCarrier(bits=out)
     if any(len(f.payload) for f in c.frames):
         raise ValueError(
@@ -620,7 +628,6 @@ def permute_rx(c: RxCarrier, *, perm: list[int]) -> RxCarrier:
             "body slicer"
         )
     bits = np.asarray(c.bits, np.uint8)
-    span = int(idx.max()) + 1 if idx.size else 0
     pieces, frames, pos = [], [], 0
     for f in c.frames:
         if f.cursor + span > bits.size:
@@ -674,6 +681,8 @@ def codebook_rx(
     3-of-6, Manchester, PPM chip-pairs — the table and widths are caller data."""
     _, inv = _codebook_maps(code_bits, data_bits, table)
     if symbol_input:
+        if c.symbols is None:
+            raise ValueError("codebook(symbol_input=True) needs a symbols carrier")
         syms = np.asarray(c.symbols, np.int64)
         bits = (
             _pack_symbols(inv[syms], data_bits) if syms.size else np.zeros(0, np.uint8)
