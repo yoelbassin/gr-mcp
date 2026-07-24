@@ -55,8 +55,10 @@ def _demod(order: int) -> ModemSpec:
                 conv="agc",
                 params={
                     "mode": "feedback",
-                    "attack_symbols": 1.0,
-                    "decay_symbols": 4.0,
+                    # 16/16: agc2_cc limit-cycles at faster rates on a large
+                    # gain step (see issue).
+                    "attack_symbols": 16.0,
+                    "decay_symbols": 16.0,
                 },
             ),
             ModemStep(conv="psk_demod", params={"order": order}),
