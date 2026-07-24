@@ -6,6 +6,7 @@ from typing import Any
 from pydantic import StrictInt, model_validator
 from pydantic_core import PydanticCustomError
 
+from marconi.core.descriptor import Carrier
 from marconi.core.levels import Level
 from marconi.core.params import StageParams
 from marconi.core.stages import DuplexStage, RxStage, Stage
@@ -46,6 +47,10 @@ class PreambleSync(DuplexStage[CompileContext]):
     to_level = Level.SYMBOLS
     family = "acquisition"
     params_model = _PreambleSyncParams
+    # corr_est_cc + sym_strip are complex-only: reject real-float symbols (fsk)
+    # at compile instead of dying on an itemsize mismatch in the backend.
+    accepts_item_type = "c"
+    accepts_carrier = Carrier.SOFT
 
     def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
         p = _PreambleSyncParams.model_validate(dict(params))

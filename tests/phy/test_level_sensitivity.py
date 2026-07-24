@@ -19,7 +19,7 @@ from marconi.phy.stages import stage_registry
 # __future__ import annotations`, so its Literal is stored unevaluated (a
 # string) and isn't reachable as a reusable static alias without a source
 # change -- this duplication is intentional and test-side only.
-_Status = Literal["ok", "error", "timeout"]
+_Status = Literal["ok", "error", "timeout", "empty"]
 
 
 @dataclass(frozen=True)

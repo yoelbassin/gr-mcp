@@ -29,9 +29,14 @@ class BlockCensus(BaseModel):
 
 
 class RunResult(BaseModel):
-    status: Literal["ok", "error", "timeout"]
+    # "empty": the graph ran clean but its terminal sink wrote nothing — a
+    # decoded-nothing run is NOT a success, so status stops saying "ok" for it.
+    status: Literal["ok", "error", "timeout", "empty"]
     artifacts: list[str] = []
     error: str | None = None
+    # the block id where the signal died on an "empty" run (first stage whose
+    # items_out fell to zero), or None. The machine anchor for the census gradient.
+    stalled_at: str | None = None
     # per-block counters/marks (keyed by block id) harvested after the run,
     # e.g. {"b4": {"locks": 2}} or {"b7": {"bursts": [0, 512]}} — lets a caller
     # tell "no signal found" from silence, or recover per-burst symbol offsets

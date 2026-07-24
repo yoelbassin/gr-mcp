@@ -266,7 +266,10 @@ GR_BLOCKS: dict[str, Callable[[_GrCtx, Params], Any]] = {
             _as_float(p["rate"]),
             _as_float(p["rate"]) / _as_float(p["sps"]),
             _as_float(p.get("alpha", 0.35)),
-            _as_int(p["sps"]) * _as_int(p.get("span", 11)) + 1,
+            # tap count is a filter LENGTH, legitimately non-integer-sps: round it
+            # so a fractional-sps capture (rate not an integer multiple of baud)
+            # builds instead of crashing on _as_int(sps).
+            round(_as_float(p["sps"]) * _as_int(p.get("span", 11))) + 1,
         ),
     ),
     "freq_xlating_fir_filter_ccf": lambda c, p: c.gr_filter.freq_xlating_fir_filter_ccf(

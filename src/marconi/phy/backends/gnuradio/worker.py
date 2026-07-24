@@ -186,6 +186,29 @@ def _flag_scheduler_abort(result: RunResult, captured: str) -> RunResult:
     )
 
 
+def _flag_empty_sink(result: RunResult, pipeline: GrPipeline) -> RunResult:
+    """A graph that reached EOF but wrote nothing to its terminal sink decoded
+    nothing; 'ok' would be a lie. Report 'empty' and name the first stage whose
+    items_out fell to zero — the census gradient a parameter search needs. Runs
+    only after the error/abort checks, so a real failure still outranks it and a
+    missing census never fabricates an empty verdict."""
+    if result.status != "ok" or not result.census:
+        return result
+    sink_ids = {b.id for b in pipeline.blocks if b.kind in _SINK_KINDS}
+    sinks = [c for c in result.census if c.block in sink_ids]
+    if not sinks or any(c.items_in is None or c.items_in > 0 for c in sinks):
+        return result
+    stall = next((c for c in result.census if c.items_out == 0), None)
+    where = f" (no items past {stall.kind})" if stall else ""
+    return result.model_copy(
+        update={
+            "status": "empty",
+            "stalled_at": stall.block if stall else None,
+            "error": f"terminal sink wrote 0 items{where}",
+        }
+    )
+
+
 def run_pipeline_worker(
     payload_json: str, conn: Connection, capture_path: str | None = None
 ) -> None:
@@ -194,7 +217,9 @@ def run_pipeline_worker(
         os.dup2(fd, 1)
         os.dup2(fd, 2)
         os.close(fd)
-    result = _run_flowgraph(GrPipeline.model_validate_json(payload_json))
+    pipeline = GrPipeline.model_validate_json(payload_json)
+    result = _run_flowgraph(pipeline)
     result = _flag_scheduler_abort(result, _captured_text(capture_path))
+    result = _flag_empty_sink(result, pipeline)
     conn.send(result.model_dump_json())
     conn.close()

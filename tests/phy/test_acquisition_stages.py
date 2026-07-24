@@ -1,9 +1,12 @@
 import numpy as np
+import pytest
 
-from marconi.core.descriptor import Carrier, Descriptor
+from marconi.core.descriptor import Amplitude, Carrier, Descriptor
 from marconi.core.levels import Level
 from marconi.core.stages import validate_params
 from marconi.phy.compile_context import CompileContext
+from marconi.phy.compiler import CompileError, compile_modem
+from marconi.phy.models import ModemSpec, ModemStep
 from marconi.phy.stages import stage_registry
 from marconi.phy.stages.acquisition import PreambleSync
 
@@ -45,6 +48,39 @@ def test_emit_tx_chains_sym_prepend() -> None:
     b = CompileContext(SYM_C, rate=4.0, symbol_rate=1.0)
     PreambleSync().emit_tx(b, _P)
     assert [x.kind for x in b.build("t", 4.0).blocks] == ["sym_prepend"]
+
+
+def _compile_rx(*steps: ModemStep):
+    return compile_modem(
+        ModemSpec(symbol_rate=1.0, path=list(steps)),
+        stage_registry(),
+        direction="rx",
+        sample_rate=8.0,
+        start=Descriptor(Level.IQ, "c", amplitude=Amplitude.PEAK_UNITY),
+        source_io={"path": "in.iq"},
+        sink_io={"path": "out.cf32"},
+    )
+
+
+def test_float_symbols_into_preamble_sync_rejected_at_compile() -> None:
+    """corr_est_cc and sym_strip are complex-only; fsk emits real-float symbols.
+    The seam check must reject fsk->preamble_sync at compile, not let it die on
+    an itemsize mismatch in the backend."""
+    with pytest.raises(CompileError, match="item_type"):
+        _compile_rx(
+            ModemStep(conv="fsk", params={"deviation": 0.5}),
+            ModemStep(conv="preamble_sync", params=_P),
+        )
+
+
+def test_soft_complex_symbols_into_preamble_sync_compiles() -> None:
+    """The valid composition still compiles: psk_demod emits complex soft
+    symbols, exactly what preamble_sync accepts."""
+    pipe = _compile_rx(
+        ModemStep(conv="psk_demod", params={"order": 4}),
+        ModemStep(conv="preamble_sync", params=_P),
+    )
+    assert any(b.kind == "corr_est_cc" for b in pipe.blocks)
 
 
 def test_param_validation() -> None:

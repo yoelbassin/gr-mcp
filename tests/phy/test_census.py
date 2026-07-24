@@ -132,7 +132,7 @@ def test_census_names_the_stage_that_produced_nothing(tmp_path: Path) -> None:
         ),
     ]
     res = _run(path, _signal(tmp_path), tmp_path / "out.cf32")
-    assert res.status == "ok"
+    assert res.status == "empty"
     dead = [c for c in res.census if c.items_out == 0]
     assert [c.kind for c in dead] == ["sym_strip"]
     upstream = next(c for c in res.census if c.kind == "corr_est_cc")
@@ -165,6 +165,43 @@ def test_an_all_stock_chain_is_observable_too(tmp_path: Path) -> None:
     )
     assert res.diagnostics == {}
     assert len(res.census) == 5
+
+
+def test_empty_sink_is_not_ok_and_names_the_stall(tmp_path: Path) -> None:
+    """A run that reaches EOF but writes nothing to its terminal sink is NOT a
+    success: status is 'empty', stalled_at names the first stage that produced
+    zero, and error carries the human-readable gradient. status must stop lying
+    'ok' when no signal was decoded."""
+    ensure_worker_warm()
+    path = [
+        ModemStep(conv="psk_demod", params=_QPSK),
+        ModemStep(
+            conv="preamble_sync",
+            params={
+                "preamble_i": [1.0, -1.0] * 16,
+                "preamble_q": [0.0] * 32,
+                "threshold": 0.99,
+            },
+        ),
+    ]
+    res = _run(path, _signal(tmp_path), tmp_path / "out.cf32")
+    assert res.status == "empty"
+    stalled = next(c for c in res.census if c.block == res.stalled_at)
+    assert stalled.kind == "sym_strip"
+    assert res.error is not None and "sym_strip" in res.error
+
+
+def test_a_run_that_produces_output_stays_ok(tmp_path: Path) -> None:
+    """The honest-empty status must not fire on a normal decode: a chain that
+    writes items to its sink is 'ok' with no stall."""
+    ensure_worker_warm()
+    res = _run(
+        [ModemStep(conv="psk_demod", params=_QPSK)],
+        _signal(tmp_path),
+        tmp_path / "out.cf32",
+    )
+    assert res.status == "ok"
+    assert res.stalled_at is None
 
 
 @pytest.mark.parametrize("kind", ["iq_file_source", "rrc_filter_ccf"])

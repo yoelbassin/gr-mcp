@@ -24,6 +24,24 @@ def test_psk_factory_constructs_a_block(kind: str, params: dict) -> None:
     assert block is not None
 
 
+def test_rrc_filter_accepts_fractional_sps() -> None:
+    """A capture whose sample rate is not an integer multiple of the baud has
+    fractional sps; the RRC matched filter's tap count must round it, not force
+    an int and raise in the backend (sample_rate=10, symbol_rate=3 -> sps=3.33)."""
+    ctx = _make_ctx(10.0)
+    block = GR_BLOCKS["rrc_filter_ccf"](
+        ctx,
+        {
+            "interpolation": 1,
+            "rate": 10.0,
+            "sps": 10.0 / 3.0,
+            "alpha": 0.35,
+            "span": 11,
+        },
+    )
+    assert block is not None
+
+
 def test_const_rejects_unknown_order() -> None:
     ctx = _make_ctx(4.0)
     with pytest.raises(BackendError):
