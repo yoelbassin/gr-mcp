@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from typing import Any
 
 from marconi.core.descriptor import Amplitude, Descriptor
@@ -8,6 +9,8 @@ from marconi.core.errors import register_error
 from marconi.core.models import ValidationIssue
 from marconi.core.params import ParamValue
 from marconi.core.stages import SpecStep, Stage, validate_path
+from marconi.phy.coding.builder import CodingBuilder
+from marconi.phy.coding.program import CodingProgram
 from marconi.phy.compile_context import CompileContext
 from marconi.phy.ir import GrPipeline
 from marconi.phy.models import ModemSpec
@@ -153,27 +156,21 @@ def _validate(
         )
 
 
-def compile_modem(
-    modem: ModemSpec,
+def _emit_gr_segment(
+    steps: Sequence[SpecStep],
     registry: Mapping[str, Stage[Any]],
-    *,
+    boundaries: Sequence[Descriptor],
+    rates: Sequence[float],
+    symbol_rate: float,
     direction: str,
     sample_rate: float,
     start: Descriptor,
     source_io: Mapping[str, ParamValue],
     sink_io: Mapping[str, ParamValue],
-    name: str = "pipeline",
+    name: str,
 ) -> GrPipeline:
-    if direction not in ("rx", "tx"):
-        raise CompileError(f"direction must be 'rx' or 'tx', got {direction!r}")
-    _validate(modem, registry, start, direction)
-    steps = modem.path
     n = len(steps)
-    boundaries, rates = _forward_pass(steps, registry, start, sample_rate)
-    _validate_descriptors(
-        steps, registry, boundaries, rates, modem.symbol_rate, direction
-    )
-    ctx = CompileContext(start, sample_rate, modem.symbol_rate)
+    ctx = CompileContext(start, sample_rate, symbol_rate)
 
     if direction == "rx":
         ctx.chain(_source_kind(boundaries[0]), **dict(source_io))
@@ -198,3 +195,114 @@ def compile_modem(
         ctx.chain(_sink_kind(boundaries[0]), **dict(sink_io))
 
     return ctx.build(name, sample_rate)
+
+
+def _split_index(
+    steps: Sequence[SpecStep], registry: Mapping[str, Stage[Any]], direction: str
+) -> int:
+    k = next(
+        (i for i, s in enumerate(steps) if _resolve(s, registry).engine == "coding"),
+        len(steps),
+    )
+    if direction == "tx" and k < len(steps):
+        raise CompileError(
+            f"stage '{steps[k].conv}' is a coding stage; coded tx is not supported yet"
+        )
+    for i in range(k, len(steps)):
+        if _resolve(steps[i], registry).engine != "coding":
+            raise CompileError(
+                f"stage '{steps[i].conv}' would re-enter the GR engine after "
+                f"'{steps[k].conv}'; a pipeline never re-enters GR"
+            )
+    return k
+
+
+@dataclass(frozen=True)
+class CompiledPipeline:
+    gr: GrPipeline | None
+    coding: CodingProgram | None
+    boundary: Descriptor
+    final: Descriptor
+
+
+def compile_pipeline(
+    modem: ModemSpec,
+    registry: Mapping[str, Stage[Any]],
+    *,
+    direction: str,
+    sample_rate: float,
+    start: Descriptor,
+    source_io: Mapping[str, ParamValue],
+    sink_io: Mapping[str, ParamValue],
+    name: str = "pipeline",
+) -> CompiledPipeline:
+    if direction not in ("rx", "tx"):
+        raise CompileError(f"direction must be 'rx' or 'tx', got {direction!r}")
+    steps = modem.path
+    k = _split_index(steps, registry, direction)
+    _validate(modem, registry, start, direction)
+    boundaries, rates = _forward_pass(steps, registry, start, sample_rate)
+    _validate_descriptors(
+        steps, registry, boundaries, rates, modem.symbol_rate, direction
+    )
+    gr: GrPipeline | None = None
+    if k or direction == "tx":
+        gr = _emit_gr_segment(
+            steps[:k],
+            registry,
+            boundaries,
+            rates,
+            modem.symbol_rate,
+            direction,
+            sample_rate,
+            start,
+            source_io,
+            sink_io,
+            name,
+        )
+    coding: CodingProgram | None = None
+    if k < len(steps):
+        b = CodingBuilder()
+        for i in range(k, len(steps)):
+            stage = _resolve(steps[i], registry)
+            b.label = f"{steps[i].conv}[{i}]"
+            b.kind = steps[i].conv
+            stage.emit_rx(b, steps[i].params)
+        coding = CodingProgram(
+            steps=b.steps,
+            entry_level=boundaries[k].level,
+            entry_item_type=boundaries[k].item_type,
+        )
+    return CompiledPipeline(
+        gr=gr, coding=coding, boundary=boundaries[k], final=boundaries[len(steps)]
+    )
+
+
+def compile_modem(
+    modem: ModemSpec,
+    registry: Mapping[str, Stage[Any]],
+    *,
+    direction: str,
+    sample_rate: float,
+    start: Descriptor,
+    source_io: Mapping[str, ParamValue],
+    sink_io: Mapping[str, ParamValue],
+    name: str = "pipeline",
+) -> GrPipeline:
+    cp = compile_pipeline(
+        modem,
+        registry,
+        direction=direction,
+        sample_rate=sample_rate,
+        start=start,
+        source_io=source_io,
+        sink_io=sink_io,
+        name=name,
+    )
+    if cp.coding is not None:
+        raise CompileError(
+            "path contains coding stages; compile_modem is the pure-GR entry — "
+            "use compile_pipeline/run_rx"
+        )
+    assert cp.gr is not None
+    return cp.gr
