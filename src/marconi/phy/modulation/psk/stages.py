@@ -10,7 +10,7 @@ from pydantic_core import PydanticCustomError
 from marconi.core.descriptor import Amplitude, Carrier, Descriptor
 from marconi.core.levels import Level
 from marconi.core.params import StageParams
-from marconi.core.stages import DuplexStage
+from marconi.core.stages import DuplexStage, RxStage, Stage
 from marconi.phy.compile_context import CompileContext
 
 _PSK_ORDERS = (2, 4, 8)
@@ -118,4 +118,40 @@ class PskDemap(DuplexStage[CompileContext]):
         return Descriptor(Level.BITS, "b", in_desc.layout, Carrier.HARD)
 
 
-PSK_STAGES: tuple[type[DuplexStage[CompileContext]], ...] = (PskDemod, PskDemap)
+class PskSoftDemap(RxStage[CompileContext]):
+    """Constellation soft demap, SYMBOLS->BITS soft. RX-only: stock
+    constellation_soft_decoder, one LLR per bit. The soft counterpart of
+    psk_demap, and the single-carrier entry point to the soft coding lane
+    (deinterleave/depuncture/fec), which until now only dqpsk_soft_demap could
+    feed.
+
+    MEASURED: constellation_soft_decoder emits log P(1)/P(0) -- BPSK point +1
+    (hard bit 1) reads +4.0 -- while both soft consumers in this engine use the
+    opposite sign (trellis_viterbi's Euclidean table maps encoder bit 0 to +1.0,
+    and core.bitfile.harden is llr<0). Without the negation the lane decodes to
+    noise on NOISELESS symbols (measured match 0.508); with it, BER 0."""
+
+    name = "psk_soft_demap"
+    from_level = Level.SYMBOLS
+    to_level = Level.BITS
+    family = "psk"
+    params_model = _PskDemapParams
+    accepts_item_type = "c"
+    accepts_carrier = Carrier.SOFT
+
+    def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
+        p = _PskDemapParams.model_validate(dict(params))
+        b.chain("constellation_soft_decoder", scheme="psk", order=p.order)
+        b.chain("multiply_const_ff", value=-1.0)
+
+    def out_descriptor(
+        self, in_desc: Descriptor, params: Mapping[str, Any]
+    ) -> Descriptor:
+        return Descriptor(Level.BITS, "f", in_desc.layout, Carrier.SOFT)
+
+
+PSK_STAGES: tuple[type[Stage[CompileContext]], ...] = (
+    PskDemod,
+    PskDemap,
+    PskSoftDemap,
+)
