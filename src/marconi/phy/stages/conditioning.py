@@ -269,6 +269,56 @@ class Agc(RxStage[CompileContext]):
         )
 
 
+class _SquelchParams(StageParams):
+    threshold_db: float
+    alpha_symbols: float = 1.0  # power-estimate time constant
+    ramp_symbols: float = 0.0  # cosine edge, suppresses the switching transient
+
+    @model_validator(mode="after")
+    def _ok(self) -> "_SquelchParams":
+        if self.alpha_symbols <= 0.0:
+            raise PydanticCustomError("value_error", "alpha_symbols must be > 0")
+        if self.ramp_symbols < 0.0:
+            raise PydanticCustomError("value_error", "ramp_symbols must be >= 0")
+        return self
+
+
+class Squelch(RxStage[CompileContext]):
+    """Mute the stream below a power threshold, IQ->IQ (stock pwr_squelch_cc).
+
+    A clock-recovery loop that free-runs through the gaps between bursts
+    integrates noise and arrives at the next burst mistimed; on a real bursty
+    capture that turns float-level nondeterminism into whole-symbol drift.
+    Muting the gaps zeroes the timing error there, so the loop holds its state
+    instead of wandering.
+
+    Samples are ZEROED, never dropped: gating would make the output length
+    signal-dependent, which no rate_factor can express, so every downstream
+    sps/rate computation would silently disagree with reality.
+
+    `threshold_db` is power relative to the input's scale, so this must run on a
+    stream whose scale is known -- hence the amplitude precondition. Put it
+    after the agc, and give that agc a window long enough to span the gaps
+    (otherwise it lifts the noise floor between bursts to meet the threshold)."""
+
+    name = "squelch"
+    from_level = Level.IQ
+    to_level = Level.IQ
+    family = "conditioning"
+    accepts_amplitude = frozenset({Amplitude.RMS_UNITY})
+    params_model = _SquelchParams
+
+    def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
+        p = _SquelchParams.model_validate(dict(params))
+        b.chain(
+            "pwr_squelch_cc",
+            threshold_db=p.threshold_db,
+            alpha=1.0 / (p.alpha_symbols * b.sps),
+            ramp=round(p.ramp_symbols * b.sps),
+            gate=False,
+        )
+
+
 class _AmParams(StageParams):
     dc_block_len: StrictInt = 1024
 
@@ -336,6 +386,7 @@ CONDITIONING_STAGES: tuple[type[RxStage[CompileContext]], ...] = (
     Resample,
     ClockCorrect,
     Agc,
+    Squelch,
     Am,
     Analytic,
 )

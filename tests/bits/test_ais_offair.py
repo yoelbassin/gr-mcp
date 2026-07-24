@@ -1,16 +1,26 @@
 """Real off-air AIS, end-to-end through phy -> bits, CRC as the oracle.
 
-This chain is measurably non-deterministic run-to-run, with a bisected
-mechanism (issue 05): the first FIR's output already differs at the float32
-last-bit level per run (volk dispatches aligned/unaligned kernels by the
-address of each scheduler-granted chunk; measured max |delta| 3.7e-6 on
-0.008 mean magnitude, 88% of samples), and symbol_sync_ff's clock loop
-amplifies that across the noise gaps between AIS bursts into ~±5%
-symbol-count swings. num_crc_ok measured over 10 runs spans 6..22; the
-gate is observed min (6) minus 2. Stabilizing bursty decodes needs burst
-gating ahead of clock recovery — product work, not test calibration.
-Engine exactness is proven deterministically in test_engine.py /
-test_framing.py.
+Burst gating carries this decode. AIS is bursty, and a clock-recovery loop that
+free-runs through the gaps arrives at the next burst mistimed, so most of the
+capture was being thrown away. Measured, 3 runs per arm, counting only
+CRC-valid frames with a non-zero payload (a zero payload passes a zero-init
+CRC and is not evidence):
+
+    baseline              14-19 messages, 10-15 vessels
+    + agc only            10-21 messages, 10-16 vessels   <- agc alone does nothing
+    + agc + squelch      251-330 messages, 29-31 vessels
+
+Content check on the squelched arm: 824/824 decoded positions fall inside the
+receiver's VHF footprint (lat 51.448..51.491, lon 0.174..0.379) and every
+msg_type is in 1..27, so the extra frames are real traffic, not CRC collisions.
+30 vessels over 60 s at class-A reporting rates is 200-900 messages, which is
+the band this now lands in; the old chain was recovering about 5% of the
+capture.
+
+Run-to-run spread in the frame count remains wide (158..313 over 15 runs; the
+root cause is volk kernel dispatch by buffer address, untouched by gating), so
+the count is only a sanity floor. Distinct vessels is the stable statistic --
+28..31 gated vs 10..16 ungated -- and carries the tight gate.
 """
 
 from __future__ import annotations
@@ -108,6 +118,13 @@ def _ais_modem(center_hz: float) -> ModemSpec:
                 conv="channelize",
                 params={"decim": 5, "bandwidth_hz": 14000.0, "center_hz": center_hz},
             ),
+            # window_symbols spans many burst gaps on purpose: a short window
+            # lifts the inter-burst noise floor to meet the squelch threshold
+            # and nothing gets muted (tests/phy/test_squelch.py pins this).
+            ModemStep(conv="agc", params={"mode": "power", "window_symbols": 4096.0}),
+            ModemStep(
+                conv="squelch", params={"threshold_db": -12.0, "alpha_symbols": 2.0}
+            ),
             ModemStep(conv="fsk", params={"deviation": 2400.0}),
             ModemStep(conv="slice", params={}),
         ],
@@ -141,9 +158,13 @@ def test_ais_offair_crc(tmp_path: Path) -> None:
         )
         total += res.num_crc_ok
         msgs.extend(res.messages)
-    assert (
-        total >= 4
-    ), f"expected >= 4 CRC-valid AIS frames (10x observed min 6 - 2), got {total}"
+    # The frame COUNT is the noisy statistic (158..313 over 15 runs), so it is
+    # only a sanity floor: 3x the pre-gating chain's ~19, which a regression to
+    # that chain cannot clear. The tight gate is the vessel count below.
+    assert total >= 60, (
+        f"expected >= 60 CRC-valid AIS frames (15-run range 158..313 with burst "
+        f"gating; the pre-gating chain yielded ~19), got {total}"
+    )
     assert msgs, "no CRC-valid AIS messages were parsed"
     types = [int(m["msg_type"]) for m in msgs]
     assert all(1 <= t <= 27 for t in types), f"out-of-range AIS msg_type: {types}"
@@ -159,7 +180,9 @@ def test_ais_offair_crc(tmp_path: Path) -> None:
     # one receiver (probed spread: lat 51.44-51.48, lon 0.25-0.37).
     mmsis = {int(m["mmsi"]) for m in msgs}
     assert all(0 < v < 1_000_000_000 for v in mmsis), f"non-MMSI value: {mmsis}"
-    assert len(mmsis) >= 3, f"too few distinct vessels: {sorted(mmsis)}"
+    # Distinct vessels is the stable statistic: 28..31 over 15 runs with burst
+    # gating, against 10..16 without it. Tight enough that losing gating fails.
+    assert len(mmsis) >= 22, f"too few distinct vessels: {sorted(mmsis)}"
     # every probed frame was a type-1/2/3 position report; a layout that no
     # longer fits the frame drops the body silently, so its absence is itself
     # the regression signal

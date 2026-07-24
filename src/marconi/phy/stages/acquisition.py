@@ -8,7 +8,7 @@ from pydantic_core import PydanticCustomError
 
 from marconi.core.levels import Level
 from marconi.core.params import StageParams
-from marconi.core.stages import DuplexStage
+from marconi.core.stages import DuplexStage, RxStage, Stage
 from marconi.phy.compile_context import CompileContext
 
 
@@ -69,4 +69,51 @@ class PreambleSync(DuplexStage[CompileContext]):
         )
 
 
-ACQUISITION_STAGES: tuple[type[DuplexStage[CompileContext]], ...] = (PreambleSync,)
+class _FllParams(StageParams):
+    # Must match the pulse shaping the transmitter used: the band-edge filters
+    # are built from the excess bandwidth, so a wrong rolloff mistunes them.
+    rolloff: float = 0.35
+    filter_size: StrictInt = 44
+    loop_bw: float = 0.03
+
+    @model_validator(mode="after")
+    def _ok(self) -> "_FllParams":
+        if not (0.0 < self.rolloff <= 1.0):
+            raise PydanticCustomError("value_error", "rolloff must be in (0, 1]")
+        if self.filter_size < 1:
+            raise PydanticCustomError("value_error", "filter_size must be >= 1")
+        if self.loop_bw <= 0.0:
+            raise PydanticCustomError("value_error", "loop_bw must be > 0")
+        return self
+
+
+class Fll(RxStage[CompileContext]):
+    """Coarse carrier-frequency acquisition, IQ->IQ (stock fll_band_edge_cc).
+
+    A costas/decision-directed loop only pulls in a fraction of its own loop
+    bandwidth, so a real capture's frequency offset -- a 2 ppm TCXO at 900 MHz
+    is ~1.8 kHz, 19% of symbol rate on a 9600-baud link -- sits far outside it.
+    This band-edge FLL acquires the offset first, from the pulse shaping's
+    excess-bandwidth edges rather than from data decisions, so it needs no
+    modulation knowledge beyond the rolloff. Runs on the pulse-shaped signal,
+    i.e. BEFORE the demod's matched filter. Rotation only, so it preserves
+    whatever amplitude statistic it was handed."""
+
+    name = "fll"
+    from_level = Level.IQ
+    to_level = Level.IQ
+    family = "acquisition"
+    params_model = _FllParams
+
+    def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
+        p = _FllParams.model_validate(dict(params))
+        b.chain(
+            "fll_band_edge_cc",
+            sps=b.sps,
+            rolloff=p.rolloff,
+            filter_size=p.filter_size,
+            loop_bw=p.loop_bw,
+        )
+
+
+ACQUISITION_STAGES: tuple[type[Stage[CompileContext]], ...] = (PreambleSync, Fll)

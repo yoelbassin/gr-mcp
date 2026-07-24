@@ -223,6 +223,18 @@ GR_BLOCKS: dict[str, Callable[[_GrCtx, Params], Any]] = {
         _as_int(p["nsamples"]), _as_float(p["reference"])
     ),
     "agc2_cc": _agc2,
+    "fll_band_edge_cc": lambda c, p: c.digital.fll_band_edge_cc(
+        _as_float(p["sps"]),
+        _as_float(p["rolloff"]),
+        _as_int(p["filter_size"]),
+        _as_float(p["loop_bw"]),
+    ),
+    "pwr_squelch_cc": lambda c, p: c.analog.pwr_squelch_cc(
+        _as_float(p["threshold_db"]),
+        _as_float(p["alpha"]),
+        _as_int(p.get("ramp", 0)),
+        bool(p.get("gate", False)),
+    ),
     "msk_demod": lambda c, p: make_msk_demod(
         c.gr, sps=_as_float(p["sps"]), loop_bw=_as_float(p.get("loop_bw", 0.0038))
     ),
