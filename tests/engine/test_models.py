@@ -3,7 +3,12 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from marconi.engine.types.models import Bitstream, CaptureRef, SoftBitstream
+from marconi.engine.types.models import (
+    Bitstream,
+    CaptureRef,
+    SoftBitstream,
+    Symbolstream,
+)
 
 
 def test_capture_duration() -> None:
@@ -28,3 +33,16 @@ def test_capture_rejects_nonpositive_sample_rate() -> None:
 def test_soft_bitstream_is_a_sibling_not_a_flag() -> None:
     s = SoftBitstream(path=Path("s.f32"), num_bits=80)
     assert isinstance(s, SoftBitstream) and not isinstance(s, Bitstream)
+
+
+@pytest.mark.parametrize("marks", [[5, 3], [3, 3], [-1], [10]])
+def test_symbolstream_rejects_non_position_marks(
+    tmp_path: Path, marks: list[int]
+) -> None:
+    with pytest.raises(ValidationError, match="marks"):
+        Symbolstream(path=tmp_path / "s.i16", num_symbols=10, marks=marks)
+
+
+def test_symbolstream_accepts_ordered_marks(tmp_path: Path) -> None:
+    s = Symbolstream(path=tmp_path / "s.i16", num_symbols=10, marks=[0, 5, 9])
+    assert s.marks == [0, 5, 9]

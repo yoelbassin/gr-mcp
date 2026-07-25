@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from marconi.engine.types.params import ParamValue
 
@@ -58,6 +58,18 @@ class Symbolstream(BaseModel):
     marks: list[int] = []
     source_capture: Path | None = None
     symbol_rate: float | None = None
+
+    @model_validator(mode="after")
+    def _marks_are_stream_positions(self) -> "Symbolstream":
+        prev = -1
+        for m in self.marks:
+            if m <= prev or m >= self.num_symbols:
+                raise ValueError(
+                    "marks must be strictly increasing offsets in "
+                    f"[0, num_symbols={self.num_symbols}); got {self.marks}"
+                )
+            prev = m
+        return self
 
 
 class ModemStep(BaseModel):
