@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
-from engine._dsp import aligned_ber
+from engine._dsp import aligned_ber_best
 
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
 from marconi.engine.compile.compiler import compile_modem
@@ -72,6 +72,5 @@ def test_am_afsk_decodes_ber0(tmp_path: Path) -> None:
     # A residual few-symbol Gardner acquisition offset survives even at
     # DC_BLOCK_LEN=64, so alignment needs a shift search (issue 05: paired with
     # the length assert above, never aligned_ber alone).
-    ber = aligned_ber(out, bits)
-    ber_inv = aligned_ber(1 - out, bits)
-    assert ber == 0.0 or ber_inv == 0.0  # ber_inv 0 = global inversion: accept
+    # global inversion is a legitimate hypothesis: accept either polarity
+    assert aligned_ber_best([out, 1 - out], bits) == 0.0

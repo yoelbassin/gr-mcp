@@ -43,7 +43,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
-from engine._dsp import aligned_ber, channel, read_bits, write_bits
+from engine._dsp import aligned_ber_best, channel, read_bits, write_bits
 
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
 from marconi.engine.compile.compiler import compile_modem
@@ -76,8 +76,8 @@ def _score(rx_conv: str, out: np.ndarray, bits: np.ndarray) -> float:
     if rx_conv == "msk":
         h = out.astype(np.uint8)
         nrzi = (h[1:] ^ h[:-1]).astype(np.uint8)
-        return min(aligned_ber(nrzi, bits), aligned_ber(1 - nrzi, bits))
-    return min(aligned_ber(out, bits), aligned_ber(1 - out, bits))
+        return aligned_ber_best([nrzi, 1 - nrzi], bits)
+    return aligned_ber_best([out, 1 - out], bits)
 
 
 def _ber(rx_conv: str, seed: int, tmp_path: Path) -> float:

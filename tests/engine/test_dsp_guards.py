@@ -41,3 +41,41 @@ def test_resolved_ser_hard_rejects_max_shift_at_or_below_settle() -> None:
     pts = np.array([1 + 1j, 1 - 1j, -1 + 1j, -1 - 1j])
     with pytest.raises(ValueError, match="max_shift"):
         resolved_ser_hard(rx, tx, pts, settle=100, max_shift=100)
+
+
+def test_aligned_ber_raises_when_lag_exceeds_window() -> None:
+    from engine._dsp import AlignmentNotFound, aligned_ber
+
+    rng = np.random.default_rng(3)
+    tx = rng.integers(0, 2, 4096).astype(np.uint8)
+    rx = np.concatenate([np.zeros(600, dtype=np.uint8), tx])
+    with pytest.raises(AlignmentNotFound, match="max_shift"):
+        aligned_ber(rx, tx, max_shift=64)
+
+
+def test_aligned_ber_still_returns_on_lock() -> None:
+    from engine._dsp import aligned_ber
+
+    rng = np.random.default_rng(3)
+    tx = rng.integers(0, 2, 4096).astype(np.uint8)
+    rx = np.concatenate([np.zeros(32, dtype=np.uint8), tx])
+    assert aligned_ber(rx, tx, max_shift=64) == 0.0
+
+
+def test_aligned_ber_best_raises_when_no_candidate_aligns() -> None:
+    from engine._dsp import AlignmentNotFound, aligned_ber_best
+
+    rng = np.random.default_rng(3)
+    tx = rng.integers(0, 2, 4096).astype(np.uint8)
+    rx = np.concatenate([np.zeros(600, dtype=np.uint8), tx])
+    with pytest.raises(AlignmentNotFound, match="hypothesis"):
+        aligned_ber_best([rx, 1 - rx], tx, max_shift=64)
+
+
+def test_aligned_ber_best_returns_the_locking_candidate() -> None:
+    from engine._dsp import aligned_ber_best
+
+    rng = np.random.default_rng(3)
+    tx = rng.integers(0, 2, 4096).astype(np.uint8)
+    rx = np.concatenate([np.zeros(32, dtype=np.uint8), tx])
+    assert aligned_ber_best([1 - rx, rx], tx, max_shift=64) == 0.0

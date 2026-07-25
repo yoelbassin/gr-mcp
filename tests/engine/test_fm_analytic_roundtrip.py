@@ -9,7 +9,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
-from engine._dsp import aligned_ber
+from engine._dsp import aligned_ber_best
 
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
 from marconi.engine.compile.compiler import compile_modem
@@ -79,6 +79,5 @@ def test_fm_carried_afsk_decodes_ber0(tmp_path: Path) -> None:
     n_sent = warm.size + bits.size
     assert out.size >= n_sent - 96, f"tail loss too large: {out.size}/{n_sent}"
     shift = WARM_BITS + 96  # alignment lag = warm preamble + chain group delay
-    ber = aligned_ber(out, bits, max_shift=shift)
-    ber_inv = aligned_ber(1 - out, bits, max_shift=shift)
-    assert ber == 0.0 or ber_inv == 0.0  # ber_inv 0 = global inversion: accept
+    # global inversion is a legitimate hypothesis: accept either polarity
+    assert aligned_ber_best([out, 1 - out], bits, max_shift=shift) == 0.0

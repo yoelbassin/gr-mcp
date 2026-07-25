@@ -1,8 +1,15 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from pathlib import Path
 
 import numpy as np
+
+NO_LOCK = 0.4
+
+
+class AlignmentNotFound(Exception):
+    pass
 
 
 def channel(
@@ -139,6 +146,13 @@ def resolved_ser(
             best = min(best, ser)
             if best == 0.0:
                 return best
+    if best > NO_LOCK:
+        raise AlignmentNotFound(
+            f"no alignment: best SER {best:.3f} within {max_shift} shifts "
+            f"after settle={settle}. A clean decode whose lag or warm-up "
+            "exceeds the search window scores as random - widen max_shift / "
+            "check settle before blaming the DSP."
+        )
     return best
 
 
@@ -177,6 +191,13 @@ def resolved_ser_hard(
             best = min(best, float(np.mean(ri[:n] != tx[shift : shift + n])))
             if best == 0.0:
                 return best
+    if best > NO_LOCK:
+        raise AlignmentNotFound(
+            f"no alignment: best SER {best:.3f} within {ms} shifts "
+            f"after settle={settle}. A clean decode whose lag or warm-up "
+            "exceeds the search window scores as random - widen max_shift / "
+            "check settle before blaming the DSP."
+        )
     return best
 
 
@@ -223,4 +244,30 @@ def aligned_ber(rx: np.ndarray, tx: np.ndarray, max_shift: int = 256) -> float:
             best = min(best, float(np.mean(lead[shift : shift + n] != lag[:n])))
             if best == 0.0:
                 return best
+    if best > NO_LOCK:
+        raise AlignmentNotFound(
+            f"no alignment: best BER {best:.3f} within +/-{max_shift} shifts. "
+            "A clean decode whose lag or warm-up exceeds the search window "
+            "scores as random - widen max_shift / check settle before "
+            "blaming the DSP."
+        )
+    return best
+
+
+def aligned_ber_best(
+    candidates: Iterable[np.ndarray], tx: np.ndarray, max_shift: int = 256
+) -> float:
+    best: float | None = None
+    for rx in candidates:
+        try:
+            ber = aligned_ber(rx, tx, max_shift)
+        except AlignmentNotFound:
+            continue
+        best = ber if best is None else min(best, ber)
+    if best is None:
+        raise AlignmentNotFound(
+            f"no hypothesis aligned within +/-{max_shift} shifts - every "
+            "candidate scored as random. Widen max_shift / check settle "
+            "before blaming the DSP."
+        )
     return best

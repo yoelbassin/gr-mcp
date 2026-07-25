@@ -1,6 +1,6 @@
 import numpy as np
 import pytest
-from engine._dsp import resolved_ser_hard
+from engine._dsp import AlignmentNotFound, resolved_ser_hard
 
 
 def _qam16_points() -> np.ndarray:
@@ -29,7 +29,8 @@ def test_high_on_random_stream() -> None:
     rng = np.random.default_rng(1)
     tsi = rng.integers(0, 16, 4000)
     rx = rng.integers(0, 16, 4000 + 1500)
-    assert resolved_ser_hard(rx, tsi, pts, settle=1500) > 0.5
+    with pytest.raises(AlignmentNotFound):
+        resolved_ser_hard(rx, tsi, pts, settle=1500)
 
 
 def test_max_shift_must_exceed_settle() -> None:

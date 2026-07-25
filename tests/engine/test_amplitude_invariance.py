@@ -9,7 +9,9 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent / "modulation"))
 import _lattice  # noqa: E402  (sibling helper, tests/phy/modulation/_lattice.py)
 from engine._dsp import (  # noqa: E402
+    AlignmentNotFound,
     aligned_ber,
+    aligned_ber_best,
     channel,
     read_bits,
     read_complex,
@@ -354,7 +356,7 @@ def _qam_ser(
 def _msk_best_ber(out: np.ndarray, bits: np.ndarray) -> float:
     h = out.astype(np.uint8)
     nrzi = (h[1:] ^ h[:-1]).astype(np.uint8)
-    return min(aligned_ber(nrzi, bits), aligned_ber(1 - nrzi, bits))
+    return aligned_ber_best([nrzi, 1 - nrzi], bits)
 
 
 def _msk_ber(
@@ -569,7 +571,10 @@ def test_default_statistic_is_no_worse_than_the_other_allowed_one(
     on/off duty cycle moves) is now a compile error, not a quality trade-off."""
     ensure_worker_warm()
     peak = _burst_ber(tmp_path, "feedforward")
-    rms = _burst_ber(tmp_path, "power")
+    try:
+        rms = _burst_ber(tmp_path, "power")
+    except AlignmentNotFound:
+        rms = 1.0  # comparison arm only: no lock = worst case, not laundered
     print(f"\nburst {_BURST_RECIPE} -> peak {peak}, rms {rms}")
     assert peak <= rms + 0.05, f"peak {peak} worse than rms {rms}"
 

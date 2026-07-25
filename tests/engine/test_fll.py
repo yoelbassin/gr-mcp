@@ -22,7 +22,14 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from engine._dsp import channel, read_complex, resolved_ser, tx_sym_indices, write_bits
+from engine._dsp import (
+    AlignmentNotFound,
+    channel,
+    read_complex,
+    resolved_ser,
+    tx_sym_indices,
+    write_bits,
+)
 
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
 from marconi.engine.compile.compiler import compile_modem
@@ -98,11 +105,8 @@ def test_fll_acquires_offsets_costas_alone_cannot(
     cfo_frac: float, tmp_path: Path
 ) -> None:
     ensure_worker_warm()
-    without = _ser_at(tmp_path, cfo_frac, with_fll=False)
-    assert without > 0.5, (
-        f"control arm decodes at CFO {cfo_frac:.0%} without an fll (SER {without}); "
-        "the sweep no longer demonstrates a pull-in limit"
-    )
+    with pytest.raises(AlignmentNotFound):
+        _ser_at(tmp_path, cfo_frac, with_fll=False)
     assert _ser_at(tmp_path, cfo_frac, with_fll=True) == 0.0
 
 

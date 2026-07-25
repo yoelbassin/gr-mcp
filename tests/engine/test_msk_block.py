@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from engine._dsp import aligned_ber
+from engine._dsp import aligned_ber_best
 from engine._fakegr import FAKE_GR, drive
 
 from marconi.engine.backends.gnuradio.embedded.msk import make_msk_demod
@@ -37,10 +37,11 @@ def _best_ber(soft: np.ndarray, bits: np.ndarray) -> float:
     # which lives in the bits layer downstream, like the AIS `differential`
     # stage, keeping the demod protocol-agnostic — is applied here before
     # scoring. Real precoded links (e.g. ACARS) decode directly; the block is
-    # unchanged either way. min(ber, 1-ber) absorbs the residual 180° polarity.
+    # unchanged either way. Both polarities are tried: the residual 180°
+    # ambiguity makes the inverted rail a legitimate hypothesis, not a control.
     h = _hard(soft)
     nrzi = (h[1:] ^ h[:-1]).astype(np.uint8)
-    return min(aligned_ber(nrzi, bits), aligned_ber(1 - nrzi, bits))
+    return aligned_ber_best([nrzi, 1 - nrzi], bits)
 
 
 def test_clean_msk_ber0_across_chunk_sizes() -> None:

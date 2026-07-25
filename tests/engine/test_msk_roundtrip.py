@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
-from engine._dsp import aligned_ber, channel, read_bits, write_bits
+from engine._dsp import aligned_ber_best, channel, read_bits, write_bits
 
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
 from marconi.engine.compile.compiler import compile_modem
@@ -58,7 +58,7 @@ def _best_ber(out: np.ndarray, bits: np.ndarray) -> float:
     # the production demod stays protocol-agnostic (issue 22).
     h = out.astype(np.uint8)
     nrzi = (h[1:] ^ h[:-1]).astype(np.uint8)
-    return min(aligned_ber(nrzi, bits), aligned_ber(1 - nrzi, bits))
+    return aligned_ber_best([nrzi, 1 - nrzi], bits)
 
 
 def test_msk_roundtrip_clean_ber0(tmp_path: Path) -> None:
