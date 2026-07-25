@@ -13,7 +13,7 @@ def test_registered() -> None:
 
 def test_demod_descriptor_is_hard_symbol_index() -> None:
     out = QamDemod().out_descriptor(Descriptor(Level.IQ, "c"), {"order": 16})
-    assert out == Descriptor(Level.SYMBOLS, "b", carrier=Carrier.HARD)
+    assert out == Descriptor(Level.SYMBOLS, "b", carrier=Carrier.HARD, order=16)
 
 
 def test_demap_descriptor_is_hard_bits() -> None:

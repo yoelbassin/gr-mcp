@@ -218,7 +218,7 @@ class PskDemod(DuplexStage[CompileContext]):
     def out_descriptor(
         self, in_desc: Descriptor, params: Mapping[str, Any]
     ) -> Descriptor:
-        return Descriptor(Level.SYMBOLS, "c", Carrier.SOFT)
+        return Descriptor(Level.SYMBOLS, "c", Carrier.SOFT, order=int(params["order"]))
 
 
 class PskDemap(DuplexStage[CompileContext]):

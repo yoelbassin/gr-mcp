@@ -97,7 +97,7 @@ class QamDemod(DuplexStage[CompileContext]):
     def out_descriptor(
         self, in_desc: Descriptor, params: Mapping[str, Any]
     ) -> Descriptor:
-        return Descriptor(Level.SYMBOLS, "b", Carrier.HARD)
+        return Descriptor(Level.SYMBOLS, "b", Carrier.HARD, order=int(params["order"]))
 
 
 class QamDemap(DuplexStage[CompileContext]):

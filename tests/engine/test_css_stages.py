@@ -51,7 +51,7 @@ def test_dechirp_out_descriptor_is_symbols_hard() -> None:
     from marconi.engine.modulation.css.stages import Dechirp
 
     out = Dechirp().out_descriptor(IQ, _SF7_PARAMS)
-    assert out == SYMBOLS_HARD
+    assert out == Descriptor(Level.SYMBOLS, "s", carrier=Carrier.HARD, order=128)
 
 
 def test_css_demap_out_descriptor_is_bits_hard() -> None:

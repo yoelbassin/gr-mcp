@@ -172,7 +172,9 @@ class Dechirp(DuplexStage[CompileContext]):
     def out_descriptor(
         self, in_desc: Descriptor, params: Mapping[str, Any]
     ) -> Descriptor:
-        return Descriptor(Level.SYMBOLS, "s", Carrier.HARD)
+        return Descriptor(
+            Level.SYMBOLS, "s", Carrier.HARD, order=1 << int(params["sf"])
+        )
 
     def required_input_rate(
         self, params: Mapping[str, Any], symbol_rate: float

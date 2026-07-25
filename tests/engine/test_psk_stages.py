@@ -13,7 +13,7 @@ def test_registered() -> None:
 
 def test_demod_descriptor_is_soft_complex_symbols() -> None:
     out = PskDemod().out_descriptor(Descriptor(Level.IQ, "c"), {"order": 4})
-    assert out == Descriptor(Level.SYMBOLS, "c", carrier=Carrier.SOFT)
+    assert out == Descriptor(Level.SYMBOLS, "c", carrier=Carrier.SOFT, order=4)
 
 
 def test_demap_descriptor_is_hard_bits() -> None:

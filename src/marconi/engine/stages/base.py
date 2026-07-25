@@ -94,6 +94,7 @@ class Stage(ABC, Generic[B]):
             in_desc.item_type,
             in_desc.carrier,
             amplitude,
+            in_desc.order if self.to_level is in_desc.level else None,
         )
 
     def rate_factor(self, params: Mapping[str, Any]) -> float:

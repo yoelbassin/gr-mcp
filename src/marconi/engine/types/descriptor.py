@@ -30,3 +30,15 @@ class Descriptor:
     item_type: str  # GR wire type "c/f/b/s"; selects IO blocks
     carrier: Carrier = Carrier.HARD  # decision-hardness, a seam invariant
     amplitude: Amplitude = Amplitude.UNKNOWN
+    order: int | None = None
+
+    def __post_init__(self) -> None:
+        if self.order is None:
+            return
+        if self.level is not Level.SYMBOLS:
+            raise ValueError(
+                f"order={self.order} at level {self.level.value}; a symbol "
+                "alphabet only exists at symbols"
+            )
+        if self.order < 2:
+            raise ValueError(f"order must be >= 2, got {self.order}")
