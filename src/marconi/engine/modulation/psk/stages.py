@@ -4,7 +4,7 @@ import math
 from collections.abc import Mapping
 from typing import Any
 
-from pydantic import StrictInt, model_validator
+from pydantic import Field, StrictInt, model_validator
 from pydantic_core import PydanticCustomError
 
 from marconi.engine.compile.compile_context import CompileContext
@@ -106,6 +106,71 @@ class SymbolSync(RxStage[CompileContext]):
         self, params: Mapping[str, Any], symbol_rate: float
     ) -> float | None:
         return int(params["sps"]) * symbol_rate
+
+
+class SampleSymbols(RxStage[CompileContext]):
+    """IQ->SYMBOLS at 1 sps with no carrier loop: the timing-only rung.
+    Emits no blocks - the level move is the whole stage - so an externally
+    recovered or differentially absorbed carrier can reach the symbol seam."""
+
+    name = "sample_symbols"
+    from_level = Level.IQ
+    to_level = Level.SYMBOLS
+    family = "psk"
+
+    class _Params(StageParams):
+        pass
+
+    params_model = _Params
+
+    def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
+        pass
+
+    def out_descriptor(
+        self, in_desc: Descriptor, params: Mapping[str, Any]
+    ) -> Descriptor:
+        return Descriptor(Level.SYMBOLS, "c", in_desc.layout, Carrier.SOFT)
+
+    def required_input_rate(
+        self, params: Mapping[str, Any], symbol_rate: float
+    ) -> float | None:
+        return symbol_rate
+
+
+class _DifferentialDemodParams(StageParams):
+    delay: StrictInt = Field(default=1, ge=1)
+    rotate: float = 0.0
+
+
+class DifferentialDemod(RxStage[CompileContext]):
+    """SYMBOLS->SYMBOLS continuous differential: z[i] = x[i] * conj(x[i-delay]),
+    optionally rotated by exp(j*rotate). With rotate=-pi/4 this lands pi/4-DQPSK
+    on the plain QPSK constellation; delay > 1 serves symbol-interleaved
+    differential schemes."""
+
+    name = "differential_demod"
+    from_level = Level.SYMBOLS
+    to_level = Level.SYMBOLS
+    family = "psk"
+    params_model = _DifferentialDemodParams
+    accepts_item_type = "c"
+    accepts_carrier = Carrier.SOFT
+
+    def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
+        p = _DifferentialDemodParams.model_validate(dict(params))
+        src = b.tail
+        assert src is not None
+        dly = b.chain("delay_cc", samples=p.delay)
+        mc = b.add("multiply_conjugate_cc")
+        b.connect(src, mc, dst_port=0)
+        b.connect(dly, mc, dst_port=1)
+        b.set_tail(mc)
+        if p.rotate:
+            b.chain(
+                "multiply_const_cc",
+                re=math.cos(p.rotate),
+                im=math.sin(p.rotate),
+            )
 
 
 class PskDemod(DuplexStage[CompileContext]):
@@ -219,6 +284,8 @@ class PskSoftDemap(RxStage[CompileContext]):
 
 PSK_STAGES: tuple[type[Stage[CompileContext]], ...] = (
     SymbolSync,
+    SampleSymbols,
+    DifferentialDemod,
     PskDemod,
     PskDemap,
     PskSoftDemap,

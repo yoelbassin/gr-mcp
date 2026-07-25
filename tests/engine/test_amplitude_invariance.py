@@ -156,6 +156,17 @@ _RECIPES: dict[str, dict[str, object]] = {
         "agc": _agc(),
         "path": [ModemStep(conv="ofdm_coherent_sync", params=_lattice.sync_params())],
     },
+    "sample_symbols": {
+        # 1-sps BPSK, min-distance demap: decisions are sign() on a positive
+        # real gain, so the rung is scale-invariant with or without agc --
+        # which is what accepts_amplitude=None claims.
+        "agc": _agc(),
+        "path": [
+            ModemStep(conv="sample_symbols"),
+            ModemStep(conv="psk_demap", params={"order": 2}),
+        ],
+        "sample_rate": 1.0,
+    },
 }
 
 
@@ -490,12 +501,37 @@ def _ofdm_coherent_ser(
     return _ofdm_coherent_resolved_ser(eq, _OFDMC_N_SYMS, _OFDMC_SEED)
 
 
+def _sample_symbols_ber(
+    tmp_path: Path,
+    gain: float,
+    with_agc: bool,
+    condition: str,
+    agc_override: ModemStep | None,
+) -> float:
+    from gnuradio import digital  # in-process GR for oracle ground truth (allowed)
+
+    be = GnuRadioBackend()
+    bits = np.random.default_rng(0).integers(0, 2, 4096).astype(np.uint8)
+    points = np.asarray(digital.constellation_bpsk().points())
+    z = _apply(points[bits].astype(np.complex64), gain, condition)
+    scaled = tmp_path / f"ss_{gain}_{with_agc}_{condition}.iq"
+    z.astype(np.complex64).tofile(scaled)
+    rx_path = _recipe_path("sample_symbols")
+    if with_agc:
+        rx_path = [_agc_for("sample_symbols", agc_override)] + rx_path
+    out = tmp_path / f"ss_out_{gain}_{with_agc}_{condition}.bits"
+    pipe = _compile_pipeline("rx", rx_path, 1.0, _SYM, IQ, scaled, out)
+    assert be.run_pipeline(pipe).status == "ok"
+    return aligned_ber(read_bits(out), bits, max_shift=64)
+
+
 _Measure = Callable[[Path, float, bool, str, ModemStep | None], float]
 _BESPOKE: dict[str, _Measure] = {
     "qam_demod": _qam_ser,
     "msk": _msk_ber,
     "ofdm_demod": _ofdm_demod_ber,
     "ofdm_coherent_sync": _ofdm_coherent_ser,
+    "sample_symbols": _sample_symbols_ber,
 }
 
 

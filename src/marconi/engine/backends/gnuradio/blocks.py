@@ -481,6 +481,9 @@ GR_BLOCKS: dict[str, Callable[[_GrCtx, Params], Any]] = {
         c.gr.sizeof_gr_complex, _as_int(p["samples"])
     ),
     "multiply_conjugate_cc": lambda c, p: c.blocks.multiply_conjugate_cc(),
+    "multiply_const_cc": lambda c, p: c.blocks.multiply_const_cc(
+        complex(_as_float(p["re"]), _as_float(p["im"]))
+    ),
     "constellation_soft_decoder": lambda c, p: c.digital.constellation_soft_decoder_cf(
         _const(c, p).base()
     ),
