@@ -233,21 +233,26 @@ def parse_message(
     bit_order: str = "msb",
     discriminator: str | None = None,
     cases: list[dict] | None = None,
-) -> dict[str, int | str]:
+) -> dict[str, int | str] | None:
     pf = parse_fields(fields)
     _reject_misplaced_rest(pf)
     case_map = _build_cases(pf, cases)
+    if len(payload) < _need_bytes(pf):
+        return None
     struct = build_struct(pf)
     sel_fields = pf
-    msg = _decode_struct(struct, payload, bit_order, pf)
-    # A per-type body is applied only when its discriminator matches AND the
-    # payload can hold it; otherwise the shared header stands alone — a
-    # non-matching type is never re-read with a wrong-type struct.
-    if discriminator is not None and case_map:
-        selected = case_map.get(int(msg.get(discriminator, -1)))
-        if selected is not None and len(payload) >= _need_bytes(selected[1]):
-            msg = _decode_struct(selected[0], payload, bit_order, selected[1])
-            sel_fields = selected[1]
+    try:
+        msg = _decode_struct(struct, payload, bit_order, pf)
+        # A per-type body is applied only when its discriminator matches AND
+        # the payload can hold it; otherwise the shared header stands alone —
+        # a non-matching type is never re-read with a wrong-type struct.
+        if discriminator is not None and case_map:
+            selected = case_map.get(int(msg.get(discriminator, -1)))
+            if selected is not None and len(payload) >= _need_bytes(selected[1]):
+                msg = _decode_struct(selected[0], payload, bit_order, selected[1])
+                sel_fields = selected[1]
+    except (ConstructError, KeyError, TypeError):
+        return None
     return _apply_rest(msg, payload, sel_fields, bit_order)
 
 

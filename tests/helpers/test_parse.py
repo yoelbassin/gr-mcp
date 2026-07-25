@@ -17,6 +17,7 @@ def test_seven_bit_charset_field() -> None:
     msg = parse.parse_message(
         payload, [{"name": "tag", "bits": 14, "charset": _ASCII7, "char_bits": 7}]
     )
+    assert msg is not None
     assert msg["tag"] == "AB"
 
 
@@ -39,6 +40,7 @@ def test_rest_consumes_remaining_payload() -> None:
             },
         ],
     )
+    assert msg is not None
     assert msg["kind"] == 0xA5
     assert msg["text"] == "HELLO"
 
@@ -64,7 +66,9 @@ def _rest_roundtrip(charset: str, char_bits: int, header_bits: int, msg: dict) -
         },
     ]
     payload = parse.build_message(msg, fields)
-    return parse.parse_message(payload, fields)
+    out = parse.parse_message(payload, fields)
+    assert out is not None
+    return out
 
 
 def test_rest_round_trips_through_tx_then_rx() -> None:
@@ -171,6 +175,7 @@ def test_type5_parses_its_own_body_not_type1() -> None:
     payload = parse.build_message(msg, _COMMON + _TYPE5_FIELDS)
     out = parse.parse_message(payload, _COMMON, discriminator="kind", cases=_CASES)
     assert out == msg
+    assert out is not None
     assert "speed" not in out and "course" not in out  # not the type-1 struct
 
 
@@ -179,3 +184,20 @@ def test_unknown_type_yields_common_only_never_misparsed() -> None:
     payload = bytes([0x90, 0x03, 0xFF, 0xFF, 0xFF])  # kind=9, id=3, junk body
     out = parse.parse_message(payload, _COMMON, discriminator="kind", cases=_CASES)
     assert out == {"kind": 9, "id": 3}
+
+
+def test_empty_payload_returns_none() -> None:
+    assert parse.parse_message(b"", [{"name": "a", "bits": 8}]) is None
+
+
+def test_payload_shorter_than_fixed_fields_returns_none() -> None:
+    fields = [{"name": "a", "bits": 8}, {"name": "b", "bits": 8}]
+    assert parse.parse_message(b"\xa5", fields) is None
+
+
+def test_case_body_longer_than_payload_falls_back_to_shared_header() -> None:
+    # kind=1 selects the type-1 case, but the payload only holds the 2-byte
+    # header: the case must not be applied, the shared header stands alone.
+    payload = bytes([0x10, 0x07])  # kind=1, id=7, no body
+    out = parse.parse_message(payload, _COMMON, discriminator="kind", cases=_CASES)
+    assert out == {"kind": 1, "id": 7}
