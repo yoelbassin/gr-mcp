@@ -321,6 +321,51 @@ class Squelch(RxStage[CompileContext]):
         )
 
 
+class _EqualizerParams(StageParams):
+    num_taps: StrictInt = 15  # FIR length; must span the channel's delay spread
+    step_size: float = 0.01  # CMA adaptation rate (mu)
+    modulus: float = 1.0  # target constant modulus the taps drive |y| toward
+
+    @model_validator(mode="after")
+    def _ok(self) -> "_EqualizerParams":
+        if self.num_taps < 1:
+            raise PydanticCustomError("value_error", "num_taps must be >= 1")
+        if self.step_size <= 0.0:
+            raise PydanticCustomError("value_error", "step_size must be > 0")
+        if self.modulus <= 0.0:
+            raise PydanticCustomError("value_error", "modulus must be > 0")
+        return self
+
+
+class Equalizer(RxStage[CompileContext]):
+    """Blind adaptive channel equalizer: a symbol-spaced FIR whose taps adapt by
+    the Constant Modulus Algorithm (stock linear_equalizer at sps=1 +
+    adaptive_algorithm_cma). It inverts the inter-symbol interference a
+    multipath/frequency-selective channel imposes, with NO training sequence --
+    it exploits only that the modulation is (near) constant modulus (PSK, FSK,
+    GMSK), so no protocol datasheet enters the product. Run it on a 1-sps stream
+    after timing recovery; put an agc before it when the scale is unknown. CMA
+    leaves a global sign/phase ambiguity, so a downstream costas / constellation
+    receiver still resolves carrier phase. RX-only, IQ->IQ, rate-preserving; the
+    output amplitude is left UNKNOWN because CMA's steady state is approximate."""
+
+    name = "equalizer"
+    from_level = Level.IQ
+    to_level = Level.IQ
+    family = "conditioning"
+    params_model = _EqualizerParams
+    alters_amplitude = True
+
+    def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
+        p = _EqualizerParams.model_validate(dict(params))
+        b.chain(
+            "cma_equalizer",
+            num_taps=p.num_taps,
+            step_size=p.step_size,
+            modulus=p.modulus,
+        )
+
+
 class _AmParams(StageParams):
     dc_block_len: StrictInt = 1024
 
@@ -422,6 +467,7 @@ CONDITIONING_STAGES: tuple[type[RxStage[CompileContext]], ...] = (
     ClockCorrect,
     Agc,
     Squelch,
+    Equalizer,
     Am,
     FmDemod,
     Analytic,

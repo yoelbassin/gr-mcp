@@ -315,6 +315,23 @@ GR_BLOCKS: dict[str, Callable[[_GrCtx, Params], Any]] = {
     "costas_loop_cc": lambda c, p: c.digital.costas_loop_cc(
         _as_float(p.get("loop_bw", 0.045)), _as_int(p["order"]), False
     ),
+    # Blind CMA equalizer: linear_equalizer at sps=1 (symbol-spaced, rate-
+    # preserving) driven by the constant-modulus algorithm. The constellation is
+    # only a placeholder — CMA is decision-free, so its points never enter the
+    # tap update. linear_equalizer holds the algorithm's C++ shared_ptr, so the
+    # inline object outlives this expression (same pattern as _const below).
+    "cma_equalizer": lambda c, p: c.digital.linear_equalizer(
+        _as_int(p["num_taps"]),
+        1,
+        c.digital.adaptive_algorithm_cma(
+            c.digital.constellation_bpsk().base(),
+            _as_float(p["step_size"]),
+            _as_float(p["modulus"]),
+        ),
+        True,
+        [],
+        "",
+    ),
     "constellation_receiver_cb": lambda c, p: c.digital.constellation_receiver_cb(
         _const(c, p).base(),
         _as_float(p.get("loop_bw", 0.04)),
