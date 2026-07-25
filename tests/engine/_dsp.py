@@ -120,6 +120,12 @@ def resolved_ser(
     recovery leaves an M-fold phase ambiguity (no preamble — acquisition is
     deferred); this resolves it the way aligned_ber resolves timing. SER 0
     <=> BER 0 for a Gray constellation."""
+    if max_shift <= settle:
+        raise ValueError(
+            f"max_shift={max_shift} <= settle={settle}: rx is trimmed by "
+            "settle, so realignment needs a shift past it - a smaller "
+            "max_shift reads a clean decode as random"
+        )
     best = 1.0
     roots = np.exp(2j * np.pi * np.arange(M) / M)
     rx_sym = rx_sym[settle:]
@@ -149,14 +155,16 @@ def resolved_ser_hard(
     rotation relabels each index via nearest-point on the rotated constellation;
     the true labelling is one of the four roots. The decision-directed receiver
     leaves this discrete ambiguity (no preamble — acquisition is deferred),
-    resolved here the way resolved_ser resolves PSK's M-fold ambiguity.
-
-    `max_shift` MUST exceed `settle`: the rx is trimmed by `settle`, so a true
-    realignment needs a shift past it. It defaults to settle+700; a smaller
-    max_shift silently reads clean symbols as random."""
+    resolved here the way resolved_ser resolves PSK's M-fold ambiguity."""
     pts = np.asarray(points)
     rx = np.asarray(rx_idx, dtype=int)[settle:]
     tx = np.asarray(tx_sym_idx, dtype=int)
+    if max_shift is not None and max_shift <= settle:
+        raise ValueError(
+            f"max_shift={max_shift} <= settle={settle}: rx is trimmed by "
+            "settle, so realignment needs a shift past it - a smaller "
+            "max_shift reads a clean decode as random"
+        )
     ms = settle + 700 if max_shift is None else max_shift
     best = 1.0
     for r in (1, 1j, -1, -1j):

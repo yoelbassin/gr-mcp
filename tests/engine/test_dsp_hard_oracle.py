@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 from engine._dsp import resolved_ser_hard
 
 
@@ -38,5 +39,6 @@ def test_max_shift_must_exceed_settle() -> None:
     rng = np.random.default_rng(2)
     tsi = rng.integers(0, 16, 4000)
     rx = _relabel_90(pts)[tsi]
-    assert resolved_ser_hard(rx, tsi, pts, settle=1500, max_shift=100) > 0.5
+    with pytest.raises(ValueError, match="max_shift"):
+        resolved_ser_hard(rx, tsi, pts, settle=1500, max_shift=100)
     assert resolved_ser_hard(rx, tsi, pts, settle=1500) == 0.0  # default settle+700

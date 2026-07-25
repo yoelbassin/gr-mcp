@@ -21,3 +21,23 @@ def test_channel_sfo_noop_raises(tmp_path: Path) -> None:
 def test_channel_sfo_effective_changes_length(tmp_path: Path) -> None:
     out = channel(_iq_file(tmp_path), tmp_path / "out.cf32", sfo_ppm=500.0)
     assert len(np.fromfile(out, dtype=np.complex64)) == 2049
+
+
+def test_resolved_ser_rejects_max_shift_at_or_below_settle() -> None:
+    from engine._dsp import resolved_ser
+
+    rx = np.zeros(64, dtype=np.complex64)
+    tx = np.zeros(64, dtype=int)
+    pts = np.array([1 + 0j, -1 + 0j])
+    with pytest.raises(ValueError, match="max_shift"):
+        resolved_ser(rx, tx, pts, M=2, max_shift=64, settle=64)
+
+
+def test_resolved_ser_hard_rejects_max_shift_at_or_below_settle() -> None:
+    from engine._dsp import resolved_ser_hard
+
+    rx = np.zeros(64, dtype=int)
+    tx = np.zeros(64, dtype=int)
+    pts = np.array([1 + 1j, 1 - 1j, -1 + 1j, -1 - 1j])
+    with pytest.raises(ValueError, match="max_shift"):
+        resolved_ser_hard(rx, tx, pts, settle=100, max_shift=100)
