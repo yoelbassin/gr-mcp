@@ -5,7 +5,7 @@ from pathlib import Path
 import _lattice  # same-dir helper; no __init__.py here, pytest prepends the dir
 import numpy as np
 import pytest
-from bits import _drm
+from e2e import _drm
 
 from marconi.core.descriptor import Descriptor
 from marconi.core.levels import Level
@@ -24,7 +24,7 @@ _SLICE = (
 
 
 @pytest.mark.skipif(
-    not _SLICE.exists(), reason="DRM slice absent — run tests/bits/make_drm_slice.py"
+    not _SLICE.exists(), reason="DRM slice absent — run tests/e2e/make_drm_slice.py"
 )
 def test_ofdm_coherent_equalizes_to_clean_qpsk(tmp_path: Path) -> None:
     ensure_worker_warm()

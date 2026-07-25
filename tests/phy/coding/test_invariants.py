@@ -4,12 +4,10 @@ pure-python coding layer), plus a registry-driven sweep of every
 engine=='coding' stage against the rules the compiler and codec-shape
 validators lean on.
 
-The bits-engine's frame machinery (seeds_frames / self_slicing / slices_body,
-BITS->FRAMES transitions) is deleted, not renamed: the coding engine never
+The old package's frame/window-seeding machinery and its extra level rung
+above BITS are gone entirely, not just unused: the coding engine never
 leaves BITS/SYMBOLS, and seeds_windows is the one flag a window-establishing
-stage declares now. A coding stage that resurrected the old flags would
-silently be dead weight -- validate_codec-style machinery for them no longer
-exists on this path -- so the sweep below fails loud instead.
+stage declares now.
 """
 
 from __future__ import annotations
@@ -74,13 +72,6 @@ def _coding_stages():
 
 def test_coding_engine_has_stages() -> None:
     assert _coding_stages(), "expected at least one engine=='coding' stage"
-
-
-def test_no_coding_stage_declares_deleted_frame_machinery() -> None:
-    for name, stage in _coding_stages().items():
-        assert not stage.seeds_frames, f"{name}: seeds_frames is bits-engine-only"
-        assert not stage.slices_body, f"{name}: slices_body is bits-engine-only"
-        assert not stage.self_slicing, f"{name}: self_slicing is bits-engine-only"
 
 
 def test_no_coding_stage_touches_the_frames_level() -> None:

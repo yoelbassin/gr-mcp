@@ -24,7 +24,6 @@ def test_unknown_type_is_internal_error_with_type_name() -> None:
 def test_every_public_exception_classifies_not_internal() -> None:
     # Each package registers its public exceptions at import; a user's bad
     # spec/codec/wiring must never read as an internal bug (issue 11).
-    from marconi.bits.compiler import CodecCompileError
     from marconi.core.models import ValidationIssue
     from marconi.core.stages import SpecValidationError, StageDirectionError
     from marconi.phy.backends.base import BackendError
@@ -35,7 +34,6 @@ def test_every_public_exception_classifies_not_internal() -> None:
         StageDirectionError("psk_demod", "tx", frozenset({"rx"})),
         CompileError("unknown stage"),
         BackendError("unknown block kind"),
-        CodecCompileError("unknown stage"),
     ]
     for exc in cases:
         code, _ = classify_error(exc)

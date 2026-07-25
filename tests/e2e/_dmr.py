@@ -6,9 +6,11 @@ DMR-specific code enters src/. Tables verified vs OK-DMRlib + dsd-neo."""
 from __future__ import annotations
 
 import numpy as np
+from helpers.bitops import bits_to_bytes
+from helpers.crc import crc_value
 
-from marconi.bits.carriers import RxCarrier
-from marconi.bits.framing import bits_to_bytes, block_code_rx, crc_value, permute_rx
+from marconi.phy.coding.carrier import CodingCarrier
+from marconi.phy.coding.ops_bits import block_code_rx, permute_rx
 
 # fmt: off
 DEINTERLEAVE = [
@@ -80,7 +82,7 @@ def _block_code(
     bits: np.ndarray, code_bits: int, data_bits: int, masks: list[int]
 ) -> np.ndarray:
     return block_code_rx(
-        RxCarrier(bits=bits),
+        CodingCarrier(bits=bits),
         code_bits=code_bits,
         data_bits=data_bits,
         parity_masks=masks,
@@ -90,16 +92,16 @@ def _block_code(
 
 
 def bptc_generic(info196: np.ndarray) -> np.ndarray:
-    x = permute_rx(RxCarrier(bits=info196), perm=SCATTER_INV).bits
+    x = permute_rx(CodingCarrier(bits=info196), perm=SCATTER_INV).bits
     x = x[1:196]  # drop the reserved bit0 -> 195 = 13x15 row-major matrix
     # Row [data0..10 | parity0..3] / column [data0..8 | parity0..3] stream order
     # already matches block_code_rx's LSB-first codeword basis, so no per-stride
     # reversal is needed (unlike the diagonal-interleaved CSS composition).
     for _ in range(2):
         x = _block_code(x, 15, 11, ROW_MASKS)
-        x = permute_rx(RxCarrier(bits=x), perm=TRANSPOSE).bits
+        x = permute_rx(CodingCarrier(bits=x), perm=TRANSPOSE).bits
         x = _block_code(x, 13, 9, COL_MASKS)
-        x = permute_rx(RxCarrier(bits=x), perm=TRANSPOSE_INV).bits
+        x = permute_rx(CodingCarrier(bits=x), perm=TRANSPOSE_INV).bits
     return x[np.asarray(EXTRACT, np.int64)]
 
 

@@ -32,7 +32,7 @@ _FRAME_BODY_LEN = 2056
 #   cd /Users/joel/Clones/gr-mcp-rebuild
 #   .venv/bin/python -c "
 #     import sys; sys.path.insert(0, 'tests')
-#     from bits.test_css_explicit_decode import _run, _SF11_SYMBOLS
+#     from phy.coding._css_synth import run as _run, SF11_SYMBOLS as _SF11_SYMBOLS
 #     bits = _run(_SF11_SYMBOLS); print(len(bits)); print(list(bits))"
 # then saved as data/lora_golden_bits.npy (uint8, shape (2068,)) — a giant
 # Python literal doesn't belong in a test file.

@@ -7,8 +7,6 @@ dependencies = [
     "pyyaml",
     "numpy>=2",
     "scipy>=1.17",
-    "construct>=2.10",
-    "crc>=7",
 ]
 
 [project.optional-dependencies]
@@ -22,7 +20,15 @@ build-backend = "hatchling.build"
 packages = ["src/marconi"]
 
 [dependency-groups]
-dev = ["pytest>=7.0", "pytest-asyncio", "pytest-xdist", "pre-commit", "mypy"]
+dev = [
+    "pytest>=7.0",
+    "pytest-asyncio",
+    "pytest-xdist",
+    "pre-commit",
+    "mypy",
+    "construct>=2.10",
+    "crc>=7",
+]
 
 [tool.isort]
 profile = "black"

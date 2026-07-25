@@ -9,7 +9,7 @@ The FAC/SDC coding tail (descramble + segment) is now product (phy "coding"
 family stages) riding inside fac_phy_steps/sdc_phy_steps, the same GR-chain-
 then-coding-tail composition as the DAB gate. fac_check/sdc_check are the
 test-side CRC checks over run_rx's per-window carve, replacing the old
-marconi.bits CodecSpec (fac_codec/sdc_codec/SdcCrc16)."""
+CodecSpec-based fac_codec/sdc_codec/SdcCrc16."""
 
 from __future__ import annotations
 

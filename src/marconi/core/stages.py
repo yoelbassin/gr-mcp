@@ -54,18 +54,6 @@ class Stage(ABC, Generic[B]):
     directions: frozenset[str] = frozenset({"rx", "tx"})
     params_model: type[StageParams]
 
-    # Framing capabilities a codec validator consumes (declared by the stage,
-    # not enumerated by name in the validator — so a user-registered stage
-    # advertises its own capability). A seeder establishes frame boundaries
-    # (BITS->FRAMES); it is self_slicing if it also produces complete frames,
-    # else a slices_body stage must carve the seeded region into frame bodies.
-    seeds_frames: bool = False
-    self_slicing: bool = False
-    slices_body: bool = False
-    # A level-preserving stage accepts whatever level the previous stage emits
-    # and passes it through unchanged (its runtime dispatches on carrier state).
-    # Used by transforms that work in both stream (BITS) and seeded (FRAMES) scope.
-    level_preserving: bool = False
     # Execution flavor: "gr" emits into the GR graph, "coding" into the numpy
     # coding program. The compiler partitions the path on this, never on names.
     engine: str = "gr"
@@ -187,13 +175,7 @@ def validate_path(
                     f"'{direction}'; supports {sorted(conv.directions)}",
                 )
             )
-        transparent = conv.level_preserving and prev_level in (
-            conv.from_level,
-            Level.FRAMES,
-        )
-        if transparent:
-            pass  # transparent: emits whatever level it received
-        elif idx == 0 and conv.from_level != start_level:
+        if idx == 0 and conv.from_level != start_level:
             issues.append(
                 ValidationIssue(
                     block_id=sid,
@@ -211,5 +193,4 @@ def validate_path(
                     f"boundary levels must be equal",
                 )
             )
-        if not transparent:
-            prev_level = conv.to_level
+        prev_level = conv.to_level
