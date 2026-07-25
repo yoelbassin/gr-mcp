@@ -43,7 +43,7 @@ def test_chirp_sync_is_iq_to_iq_default_out_descriptor() -> None:
     from marconi.engine.modulation.css.stages import ChirpSync
 
     out = ChirpSync().out_descriptor(IQ, _SF7_PARAMS)
-    # IQ→IQ: level, item_type, layout, carrier all unchanged from base default
+    # IQ→IQ: level, item_type, carrier all unchanged from base default
     assert out == IQ
 
 

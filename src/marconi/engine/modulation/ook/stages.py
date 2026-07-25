@@ -48,7 +48,7 @@ class OokEnvelope(DuplexStage[CompileContext]):
     def out_descriptor(
         self, in_desc: Descriptor, params: Mapping[str, Any]
     ) -> Descriptor:
-        return Descriptor(Level.SYMBOLS, "f", in_desc.layout, Carrier.SOFT)
+        return Descriptor(Level.SYMBOLS, "f", Carrier.SOFT)
 
 
 OOK_STAGES: tuple[type[DuplexStage[CompileContext]], ...] = (OokEnvelope,)

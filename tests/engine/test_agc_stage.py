@@ -9,13 +9,11 @@ from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_work
 from marconi.engine.compile.compile_context import CompileContext
 from marconi.engine.compile.compiler import compile_modem
 from marconi.engine.stages.registry import stage_registry
-from marconi.engine.types.descriptor import Amplitude, Carrier, Descriptor, Layout
+from marconi.engine.types.descriptor import Amplitude, Carrier, Descriptor
 from marconi.engine.types.levels import Level
 from marconi.engine.types.models import ModemSpec, ModemStep
 
-_NORMALIZED = Descriptor(
-    Level.IQ, "c", Layout.STREAM, Carrier.HARD, Amplitude.RMS_UNITY
-)
+_NORMALIZED = Descriptor(Level.IQ, "c", Carrier.HARD, Amplitude.RMS_UNITY)
 
 _PARAMS: dict[str, dict[str, Any]] = {
     "channelize": {"decim": 1, "bandwidth_hz": 1.0},
@@ -37,7 +35,7 @@ def test_invert_preserves_amplitude() -> None:
 
 
 def test_analytic_yields_unknown_amplitude() -> None:
-    audio = Descriptor(Level.AUDIO, "f", Layout.STREAM, Carrier.HARD)
+    audio = Descriptor(Level.AUDIO, "f", Carrier.HARD)
     out = stage_registry()["analytic"].out_descriptor(audio, {})
     assert out.amplitude is Amplitude.UNKNOWN
 

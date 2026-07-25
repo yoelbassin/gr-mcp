@@ -92,7 +92,6 @@ class Stage(ABC, Generic[B]):
         return Descriptor(
             self.to_level,
             in_desc.item_type,
-            in_desc.layout,
             in_desc.carrier,
             amplitude,
         )

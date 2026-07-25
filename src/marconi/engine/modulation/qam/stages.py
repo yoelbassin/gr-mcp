@@ -97,7 +97,7 @@ class QamDemod(DuplexStage[CompileContext]):
     def out_descriptor(
         self, in_desc: Descriptor, params: Mapping[str, Any]
     ) -> Descriptor:
-        return Descriptor(Level.SYMBOLS, "b", in_desc.layout, Carrier.HARD)
+        return Descriptor(Level.SYMBOLS, "b", Carrier.HARD)
 
 
 class QamDemap(DuplexStage[CompileContext]):
@@ -124,7 +124,7 @@ class QamDemap(DuplexStage[CompileContext]):
     def out_descriptor(
         self, in_desc: Descriptor, params: Mapping[str, Any]
     ) -> Descriptor:
-        return Descriptor(Level.BITS, "b", in_desc.layout, Carrier.HARD)
+        return Descriptor(Level.BITS, "b", Carrier.HARD)
 
 
 QAM_STAGES: tuple[type[DuplexStage[CompileContext]], ...] = (QamDemod, QamDemap)

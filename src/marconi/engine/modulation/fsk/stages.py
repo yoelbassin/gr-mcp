@@ -48,7 +48,7 @@ class Fsk(DuplexStage[CompileContext]):
     def out_descriptor(
         self, in_desc: Descriptor, params: Mapping[str, Any]
     ) -> Descriptor:
-        return Descriptor(Level.SYMBOLS, "f", in_desc.layout, Carrier.SOFT)
+        return Descriptor(Level.SYMBOLS, "f", Carrier.SOFT)
 
 
 class _MskParams(StageParams):
@@ -75,7 +75,7 @@ class Msk(RxStage[CompileContext]):
     def out_descriptor(
         self, in_desc: Descriptor, params: Mapping[str, Any]
     ) -> Descriptor:
-        return Descriptor(Level.SYMBOLS, "f", in_desc.layout, Carrier.SOFT)
+        return Descriptor(Level.SYMBOLS, "f", Carrier.SOFT)
 
 
 class _MfskSoftDemapParams(StageParams):
@@ -142,7 +142,7 @@ class MfskSoftDemap(RxStage[CompileContext]):
     def out_descriptor(
         self, in_desc: Descriptor, params: Mapping[str, Any]
     ) -> Descriptor:
-        return Descriptor(Level.BITS, "f", in_desc.layout, Carrier.SOFT)
+        return Descriptor(Level.BITS, "f", Carrier.SOFT)
 
 
 FSK_STAGES: tuple[type[Stage[CompileContext]], ...] = (Fsk, Msk, MfskSoftDemap)

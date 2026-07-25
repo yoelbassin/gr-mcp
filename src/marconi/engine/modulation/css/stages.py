@@ -172,7 +172,7 @@ class Dechirp(DuplexStage[CompileContext]):
     def out_descriptor(
         self, in_desc: Descriptor, params: Mapping[str, Any]
     ) -> Descriptor:
-        return Descriptor(Level.SYMBOLS, "s", in_desc.layout, Carrier.HARD)
+        return Descriptor(Level.SYMBOLS, "s", Carrier.HARD)
 
     def required_input_rate(
         self, params: Mapping[str, Any], symbol_rate: float
@@ -204,7 +204,7 @@ class CssDemap(DuplexStage[CompileContext]):
     def out_descriptor(
         self, in_desc: Descriptor, params: Mapping[str, Any]
     ) -> Descriptor:
-        return Descriptor(Level.BITS, "b", in_desc.layout, Carrier.HARD)
+        return Descriptor(Level.BITS, "b", Carrier.HARD)
 
 
 CSS_STAGES: tuple[type[Stage[CompileContext]], ...] = (

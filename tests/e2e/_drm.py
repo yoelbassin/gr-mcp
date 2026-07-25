@@ -408,7 +408,7 @@ class CellSelectSoftDemap(RxStage[CompileContext]):
     def out_descriptor(
         self, in_desc: Descriptor, params: Mapping[str, Any]
     ) -> Descriptor:
-        return Descriptor(Level.BITS, "f", in_desc.layout, Carrier.SOFT)
+        return Descriptor(Level.BITS, "f", Carrier.SOFT)
 
 
 def fac_stage_registry() -> dict[str, Stage[CompileContext]]:

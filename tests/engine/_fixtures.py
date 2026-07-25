@@ -57,7 +57,7 @@ class FakeDemod(DuplexStage[CompileContext]):
     def out_descriptor(
         self, in_desc: Descriptor, params: Mapping[str, Any]
     ) -> Descriptor:
-        return Descriptor(Level.SYMBOLS, "s", in_desc.layout, in_desc.carrier)
+        return Descriptor(Level.SYMBOLS, "s", in_desc.carrier)
 
 
 class FakeDemap(DuplexStage[CompileContext]):
@@ -76,7 +76,7 @@ class FakeDemap(DuplexStage[CompileContext]):
     def out_descriptor(
         self, in_desc: Descriptor, params: Mapping[str, Any]
     ) -> Descriptor:
-        return Descriptor(Level.BITS, "b", in_desc.layout, Carrier.HARD)
+        return Descriptor(Level.BITS, "b", Carrier.HARD)
 
 
 class FakeSoftDemap(DuplexStage[CompileContext]):
@@ -95,7 +95,7 @@ class FakeSoftDemap(DuplexStage[CompileContext]):
     def out_descriptor(
         self, in_desc: Descriptor, params: Mapping[str, Any]
     ) -> Descriptor:
-        return Descriptor(Level.BITS, "f", in_desc.layout, Carrier.SOFT)
+        return Descriptor(Level.BITS, "f", Carrier.SOFT)
 
 
 class FakeSoftFec(RxStage[CompileContext]):
@@ -113,7 +113,7 @@ class FakeSoftFec(RxStage[CompileContext]):
     def out_descriptor(
         self, in_desc: Descriptor, params: Mapping[str, Any]
     ) -> Descriptor:
-        return Descriptor(Level.BITS, "b", in_desc.layout, Carrier.HARD)
+        return Descriptor(Level.BITS, "b", Carrier.HARD)
 
 
 class RxOnlyDemod(RxStage[CompileContext]):
@@ -129,7 +129,7 @@ class RxOnlyDemod(RxStage[CompileContext]):
     def out_descriptor(
         self, in_desc: Descriptor, params: Mapping[str, Any]
     ) -> Descriptor:
-        return Descriptor(Level.SYMBOLS, "s", in_desc.layout, in_desc.carrier)
+        return Descriptor(Level.SYMBOLS, "s", in_desc.carrier)
 
 
 def fixture_registry() -> dict[str, Stage[CompileContext]]:

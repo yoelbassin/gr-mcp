@@ -2,7 +2,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from marconi.engine.stages.base import RxStage
-from marconi.engine.types.descriptor import Amplitude, Carrier, Descriptor, Layout
+from marconi.engine.types.descriptor import Amplitude, Carrier, Descriptor
 from marconi.engine.types.levels import Level
 
 
@@ -26,9 +26,7 @@ class _Demod(_PassThrough):
     to_level = Level.SYMBOLS
 
 
-_NORMALIZED = Descriptor(
-    Level.IQ, "c", Layout.STREAM, Carrier.HARD, Amplitude.RMS_UNITY
-)
+_NORMALIZED = Descriptor(Level.IQ, "c", Carrier.HARD, Amplitude.RMS_UNITY)
 
 
 def test_descriptor_defaults_to_unknown_amplitude() -> None:

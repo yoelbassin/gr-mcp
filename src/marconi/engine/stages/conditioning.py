@@ -265,7 +265,6 @@ class Agc(RxStage[CompileContext]):
         return Descriptor(
             Level.IQ,
             in_desc.item_type,
-            in_desc.layout,
             in_desc.carrier,
             _MODE_AMPLITUDE[p.mode],
         )
@@ -394,7 +393,7 @@ class Am(RxStage[CompileContext]):
     def out_descriptor(
         self, in_desc: Descriptor, params: Mapping[str, Any]
     ) -> Descriptor:
-        return Descriptor(Level.AUDIO, "f", in_desc.layout, in_desc.carrier)
+        return Descriptor(Level.AUDIO, "f", in_desc.carrier)
 
 
 class _FmParams(StageParams):
@@ -427,7 +426,7 @@ class FmDemod(RxStage[CompileContext]):
     def out_descriptor(
         self, in_desc: Descriptor, params: Mapping[str, Any]
     ) -> Descriptor:
-        return Descriptor(Level.AUDIO, "f", in_desc.layout, in_desc.carrier)
+        return Descriptor(Level.AUDIO, "f", in_desc.carrier)
 
 
 class _AnalyticParams(StageParams):
@@ -457,7 +456,7 @@ class Analytic(RxStage[CompileContext]):
     def out_descriptor(
         self, in_desc: Descriptor, params: Mapping[str, Any]
     ) -> Descriptor:
-        return Descriptor(Level.IQ, "c", in_desc.layout, in_desc.carrier)
+        return Descriptor(Level.IQ, "c", in_desc.carrier)
 
 
 CONDITIONING_STAGES: tuple[type[RxStage[CompileContext]], ...] = (

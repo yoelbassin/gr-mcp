@@ -1,10 +1,9 @@
-from marconi.engine.types.descriptor import Carrier, Descriptor, Layout
+from marconi.engine.types.descriptor import Carrier, Descriptor
 from marconi.engine.types.levels import Level
 
 
-def test_defaults_are_stream_and_hard() -> None:
+def test_defaults_are_hard_unknown() -> None:
     d = Descriptor(Level.IQ, "c")
-    assert d.layout is Layout.STREAM
     assert d.carrier is Carrier.HARD
 
 

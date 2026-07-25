@@ -134,9 +134,7 @@ class SymbolMap(RxStage[CodingBuilder]):
     def out_descriptor(
         self, in_desc: Descriptor, params: Mapping[str, Any]
     ) -> Descriptor:
-        return Descriptor(
-            Level.BITS, "b", in_desc.layout, Carrier.HARD, Amplitude.UNKNOWN
-        )
+        return Descriptor(Level.BITS, "b", Carrier.HARD, Amplitude.UNKNOWN)
 
 
 CODING_SYMBOL_STAGES: tuple[type[Stage[CodingBuilder]], ...] = (

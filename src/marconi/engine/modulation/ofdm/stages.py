@@ -87,7 +87,7 @@ class OfdmDemod(RxStage[CompileContext]):
     def out_descriptor(
         self, in_desc: Descriptor, params: Mapping[str, Any]
     ) -> Descriptor:
-        return Descriptor(Level.SYMBOLS, "c", in_desc.layout, Carrier.SOFT)
+        return Descriptor(Level.SYMBOLS, "c", Carrier.SOFT)
 
 
 class _DqpskParams(StageParams):
@@ -128,7 +128,7 @@ class DqpskSoftDemap(RxStage[CompileContext]):
     def out_descriptor(
         self, in_desc: Descriptor, params: Mapping[str, Any]
     ) -> Descriptor:
-        return Descriptor(Level.BITS, "f", in_desc.layout, Carrier.SOFT)
+        return Descriptor(Level.BITS, "f", Carrier.SOFT)
 
 
 class _CoherentParams(StageParams):
@@ -208,7 +208,7 @@ class OfdmCoherentSync(RxStage[CompileContext]):
     def out_descriptor(
         self, in_desc: Descriptor, params: Mapping[str, Any]
     ) -> Descriptor:
-        return Descriptor(Level.SYMBOLS, "c", in_desc.layout, Carrier.SOFT)
+        return Descriptor(Level.SYMBOLS, "c", Carrier.SOFT)
 
 
 OFDM_STAGES: tuple[type[Stage[CompileContext]], ...] = (

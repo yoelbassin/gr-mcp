@@ -35,7 +35,7 @@ class Slice(DuplexStage[CompileContext]):
     def out_descriptor(
         self, in_desc: Descriptor, params: Mapping[str, Any]
     ) -> Descriptor:
-        return Descriptor(Level.BITS, "b", in_desc.layout, Carrier.HARD)
+        return Descriptor(Level.BITS, "b", Carrier.HARD)
 
 
 GENERAL_STAGES: tuple[type[DuplexStage[CompileContext]], ...] = (Slice,)

@@ -50,7 +50,6 @@ class _Establishes(RxStage[CompileContext]):
         return Descriptor(
             Level.IQ,
             in_desc.item_type,
-            in_desc.layout,
             in_desc.carrier,
             Amplitude.RMS_UNITY,
         )

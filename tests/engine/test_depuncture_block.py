@@ -29,7 +29,7 @@ def test_depuncture_scatters_per_mask(tmp_path):
         stage_registry(),
         direction="rx",
         sample_rate=1.0,
-        start=Descriptor(Level.BITS, "f", "stream", Carrier.SOFT),
+        start=Descriptor(Level.BITS, "f", Carrier.SOFT),
         source_io={"path": str(src)},
         sink_io={"path": str(snk)},
     )
