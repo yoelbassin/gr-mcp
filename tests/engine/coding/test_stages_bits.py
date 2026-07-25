@@ -581,3 +581,26 @@ def test_correct_single_rejects_zero_parity_column() -> None:
             parity_masks=[0b110, 0b100, 0b010],
             correct_single=True,
         )
+
+
+def test_block_code_auto_correct_rejects_degenerate_columns() -> None:
+    with pytest.raises(ValidationError, match="pairwise-distinct"):
+        BlockCode._Params.model_validate(
+            {
+                "code_bits": 7,
+                "data_bits": 4,
+                "parity_masks": [0b0011, 0b0011, 0b1100],
+            }
+        )
+
+
+def test_block_code_detect_only_still_accepts_degenerate_columns() -> None:
+    p = BlockCode._Params.model_validate(
+        {
+            "code_bits": 7,
+            "data_bits": 4,
+            "parity_masks": [0b0011, 0b0011, 0b1100],
+            "correct_single": False,
+        }
+    )
+    assert p.correct_single is False

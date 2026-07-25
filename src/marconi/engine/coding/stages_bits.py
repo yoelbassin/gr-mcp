@@ -8,6 +8,7 @@ from pydantic_core import PydanticCustomError
 
 from marconi.engine.coding import ops_bits
 from marconi.engine.coding.builder import CodingBuilder
+from marconi.engine.coding.primitives import can_correct
 from marconi.engine.stages.base import RxStage, Stage
 from marconi.engine.types.descriptor import Carrier
 from marconi.engine.types.levels import Level
@@ -178,7 +179,12 @@ class BlockCode(RxStage[CodingBuilder]):
                 )
             if self.emit not in ("data", "codeword"):
                 raise PydanticCustomError("value_error", "emit must be data|codeword")
-            if self.correct_single:
+            corrects = (
+                can_correct(self.code_bits - self.data_bits, self.data_bits)
+                if self.correct_single is None
+                else self.correct_single
+            )
+            if corrects:
                 cols = [
                     tuple((mask >> j) & 1 for mask in self.parity_masks)
                     for j in range(self.data_bits)
