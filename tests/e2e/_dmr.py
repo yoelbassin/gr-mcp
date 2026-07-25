@@ -5,12 +5,15 @@ DMR-specific code enters src/. Tables verified vs OK-DMRlib + dsd-neo."""
 
 from __future__ import annotations
 
+from typing import cast
+
 import numpy as np
 from helpers.bitops import bits_to_bytes
 from helpers.crc import crc_value
 
 from marconi.phy.coding.carrier import CodingCarrier
 from marconi.phy.coding.ops_bits import block_code_rx, permute_rx
+from marconi.phy.models import ModemStep
 
 # fmt: off
 DEINTERLEAVE = [
@@ -74,6 +77,11 @@ TRANSPOSE = [(k % 13) * 15 + (k // 13) for k in range(195)]
 TRANSPOSE_INV = [(k % 15) * 13 + (k // 15) for k in range(195)]
 EXTRACT = list(range(3, 11)) + [r * 15 + c for r in range(1, 9) for c in range(11)]
 
+# DMR's info bits wrap around the 48-bit SYNC/embedded-signalling field at the
+# burst centre: a 264-bit burst's payload is bits [0,98) then [166,264). This
+# non-contiguous gather is the interior splice the product expresses windowed.
+INFO_SPLICE = list(range(0, 98)) + list(range(166, 264))
+
 _SIGN = {"0": 1, "1": 1, "2": -1, "3": -1}
 SYNC_SIGNS = np.array([_SIGN[c] for c in BS_DATA_SYNC])
 
@@ -89,6 +97,51 @@ def _block_code(
         correct=True,
         emit="codeword",
     ).bits
+
+
+def _perm_step(perm: list[int]) -> ModemStep:
+    return ModemStep(
+        conv="permute",
+        params={"perm": cast("list[float | int]", [int(x) for x in perm])},
+    )
+
+
+def _block_step(code_bits: int, data_bits: int, masks: list[int]) -> ModemStep:
+    return ModemStep(
+        conv="block_code",
+        params={
+            "code_bits": code_bits,
+            "data_bits": data_bits,
+            "parity_masks": cast("list[float | int]", masks),
+            "correct": True,
+            "emit": "codeword",
+        },
+    )
+
+
+def splice_step() -> ModemStep:
+    """The interior splice as a windowed gather: info bits around the sync."""
+    return _perm_step(INFO_SPLICE)
+
+
+def bptc_steps() -> list[ModemStep]:
+    """info196 -> 96-bit payload through the generic vocabulary: scatter
+    deinterleave, drop the reserved bit 0, two row/column Hamming passes with a
+    transpose between, then extract the message bits. Runs blind (one 196-bit
+    block) or windowed (one per seeded burst) — the ops handle both scopes."""
+    round_trip = [
+        _block_step(15, 11, ROW_MASKS),
+        _perm_step(TRANSPOSE),
+        _block_step(13, 9, COL_MASKS),
+        _perm_step(TRANSPOSE_INV),
+    ]
+    return [
+        _perm_step(SCATTER_INV),
+        _perm_step(list(range(1, 196))),  # drop reserved bit 0 -> 13x15 matrix
+        *round_trip,
+        *round_trip,
+        _perm_step(EXTRACT),
+    ]
 
 
 def bptc_generic(info196: np.ndarray) -> np.ndarray:
@@ -125,11 +178,11 @@ def _dibits_to_bits(dibits: np.ndarray) -> np.ndarray:
     return pair.reshape(-1).astype(np.uint8)
 
 
-def decode_burst_from_bits(burst264: np.ndarray) -> dict[str, int | str] | None:
-    if burst264.size != 264:
+def parse_payload(payload: np.ndarray) -> dict[str, int | str] | None:
+    """A CRC-valid 96-bit BPTC payload -> its source/target IDs. Pure datasheet
+    work over FEC-corrected bits: the CRC check and field offsets, not DSP."""
+    if payload.size != 96:
         return None
-    info = np.concatenate([burst264[0:98], burst264[166:264]])
-    payload = bptc_generic(info)
     for kind, xorout in (("csbk", CSBK_XOROUT), ("data_header", HEADER_XOROUT)):
         if not _crc_ok(payload, xorout):
             continue
@@ -146,7 +199,3 @@ def decode_burst_from_bits(burst264: np.ndarray) -> dict[str, int | str] | None:
             "source": _u(payload, *HEADER_SOURCE),
         }
     return None
-
-
-def decode_burst(dibits132: np.ndarray) -> dict[str, int | str] | None:
-    return decode_burst_from_bits(_dibits_to_bits(dibits132))

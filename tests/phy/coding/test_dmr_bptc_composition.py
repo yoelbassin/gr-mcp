@@ -11,7 +11,6 @@ in one pipeline. Tables verified vs OK-DMRlib + dsd-neo.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import cast
 
 import numpy as np
 from e2e import _dmr
@@ -46,70 +45,13 @@ def _dibits(s: str) -> np.ndarray:
     return np.array([int(ch) for ch in s], np.uint8)
 
 
-def _row_step() -> ModemStep:
-    return ModemStep(
-        conv="block_code",
-        params={
-            "code_bits": 15,
-            "data_bits": 11,
-            "parity_masks": cast("list[float | int]", _dmr.ROW_MASKS),
-            "correct": True,
-            "emit": "codeword",
-        },
-    )
-
-
-def _col_step() -> ModemStep:
-    return ModemStep(
-        conv="block_code",
-        params={
-            "code_bits": 13,
-            "data_bits": 9,
-            "parity_masks": cast("list[float | int]", _dmr.COL_MASKS),
-            "correct": True,
-            "emit": "codeword",
-        },
-    )
-
-
-def _transpose_step() -> ModemStep:
-    return ModemStep(
-        conv="permute", params={"perm": cast("list[float | int]", _dmr.TRANSPOSE)}
-    )
-
-
-def _transpose_inv_step() -> ModemStep:
-    return ModemStep(
-        conv="permute", params={"perm": cast("list[float | int]", _dmr.TRANSPOSE_INV)}
-    )
-
-
 def _bptc_modem() -> ModemSpec:
-    round_trip = [_row_step(), _transpose_step(), _col_step(), _transpose_inv_step()]
-    return ModemSpec(
-        symbol_rate=1.0,
-        path=[
-            ModemStep(
-                conv="permute",
-                params={"perm": cast("list[float | int]", _dmr.SCATTER_INV)},
-            ),
-            ModemStep(
-                conv="permute",
-                params={"perm": cast("list[float | int]", list(range(1, 196)))},
-            ),
-            *round_trip,
-            *round_trip,
-            ModemStep(
-                conv="permute",
-                params={"perm": cast("list[float | int]", _dmr.EXTRACT)},
-            ),
-        ],
-    )
+    return ModemSpec(symbol_rate=1.0, path=_dmr.bptc_steps())
 
 
 def _decode_payload(dibits: np.ndarray, tmp_path: Path) -> dict[str, int | str] | None:
     burst264 = _dmr._dibits_to_bits(dibits)
-    info196 = np.concatenate([burst264[0:98], burst264[166:264]])
+    info196 = burst264[np.asarray(_dmr.INFO_SPLICE, np.int64)]
     src = tmp_path / "info.u8"
     write_bits(src, info196)
     res = run_rx(
@@ -124,25 +66,7 @@ def _decode_payload(dibits: np.ndarray, tmp_path: Path) -> dict[str, int | str] 
     assert res.bitstream is not None
     payload = read_bits(res.bitstream.path)
     assert payload.size == 96
-    for kind, xorout in (
-        ("csbk", _dmr.CSBK_XOROUT),
-        ("data_header", _dmr.HEADER_XOROUT),
-    ):
-        if not _dmr._crc_ok(payload, xorout):
-            continue
-        if kind == "csbk":
-            return {
-                "kind": kind,
-                "csbko": _dmr._u(payload, *_dmr.CSBK_CSBKO),
-                "target": _dmr._u(payload, *_dmr.CSBK_TARGET),
-                "source": _dmr._u(payload, *_dmr.CSBK_SOURCE),
-            }
-        return {
-            "kind": kind,
-            "target": _dmr._u(payload, *_dmr.HEADER_TARGET),
-            "source": _dmr._u(payload, *_dmr.HEADER_SOURCE),
-        }
-    return None
+    return _dmr.parse_payload(payload)
 
 
 def test_bptc_composes_from_generic_stages_on_golden_vectors(tmp_path: Path) -> None:
@@ -152,3 +76,55 @@ def test_bptc_composes_from_generic_stages_on_golden_vectors(tmp_path: Path) -> 
         r = _decode_payload(d, tmp_path)
         assert r is not None, name
         assert r["source"] == src and r["target"] == tgt, (name, r)
+
+
+def _spliced_bptc_modem() -> ModemSpec:
+    """Full burst -> payload in one windowed pipeline: segment seeds a window
+    per 264-bit burst, the interior splice gathers the info bits around the
+    mid-burst sync, then the BPTC decode runs per window."""
+    return ModemSpec(
+        symbol_rate=1.0,
+        path=[
+            ModemStep(conv="segment", params={"frame_body_len": 264}),
+            _dmr.splice_step(),
+            *_dmr.bptc_steps(),
+        ],
+    )
+
+
+def test_interior_splice_and_bptc_decode_multiple_bursts(tmp_path: Path) -> None:
+    """The seam-collapse fix: DMR's info bits wrap AROUND the mid-burst sync,
+    and the whole splice + BPTC now runs in-product, windowed, over a stream of
+    back-to-back bursts -- no test-side numpy splice before the pipeline."""
+    bursts = [_dmr._dibits_to_bits(_dibits(g[0])) for g in GOLDEN.values()]
+    for b in bursts:
+        assert b.size == 264
+    stream = np.concatenate(bursts).astype(np.uint8)
+    src = tmp_path / "bursts.u8"
+    write_bits(src, stream)
+
+    res = run_rx(
+        _spliced_bptc_modem(),
+        stage_registry(),
+        sample_rate=1.0,
+        start=BITS,
+        workdir=tmp_path,
+        input_stream=Bitstream(path=src, num_bits=int(stream.size)),
+    )
+    assert res.status == "ok", res
+    assert res.windows == [0, 96], res.windows
+    assert res.bitstream is not None
+    payloads = read_bits(res.bitstream.path)
+    assert payloads.size == 96 * len(bursts)
+
+    for i, (name, (dibits, want_src, want_tgt)) in enumerate(GOLDEN.items()):
+        payload = payloads[i * 96 : (i + 1) * 96]
+        reference = _dmr.bptc_generic(
+            np.concatenate(
+                [bursts[i][0:98], bursts[i][166:264]]  # the numpy splice it replaces
+            )
+        )
+        assert np.array_equal(payload, reference), name
+        parsed = _dmr.parse_payload(payload)
+        assert parsed is not None and parsed["source"] == want_src, (name, parsed)
+        assert parsed["target"] == want_tgt, (name, parsed)

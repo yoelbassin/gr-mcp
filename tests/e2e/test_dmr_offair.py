@@ -1,15 +1,20 @@
-"""Real off-air DMR closure gate, the acid test of the phy repartition: the
-full frame-coupled chain -- acquisition marks -> per-window normalize ->
-m_slice -> symbol_map -> mark_frame windows -- now runs as ONE modem, in
-product, through run_rx. Marconi's front-end (channelize -> fsk) turns the
-capture into soft symbols; a coding tail of generic stages carries on in the
-same pipeline: sync_symbols marks bursts on the soft-symbol signs, normalize
-per-burst removes DC and rescales before the m_slice M-ary decision,
-symbol_map hardens dibits to bits and scales the marks by data_bits, and
-mark_frame reseeds windows from those scaled marks -- carving each 264-bit
-burst is a thin test-side helper (framing.carve_fixed) over run_rx's windows.
-The generic BPTC helper (Task 4) decodes each burst; the oracle is dsd-neo's
-independently CRC-confirmed subscriber-ID pairs.
+"""Real off-air DMR closure gate: IQ all the way to FEC-corrected payload bits
+in ONE product pipeline. This is the acid test that the "IQ -> FEC-corrected
+bits" boundary holds for an interior-sync protocol -- DMR's info bits wrap
+around a 48-bit sync/signalling field at the burst centre, and the whole
+chain, splice and FEC included, now runs through run_rx with nothing left in
+test-side numpy but the CRC check and field parse.
+
+Marconi's front-end (channelize -> fsk) turns the capture into soft symbols;
+the coding tail carries on in the same pipeline: sync_symbols marks bursts on
+the soft-symbol signs, normalize per-burst removes DC and rescales before the
+m_slice M-ary decision, symbol_map hardens dibits to bits, mark_frame seeds a
+window per burst, a windowed permute (INFO_SPLICE) gathers the info bits
+around the mid-burst sync, and the generic BPTC(196,96) decode -- scatter
+deinterleave + two iterated row/column Hamming passes + extract, all permute +
+block_code stages -- emits one 96-bit payload per burst. The oracle is
+dsd-neo's independently CRC-confirmed subscriber-ID pairs; carving the
+per-burst payloads is framing.carve_fixed over run_rx's own windows.
 
 The capture carries a LO-leakage DC offset co-located with the baseband
 signal at 0 Hz, so a streaming DC-blocker would notch the signal itself; DC
@@ -18,8 +23,8 @@ modem -- unchanged from the old gate.
 
 Polarity is fixed at asset-generation time (make_dmr_slice.py), so the gate
 does not search it. All DMR values (sync pattern, thresholds, oracle pairs,
-field offsets) are caller data in tests/; none enter src/marconi
-(test_agnosticism).
+BPTC tables, splice, field offsets) are caller data in tests/; none enter
+src/marconi (test_agnosticism).
 """
 
 from __future__ import annotations
@@ -38,6 +43,8 @@ from marconi.phy.backends.gnuradio.runner import ensure_worker_warm
 from marconi.phy.engine import run_rx
 from marconi.phy.models import ModemSpec, ModemStep
 from marconi.phy.stages import stage_registry
+
+PAYLOAD_BITS = 96
 
 IQ = Descriptor(Level.IQ, "c")
 RATE = 39062.0
@@ -75,6 +82,8 @@ def _dmr_modem() -> ModemSpec:
                 params={"code_bits": 2, "data_bits": 2, "table": [0, 1, 2, 3]},
             ),
             ModemStep(conv="mark_frame", params={"offset_bits": 0}),
+            _dmr.splice_step(),
+            *_dmr.bptc_steps(),
         ],
     )
 
@@ -104,8 +113,8 @@ def test_dmr_offair(tmp_path: Path) -> None:
 
     bits = read_bits(res.bitstream.path)
     out: list[dict[str, int | str]] = []
-    for burst in framing.carve_fixed(bits, res.windows, 264):
-        r = _dmr.decode_burst_from_bits(burst)
+    for payload in framing.carve_fixed(bits, res.windows, PAYLOAD_BITS):
+        r = _dmr.parse_payload(payload)
         if r:
             out.append(r)
 

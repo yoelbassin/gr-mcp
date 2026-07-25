@@ -139,8 +139,8 @@ def _decode_pocsag(bits: np.ndarray, windows: list[int]) -> int:
 
 def _decode_dmr(bits: np.ndarray, windows: list[int]) -> int:
     n = 0
-    for burst in framing.carve_fixed(bits, windows, 264):
-        if _dmr.decode_burst_from_bits(burst):
+    for payload in framing.carve_fixed(bits, windows, 96):
+        if _dmr.parse_payload(payload):
             n += 1
     return n
 
