@@ -20,12 +20,16 @@ environment, not engineers designing radios of their own:
 
 **Two-sided workflow**, each side informing the other:
 
-- **Understand** — measure a signal's parameters, classify its modulation, decode it
-  into messages, reverse-engineer an unknown protocol down to its structure.
+- **Understand** — measure a signal's parameters, classify its modulation, and turn IQ
+  into FEC-corrected bits; the agent composes those bits with its own framing, CRC, and
+  field-parsing to read messages and reverse-engineer an unknown protocol's structure.
 - **Create** — encode messages into a signal, generate test waveforms, and transmit —
   sim-first, and on hardware only behind an explicit safety confirmation.
 
-Reverse-engineering a protocol is exactly what enables recreating and transmitting it —
+Marconi itself is a radio: it transforms between IQ and FEC-corrected bits — sync,
+demod, symbol decisions, descrambling, deinterleaving, FEC. Framing, CRC checks, field
+parsing, and messages are protocol-datasheet work, not the product's. Reverse-engineering
+a protocol from Marconi's bits is exactly what enables recreating and transmitting it —
 closing the loop between the two sides.
 
 **Success:** a user points Marconi at a band or a recording, asks "what is this, and
@@ -36,11 +40,15 @@ answer — and, when desired, builds and transmits a signal of their own.
 
 Living document — the rules every commit holds to. When a rule and
 the code disagree, one is a bug — fix it, don't document the drift.
-Marconi is protocl agnostic; it does not implement any protocols itself -
+Marconi is protocol agnostic; it does not implement any protocols itself -
 it builds the tools that allow users to implement protocols.
 Specific protocols don't live inside the Marconi ecosystem itself:
 not in the source code, docs, agent skills or examples.
-If a new protocol needs to to be added or checked for support, we can
+The dividing test: does this need DSP judgment, or a protocol datasheet? DSP judgment —
+sync, demod, symbol decisions, descrambling, deinterleaving, FEC — is a phy stage;
+datasheet knowledge — frame formats, CRC parameters, field layouts, message semantics —
+belongs in tests or the driving agent, never the product.
+If a new protocol needs to be added or checked for support, we can
 do it as a new test, constructing it using the Marconi API.
 - **Don't re-implement the wheel, base on existing implementations.**
 
@@ -79,9 +87,9 @@ is wherever it's *least likely to drift relative to its source of truth*:
 
 Per-protocol values (CRC params, bit order, charset) don't live in the Marconi ecosystem.
 
-**Exception to all of the above:** the
-`@tool`-decorated docstrings in `mcp/tools.py` are the MCP tool descriptions surfaced to
-the LLM agent — functional product, never touched.
+**Exception to all of the above:** once an MCP surface exists, its `@tool`-decorated
+docstrings are the tool descriptions surfaced to the LLM agent — functional product,
+never touched.
 
 ### Errors
 
