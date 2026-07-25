@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import tracemalloc
+from collections.abc import Callable
+
 import numpy as np
 import pytest
 from crc import Calculator, Configuration
@@ -10,7 +13,8 @@ from helpers.crc import _calculator, crc_value
 from marconi.core import bitfile
 from marconi.core.bitfile import CaptureTooLarge, read_bits
 from marconi.phy.coding.carrier import CodingCarrier
-from marconi.phy.coding.ops_bits import block_code_rx
+from marconi.phy.coding.ops_bits import block_code_rx, bytes_to_bits, sync_word_rx
+from marconi.phy.coding.ops_symbols import sync_symbols_rx
 
 _HDLC = np.array([0, 1, 1, 1, 1, 1, 1, 0], dtype=np.uint8)
 
@@ -130,6 +134,71 @@ def test_find_flags_matches_greedy_reference():
     shared = np.array([0, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 0], np.uint8)
     assert framing._find_flags(shared) == _reference_find_flags(shared) == [0, 7]
     assert framing._find_flags(np.zeros(4, np.uint8)) == []
+
+
+def _peak_bytes(fn: Callable[[], object]) -> int:
+    tracemalloc.start()
+    try:
+        fn()
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    return peak
+
+
+def test_sync_word_scan_memory_is_linear_in_input_not_pattern() -> None:
+    """The correlating scan must never materialize an (n, m) array: with the
+    bits-layer budget (2^30 bits) and a 32-bit sync, n x m is ~40 GiB inside a
+    layer that promises a ~2-3x transient (core/bitfile.py)."""
+    n = 1 << 22
+    bits = np.random.default_rng(2).integers(0, 2, n, dtype=np.uint8)
+    c = CodingCarrier(bits=bits)
+    peak = _peak_bytes(lambda: sync_word_rx(c, sync="deadbeefcafef00d", max_errors=1))
+    assert peak < 8 * n, (
+        f"peak {peak >> 20} MiB scanning a {n >> 20} MiB unpacked bit array "
+        f"with a 64-bit sync -- the scan is materializing n x m"
+    )
+
+
+def test_sync_symbols_scan_memory_is_linear_in_input_not_pattern() -> None:
+    n = 1 << 20
+    sym = np.random.default_rng(3).normal(0, 1, n).astype(np.float32)
+    pattern = [1, -1] * 28 + [0] * 8
+    c = CodingCarrier(bits=np.zeros(0, np.uint8), symbols=sym)
+    peak = _peak_bytes(
+        lambda: sync_symbols_rx(c, pattern=pattern, max_errors=2, pre_symbols=0)
+    )
+    assert peak < 32 * n, (
+        f"peak {peak >> 20} MiB scanning {n >> 20} Msymbols with a 64-symbol "
+        f"pattern -- the scan is materializing n x m"
+    )
+
+
+def _reference_sync_windows(
+    bits: np.ndarray, pat: np.ndarray, max_errors: int
+) -> list[int]:
+    wins: list[int] = []
+    reach = 0
+    for i in range(bits.size - pat.size + 1):
+        if i < reach:
+            continue
+        if int((bits[i : i + pat.size] != pat).sum()) <= max_errors:
+            wins.append(i + pat.size)
+            reach = i + pat.size
+    return wins
+
+
+def test_sync_word_scan_matches_naive_reference() -> None:
+    rng = np.random.default_rng(5)
+    for sync, max_errors in [("a7", 0), ("7e7e", 1), ("deadbeef", 2)]:
+        pat = bytes_to_bits(bytes.fromhex(sync))
+        for _ in range(10):
+            bits = rng.integers(0, 2, int(rng.integers(8, 500)), dtype=np.uint8)
+            out = sync_word_rx(
+                CodingCarrier(bits=bits), sync=sync, max_errors=max_errors
+            )
+            want = _reference_sync_windows(bits, pat, max_errors)
+            assert [w.start for w in out.windows or []] == want
 
 
 def test_oversized_capture_raises_actionable(tmp_path, monkeypatch):

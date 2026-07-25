@@ -17,8 +17,10 @@ def sync_symbols_rx(
     want = pat != 0
     n_care = int(want.sum())
     signs = np.sign(np.asarray(sym, np.float64))
-    win = np.lib.stride_tricks.sliding_window_view(signs, pat.size)
-    agree = ((win == pat) & want).sum(axis=1)
+    size = signs.size - pat.size + 1
+    agree = np.zeros(size, np.min_scalar_type(int(pat.size)))
+    for j in np.flatnonzero(want):
+        agree += signs[j : j + size] == pat[j]
     hits = np.flatnonzero(agree >= n_care - max_errors)
     marks = tuple(int(h) - pre_symbols for h in hits if int(h) - pre_symbols >= 0)
     return replace(c, marks=marks)

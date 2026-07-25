@@ -45,8 +45,13 @@ def sync_word_rx(c: CodingCarrier, *, sync: str, max_errors: int = 0) -> CodingC
     windows: list[Window] = []
     if m == 0 or bits.size < m:
         return CodingCarrier(bits=bits, windows=windows, marks=c.marks)
-    view = np.lib.stride_tricks.sliding_window_view(bits, m)
-    hits = np.flatnonzero((view != pat).sum(axis=1) <= max_errors)
+    # one O(n) mismatch accumulator per pattern bit, never an (n, m) array:
+    # at the bits-layer budget an n x m compare is tens of GiB
+    size = bits.size - m + 1
+    counts = np.zeros(size, np.min_scalar_type(m))
+    for j in range(m):
+        counts += bits[j : j + size] != pat[j]
+    hits = np.flatnonzero(counts <= max_errors)
     reach = 0
     for i in hits:
         if i < reach:
