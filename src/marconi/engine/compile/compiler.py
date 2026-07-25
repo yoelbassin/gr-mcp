@@ -124,6 +124,17 @@ def _validate_descriptors(
                 f"{wanted} but '{producer}' produces {in_desc.amplitude.value}; "
                 f"{fix} (the agc stage's `mode` selects the statistic)"
             )
+        required_order = stage.required_input_order(step.params)
+        if (
+            required_order is not None
+            and in_desc.order is not None
+            and in_desc.order != required_order
+        ):
+            raise CompileError(
+                f"stage '{step.conv}' decodes an order-{required_order} "
+                f"alphabet but '{producer}' produces order-{in_desc.order} "
+                f"symbols; align the two stages' order/sf params"
+            )
         required = stage.required_input_rate(step.params, symbol_rate)
         if required is not None and required > 0:
             if abs(rates[i] - required) > _RATE_TOL * required:

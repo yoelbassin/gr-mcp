@@ -110,6 +110,13 @@ class Stage(ABC, Generic[B]):
         no diagnostics (issue 06)."""
         return None
 
+    def required_input_order(self, params: Mapping[str, Any]) -> int | None:
+        """The symbol-alphabet size this stage decodes, or None if any. The
+        compiler compares it with the producer's pinned Descriptor.order when
+        both sides declare, so a demod/demap order mismatch fails at compile
+        instead of emitting wrong-width garbage bits."""
+        return None
+
 
 class RxStage(Stage[B]):
     directions: frozenset[str] = frozenset({"rx"})

@@ -126,5 +126,8 @@ class QamDemap(DuplexStage[CompileContext]):
     ) -> Descriptor:
         return Descriptor(Level.BITS, "b", Carrier.HARD)
 
+    def required_input_order(self, params: Mapping[str, Any]) -> int | None:
+        return int(params["order"])
+
 
 QAM_STAGES: tuple[type[DuplexStage[CompileContext]], ...] = (QamDemod, QamDemap)

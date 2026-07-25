@@ -249,6 +249,9 @@ class PskDemap(DuplexStage[CompileContext]):
     ) -> Descriptor:
         return Descriptor(Level.BITS, "b", Carrier.HARD)
 
+    def required_input_order(self, params: Mapping[str, Any]) -> int | None:
+        return int(params["order"])
+
 
 class PskSoftDemap(RxStage[CompileContext]):
     """Constellation soft demap, SYMBOLS->BITS soft. RX-only: stock
@@ -280,6 +283,9 @@ class PskSoftDemap(RxStage[CompileContext]):
         self, in_desc: Descriptor, params: Mapping[str, Any]
     ) -> Descriptor:
         return Descriptor(Level.BITS, "f", Carrier.SOFT)
+
+    def required_input_order(self, params: Mapping[str, Any]) -> int | None:
+        return int(params["order"])
 
 
 PSK_STAGES: tuple[type[Stage[CompileContext]], ...] = (

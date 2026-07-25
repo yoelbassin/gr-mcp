@@ -130,6 +130,9 @@ class DqpskSoftDemap(RxStage[CompileContext]):
     ) -> Descriptor:
         return Descriptor(Level.BITS, "f", Carrier.SOFT)
 
+    def required_input_order(self, params: Mapping[str, Any]) -> int | None:
+        return int(_DqpskParams.model_validate(dict(params)).order)
+
 
 class _CoherentParams(StageParams):
     fft_len: StrictInt

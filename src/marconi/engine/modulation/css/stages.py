@@ -208,6 +208,9 @@ class CssDemap(DuplexStage[CompileContext]):
     ) -> Descriptor:
         return Descriptor(Level.BITS, "b", Carrier.HARD)
 
+    def required_input_order(self, params: Mapping[str, Any]) -> int | None:
+        return 1 << int(params["sf"])
+
 
 CSS_STAGES: tuple[type[Stage[CompileContext]], ...] = (
     ChirpSync,
