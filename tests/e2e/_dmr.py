@@ -11,9 +11,9 @@ import numpy as np
 from helpers.bitops import bits_to_bytes
 from helpers.crc import crc_value
 
-from marconi.phy.coding.carrier import CodingCarrier
-from marconi.phy.coding.ops_bits import block_code_rx, permute_rx
-from marconi.phy.models import ModemStep
+from marconi.engine.coding.carrier import CodingCarrier
+from marconi.engine.coding.ops_bits import block_code_rx, permute_rx
+from marconi.engine.models import ModemStep
 
 # fmt: off
 DEINTERLEAVE = [

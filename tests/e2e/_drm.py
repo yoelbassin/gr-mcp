@@ -21,13 +21,13 @@ import numpy as np
 from helpers import bitops, crc
 from pydantic import StrictInt
 
-from marconi.core.descriptor import Carrier, Descriptor
-from marconi.core.levels import Level
-from marconi.core.params import StageParams
-from marconi.core.stages import RxStage, Stage
-from marconi.phy.compile_context import CompileContext
-from marconi.phy.models import ModemStep
-from marconi.phy.stages.registry import stage_registry
+from marconi.engine.compile_context import CompileContext
+from marconi.engine.descriptor import Carrier, Descriptor
+from marconi.engine.levels import Level
+from marconi.engine.models import ModemStep
+from marconi.engine.params import StageParams
+from marconi.engine.stage import RxStage, Stage
+from marconi.engine.stages.registry import stage_registry
 
 FFT_LEN = 256
 CP_LEN = 64

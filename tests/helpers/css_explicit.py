@@ -1,6 +1,6 @@
 """CSS explicit-header orchestration — datasheet work, deliberately outside
 the product. Parses the protocol-declared header at each burst mark, then
-decodes the payload at its declared code rate through marconi.core.coding's
+decodes the payload at its declared code rate through marconi.engine.coding.primitives's
 generic primitives (demap / diagonal deinterleave / block FEC / frame-extent
 algebra). Marked mode parses headers only at burst-start marks so inter-burst
 junk is never mistaken for a header, a corrupt header skips to the next mark,
@@ -19,7 +19,7 @@ from typing import Any
 
 import numpy as np
 
-from marconi.core import coding
+from marconi.engine.coding import primitives as coding
 
 
 def css_explicit_decode(

@@ -5,12 +5,12 @@ tests/phy/coding/_css_synth.py; the SF11 fixtures are real off-air symbols."""
 from __future__ import annotations
 
 import numpy as np
-from phy._css_lora import HEADER as _HEADER
-from phy.coding._css_synth import SF11_SYMBOLS as _SF11_SYMBOLS
-from phy.coding._css_synth import assemble as _assemble
-from phy.coding._css_synth import encode_header as _encode_header
-from phy.coding._css_synth import encode_payload as _encode_payload
-from phy.coding._css_synth import run as _run
+from engine._css_lora import HEADER as _HEADER
+from engine.coding._css_synth import SF11_SYMBOLS as _SF11_SYMBOLS
+from engine.coding._css_synth import assemble as _assemble
+from engine.coding._css_synth import encode_header as _encode_header
+from engine.coding._css_synth import encode_payload as _encode_payload
+from engine.coding._css_synth import run as _run
 
 
 def test_explicit_decode_yields_rf_fingerpring_payload() -> None:

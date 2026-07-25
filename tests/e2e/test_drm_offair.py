@@ -22,12 +22,12 @@ import pytest
 from e2e import _drm
 from helpers import framing
 
-from marconi.core.bitfile import read_bits
-from marconi.core.descriptor import Descriptor
-from marconi.core.levels import Level
-from marconi.phy.backends.gnuradio.runner import ensure_worker_warm
-from marconi.phy.engine import run_rx
-from marconi.phy.models import ModemSpec
+from marconi.engine.backends.gnuradio.runner import ensure_worker_warm
+from marconi.engine.bitfile import read_bits
+from marconi.engine.descriptor import Descriptor
+from marconi.engine.levels import Level
+from marconi.engine.models import ModemSpec
+from marconi.engine.run import run_rx
 
 IQ = Descriptor(Level.IQ, "c")
 _SLICE = (

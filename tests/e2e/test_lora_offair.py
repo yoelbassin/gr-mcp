@@ -28,15 +28,14 @@ import pytest
 from helpers import bitops, crc, framing
 from helpers.css_explicit import css_explicit_decode
 
-from marconi.core.bitfile import read_bits, read_symbols, write_bits
-from marconi.core.descriptor import Descriptor
-from marconi.core.levels import Level
-from marconi.core.models import Bitstream
-from marconi.core.params import ParamValue
-from marconi.phy.backends.gnuradio.runner import ensure_worker_warm
-from marconi.phy.engine import run_rx
-from marconi.phy.models import ModemSpec, ModemStep
-from marconi.phy.stages import stage_registry
+from marconi.engine.backends.gnuradio.runner import ensure_worker_warm
+from marconi.engine.bitfile import read_bits, read_symbols, write_bits
+from marconi.engine.descriptor import Descriptor
+from marconi.engine.levels import Level
+from marconi.engine.models import Bitstream, ModemSpec, ModemStep
+from marconi.engine.params import ParamValue
+from marconi.engine.run import run_rx
+from marconi.engine.stages import stage_registry
 
 IQ = Descriptor(Level.IQ, "c")
 BITS = Descriptor(Level.BITS, "b")

@@ -93,7 +93,7 @@ never touched.
 
 ### Errors
 
-One classifier in `core/errors.py`; each package registers its exception types for
+One classifier in `marconi/errors.py`; each package registers its exception types for
 stable MCP `[code]` prefixes. Once an MCP surface exists, every MCP tool is wrapped
 with `@tool_error_boundary`.
 

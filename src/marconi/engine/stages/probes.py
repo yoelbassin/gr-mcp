@@ -1,0 +1,32 @@
+from __future__ import annotations
+
+from collections.abc import Mapping
+from typing import Any
+
+from marconi.engine.compile_context import CompileContext
+from marconi.engine.levels import Level
+from marconi.engine.params import StageParams
+from marconi.engine.stage import RxStage
+
+
+class _BurstProbeParams(StageParams):
+    pass
+
+
+class BurstProbe(RxStage[CompileContext]):
+    """Passthrough probe recording each upstream "burst" tag's symbol offset
+    into run diagnostics ({"bursts": [...]}) — burst starts for an offline
+    consumer, since stream tags don't survive a file sink."""
+
+    name = "burst_probe"
+    from_level = Level.SYMBOLS
+    to_level = Level.SYMBOLS
+    family = "probe"
+    params_model = _BurstProbeParams
+    accepts_item_type = "s"
+
+    def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
+        b.chain("burst_probe")
+
+
+PROBE_STAGES: tuple[type[RxStage[CompileContext]], ...] = (BurstProbe,)

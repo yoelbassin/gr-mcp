@@ -61,13 +61,13 @@ from pathlib import Path
 import pytest
 from helpers import bitops, crc, framing, parse
 
-from marconi.core.bitfile import read_bits
-from marconi.core.descriptor import Descriptor
-from marconi.core.levels import Level
-from marconi.phy.backends.gnuradio.runner import ensure_worker_warm
-from marconi.phy.engine import run_rx
-from marconi.phy.models import ModemSpec, ModemStep
-from marconi.phy.stages import stage_registry
+from marconi.engine.backends.gnuradio.runner import ensure_worker_warm
+from marconi.engine.bitfile import read_bits
+from marconi.engine.descriptor import Descriptor
+from marconi.engine.levels import Level
+from marconi.engine.models import ModemSpec, ModemStep
+from marconi.engine.run import run_rx
+from marconi.engine.stages import stage_registry
 
 IQ = Descriptor(Level.IQ, "c")
 RATE = 2_000_000.0

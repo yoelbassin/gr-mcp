@@ -13,13 +13,12 @@ import numpy as np
 import pytest
 from helpers import bitops, crc, framing
 
-from marconi.core.bitfile import read_bits, write_bits
-from marconi.core.descriptor import Descriptor
-from marconi.core.levels import Level
-from marconi.core.models import Bitstream
-from marconi.phy.engine import run_rx
-from marconi.phy.models import ModemSpec, ModemStep
-from marconi.phy.stages import stage_registry
+from marconi.engine.bitfile import read_bits, write_bits
+from marconi.engine.descriptor import Descriptor
+from marconi.engine.levels import Level
+from marconi.engine.models import Bitstream, ModemSpec, ModemStep
+from marconi.engine.run import run_rx
+from marconi.engine.stages import stage_registry
 
 BITS = Descriptor(Level.BITS, "b")
 _FRAME_BODY_LEN = 256
