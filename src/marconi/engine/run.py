@@ -230,6 +230,18 @@ def run_rx(
             "the path with a demodulation stage (for conditioned-IQ output use "
             "compile_modem and run the backend directly)"
         )
+    if cp.final.level is Level.AUDIO:
+        raise CompileError(
+            "rx pipeline ends at AUDIO; run_rx extracts symbol/bit streams — "
+            "continue the path with a demodulation stage (for audio output "
+            "use compile_modem and run the backend directly)"
+        )
+    if cp.final.level is Level.SYMBOLS and cp.final.item_type == "c":
+        raise CompileError(
+            "rx pipeline ends at complex soft symbols, an interior seam with "
+            "no stream format; end the path with a demap stage (for raw "
+            "symbol output use compile_modem and run the backend directly)"
+        )
     if cp.gr is not None and input_stream is not None:
         raise ValueError(
             "this modem's path has a GR segment fed by source_io; input_stream "
