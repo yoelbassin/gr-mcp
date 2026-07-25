@@ -271,6 +271,71 @@ def rs_code_rx(
     )
 
 
+def _conv_tables(rate_inv: int, polys: list[int]) -> tuple[int, int, np.ndarray]:
+    m = max(int(p).bit_length() for p in polys) - 1
+    regs = np.arange(2 << m, dtype=np.int64)
+    outs = np.zeros((regs.size, rate_inv), np.uint8)
+    for d, poly in enumerate(polys):
+        x = regs & int(poly)
+        while x.any():
+            outs[:, d] ^= (x & 1).astype(np.uint8)
+            x >>= 1
+    return m, 1 << m, outs
+
+
+def _viterbi_frame(
+    coded: np.ndarray, rate_inv: int, polys: list[int], n_steps: int, tail: int
+) -> np.ndarray:
+    # GR fsm(1, n, polys) trellis: reg = (u << m) | state, next = reg >> 1,
+    # poly 0 = first output bit; regs (2s, 2s+1) are exactly the two branches
+    # into next-state s, so the ACS pairs by reshape.
+    m, n_states, outs = _conv_tables(rate_inv, polys)
+    obs = coded[: n_steps * rate_inv].reshape(n_steps, rate_inv)
+    pm = np.zeros(n_states, np.int64)
+    if tail:
+        pm += np.iinfo(np.int32).max
+        pm[0] = 0
+    tb = np.empty((n_steps, n_states), np.uint8)
+    src_state = np.arange(2 << m, dtype=np.int64) & (n_states - 1)
+    for t in range(n_steps):
+        bm = (outs != obs[t][None, :]).sum(axis=1)
+        cand = (pm[src_state] + bm).reshape(n_states, 2)
+        tb[t] = cand.argmin(axis=1)
+        pm = cand[np.arange(n_states), tb[t]]
+    state = 0 if tail else int(pm.argmin())
+    decoded = np.empty(n_steps, np.uint8)
+    for t in range(n_steps - 1, -1, -1):
+        reg = 2 * state + int(tb[t, state])
+        decoded[t] = reg >> m
+        state = reg & (n_states - 1)
+    return decoded
+
+
+def _conv_decode(
+    bits: np.ndarray, rate_inv: int, polys: list[int], frame_bits: int, tail: int
+) -> np.ndarray:
+    n_steps = frame_bits + tail
+    need = n_steps * rate_inv
+    frames = []
+    for f in range(bits.size // need):
+        frame = _viterbi_frame(bits[f * need :], rate_inv, polys, n_steps, tail)
+        frames.append(frame[:frame_bits])
+    return np.concatenate(frames) if frames else np.zeros(0, np.uint8)
+
+
+def conv_code_rx(
+    c: CodingCarrier,
+    *,
+    rate_inv: int,
+    polys: list[int],
+    frame_bits: int,
+    tail: int = 0,
+) -> CodingCarrier:
+    return _decode_scoped(
+        c, lambda bits: _conv_decode(bits, rate_inv, polys, frame_bits, tail)
+    )
+
+
 def _perm_span(idx: np.ndarray) -> int:
     """Input stride a gather consumes: one past its highest index, NOT its
     length. A dropping gather (one that skips per-slot bits, so it spans more
