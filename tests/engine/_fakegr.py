@@ -70,22 +70,38 @@ def drive(
     out_len: int = 1 << 16,
     out_dtype: Any = None,
 ) -> np.ndarray:
-    """Feed sig in `chunk`-sized pieces; after every piece, keep calling with
-    ZERO input until quiescent — the wakeups the scheduler is allowed to make
-    whenever forecast announces 0. Assumes the block consumes each offered
-    piece (all-consuming blocks); the caller tracks nitems_written."""
+    """Feed sig in `chunk`-sized pieces; zero-input wakeups happen only while
+    the block's own forecast announces zero demand — the scheduler contract in
+    lifecycle.py. Assumes the block consumes each offered piece (all-consuming
+    blocks); the caller tracks nitems_written."""
     sig = np.asarray(sig)
     dtype = out_dtype if out_dtype is not None else sig.dtype
+    fc = getattr(blk, "forecast", None)
     got = []
-    for start in range(0, len(sig), chunk):
-        nxt = sig[start : start + chunk]
-        while True:
-            out = np.zeros(out_len, dtype)
-            k = int(blk.general_work([nxt], [out]))
-            blk._nwritten += k
-            if k:
-                got.append(out[:k].copy())
-            nxt = sig[0:0]
+
+    def _call(data: np.ndarray) -> int:
+        out = np.zeros(out_len, dtype)
+        k = int(blk.general_work([data], [out]))
+        blk._nwritten += k
+        if k:
+            got.append(out[:k].copy())
+        return k
+
+    def _drain() -> None:
+        for _ in range(1_000_000):
+            if fc is not None and fc(out_len, 1) != [0]:
+                return
+            k = _call(sig[0:0])
             if k == 0:
-                break
+                if fc is None:
+                    return
+                raise AssertionError(
+                    "block announces zero demand but emits nothing: the EOF "
+                    "flush would spin forever under the real scheduler"
+                )
+        raise AssertionError("drive: drain did not quiesce")
+
+    for start in range(0, len(sig), chunk):
+        _call(sig[start : start + chunk])
+        _drain()
     return np.concatenate(got) if got else np.zeros(0, dtype)
