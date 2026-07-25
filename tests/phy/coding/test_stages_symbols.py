@@ -19,6 +19,7 @@ from marconi.phy.coding.ops_symbols import m_slice_rx, normalize_rx, sync_symbol
 from marconi.phy.coding.stages_symbols import (
     CssExplicitDecode,
     MSlice,
+    SymbolMap,
     _ExplicitParams,
     _MSliceParams,
 )
@@ -38,6 +39,20 @@ def test_m_slice_out_descriptor_hardens() -> None:
     d = Descriptor(Level.SYMBOLS, "f", carrier=Carrier.SOFT)
     out = MSlice().out_descriptor(d, {"thresholds": [0.0], "levels": [0, 1]})
     assert out.item_type == "s" and out.carrier is Carrier.HARD
+
+
+def test_css_explicit_decode_out_descriptor_lands_on_hard_bits() -> None:
+    d = Descriptor(Level.SYMBOLS, "s", carrier=Carrier.HARD)
+    out = CssExplicitDecode().out_descriptor(d, _EXPLICIT_PARAMS)
+    assert out == Descriptor(Level.BITS, "b", carrier=Carrier.HARD)
+
+
+def test_symbol_map_out_descriptor_lands_on_hard_bits() -> None:
+    d = Descriptor(Level.SYMBOLS, "s", carrier=Carrier.HARD)
+    out = SymbolMap().out_descriptor(
+        d, {"code_bits": 1, "data_bits": 1, "table": [0, 1]}
+    )
+    assert out == Descriptor(Level.BITS, "b", carrier=Carrier.HARD)
 
 
 # --- sync_symbols_rx (ported from tests/bits/test_sync_symbols.py) ---

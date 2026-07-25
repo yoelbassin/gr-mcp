@@ -16,6 +16,7 @@ from marconi.phy.stages import stage_registry
 
 BITS = Descriptor(Level.BITS, "b")
 SOFT_SYMBOLS = Descriptor(Level.SYMBOLS, "f", carrier=Carrier.SOFT)
+HARD_SYMBOLS = Descriptor(Level.SYMBOLS, "s", carrier=Carrier.HARD)
 _FLAG_BITS = np.concatenate(
     [
         np.zeros(3, np.uint8),
@@ -60,6 +61,18 @@ def _sync_symbols_modem() -> ModemSpec:
     return ModemSpec(
         symbol_rate=1.0,
         path=[ModemStep(conv="sync_symbols", params={"pattern": [1, -1]})],
+    )
+
+
+def _symbol_map_modem() -> ModemSpec:
+    return ModemSpec(
+        symbol_rate=1.0,
+        path=[
+            ModemStep(
+                conv="symbol_map",
+                params={"code_bits": 1, "data_bits": 1, "table": [0, 1]},
+            )
+        ],
     )
 
 
@@ -195,4 +208,42 @@ def test_gr_segment_with_input_stream_is_an_error(tmp_path: Path) -> None:
             start=SOFT_SYMBOLS,
             workdir=tmp_path,
             input_stream=_flag_stream(tmp_path),
+        )
+
+
+def test_bitstream_input_against_symbol_boundary_is_an_error(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="Bitstream"):
+        run_rx(
+            _sync_symbols_modem(),
+            stage_registry(),
+            sample_rate=1.0,
+            start=SOFT_SYMBOLS,
+            workdir=tmp_path,
+            input_stream=_flag_stream(tmp_path),
+        )
+
+
+def test_symbolstream_input_against_bit_boundary_is_an_error(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="Symbolstream"):
+        run_rx(
+            _sync_word_modem(),
+            stage_registry(),
+            sample_rate=1.0,
+            start=BITS,
+            workdir=tmp_path,
+            input_stream=_soft_symbolstream(tmp_path, marks=[]),
+        )
+
+
+def test_symbolstream_item_type_mismatch_against_boundary_is_an_error(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(ValueError, match="item_type"):
+        run_rx(
+            _symbol_map_modem(),
+            stage_registry(),
+            sample_rate=1.0,
+            start=HARD_SYMBOLS,
+            workdir=tmp_path,
+            input_stream=_soft_symbolstream(tmp_path, marks=[]),
         )

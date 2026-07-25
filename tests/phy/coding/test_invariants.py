@@ -17,7 +17,13 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+from phy._css_lora import HEADER as _CSS_HEADER
+
+from marconi.core.descriptor import Carrier, Descriptor
 from marconi.core.levels import Level
+from marconi.phy.compiler import CompileError, compile_pipeline
+from marconi.phy.models import ModemSpec, ModemStep
 from marconi.phy.stages import stage_registry
 
 _CODING_SRC = Path(__file__).resolve().parents[3] / "src" / "marconi" / "phy" / "coding"
@@ -86,3 +92,43 @@ def test_coding_stages_are_rx_only() -> None:
     # every stage the registry offers on this engine backs that up statically.
     for name, stage in _coding_stages().items():
         assert stage.directions == frozenset({"rx"}), (name, stage.directions)
+
+
+def test_bits_entry_coding_stages_declare_hard_bit_input() -> None:
+    for name, stage in _coding_stages().items():
+        if stage.from_level is Level.BITS:
+            assert stage.accepts_item_type == "b", name
+
+
+def test_soft_bits_into_sync_word_is_a_compile_error() -> None:
+    spec = ModemSpec(
+        symbol_rate=1.0,
+        path=[ModemStep(conv="sync_word", params={"sync": "7e"})],
+    )
+    with pytest.raises(CompileError, match="item_type"):
+        compile_pipeline(
+            spec,
+            stage_registry(),
+            direction="rx",
+            sample_rate=1.0,
+            start=Descriptor(Level.BITS, "f", carrier=Carrier.SOFT),
+            source_io={},
+            sink_io={},
+        )
+
+
+def test_soft_symbols_into_css_explicit_decode_is_a_compile_error() -> None:
+    spec = ModemSpec(
+        symbol_rate=1.0,
+        path=[ModemStep(conv="css_explicit_decode", params=dict(_CSS_HEADER))],
+    )
+    with pytest.raises(CompileError, match="item_type"):
+        compile_pipeline(
+            spec,
+            stage_registry(),
+            direction="rx",
+            sample_rate=1.0,
+            start=Descriptor(Level.SYMBOLS, "f", carrier=Carrier.SOFT),
+            source_io={},
+            sink_io={},
+        )

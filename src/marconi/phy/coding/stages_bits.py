@@ -6,6 +6,7 @@ from typing import Any
 from pydantic import Field, StrictInt, model_validator
 from pydantic_core import PydanticCustomError
 
+from marconi.core.descriptor import Carrier
 from marconi.core.levels import Level
 from marconi.core.params import StageParams
 from marconi.core.stages import RxStage, Stage
@@ -79,6 +80,8 @@ class SyncWord(RxStage[CodingBuilder]):
     to_level = Level.BITS
     seeds_windows = True
     family = "acquisition"
+    accepts_item_type = "b"
+    accepts_carrier = Carrier.HARD
 
     params_model = _SyncParams
 
@@ -94,6 +97,8 @@ class MarkFrame(RxStage[CodingBuilder]):
     to_level = Level.BITS
     seeds_windows = True
     family = "acquisition"
+    accepts_item_type = "b"
+    accepts_carrier = Carrier.HARD
 
     class _Params(StageParams):
         offset_bits: StrictInt = Field(default=0, ge=0)
@@ -111,6 +116,8 @@ class Segment(RxStage[CodingBuilder]):
     to_level = Level.BITS
     seeds_windows = True
     family = "acquisition"
+    accepts_item_type = "b"
+    accepts_carrier = Carrier.HARD
 
     class _Params(StageParams):
         frame_body_len: StrictInt = Field(ge=1)
@@ -127,6 +134,8 @@ class Codebook(RxStage[CodingBuilder]):
     from_level = Level.BITS
     to_level = Level.BITS
     family = "coding"
+    accepts_item_type = "b"
+    accepts_carrier = Carrier.HARD
 
     params_model = _CodebookParams
 
@@ -140,6 +149,8 @@ class BlockCode(RxStage[CodingBuilder]):
     from_level = Level.BITS
     to_level = Level.BITS
     family = "coding"
+    accepts_item_type = "b"
+    accepts_carrier = Carrier.HARD
 
     class _Params(StageParams):
         code_bits: StrictInt = Field(ge=2)
@@ -189,6 +200,8 @@ class Permute(RxStage[CodingBuilder]):
     from_level = Level.BITS
     to_level = Level.BITS
     family = "coding"
+    accepts_item_type = "b"
+    accepts_carrier = Carrier.HARD
 
     class _Params(StageParams):
         perm: list[int] = Field(min_length=1)
@@ -216,6 +229,8 @@ class Realign(RxStage[CodingBuilder]):
     from_level = Level.BITS
     to_level = Level.BITS
     family = "coding"
+    accepts_item_type = "b"
+    accepts_carrier = Carrier.HARD
 
     class _Params(StageParams):
         bit_offset: StrictInt = Field(ge=0)
@@ -232,6 +247,8 @@ class Differential(RxStage[CodingBuilder]):
     from_level = Level.BITS
     to_level = Level.BITS
     family = "coding"
+    accepts_item_type = "b"
+    accepts_carrier = Carrier.HARD
 
     class _Params(StageParams):
         invert: bool = False
@@ -249,6 +266,8 @@ class NibbleSwap(RxStage[CodingBuilder]):
     from_level = Level.BITS
     to_level = Level.BITS
     family = "coding"
+    accepts_item_type = "b"
+    accepts_carrier = Carrier.HARD
 
     class _Params(StageParams):
         pass
@@ -265,6 +284,8 @@ class Descramble(RxStage[CodingBuilder]):
     from_level = Level.BITS
     to_level = Level.BITS
     family = "coding"
+    accepts_item_type = "b"
+    accepts_carrier = Carrier.HARD
 
     params_model = _SequenceParams
 

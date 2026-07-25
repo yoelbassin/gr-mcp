@@ -80,7 +80,7 @@ class CssExplicitDecode(RxStage[CodingBuilder]):
     starts; without marks, frames are assumed back-to-back.
 
     An orchestration fast-path, not new vocabulary: the composition proof
-    (tests/bits/test_css_explicit_composition.py) reproduces it bit-exactly
+    (tests/phy/coding/test_css_explicit_composition.py) reproduces it bit-exactly
     from the generic pieces — demap / deinterleave / block-FEC / parse — in
     two agent-style passes."""
 
@@ -90,6 +90,8 @@ class CssExplicitDecode(RxStage[CodingBuilder]):
     to_level = Level.BITS
     family = "symbols"
     params_model = _ExplicitParams
+    accepts_item_type = "s"
+    accepts_carrier = Carrier.HARD
 
     def emit_rx(self, b: CodingBuilder, params: Mapping[str, Any]) -> None:
         p = _ExplicitParams.model_validate(dict(params))
@@ -226,6 +228,7 @@ class SymbolMap(RxStage[CodingBuilder]):
     family = "coding"
     params_model = _CodebookParams
     accepts_item_type = "s"
+    accepts_carrier = Carrier.HARD
 
     def emit_rx(self, b: CodingBuilder, params: Mapping[str, Any]) -> None:
         b.add(

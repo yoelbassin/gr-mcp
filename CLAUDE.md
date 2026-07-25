@@ -94,7 +94,8 @@ never touched.
 ### Errors
 
 One classifier in `core/errors.py`; each package registers its exception types for
-stable MCP `[code]` prefixes. Every MCP tool is wrapped with `@tool_error_boundary`.
+stable MCP `[code]` prefixes. Once an MCP surface exists, every MCP tool is wrapped
+with `@tool_error_boundary`.
 
 ### Tests
 
@@ -106,5 +107,5 @@ stable MCP `[code]` prefixes. Every MCP tool is wrapped with `@tool_error_bounda
 ### Tooling
 
 `isort` (black profile) · `black` · `flake8` (max line 88, `E203`/`W503` ignored) ·
-`mypy` · `pytest`, all under pre-commit. The docs (`PRODUCT`, `SPEC`, `CONTEXT`, this
-file) are living files edited in place, never dated copies.
+`mypy` · `pytest`, all under pre-commit. This file is a living document edited in
+place, never a dated copy.
