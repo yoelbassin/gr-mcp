@@ -195,3 +195,40 @@ def test_unpinned_boundary_skips_preamble_check() -> None:
         [ModemStep(conv="preamble_sync", params=off_grid), _step("psk_demap", order=8)],
         start=SYM_C,
     )
+
+
+_ORDER_MATRIX: dict[str, tuple[dict[str, ParamValue], int]] = {
+    "psk_demod": ({"order": 4}, 4),
+    "psk_demap": ({"order": 4}, 4),
+    "psk_soft_demap": ({"order": 4}, 4),
+    "qam_demod": ({"order": 16}, 16),
+    "qam_demap": ({"order": 16}, 16),
+    "dechirp": (_DECHIRP_PARAMS, 128),
+    "css_demap": ({"sf": 7}, 128),
+    "dqpsk_soft_demap": ({"data_syms": 4, "n_carriers": 4}, 4),
+}
+
+
+def test_order_bearing_stages_are_in_the_contract() -> None:
+    for name, stage in stage_registry().items():
+        fields = set(stage.params_model.model_fields)
+        if not {"order", "sf"} & fields:
+            continue
+        produces = (
+            stage.to_level is Level.SYMBOLS and stage.from_level is not Level.SYMBOLS
+        )
+        consumes = (
+            stage.from_level is Level.SYMBOLS and stage.to_level is not Level.SYMBOLS
+        )
+        if not (produces or consumes):
+            continue
+        assert name in _ORDER_MATRIX, (
+            f"stage '{name}' carries an order/sf param at a SYMBOLS boundary; "
+            "add it to _ORDER_MATRIX and give it a pin or requirement"
+        )
+        params, expected = _ORDER_MATRIX[name]
+        if produces:
+            out = stage.out_descriptor(Descriptor(stage.from_level, "c"), params)
+            assert out.order == expected, name
+        if consumes:
+            assert stage.required_input_order(params) == expected, name
