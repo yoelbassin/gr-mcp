@@ -115,3 +115,65 @@ def test_fec_params_accept_cc():
     ok: list = []
     validate_params("fec[0]", Fec().params_model, _CC_PARAMS, ok)
     assert not ok, ok
+
+
+def test_fec_conv_unterminated_frame_tail_bits_correct(tmp_path):
+    ensure_worker_warm()
+    from gnuradio import blocks as gb
+    from gnuradio import gr, trellis
+
+    frame_bits, rate_inv, polys = 64, 2, [0o7, 0o5]
+    rng = np.random.default_rng(7)
+    info = rng.integers(0, 2, frame_bits).astype(np.uint8)
+    while not (info[-1] or info[-2]):
+        info = rng.integers(0, 2, frame_bits).astype(np.uint8)
+    fsm = trellis.fsm(1, rate_inv, polys)
+
+    class Enc(gr.top_block):
+        def __init__(self, data):
+            gr.top_block.__init__(self)
+            src = gb.vector_source_b(list(map(int, data)), False)
+            enc = trellis.encoder_bb(fsm, 0)
+            snk = gb.vector_sink_b()
+            self.connect(src, enc, snk)
+            self.snk = snk
+
+    e = Enc(info)
+    e.run()
+    syms = np.array(e.snk.data(), np.int64)
+    soft = np.empty(syms.size * rate_inv, np.float32)
+    for i, s in enumerate(syms):
+        for d in range(rate_inv):
+            soft[i * rate_inv + d] = 1.0 - 2 * ((s >> (rate_inv - 1 - d)) & 1)
+    src = tmp_path / "unterm.f32"
+    soft.tofile(src)
+    snk = tmp_path / "unterm.u8"
+    modem = ModemSpec(
+        name="fec",
+        symbol_rate=1.0,
+        path=[
+            ModemStep(
+                conv="fec",
+                params={
+                    "scheme": "cc",
+                    "rate_inv": rate_inv,
+                    "polys": polys,
+                    "frame_bits": frame_bits,
+                    "tail": 0,
+                },
+            )
+        ],
+    )
+    pipe = compile_modem(
+        modem,
+        stage_registry(),
+        direction="rx",
+        sample_rate=1.0,
+        start=Descriptor(Level.BITS, "f", "stream", Carrier.SOFT),
+        source_io={"path": str(src)},
+        sink_io={"path": str(snk)},
+    )
+    r = GnuRadioBackend().run_pipeline(pipe, timeout=30.0)
+    assert r.status == "ok", r
+    out = read_bits(snk)[:frame_bits]
+    assert np.array_equal(out, info), np.flatnonzero(out != info)

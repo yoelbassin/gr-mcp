@@ -15,6 +15,7 @@ def make_trellis_viterbi(
     table = [
         1.0 - 2.0 * ((o >> (d - 1 - j)) & 1) for o in range(o_card) for j in range(d)
     ]
+    end = 0 if tail else -1
     return ctx.trellis.viterbi_combined_fb(
-        fsm, k, 0, 0, d, table, ctx.digital.TRELLIS_EUCLIDEAN
+        fsm, k, end, end, d, table, ctx.digital.TRELLIS_EUCLIDEAN
     )
