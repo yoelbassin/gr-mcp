@@ -3,12 +3,10 @@ encoders that run the decoder's coding primitives in reverse."""
 
 from __future__ import annotations
 
-import numpy as np
+from helpers.css_explicit import css_explicit_decode
 from phy._css_lora import HEADER, PARITY_MASKS
 
 from marconi.core import coding
-from marconi.phy.coding.carrier import CodingCarrier
-from marconi.phy.coding.css import css_explicit_decode_rx
 
 # IQ_2 SF11/BW125/CR4-5/LDRO explicit-header frame — raw dechirp argmax bins
 # (8 header + 285 payload), known-good (V1 tests/phy/test_header_demux_stage.py).
@@ -66,12 +64,7 @@ def assemble(bits, payload_len=255):
 
 
 def run(symbols, marks=(), params=HEADER):
-    carrier = CodingCarrier(
-        bits=np.zeros(0, np.uint8),
-        symbols=np.asarray(symbols, dtype=np.int16),
-        marks=tuple(marks),
-    )
-    return css_explicit_decode_rx(carrier, **params).bits
+    return css_explicit_decode(symbols, marks, params)
 
 
 def encode_header(payload_len, cr, has_crc):

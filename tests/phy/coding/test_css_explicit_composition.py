@@ -1,6 +1,7 @@
-"""The composition proof for css_explicit_decode (2026-07 review): the stage
-is an orchestration fast-path over the generic vocabulary, not a protocol
-smuggled behind 18 parameters. An agent-style two-pass decode -- a static
+"""The composition proof for the css_explicit orchestrator (2026-07 review;
+demoted from a registered stage to tests/helpers/css_explicit.py on its
+strength): a fast-path over the generic vocabulary, not a protocol smuggled
+behind 18 parameters. An agent-style two-pass decode -- a static
 header codec, then a payload codec constructed from the decoded header
 fields -- reproduces the orchestrator bit-exactly using only generic pieces:
 
@@ -12,9 +13,9 @@ fields -- reproduces the orchestrator bit-exactly using only generic pieces:
   css_explicit_frame_len   frame-extent algebra             core primitive
 
 The header->payload dependency (the payload's code rate and extent live in
-the header) is exactly the agent loop, so all css_explicit_decode adds is
-doing both passes in one call. Stage-level gaps if this were to run
-in-engine: a SYMBOLS->BITS demap stage and a block-permutation stage.
+the header) is exactly the agent loop, so all the orchestrator adds is
+doing both passes in one call. Gaps if this were ever to run in-engine:
+a SYMBOLS->BITS demap stage and a block-permutation stage.
 """
 
 from __future__ import annotations

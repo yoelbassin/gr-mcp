@@ -111,7 +111,6 @@ def test_frame_length_is_parameterized_not_datasheet() -> None:
     "path",
     [
         "phy/backends/gnuradio/embedded/chirp.py",
-        "phy/coding/css.py",
         "phy/coding/stages_symbols.py",
         "core/coding.py",
         "phy/modulation/css/stages.py",

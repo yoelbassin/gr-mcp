@@ -8,16 +8,12 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from e2e.test_lora_offair import _HEADER
-from phy._css_lora import HEADER
-from phy.coding._css_synth import SF11_SYMBOLS
 
 from marconi.core.descriptor import Descriptor
 from marconi.core.levels import Level
 from marconi.core.params import ParamValue
 from marconi.phy.coding import ops_bits
 from marconi.phy.coding.carrier import CodingCarrier, Window
-from marconi.phy.coding.css import css_explicit_decode_rx
 from marconi.phy.compiler import CompileError, compile_pipeline
 from marconi.phy.models import ModemSpec, ModemStep
 from marconi.phy.stages import stage_registry
@@ -74,20 +70,6 @@ def test_index_destroying_ops_drop_marks() -> None:
     assert rs.marks == ()
 
 
-def test_css_explicit_decode_emits_a_clean_bits_carrier() -> None:
-    carrier = CodingCarrier(
-        bits=np.zeros(0, np.uint8),
-        symbols=np.asarray(SF11_SYMBOLS, np.int16),
-        marks=(0,),
-        windows=[],
-    )
-    out = css_explicit_decode_rx(carrier, **HEADER)
-    assert out.bits.size > 0
-    assert out.symbols is None
-    assert out.marks == ()
-    assert out.windows is None
-
-
 def test_probe_marks_cannot_cross_a_rate_changing_gr_stage() -> None:
     modem = ModemSpec(
         symbol_rate=1.0,
@@ -116,7 +98,14 @@ def test_probe_at_the_end_of_the_gr_segment_compiles() -> None:
         path=[
             ModemStep(conv="dechirp", params=_DECHIRP),
             ModemStep(conv="burst_probe", params={}),
-            ModemStep(conv="css_explicit_decode", params=dict(_HEADER)),
+            ModemStep(
+                conv="symbol_map",
+                params={
+                    "code_bits": 11,
+                    "data_bits": 11,
+                    "table": list(range(1 << 11)),
+                },
+            ),
         ],
     )
     cp = compile_pipeline(

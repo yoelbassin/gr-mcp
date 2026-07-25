@@ -1,65 +1,69 @@
-"""SYMBOLS -> BITS ops: the header-driven CSS explicit-header carve, offline
-over the whole symbol array. Marked mode parses headers only at burst-start
-marks so inter-burst junk is never mistaken for a header, a corrupt header
-skips to the next mark, and a frame whose declared extent crosses the next
-mark is cut there so a corrupt length can never swallow a real burst. Blind
-mode assumes back-to-back frames from 0 and stops at the first header
-failure. The coding math lives in marconi.core.coding."""
+"""CSS explicit-header orchestration — datasheet work, deliberately outside
+the product. Parses the protocol-declared header at each burst mark, then
+decodes the payload at its declared code rate through marconi.core.coding's
+generic primitives (demap / diagonal deinterleave / block FEC / frame-extent
+algebra). Marked mode parses headers only at burst-start marks so inter-burst
+junk is never mistaken for a header, a corrupt header skips to the next mark,
+and a frame whose declared extent crosses the next mark is cut there so a
+corrupt length can never swallow a real burst. Blind mode assumes back-to-back
+frames from 0 and stops at the first header failure.
+
+Demoted from a registered stage 2026-07: the composition proof
+(tests/phy/coding/test_css_explicit_composition.py) shows this adds no
+vocabulary the product lane doesn't already have."""
 
 from __future__ import annotations
+
+from collections.abc import Mapping, Sequence
+from typing import Any
 
 import numpy as np
 
 from marconi.core import coding
-from marconi.phy.coding.carrier import CodingCarrier
 
 
-def css_explicit_decode_rx(
-    carrier: CodingCarrier,
-    *,
-    sf: int,
-    header_cr: int,
-    reduced: bool,
-    header_symbols: int,
-    header_nibbles: int,
-    sf_reduction: int,
-    header_data_bits: int,
-    header_parity: list[int],
-    field_payload_len: list[int],
-    field_cr: list[int],
-    field_has_crc: list[int],
-    field_parity: list[int],
-    data_bits: int,
-    crc_bytes: int,
-    parity_masks: list[int],
-    reduced_offset: int,
-    full_offset: int,
-) -> CodingCarrier:
-    if carrier.symbols is None:
-        raise ValueError("css_explicit_decode needs a symbols carrier")
-    syms = [int(s) for s in carrier.symbols]
+def css_explicit_decode(
+    symbols: Sequence[int] | np.ndarray,
+    marks: Sequence[int],
+    params: Mapping[str, Any],
+) -> np.ndarray:
+    sf = int(params["sf"])
+    header_cr = int(params["header_cr"])
+    reduced = bool(params["reduced"])
+    header_symbols = int(params["header_symbols"])
+    header_nibbles = int(params["header_nibbles"])
+    sf_reduction = int(params["sf_reduction"])
+    header_data_bits = int(params["header_data_bits"])
+    data_bits = int(params["data_bits"])
+    crc_bytes = int(params["crc_bytes"])
+    reduced_offset = int(params.get("reduced_offset", 0))
+    full_offset = int(params.get("full_offset", 0))
+    masks = [int(x) for x in params["header_parity"]]
+    fec_masks = [int(x) for x in params["parity_masks"]]
+    pl_start, pl_len = (int(x) for x in params["field_payload_len"])
+    cr_start, cr_len = (int(x) for x in params["field_cr"])
+    crc_start, crc_len = (int(x) for x in params["field_has_crc"])
+    par_start, par_len = (int(x) for x in params["field_parity"])
+
+    syms = [int(s) for s in symbols]
     n = 1 << sf
     header_sf_app = sf - sf_reduction
     payload_sf_app = sf - sf_reduction if reduced else sf
-    masks = [int(x) for x in header_parity]
-    fec_masks = [int(x) for x in parity_masks]
-    pl_start, pl_len = (int(x) for x in field_payload_len)
-    cr_start, cr_len = (int(x) for x in field_cr)
-    crc_start, crc_len = (int(x) for x in field_has_crc)
-    par_start, par_len = (int(x) for x in field_parity)
 
-    def _demap(symbols: list[int], sf_app: int) -> list[int]:
+    def _demap(sym_slice: list[int], sf_app: int) -> list[int]:
         if sf_app < sf:
             return coding.demap_symbols(
-                symbols, sf_app, n=n, divisor=1 << sf_reduction, offset=reduced_offset
+                sym_slice, sf_app, n=n, divisor=1 << sf_reduction, offset=reduced_offset
             )
-        return coding.demap_symbols(symbols, sf_app, n=n, divisor=1, offset=full_offset)
+        return coding.demap_symbols(
+            sym_slice, sf_app, n=n, divisor=1, offset=full_offset
+        )
 
-    def _fec_nibbles(symbols: list[int], sf_app: int, cr: int) -> list[int]:
+    def _fec_nibbles(sym_slice: list[int], sf_app: int, cr: int) -> list[int]:
         cw_len = cr + data_bits
         correct = coding.can_correct(cr, data_bits)
         parity = coding.parity_for_cr(fec_masks, cr)
-        bits = _demap(symbols, sf_app)
+        bits = _demap(sym_slice, sf_app)
         perm = coding.diag_deinterleave_perm(sf_app, cw_len)
         block = sf_app * cw_len
         nibbles: list[int] = []
@@ -122,10 +126,10 @@ def css_explicit_decode_rx(
         return bits[:declared]
 
     out: list[int] = []
-    marks = [int(m) for m in carrier.marks]
-    if marks:
+    mark_list = [int(m) for m in marks]
+    if mark_list:
         pos = 0
-        for i, start in enumerate(marks):
+        for i, start in enumerate(mark_list):
             if start < pos or start + header_symbols > len(syms):
                 continue
             hdr = _parse_header(start)
@@ -136,7 +140,7 @@ def css_explicit_decode_rx(
             if need > len(syms):
                 continue
             out.extend(_frame_bits(start, frame_len, payload_cr, declared, carry))
-            nxt = next((m for m in marks[i + 1 :] if m > start), None)
+            nxt = next((m for m in mark_list[i + 1 :] if m > start), None)
             pos = need if nxt is None or nxt >= need else nxt
     else:
         pos = 0
@@ -150,4 +154,4 @@ def css_explicit_decode_rx(
                 break
             out.extend(_frame_bits(pos, frame_len, payload_cr, declared, carry))
             pos = need
-    return CodingCarrier(bits=np.asarray(out, dtype=np.uint8))
+    return np.asarray(out, dtype=np.uint8)

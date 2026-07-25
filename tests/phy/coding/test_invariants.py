@@ -18,7 +18,6 @@ import sys
 from pathlib import Path
 
 import pytest
-from phy._css_lora import HEADER as _CSS_HEADER
 
 from marconi.core.descriptor import Carrier, Descriptor
 from marconi.core.levels import Level
@@ -117,10 +116,15 @@ def test_soft_bits_into_sync_word_is_a_compile_error() -> None:
         )
 
 
-def test_soft_symbols_into_css_explicit_decode_is_a_compile_error() -> None:
+def test_soft_symbols_into_a_hard_symbol_stage_is_a_compile_error() -> None:
     spec = ModemSpec(
         symbol_rate=1.0,
-        path=[ModemStep(conv="css_explicit_decode", params=dict(_CSS_HEADER))],
+        path=[
+            ModemStep(
+                conv="symbol_map",
+                params={"code_bits": 1, "data_bits": 1, "table": [0, 1]},
+            )
+        ],
     )
     with pytest.raises(CompileError, match="item_type"):
         compile_pipeline(

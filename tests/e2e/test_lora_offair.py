@@ -1,18 +1,17 @@
-"""Real off-air LoRa SF11 (IQ_2), one ModemSpec spanning phy through the coding
-tail, CRC as the oracle. The slice holds TWO complete frames; both must decode
-CRC-valid in one run_rx call — chirp_sync re-arms per preamble, burst_probe
-surfaces both burst marks INSIDE the same run, and run_rx harvests them into
-the coding carrier (issue 03's multi-burst requirement, now proven without a
-hand-harvest step between phy and coding).
+"""Real off-air LoRa SF11 (IQ_2), the agent-loop shape end to end, CRC as the
+oracle. The slice holds TWO complete frames; both must decode CRC-valid.
 
-The PHY (resample/chirp_sync/dechirp/burst_probe) and the header-driven coding
-tail (css_explicit_decode/nibble_swap/segment) compose in a single ModemSpec;
-css_explicit_decode consumes the marks burst_probe leaves in diagnostics —
-run_rx's internal harvest is exactly the old gate's hand-harvest of
-diagnostics["bursts"], now load-bearing production behavior instead of a test
-helper. Dewhitening and the trailing CRC-16 check are test-side helpers
-(framing.carve_fixed/xor_bits, crc.crc_check) over run_rx's per-frame windows,
-the same per-window pattern as the POCSAG/BLE gates.
+Run 1 is the product phy: resample/chirp_sync/dechirp/burst_probe in one
+ModemSpec — chirp_sync re-arms per preamble and burst_probe surfaces both
+burst marks in the same run (issue 03's multi-burst requirement), delivered
+on the symbolstream. The header-driven carve is datasheet work and runs
+test-side (helpers/css_explicit.py, demoted from a registered stage 2026-07):
+it parses each marked burst's declared header and decodes the payload at its
+declared code rate through core.coding's generic primitives. Run 2 feeds the
+FEC-corrected bits back through the product's generic coding tail
+(nibble_swap/segment) via input_stream. Dewhitening and the trailing CRC-16
+are test-side helpers over run 2's per-frame windows, the same per-window
+pattern as the POCSAG/BLE gates.
 
 Capture: IQ_2 (LoPy4), 1 Msps, SF11/BW125/CR4-5/LDRO — cropped to a ~11.3 Msample
 window holding two back-to-back frames (tests/e2e/make_lora_slice.py). Both
@@ -27,10 +26,12 @@ from typing import cast
 
 import pytest
 from helpers import bitops, crc, framing
+from helpers.css_explicit import css_explicit_decode
 
-from marconi.core.bitfile import read_bits
+from marconi.core.bitfile import read_bits, read_symbols, write_bits
 from marconi.core.descriptor import Descriptor
 from marconi.core.levels import Level
+from marconi.core.models import Bitstream
 from marconi.core.params import ParamValue
 from marconi.phy.backends.gnuradio.runner import ensure_worker_warm
 from marconi.phy.engine import run_rx
@@ -38,6 +39,7 @@ from marconi.phy.models import ModemSpec, ModemStep
 from marconi.phy.stages import stage_registry
 
 IQ = Descriptor(Level.IQ, "c")
+BITS = Descriptor(Level.BITS, "b")
 RATE = 1_000_000.0
 _SLICE = (
     Path(__file__).resolve().parents[2]
@@ -98,7 +100,7 @@ _WHITEN = (
 _FRAME_BODY_LEN = 2056  # 255 whitened payload bytes + 2 unwhitened CRC bytes
 
 
-def _modem() -> ModemSpec:
+def _phy_modem() -> ModemSpec:
     return ModemSpec(
         name="lora_sf11_rx",
         symbol_rate=61.03515625,
@@ -127,7 +129,15 @@ def _modem() -> ModemSpec:
                 },
             ),
             ModemStep(conv="burst_probe", params={}),
-            ModemStep(conv="css_explicit_decode", params=dict(_HEADER)),
+        ],
+    )
+
+
+def _codec_modem() -> ModemSpec:
+    return ModemSpec(
+        name="lora_sf11_codec",
+        symbol_rate=1.0,
+        path=[
             ModemStep(conv="nibble_swap", params={}),
             ModemStep(conv="segment", params={"frame_body_len": _FRAME_BODY_LEN}),
         ],
@@ -140,7 +150,7 @@ def _modem() -> ModemSpec:
 def test_lora_offair(tmp_path: Path) -> None:
     ensure_worker_warm()
     res = run_rx(
-        _modem(),
+        _phy_modem(),
         stage_registry(),
         sample_rate=RATE,
         start=IQ,
@@ -149,12 +159,29 @@ def test_lora_offair(tmp_path: Path) -> None:
     )
     assert res.status == "ok", res
     assert len(res.marks) >= 2, res.diagnostics
-    assert res.windows, "no LoRa frames segmented"
-    assert res.bitstream is not None
-    bits = read_bits(res.bitstream.path)
+    assert res.symbolstream is not None and res.symbolstream.item_type == "s"
+    symbols = read_symbols(res.symbolstream.path, "s")
+
+    fec_bits = css_explicit_decode(symbols, res.symbolstream.marks, _HEADER)
+    assert fec_bits.size, "no frame decoded from the marked bursts"
+    fec_path = tmp_path / "fec.u8"
+    write_bits(fec_path, fec_bits)
+
+    res2 = run_rx(
+        _codec_modem(),
+        stage_registry(),
+        sample_rate=1.0,
+        start=BITS,
+        workdir=tmp_path,
+        input_stream=Bitstream(path=fec_path, num_bits=int(fec_bits.size)),
+    )
+    assert res2.status == "ok", res2
+    assert res2.windows, "no LoRa frames segmented"
+    assert res2.bitstream is not None
+    bits = read_bits(res2.bitstream.path)
 
     decoded: list[bytes] = []
-    for frame in framing.carve_fixed(bits, res.windows, _FRAME_BODY_LEN):
+    for frame in framing.carve_fixed(bits, res2.windows, _FRAME_BODY_LEN):
         dewhitened = framing.xor_bits(frame, _WHITEN)
         ok, body = crc.crc_check(
             bitops.bits_to_bytes(dewhitened),
