@@ -1,8 +1,8 @@
 import ast
 from pathlib import Path
 
-from marconi.engine.stages import stage_registry
 from marconi.engine.stages.general import GENERAL_STAGES
+from marconi.engine.stages.registry import stage_registry
 
 _FAMILIES = {"fsk", "psk", "qam", "ask", "ook", "ppm", "css"}
 _GENERAL_SRC = Path("src/marconi/engine/stages/general.py")

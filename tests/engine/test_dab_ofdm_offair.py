@@ -5,12 +5,12 @@ import numpy as np
 import pytest
 
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
-from marconi.engine.compiler import compile_modem
-from marconi.engine.descriptor import Descriptor
-from marconi.engine.levels import Level
-from marconi.engine.models import ModemSpec, ModemStep
+from marconi.engine.compile.compiler import compile_modem
 from marconi.engine.modulation.ofdm.primitives import qpsk_lock
-from marconi.engine.stages import stage_registry
+from marconi.engine.stages.registry import stage_registry
+from marconi.engine.types.descriptor import Descriptor
+from marconi.engine.types.levels import Level
+from marconi.engine.types.models import ModemSpec, ModemStep
 
 _SLICE = (
     Path(__file__).resolve().parents[1]

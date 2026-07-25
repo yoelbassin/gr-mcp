@@ -5,7 +5,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from marconi.engine.params import ParamValue
+from marconi.engine.types.params import ParamValue
 
 
 class ValidationIssue(BaseModel):

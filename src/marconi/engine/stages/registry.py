@@ -11,8 +11,8 @@ from marconi.engine.modulation.ofdm.stages import OFDM_STAGES
 from marconi.engine.modulation.ook.stages import OOK_STAGES
 from marconi.engine.modulation.psk.stages import PSK_STAGES
 from marconi.engine.modulation.qam.stages import QAM_STAGES
-from marconi.engine.stage import Stage
 from marconi.engine.stages.acquisition import ACQUISITION_STAGES
+from marconi.engine.stages.base import Stage
 from marconi.engine.stages.conditioning import CONDITIONING_STAGES
 from marconi.engine.stages.general import GENERAL_STAGES
 from marconi.engine.stages.probes import PROBE_STAGES

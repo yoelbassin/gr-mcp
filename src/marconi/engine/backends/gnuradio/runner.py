@@ -16,7 +16,7 @@ from marconi.engine.backends.gnuradio.worker import (
     run_pipeline_worker,
     sink_paths,
 )
-from marconi.engine.ir import GrPipeline
+from marconi.engine.compile.ir import GrPipeline
 
 _GRACE_SECONDS = 5.0
 _TAIL_CHARS = 4000

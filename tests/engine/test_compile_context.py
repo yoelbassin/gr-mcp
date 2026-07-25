@@ -1,8 +1,8 @@
 import pytest
 
-from marconi.engine.compile_context import CompileContext, SampleRateError
-from marconi.engine.descriptor import Descriptor
-from marconi.engine.levels import Level
+from marconi.engine.compile.compile_context import CompileContext, SampleRateError
+from marconi.engine.types.descriptor import Descriptor
+from marconi.engine.types.levels import Level
 from marconi.errors import classify_error
 
 IQ = Descriptor(Level.IQ, "c")

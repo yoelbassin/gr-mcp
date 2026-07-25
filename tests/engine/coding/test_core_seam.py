@@ -1,6 +1,6 @@
 from marconi.engine.backends.base import BlockCensus
-from marconi.engine.stage import Stage
-from marconi.engine.stages import stage_registry
+from marconi.engine.stages.base import Stage
+from marconi.engine.stages.registry import stage_registry
 
 
 def test_stage_defaults_gr_engine_no_window_seeding() -> None:

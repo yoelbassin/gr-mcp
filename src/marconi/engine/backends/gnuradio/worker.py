@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from marconi.engine.backends.base import BackendError, BlockCensus, RunResult
-from marconi.engine.ir import GrPipeline
+from marconi.engine.compile.ir import GrPipeline
 
 _SINK_KINDS = {
     "iq_file_sink",

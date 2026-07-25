@@ -8,21 +8,25 @@ import numpy as np
 from pydantic import BaseModel
 
 from marconi.engine.backends.base import Backend, BlockCensus
-from marconi.engine.bitfile import (
+from marconi.engine.coding.carrier import CodingCarrier
+from marconi.engine.coding.program import run_coding
+from marconi.engine.compile.compiler import (
+    CompiledPipeline,
+    CompileError,
+    compile_pipeline,
+)
+from marconi.engine.io.bitfile import (
     read_bits,
     read_symbols,
     write_bits,
     write_llrs,
     write_symbols,
 )
-from marconi.engine.coding.carrier import CodingCarrier
-from marconi.engine.coding.program import run_coding
-from marconi.engine.compiler import CompiledPipeline, CompileError, compile_pipeline
-from marconi.engine.descriptor import Descriptor
-from marconi.engine.levels import Level
-from marconi.engine.models import Bitstream, ModemSpec, Symbolstream
-from marconi.engine.params import ParamValue
-from marconi.engine.stage import Stage
+from marconi.engine.stages.base import Stage
+from marconi.engine.types.descriptor import Descriptor
+from marconi.engine.types.levels import Level
+from marconi.engine.types.models import Bitstream, ModemSpec, Symbolstream
+from marconi.engine.types.params import ParamValue
 
 
 class PipelineResult(BaseModel):

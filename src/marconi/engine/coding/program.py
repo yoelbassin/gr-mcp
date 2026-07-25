@@ -7,7 +7,7 @@ import numpy as np
 
 from marconi.engine.backends.base import BlockCensus
 from marconi.engine.coding.carrier import CodingCarrier
-from marconi.engine.levels import Level
+from marconi.engine.types.levels import Level
 
 
 @dataclass(frozen=True)

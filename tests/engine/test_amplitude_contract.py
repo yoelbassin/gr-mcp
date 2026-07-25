@@ -1,9 +1,9 @@
 from collections.abc import Mapping
 from typing import Any
 
-from marconi.engine.descriptor import Amplitude, Carrier, Descriptor, Layout
-from marconi.engine.levels import Level
-from marconi.engine.stage import RxStage
+from marconi.engine.stages.base import RxStage
+from marconi.engine.types.descriptor import Amplitude, Carrier, Descriptor, Layout
+from marconi.engine.types.levels import Level
 
 
 class _PassThrough(RxStage[object]):

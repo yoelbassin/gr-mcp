@@ -1,9 +1,9 @@
-from marconi.engine.compile_context import CompileContext
-from marconi.engine.descriptor import Carrier, Descriptor
-from marconi.engine.levels import Level
+from marconi.engine.compile.compile_context import CompileContext
 from marconi.engine.modulation.psk.stages import PskDemap, PskDemod
-from marconi.engine.stage import validate_params
-from marconi.engine.stages import stage_registry
+from marconi.engine.stages.base import validate_params
+from marconi.engine.stages.registry import stage_registry
+from marconi.engine.types.descriptor import Carrier, Descriptor
+from marconi.engine.types.levels import Level
 
 
 def test_registered() -> None:

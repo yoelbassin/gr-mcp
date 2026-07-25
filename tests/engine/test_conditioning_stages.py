@@ -2,12 +2,12 @@ import math
 
 import pytest
 
-from marconi.engine.compile_context import CompileContext
-from marconi.engine.descriptor import Descriptor
-from marconi.engine.levels import Level
-from marconi.engine.stage import StageDirectionError, validate_params
-from marconi.engine.stages import stage_registry
+from marconi.engine.compile.compile_context import CompileContext
+from marconi.engine.stages.base import StageDirectionError, validate_params
 from marconi.engine.stages.conditioning import Channelize, Invert
+from marconi.engine.stages.registry import stage_registry
+from marconi.engine.types.descriptor import Descriptor
+from marconi.engine.types.levels import Level
 
 
 def test_registered_as_conditioning() -> None:
@@ -74,9 +74,9 @@ def test_param_validation() -> None:
 def test_rate_threads_through_channelize_to_demod() -> None:
     # The novel bit: a rate-changing stage must hand the DECIMATED rate to the demod.
     # Compile [channelize(decim=2), fsk] at input rate 16 -> fsk sees rate 8.
-    from marconi.engine.compiler import compile_modem
-    from marconi.engine.descriptor import Descriptor as D
-    from marconi.engine.models import ModemSpec, ModemStep
+    from marconi.engine.compile.compiler import compile_modem
+    from marconi.engine.types.descriptor import Descriptor as D
+    from marconi.engine.types.models import ModemSpec, ModemStep
 
     modem = ModemSpec(
         symbol_rate=1.0,

@@ -10,11 +10,11 @@ from crc._crc import TableBasedRegister
 from helpers import framing
 from helpers.crc import _calculator, crc_value
 
-from marconi.engine import bitfile
-from marconi.engine.bitfile import CaptureTooLarge, read_bits
 from marconi.engine.coding.carrier import CodingCarrier
 from marconi.engine.coding.ops_bits import block_code_rx, bytes_to_bits, sync_word_rx
 from marconi.engine.coding.ops_symbols import sync_symbols_rx
+from marconi.engine.io import bitfile
+from marconi.engine.io.bitfile import CaptureTooLarge, read_bits
 
 _HDLC = np.array([0, 1, 1, 1, 1, 1, 1, 0], dtype=np.uint8)
 

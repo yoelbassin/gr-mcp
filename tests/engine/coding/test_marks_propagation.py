@@ -11,12 +11,12 @@ import pytest
 
 from marconi.engine.coding import ops_bits
 from marconi.engine.coding.carrier import CodingCarrier, Window
-from marconi.engine.compiler import CompileError, compile_pipeline
-from marconi.engine.descriptor import Descriptor
-from marconi.engine.levels import Level
-from marconi.engine.models import ModemSpec, ModemStep
-from marconi.engine.params import ParamValue
-from marconi.engine.stages import stage_registry
+from marconi.engine.compile.compiler import CompileError, compile_pipeline
+from marconi.engine.stages.registry import stage_registry
+from marconi.engine.types.descriptor import Descriptor
+from marconi.engine.types.levels import Level
+from marconi.engine.types.models import ModemSpec, ModemStep
+from marconi.engine.types.params import ParamValue
 
 MARKS = (3, 9)
 IQ = Descriptor(Level.IQ, "c")

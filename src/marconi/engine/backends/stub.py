@@ -4,7 +4,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 
 from marconi.engine.backends.base import Backend, BackendError, RunResult
-from marconi.engine.ir import GrPipeline
+from marconi.engine.compile.ir import GrPipeline
 
 
 @dataclass(frozen=True)

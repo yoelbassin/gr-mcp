@@ -54,15 +54,15 @@ from engine.coding.test_lora_golden import _golden_modem as _lora_golden_modem
 from helpers import bitops, crc, framing
 from pydantic import ValidationError
 
-from marconi.engine.bitfile import read_bits
 from marconi.engine.coding.carrier import CodingCarrier, Window
 from marconi.engine.coding.ops_bits import permute_rx
 from marconi.engine.coding.stages_bits import Permute
-from marconi.engine.descriptor import Carrier, Descriptor
-from marconi.engine.levels import Level
-from marconi.engine.models import Bitstream, ModemSpec, Symbolstream
+from marconi.engine.io.bitfile import read_bits
 from marconi.engine.run import run_rx
-from marconi.engine.stages import stage_registry
+from marconi.engine.stages.registry import stage_registry
+from marconi.engine.types.descriptor import Carrier, Descriptor
+from marconi.engine.types.levels import Level
+from marconi.engine.types.models import Bitstream, ModemSpec, Symbolstream
 
 BITS = Descriptor(Level.BITS, "b")
 SOFT_SYMBOLS = Descriptor(Level.SYMBOLS, "f", carrier=Carrier.SOFT)

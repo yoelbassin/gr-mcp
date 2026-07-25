@@ -6,12 +6,12 @@ from typing import Any
 
 from marconi.engine.coding.builder import CodingBuilder
 from marconi.engine.coding.program import CodingProgram
-from marconi.engine.compile_context import CompileContext
-from marconi.engine.descriptor import Amplitude, Descriptor
-from marconi.engine.ir import GrPipeline
-from marconi.engine.models import ModemSpec, ValidationIssue
-from marconi.engine.params import ParamValue
-from marconi.engine.stage import SpecStep, Stage, validate_path
+from marconi.engine.compile.compile_context import CompileContext
+from marconi.engine.compile.ir import GrPipeline
+from marconi.engine.stages.base import SpecStep, Stage, validate_path
+from marconi.engine.types.descriptor import Amplitude, Descriptor
+from marconi.engine.types.models import ModemSpec, ValidationIssue
+from marconi.engine.types.params import ParamValue
 from marconi.errors import register_error
 
 

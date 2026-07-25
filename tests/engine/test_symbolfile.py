@@ -2,7 +2,7 @@ from pathlib import Path
 
 import numpy as np
 
-from marconi.engine.bitfile import read_symbols, write_llrs, write_symbols
+from marconi.engine.io.bitfile import read_symbols, write_llrs, write_symbols
 
 
 def test_symbols_roundtrip_int16(tmp_path: Path) -> None:

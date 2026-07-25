@@ -6,12 +6,12 @@ import numpy as np
 import pytest
 
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
-from marconi.engine.compile_context import CompileContext
-from marconi.engine.compiler import compile_modem
-from marconi.engine.descriptor import Amplitude, Carrier, Descriptor, Layout
-from marconi.engine.levels import Level
-from marconi.engine.models import ModemSpec, ModemStep
-from marconi.engine.stages import stage_registry
+from marconi.engine.compile.compile_context import CompileContext
+from marconi.engine.compile.compiler import compile_modem
+from marconi.engine.stages.registry import stage_registry
+from marconi.engine.types.descriptor import Amplitude, Carrier, Descriptor, Layout
+from marconi.engine.types.levels import Level
+from marconi.engine.types.models import ModemSpec, ModemStep
 
 _NORMALIZED = Descriptor(
     Level.IQ, "c", Layout.STREAM, Carrier.HARD, Amplitude.RMS_UNITY

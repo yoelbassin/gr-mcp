@@ -11,9 +11,9 @@ from marconi.engine.coding.stages_symbols import (
     SymbolMap,
     _MSliceParams,
 )
-from marconi.engine.descriptor import Carrier, Descriptor
-from marconi.engine.levels import Level
-from marconi.engine.stages import stage_registry
+from marconi.engine.stages.registry import stage_registry
+from marconi.engine.types.descriptor import Carrier, Descriptor
+from marconi.engine.types.levels import Level
 
 
 def test_registry_holds_both_flavors() -> None:

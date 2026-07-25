@@ -4,7 +4,7 @@ from typing import Any
 
 from marconi.engine.backends.base import BackendError
 from marconi.engine.backends.gnuradio.blocks import _factories, _modules
-from marconi.engine.ir import GrPipeline
+from marconi.engine.compile.ir import GrPipeline
 
 
 def build_top_block(pipeline: GrPipeline) -> Any:

@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from marconi.engine.descriptor import Descriptor
-from marconi.engine.ir import GrBlock, GrConnection, GrPipeline
-from marconi.engine.params import ParamValue
+from marconi.engine.compile.ir import GrBlock, GrConnection, GrPipeline
+from marconi.engine.types.descriptor import Descriptor
+from marconi.engine.types.params import ParamValue
 from marconi.errors import register_error
 
 

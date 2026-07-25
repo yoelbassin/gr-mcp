@@ -5,14 +5,14 @@ from pathlib import Path
 
 VOCAB = [
     Path("src/marconi/errors.py"),
-    Path("src/marconi/engine/bitfile.py"),
     Path("src/marconi/engine/coding/primitives.py"),
-    Path("src/marconi/engine/descriptor.py"),
-    Path("src/marconi/engine/levels.py"),
-    Path("src/marconi/engine/models.py"),
-    Path("src/marconi/engine/params.py"),
-    Path("src/marconi/engine/specs.py"),
-    Path("src/marconi/engine/stage.py"),
+    Path("src/marconi/engine/io/bitfile.py"),
+    Path("src/marconi/engine/io/specs.py"),
+    Path("src/marconi/engine/stages/base.py"),
+    Path("src/marconi/engine/types/descriptor.py"),
+    Path("src/marconi/engine/types/levels.py"),
+    Path("src/marconi/engine/types/models.py"),
+    Path("src/marconi/engine/types/params.py"),
 ]
 
 
@@ -26,10 +26,10 @@ def test_vocabulary_imports_without_gnuradio_or_fastmcp() -> None:
         "        raise ImportError(name)\n"
         "    return _imp(name, *a, **k)\n"
         "builtins.__import__ = guard\n"
-        "import marconi.engine.levels, marconi.engine.descriptor\n"
-        "import marconi.engine.stage\n"
-        "import marconi.engine.models, marconi.engine.params\n"
-        "import marconi.engine.specs, marconi.errors\n"
+        "import marconi.engine.types.levels, marconi.engine.types.descriptor\n"
+        "import marconi.engine.stages.base\n"
+        "import marconi.engine.types.models, marconi.engine.types.params\n"
+        "import marconi.engine.io.specs, marconi.errors\n"
         "print('ok')\n"
     )
     out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)

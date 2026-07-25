@@ -2,7 +2,7 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
-from marconi.engine.specs import load_yaml_spec, save_yaml_spec
+from marconi.engine.io.specs import load_yaml_spec, save_yaml_spec
 
 
 class _Spec(BaseModel):

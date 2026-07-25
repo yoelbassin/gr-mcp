@@ -7,11 +7,11 @@ from typing import Any, Literal
 from pydantic import Field, StrictInt, model_validator
 from pydantic_core import PydanticCustomError
 
-from marconi.engine.compile_context import CompileContext
-from marconi.engine.descriptor import Amplitude, Descriptor
-from marconi.engine.levels import Level
-from marconi.engine.params import StageParams
-from marconi.engine.stage import RxStage
+from marconi.engine.compile.compile_context import CompileContext
+from marconi.engine.stages.base import RxStage
+from marconi.engine.types.descriptor import Amplitude, Descriptor
+from marconi.engine.types.levels import Level
+from marconi.engine.types.params import StageParams
 
 
 class _ChannelizeParams(StageParams):

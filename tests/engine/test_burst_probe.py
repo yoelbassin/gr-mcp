@@ -9,13 +9,13 @@ from pathlib import Path
 import numpy as np
 
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
-from marconi.engine.bitfile import write_bits
-from marconi.engine.compiler import compile_modem
-from marconi.engine.descriptor import Descriptor
-from marconi.engine.levels import Level
-from marconi.engine.models import ModemSpec, ModemStep
-from marconi.engine.params import ParamValue
-from marconi.engine.stages import stage_registry
+from marconi.engine.compile.compiler import compile_modem
+from marconi.engine.io.bitfile import write_bits
+from marconi.engine.stages.registry import stage_registry
+from marconi.engine.types.descriptor import Descriptor
+from marconi.engine.types.levels import Level
+from marconi.engine.types.models import ModemSpec, ModemStep
+from marconi.engine.types.params import ParamValue
 
 IQ = Descriptor(Level.IQ, "c")
 _P: dict[str, ParamValue] = {

@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from marconi.engine.models import Bitstream, CaptureRef, SoftBitstream
+from marconi.engine.types.models import Bitstream, CaptureRef, SoftBitstream
 
 
 def test_capture_duration() -> None:

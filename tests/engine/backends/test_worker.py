@@ -17,7 +17,7 @@ from marconi.engine.backends.gnuradio.runner import (
     _run_in_subprocess,
     ensure_worker_warm,
 )
-from marconi.engine.ir import GrBlock, GrConnection, GrPipeline
+from marconi.engine.compile.ir import GrBlock, GrConnection, GrPipeline
 
 
 def _passthrough(src: Path, dst: Path) -> GrPipeline:

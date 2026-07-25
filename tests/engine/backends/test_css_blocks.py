@@ -22,11 +22,11 @@ import pytest
 from engine._dsp import aligned_ber, read_bits, write_bits
 
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
-from marconi.engine.compile_context import CompileContext
-from marconi.engine.descriptor import Descriptor
-from marconi.engine.ir import GrBlock, GrConnection, GrPipeline
-from marconi.engine.levels import Level
+from marconi.engine.compile.compile_context import CompileContext
+from marconi.engine.compile.ir import GrBlock, GrConnection, GrPipeline
 from marconi.engine.modulation.css.stages import Dechirp
+from marconi.engine.types.descriptor import Descriptor
+from marconi.engine.types.levels import Level
 
 SF, OS, ZP = 7, 2, 4
 SAMPLE_NUM = OS * (1 << SF)  # 256

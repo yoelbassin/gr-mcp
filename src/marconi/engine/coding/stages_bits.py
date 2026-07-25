@@ -8,10 +8,10 @@ from pydantic_core import PydanticCustomError
 
 from marconi.engine.coding import ops_bits
 from marconi.engine.coding.builder import CodingBuilder
-from marconi.engine.descriptor import Carrier
-from marconi.engine.levels import Level
-from marconi.engine.params import StageParams
-from marconi.engine.stage import RxStage, Stage
+from marconi.engine.stages.base import RxStage, Stage
+from marconi.engine.types.descriptor import Carrier
+from marconi.engine.types.levels import Level
+from marconi.engine.types.params import StageParams
 
 
 class _SyncParams(StageParams):

@@ -6,7 +6,7 @@ import pytest
 
 from marconi.engine.backends.base import BackendError
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend
-from marconi.engine.ir import GrBlock, GrConnection, GrPipeline
+from marconi.engine.compile.ir import GrBlock, GrConnection, GrPipeline
 
 
 def _run_off_thread(tb: object, timeout: float = 15.0) -> None:

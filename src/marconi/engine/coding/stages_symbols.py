@@ -10,10 +10,10 @@ from pydantic_core import PydanticCustomError
 from marconi.engine.coding import ops_bits, ops_symbols
 from marconi.engine.coding.builder import CodingBuilder
 from marconi.engine.coding.stages_bits import _CodebookParams
-from marconi.engine.descriptor import Amplitude, Carrier, Descriptor
-from marconi.engine.levels import Level
-from marconi.engine.params import StageParams
-from marconi.engine.stage import RxStage, Stage
+from marconi.engine.stages.base import RxStage, Stage
+from marconi.engine.types.descriptor import Amplitude, Carrier, Descriptor
+from marconi.engine.types.levels import Level
+from marconi.engine.types.params import StageParams
 
 
 class _SyncSymbolsParams(StageParams):

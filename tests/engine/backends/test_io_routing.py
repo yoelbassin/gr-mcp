@@ -1,6 +1,6 @@
-from marconi.engine.compiler import _sink_kind, _source_kind
-from marconi.engine.descriptor import Carrier, Descriptor
-from marconi.engine.levels import Level
+from marconi.engine.compile.compiler import _sink_kind, _source_kind
+from marconi.engine.types.descriptor import Carrier, Descriptor
+from marconi.engine.types.levels import Level
 
 
 def test_complex_soft_symbols_route_to_iq_blocks() -> None:

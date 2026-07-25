@@ -5,11 +5,11 @@ import pytest
 from engine._dsp import aligned_ber, channel, read_bits, write_bits
 
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
-from marconi.engine.compiler import CompileError, compile_modem
-from marconi.engine.descriptor import Descriptor
-from marconi.engine.levels import Level
-from marconi.engine.models import ModemSpec, ModemStep
-from marconi.engine.params import ParamValue
+from marconi.engine.compile.compiler import CompileError, compile_modem
+from marconi.engine.types.descriptor import Descriptor
+from marconi.engine.types.levels import Level
+from marconi.engine.types.models import ModemSpec, ModemStep
+from marconi.engine.types.params import ParamValue
 
 IQ = Descriptor(Level.IQ, "c")
 _OS, _ZP, _SYM = 2, 4, 1.0
@@ -35,7 +35,7 @@ def _modem(sf: int, oversample: int = _OS) -> ModemSpec:
 
 
 def _compile(modem: ModemSpec, direction: str, rate: float, src: Path, snk: Path):
-    from marconi.engine.stages import stage_registry
+    from marconi.engine.stages.registry import stage_registry
 
     return compile_modem(
         modem,

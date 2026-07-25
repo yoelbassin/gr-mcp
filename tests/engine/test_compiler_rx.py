@@ -1,10 +1,10 @@
 import pytest
 from engine._fixtures import fixture_registry
 
-from marconi.engine.compiler import CompileError, compile_modem
-from marconi.engine.descriptor import Descriptor
-from marconi.engine.levels import Level
-from marconi.engine.models import ModemSpec, ModemStep
+from marconi.engine.compile.compiler import CompileError, compile_modem
+from marconi.engine.types.descriptor import Descriptor
+from marconi.engine.types.levels import Level
+from marconi.engine.types.models import ModemSpec, ModemStep
 
 IQ = Descriptor(Level.IQ, "c")
 
@@ -107,7 +107,7 @@ def test_bad_direction_raises_compile_error() -> None:
 
 
 def test_modemstep_satisfies_specstep_protocol() -> None:
-    from marconi.engine.stage import SpecStep
+    from marconi.engine.stages.base import SpecStep
 
     step: SpecStep = ModemStep(conv="fake_demod")
     assert step.conv == "fake_demod" and dict(step.params) == {}

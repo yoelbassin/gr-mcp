@@ -3,11 +3,11 @@ from engine._fixtures import fixture_registry, stub_factories
 
 from marconi.engine.backends.base import BackendError
 from marconi.engine.backends.stub import StubBackend
-from marconi.engine.compiler import compile_modem
-from marconi.engine.descriptor import Descriptor
-from marconi.engine.ir import GrBlock, GrConnection, GrPipeline
-from marconi.engine.levels import Level
-from marconi.engine.models import ModemSpec, ModemStep
+from marconi.engine.compile.compiler import compile_modem
+from marconi.engine.compile.ir import GrBlock, GrConnection, GrPipeline
+from marconi.engine.types.descriptor import Descriptor
+from marconi.engine.types.levels import Level
+from marconi.engine.types.models import ModemSpec, ModemStep
 
 IQ = Descriptor(Level.IQ, "c")
 

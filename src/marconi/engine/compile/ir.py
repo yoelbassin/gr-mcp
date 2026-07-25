@@ -4,7 +4,7 @@ from collections import Counter
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from marconi.engine.params import ParamValue
+from marconi.engine.types.params import ParamValue
 
 
 class GrBlock(BaseModel):

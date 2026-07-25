@@ -4,7 +4,7 @@ from marconi.engine.backends.base import BlockCensus
 from marconi.engine.coding.builder import CodingBuilder
 from marconi.engine.coding.carrier import CodingCarrier, Window
 from marconi.engine.coding.program import CodingProgram, run_coding
-from marconi.engine.levels import Level
+from marconi.engine.types.levels import Level
 
 
 def _drop_half(c: CodingCarrier) -> CodingCarrier:

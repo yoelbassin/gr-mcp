@@ -7,11 +7,11 @@ from typing import Any
 from pydantic import StrictInt, model_validator
 from pydantic_core import PydanticCustomError
 
-from marconi.engine.compile_context import CompileContext
-from marconi.engine.descriptor import Amplitude, Carrier, Descriptor
-from marconi.engine.levels import Level
-from marconi.engine.params import StageParams
-from marconi.engine.stage import DuplexStage
+from marconi.engine.compile.compile_context import CompileContext
+from marconi.engine.stages.base import DuplexStage
+from marconi.engine.types.descriptor import Amplitude, Carrier, Descriptor
+from marconi.engine.types.levels import Level
+from marconi.engine.types.params import StageParams
 
 _QAM_ORDERS = (16, 64)
 

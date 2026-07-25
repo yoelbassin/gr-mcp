@@ -22,12 +22,12 @@ from marconi.engine.backends.gnuradio.runner import (  # noqa: E402
     GnuRadioBackend,
     ensure_worker_warm,
 )
-from marconi.engine.compiler import CompileError, compile_modem  # noqa: E402
-from marconi.engine.descriptor import Amplitude, Carrier, Descriptor  # noqa: E402
-from marconi.engine.levels import Level  # noqa: E402
-from marconi.engine.models import ModemSpec, ModemStep  # noqa: E402
-from marconi.engine.params import ParamValue  # noqa: E402
-from marconi.engine.stages import stage_registry  # noqa: E402
+from marconi.engine.compile.compiler import CompileError, compile_modem  # noqa: E402
+from marconi.engine.stages.registry import stage_registry  # noqa: E402
+from marconi.engine.types.descriptor import Amplitude, Carrier, Descriptor  # noqa: E402
+from marconi.engine.types.levels import Level  # noqa: E402
+from marconi.engine.types.models import ModemSpec, ModemStep  # noqa: E402
+from marconi.engine.types.params import ParamValue  # noqa: E402
 
 IQ = Descriptor(Level.IQ, "c")
 SYM_C = Descriptor(Level.SYMBOLS, "c", carrier=Carrier.SOFT)

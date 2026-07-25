@@ -26,7 +26,7 @@ from marconi.engine.backends.gnuradio.embedded.preamble import (
 )
 from marconi.engine.backends.gnuradio.embedded.probe import make_burst_probe
 from marconi.engine.backends.gnuradio.embedded.trellis_fec import make_trellis_viterbi
-from marconi.engine.params import ParamValue
+from marconi.engine.types.params import ParamValue
 
 Params = dict[str, ParamValue]
 Factory = Callable[[Params], Any]

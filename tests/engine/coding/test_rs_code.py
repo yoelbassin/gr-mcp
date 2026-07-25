@@ -13,7 +13,7 @@ from pydantic import ValidationError
 from marconi.engine.coding.carrier import CodingCarrier, Window
 from marconi.engine.coding.ops_bits import rs_code_rx
 from marconi.engine.coding.stages_bits import RsCode
-from marconi.engine.stages import stage_registry
+from marconi.engine.stages.registry import stage_registry
 
 RS15: dict[str, int] = {
     "symbol_bits": 4,

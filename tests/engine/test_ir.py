@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from marconi.engine.ir import GrBlock, GrConnection, GrPipeline
+from marconi.engine.compile.ir import GrBlock, GrConnection, GrPipeline
 
 
 def test_pipeline_round_trips_through_json() -> None:

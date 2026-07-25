@@ -13,7 +13,7 @@ from helpers.crc import crc_value
 
 from marconi.engine.coding.carrier import CodingCarrier
 from marconi.engine.coding.ops_bits import block_code_rx, permute_rx
-from marconi.engine.models import ModemStep
+from marconi.engine.types.models import ModemStep
 
 # fmt: off
 DEINTERLEAVE = [

@@ -5,17 +5,17 @@ from typing import Any
 import pytest
 from pydantic import StrictInt
 
-from marconi.engine.descriptor import Carrier, Descriptor
-from marconi.engine.levels import Level
-from marconi.engine.models import ValidationIssue
-from marconi.engine.params import StageParams
-from marconi.engine.stage import (
+from marconi.engine.stages.base import (
     DuplexStage,
     RxStage,
     Stage,
     StageDirectionError,
     validate_path,
 )
+from marconi.engine.types.descriptor import Carrier, Descriptor
+from marconi.engine.types.levels import Level
+from marconi.engine.types.models import ValidationIssue
+from marconi.engine.types.params import StageParams
 
 
 class _FakeBuilder:

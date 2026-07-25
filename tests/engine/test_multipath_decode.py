@@ -23,12 +23,12 @@ import numpy as np
 from engine._dsp import channel, read_complex, resolved_ser, tx_sym_indices, write_bits
 
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
-from marconi.engine.compiler import compile_modem
-from marconi.engine.descriptor import Amplitude, Descriptor
-from marconi.engine.ir import GrPipeline
-from marconi.engine.levels import Level
-from marconi.engine.models import ModemSpec, ModemStep
-from marconi.engine.stages import stage_registry
+from marconi.engine.compile.compiler import compile_modem
+from marconi.engine.compile.ir import GrPipeline
+from marconi.engine.stages.registry import stage_registry
+from marconi.engine.types.descriptor import Amplitude, Descriptor
+from marconi.engine.types.levels import Level
+from marconi.engine.types.models import ModemSpec, ModemStep
 
 IQ = Descriptor(Level.IQ, "c")
 IQ_RMS = Descriptor(Level.IQ, "c", amplitude=Amplitude.RMS_UNITY)

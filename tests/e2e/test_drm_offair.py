@@ -23,11 +23,11 @@ from e2e import _drm
 from helpers import framing
 
 from marconi.engine.backends.gnuradio.runner import ensure_worker_warm
-from marconi.engine.bitfile import read_bits
-from marconi.engine.descriptor import Descriptor
-from marconi.engine.levels import Level
-from marconi.engine.models import ModemSpec
+from marconi.engine.io.bitfile import read_bits
 from marconi.engine.run import run_rx
+from marconi.engine.types.descriptor import Descriptor
+from marconi.engine.types.levels import Level
+from marconi.engine.types.models import ModemSpec
 
 IQ = Descriptor(Level.IQ, "c")
 _SLICE = (

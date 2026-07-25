@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 
-from marconi.engine.levels import Level
+from marconi.engine.types.levels import Level
 
 
 class Layout(str, Enum):

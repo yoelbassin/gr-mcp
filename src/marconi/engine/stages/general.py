@@ -3,11 +3,11 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from marconi.engine.compile_context import CompileContext
-from marconi.engine.descriptor import Carrier, Descriptor
-from marconi.engine.levels import Level
-from marconi.engine.params import StageParams
-from marconi.engine.stage import DuplexStage
+from marconi.engine.compile.compile_context import CompileContext
+from marconi.engine.stages.base import DuplexStage
+from marconi.engine.types.descriptor import Carrier, Descriptor
+from marconi.engine.types.levels import Level
+from marconi.engine.types.params import StageParams
 
 
 class _SliceParams(StageParams):

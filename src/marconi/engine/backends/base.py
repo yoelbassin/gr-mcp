@@ -5,7 +5,7 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-from marconi.engine.ir import GrPipeline
+from marconi.engine.compile.ir import GrPipeline
 from marconi.errors import register_error
 
 

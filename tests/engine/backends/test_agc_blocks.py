@@ -5,7 +5,7 @@ import pytest
 
 from marconi.engine.backends.gnuradio.blocks import GR_BLOCKS, _make_ctx
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
-from marconi.engine.ir import GrBlock, GrConnection, GrPipeline
+from marconi.engine.compile.ir import GrBlock, GrConnection, GrPipeline
 
 _KINDS = [
     ("feedforward_agc_cc", {"nsamples": 64, "reference": 1.0}),

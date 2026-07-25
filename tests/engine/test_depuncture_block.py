@@ -2,12 +2,12 @@ import numpy as np
 import pytest
 
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
-from marconi.engine.bitfile import read_llrs
-from marconi.engine.compiler import CompileError, compile_modem
-from marconi.engine.descriptor import Carrier, Descriptor
-from marconi.engine.levels import Level
-from marconi.engine.models import ModemSpec, ModemStep
-from marconi.engine.stages import stage_registry
+from marconi.engine.compile.compiler import CompileError, compile_modem
+from marconi.engine.io.bitfile import read_llrs
+from marconi.engine.stages.registry import stage_registry
+from marconi.engine.types.descriptor import Carrier, Descriptor
+from marconi.engine.types.levels import Level
+from marconi.engine.types.models import ModemSpec, ModemStep
 
 
 def test_depuncture_scatters_per_mask(tmp_path):

@@ -4,7 +4,13 @@ from pathlib import Path
 
 import numpy as np
 
-from marconi.engine.bitfile import harden, read_bits, read_llrs, write_bits, write_llrs
+from marconi.engine.io.bitfile import (
+    harden,
+    read_bits,
+    read_llrs,
+    write_bits,
+    write_llrs,
+)
 
 
 def test_bits_roundtrip(tmp_path: Path) -> None:

@@ -1,5 +1,5 @@
-from marconi.engine.descriptor import Carrier, Descriptor, Layout
-from marconi.engine.levels import Level
+from marconi.engine.types.descriptor import Carrier, Descriptor, Layout
+from marconi.engine.types.levels import Level
 
 
 def test_defaults_are_stream_and_hard() -> None:

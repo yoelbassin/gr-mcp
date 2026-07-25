@@ -21,7 +21,7 @@ from marconi.engine.coding.stages_bits import (
     Realign,
     SyncWord,
 )
-from marconi.engine.stage import StageDirectionError
+from marconi.engine.stages.base import StageDirectionError
 
 
 def test_sync_word_seeds_window_past_each_match() -> None:

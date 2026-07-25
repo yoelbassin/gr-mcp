@@ -1,7 +1,7 @@
 import pytest
 from pydantic import StrictInt, ValidationError
 
-from marconi.engine.params import StageParams
+from marconi.engine.types.params import StageParams
 
 
 class _Demo(StageParams):

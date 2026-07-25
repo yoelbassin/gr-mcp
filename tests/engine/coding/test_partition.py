@@ -1,11 +1,15 @@
 import pytest
 
-from marconi.engine.compiler import CompileError, compile_modem, compile_pipeline
-from marconi.engine.descriptor import Carrier, Descriptor
-from marconi.engine.levels import Level
-from marconi.engine.models import ModemSpec, ModemStep
-from marconi.engine.params import ParamValue
-from marconi.engine.stages import stage_registry
+from marconi.engine.compile.compiler import (
+    CompileError,
+    compile_modem,
+    compile_pipeline,
+)
+from marconi.engine.stages.registry import stage_registry
+from marconi.engine.types.descriptor import Carrier, Descriptor
+from marconi.engine.types.levels import Level
+from marconi.engine.types.models import ModemSpec, ModemStep
+from marconi.engine.types.params import ParamValue
 
 IQ = Descriptor(Level.IQ, "c")
 SOFT_BITS = Descriptor(Level.BITS, "b", carrier=Carrier.HARD)

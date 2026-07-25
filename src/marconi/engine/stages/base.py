@@ -6,10 +6,10 @@ from typing import Any, Generic, Protocol, TypeVar
 
 from pydantic import BaseModel, ValidationError
 
-from marconi.engine.descriptor import Amplitude, Carrier, Descriptor
-from marconi.engine.levels import Level
-from marconi.engine.models import ValidationIssue
-from marconi.engine.params import StageParams
+from marconi.engine.types.descriptor import Amplitude, Carrier, Descriptor
+from marconi.engine.types.levels import Level
+from marconi.engine.types.models import ValidationIssue
+from marconi.engine.types.params import StageParams
 from marconi.errors import register_error
 
 B = TypeVar("B")

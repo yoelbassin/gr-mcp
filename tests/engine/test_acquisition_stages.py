@@ -1,14 +1,14 @@
 import numpy as np
 import pytest
 
-from marconi.engine.compile_context import CompileContext
-from marconi.engine.compiler import CompileError, compile_modem
-from marconi.engine.descriptor import Amplitude, Carrier, Descriptor
-from marconi.engine.levels import Level
-from marconi.engine.models import ModemSpec, ModemStep
-from marconi.engine.stage import validate_params
-from marconi.engine.stages import stage_registry
+from marconi.engine.compile.compile_context import CompileContext
+from marconi.engine.compile.compiler import CompileError, compile_modem
 from marconi.engine.stages.acquisition import PreambleSync
+from marconi.engine.stages.base import validate_params
+from marconi.engine.stages.registry import stage_registry
+from marconi.engine.types.descriptor import Amplitude, Carrier, Descriptor
+from marconi.engine.types.levels import Level
+from marconi.engine.types.models import ModemSpec, ModemStep
 
 _PRE = np.exp(1j * np.linspace(-3.0, 3.0, 64))
 _P = {

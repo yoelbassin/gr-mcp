@@ -1,11 +1,11 @@
 import numpy as np
 
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
-from marconi.engine.compiler import compile_modem
-from marconi.engine.descriptor import Descriptor
-from marconi.engine.levels import Level
-from marconi.engine.models import ModemSpec, ModemStep
-from marconi.engine.stages import stage_registry
+from marconi.engine.compile.compiler import compile_modem
+from marconi.engine.stages.registry import stage_registry
+from marconi.engine.types.descriptor import Descriptor
+from marconi.engine.types.levels import Level
+from marconi.engine.types.models import ModemSpec, ModemStep
 
 FFT, CP, SYM, NULL, NC = 16, 4, 20, 24, 4
 ACTIVE = [1, 2, 14, 15]

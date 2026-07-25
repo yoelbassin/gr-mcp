@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from marconi.engine.stage import validate_params
+from marconi.engine.stages.base import validate_params
 
 
 def test_clock_correct_rejects_pole_ppm() -> None:

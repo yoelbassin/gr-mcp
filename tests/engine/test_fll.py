@@ -25,11 +25,11 @@ import pytest
 from engine._dsp import channel, read_complex, resolved_ser, tx_sym_indices, write_bits
 
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
-from marconi.engine.compiler import compile_modem
-from marconi.engine.descriptor import Descriptor
-from marconi.engine.levels import Level
-from marconi.engine.models import ModemSpec, ModemStep
-from marconi.engine.stages import stage_registry
+from marconi.engine.compile.compiler import compile_modem
+from marconi.engine.stages.registry import stage_registry
+from marconi.engine.types.descriptor import Descriptor
+from marconi.engine.types.levels import Level
+from marconi.engine.types.models import ModemSpec, ModemStep
 
 IQ = Descriptor(Level.IQ, "c")
 _SR, _SYM, _ORDER, _NBITS = 8.0, 1.0, 4, 8192
@@ -113,7 +113,7 @@ def test_fll_is_transparent_when_there_is_no_offset(tmp_path: Path) -> None:
 
 def test_fll_preserves_the_amplitude_claim() -> None:
     """Rotation only, so an agc upstream still satisfies a demod's contract."""
-    from marconi.engine.descriptor import Amplitude
+    from marconi.engine.types.descriptor import Amplitude
 
     stage = stage_registry()["fll"]
     normalized = Descriptor(Level.IQ, "c", amplitude=Amplitude.RMS_UNITY)

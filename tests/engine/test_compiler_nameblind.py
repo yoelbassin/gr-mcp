@@ -3,11 +3,11 @@ from pathlib import Path
 
 from engine._fixtures import fixture_registry
 
-from marconi.engine.stages import stage_registry
+from marconi.engine.stages.registry import stage_registry
 
 COMPILER_FILES = [
-    Path("src/marconi/engine/compiler.py"),
-    Path("src/marconi/engine/compile_context.py"),
+    Path("src/marconi/engine/compile/compiler.py"),
+    Path("src/marconi/engine/compile/compile_context.py"),
 ]
 
 

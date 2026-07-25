@@ -3,14 +3,14 @@ from typing import Any
 
 import pytest
 
-from marconi.engine.compile_context import CompileContext
-from marconi.engine.compiler import CompileError, compile_modem
-from marconi.engine.descriptor import Amplitude, Descriptor
-from marconi.engine.levels import Level
-from marconi.engine.models import ModemSpec, ModemStep
-from marconi.engine.params import StageParams
-from marconi.engine.stage import DuplexStage, RxStage
-from marconi.engine.stages import stage_registry
+from marconi.engine.compile.compile_context import CompileContext
+from marconi.engine.compile.compiler import CompileError, compile_modem
+from marconi.engine.stages.base import DuplexStage, RxStage
+from marconi.engine.stages.registry import stage_registry
+from marconi.engine.types.descriptor import Amplitude, Descriptor
+from marconi.engine.types.levels import Level
+from marconi.engine.types.models import ModemSpec, ModemStep
+from marconi.engine.types.params import StageParams
 
 IQ = Descriptor(Level.IQ, "c")
 
