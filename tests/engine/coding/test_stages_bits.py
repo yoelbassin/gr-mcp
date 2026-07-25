@@ -40,7 +40,12 @@ def test_block_code_window_scope_decodes_per_window_stride() -> None:
     bits = np.concatenate([word, bad])
     c = CodingCarrier(bits=bits, windows=[Window(0, 0), Window(7, 7)])
     out = ops_bits.block_code_rx(
-        c, code_bits=7, data_bits=4, parity_masks=masks, correct=True, emit="data"
+        c,
+        code_bits=7,
+        data_bits=4,
+        parity_masks=masks,
+        correct_single=True,
+        emit="data",
     )
     assert out.bits.tolist() == [1, 0, 1, 1, 1, 0, 1, 1]
     assert [w.start for w in _wins(out)] == [0, 4]
@@ -307,7 +312,7 @@ def test_block_code_rx_matches_scalar_reference() -> None:
             code_bits=code_bits,
             data_bits=data_bits,
             parity_masks=masks,
-            correct=correct,
+            correct_single=correct,
         )
         assert out.bits.tolist() == _scalar_reference(
             bits, code_bits, data_bits, masks, correct
@@ -324,7 +329,7 @@ def test_block_code_seeded_decodes_within_window() -> None:
         code_bits=3,
         data_bits=2,
         parity_masks=[0b11],
-        correct=False,
+        correct_single=False,
         emit="data",
     )
     assert out.bits.tolist() == [1, 0, 0, 1]
@@ -347,7 +352,7 @@ def _roundtrip(code_bits: int, data_bits: int, masks: list[int]) -> None:
         code_bits=code_bits,
         data_bits=data_bits,
         parity_masks=masks,
-        correct=True,
+        correct_single=True,
         emit="codeword",
     ).bits.reshape(-1, code_bits)
     for x in range(1 << code_bits):
@@ -368,14 +373,14 @@ def test_data_mode_unchanged() -> None:
         code_bits=7,
         data_bits=4,
         parity_masks=[0b1011, 0b1101, 0b1110],
-        correct=True,
+        correct_single=True,
     ).bits
     b = ops_bits.block_code_rx(
         CodingCarrier(bits=flat),
         code_bits=7,
         data_bits=4,
         parity_masks=[0b1011, 0b1101, 0b1110],
-        correct=True,
+        correct_single=True,
         emit="data",
     ).bits
     assert np.array_equal(a, b)
@@ -389,7 +394,7 @@ def test_block_code_stage_emits_full_codeword() -> None:
             "code_bits": 7,
             "data_bits": 4,
             "parity_masks": [0b1011, 0b1101, 0b1110],
-            "correct": True,
+            "correct_single": True,
             "emit": "codeword",
         },
     )
@@ -527,3 +532,32 @@ def test_descramble_restarts_sequence_at_each_window_cursor() -> None:
     assert np.array_equal(out.bits, expected)
     whole_stream = np.bitwise_xor(bits, np.resize(seq, bits.size))
     assert not np.array_equal(out.bits, whole_stream)
+
+
+def test_correct_single_rejects_ambiguous_syndromes() -> None:
+    with pytest.raises(ValidationError, match="single-error"):
+        BlockCode._Params(
+            code_bits=4,
+            data_bits=2,
+            parity_masks=[0b0011, 0b0011],
+            correct_single=True,
+        )
+
+
+def test_correct_single_accepts_bch_31_21() -> None:
+    masks = [
+        0x157929,
+        0x1F8B7B,
+        0x0A6FDF,
+        0x14DFBE,
+        0x1CC655,
+        0x0CF583,
+        0x19EB06,
+        0x06AF25,
+        0x0D5E4A,
+        0x1ABC94,
+    ]
+    p = BlockCode._Params(
+        code_bits=31, data_bits=21, parity_masks=masks, correct_single=True
+    )
+    assert p.correct_single is True

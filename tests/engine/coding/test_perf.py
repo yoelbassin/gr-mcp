@@ -103,7 +103,7 @@ def test_block_code_correction_makes_input_size_independent_numpy_calls(
         code_bits=8,
         data_bits=4,
         parity_masks=masks,
-        correct=True,
+        correct_single=True,
         emit="data",
     )
     small = counter.calls
@@ -115,7 +115,7 @@ def test_block_code_correction_makes_input_size_independent_numpy_calls(
         code_bits=8,
         data_bits=4,
         parity_masks=masks,
-        correct=True,
+        correct_single=True,
         emit="data",
     )
     large = counter.calls

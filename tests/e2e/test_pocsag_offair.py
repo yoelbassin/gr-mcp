@@ -102,7 +102,7 @@ def _pocsag_modem() -> ModemSpec:
                     "code_bits": CODE_BITS,
                     "data_bits": DATA_BITS,
                     "parity_masks": cast("list[float | int]", PARITY_MASKS),
-                    "correct": True,
+                    "correct_single": True,
                     "emit": "data",
                 },
             ),

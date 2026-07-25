@@ -94,7 +94,7 @@ def _block_code(
         code_bits=code_bits,
         data_bits=data_bits,
         parity_masks=masks,
-        correct=True,
+        correct_single=True,
         emit="codeword",
     ).bits
 
@@ -113,7 +113,7 @@ def _block_step(code_bits: int, data_bits: int, masks: list[int]) -> ModemStep:
             "code_bits": code_bits,
             "data_bits": data_bits,
             "parity_masks": cast("list[float | int]", masks),
-            "correct": True,
+            "correct_single": True,
             "emit": "codeword",
         },
     )

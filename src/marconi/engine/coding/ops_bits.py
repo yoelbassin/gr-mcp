@@ -151,7 +151,7 @@ def _block_decode(
     code_bits: int,
     data_bits: int,
     parity_masks: list[int],
-    correct: bool | None,
+    correct_single: bool | None,
     emit: str,
 ) -> np.ndarray:
     # Codeword basis is LSB-first: stream bit j of a stride is codeword bit j,
@@ -161,7 +161,9 @@ def _block_decode(
     # must reconcile the basis (supply masks LSB-first, or reverse each
     # stride).
     n_parity = code_bits - data_bits
-    do_correct = can_correct(n_parity, data_bits) if correct is None else correct
+    do_correct = (
+        can_correct(n_parity, data_bits) if correct_single is None else correct_single
+    )
     n_words = bits.size // code_bits
     words = bits[: n_words * code_bits].reshape(n_words, code_bits).copy()
     if do_correct and n_words and parity_masks:
@@ -192,13 +194,13 @@ def block_code_rx(
     code_bits: int,
     data_bits: int,
     parity_masks: list[int],
-    correct: bool | None = None,
+    correct_single: bool | None = None,
     emit: str = "data",
 ) -> CodingCarrier:
     return _decode_scoped(
         c,
         lambda bits: _block_decode(
-            bits, code_bits, data_bits, parity_masks, correct, emit
+            bits, code_bits, data_bits, parity_masks, correct_single, emit
         ),
     )
 
