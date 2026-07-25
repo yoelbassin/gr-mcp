@@ -143,6 +143,9 @@ def _validate_descriptors(
                     f"but the pipeline delivers {rates[i]:g} at that boundary; "
                     f"check resample ratios, oversample, and symbol_rate"
                 )
+        problem = stage.validate_input(in_desc, step.params)
+        if problem is not None:
+            raise CompileError(f"stage '{step.conv}': {problem}")
 
 
 def _validate_probe_marks(

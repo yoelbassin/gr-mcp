@@ -119,3 +119,79 @@ def test_f_lane_stays_unpinned() -> None:
     _compile(
         [_step("fsk", deviation=1.0), _step("mfsk_soft_demap", levels=[-1.0, 1.0])]
     )
+
+
+_QPSK_PRE: dict[str, ParamValue] = {
+    "preamble_i": [0.7071, -0.7071, 0.7071, -0.7071],
+    "preamble_q": [0.7071, 0.7071, -0.7071, -0.7071],
+}
+_8PSK_PRE: dict[str, ParamValue] = {
+    "preamble_i": [1.0, 0.7071, 0.0, -0.7071, -1.0, -0.7071, 0.0, 0.7071],
+    "preamble_q": [0.0, 0.7071, 1.0, 0.7071, 0.0, -0.7071, -1.0, -0.7071],
+}
+
+
+def _psk_path(order: int, pre: dict[str, ParamValue]) -> list[ModemStep]:
+    return [
+        _AGC,
+        _step("psk_demod", order=order),
+        ModemStep(conv="preamble_sync", params=pre),
+        _step("psk_demap", order=order),
+    ]
+
+
+def test_on_grid_preamble_compiles() -> None:
+    _compile(_psk_path(4, _QPSK_PRE))
+
+
+def test_rounded_8psk_preamble_compiles() -> None:
+    _compile(_psk_path(8, _8PSK_PRE))
+
+
+def test_order_propagates_through_preamble_sync() -> None:
+    path = _psk_path(4, _QPSK_PRE)
+    path[3] = _step("psk_demap", order=8)
+    with pytest.raises(CompileError) as exc:
+        _compile(path)
+    assert "order-8" in str(exc.value) and "order-4" in str(exc.value)
+
+
+def test_off_grid_preamble_fails() -> None:
+    bad: dict[str, ParamValue] = {
+        "preamble_i": [0.7071, 0.5736],
+        "preamble_q": [0.7071, 0.8192],
+    }
+    with pytest.raises(CompileError) as exc:
+        _compile(_psk_path(4, bad))
+    assert "phase grid" in str(exc.value)
+
+
+def test_off_circle_preamble_fails() -> None:
+    bad: dict[str, ParamValue] = {
+        "preamble_i": [0.7071, 1.5],
+        "preamble_q": [0.7071, 1.5],
+    }
+    with pytest.raises(CompileError) as exc:
+        _compile(_psk_path(4, bad))
+    assert "radius" in str(exc.value)
+
+
+def test_zero_preamble_point_fails() -> None:
+    bad: dict[str, ParamValue] = {
+        "preamble_i": [1.0, 0.0],
+        "preamble_q": [0.0, 0.0],
+    }
+    with pytest.raises(CompileError) as exc:
+        _compile(_psk_path(2, bad))
+    assert "zero" in str(exc.value)
+
+
+def test_unpinned_boundary_skips_preamble_check() -> None:
+    off_grid: dict[str, ParamValue] = {
+        "preamble_i": [0.7071, 0.5736],
+        "preamble_q": [0.7071, 0.8192],
+    }
+    _compile(
+        [ModemStep(conv="preamble_sync", params=off_grid), _step("psk_demap", order=8)],
+        start=SYM_C,
+    )

@@ -117,6 +117,13 @@ class Stage(ABC, Generic[B]):
         instead of emitting wrong-width garbage bits."""
         return None
 
+    def validate_input(
+        self, in_desc: Descriptor, params: Mapping[str, Any]
+    ) -> str | None:
+        """A stage-specific input check the declarative attributes cannot
+        express; a returned message fails the compile."""
+        return None
+
 
 class RxStage(Stage[B]):
     directions: frozenset[str] = frozenset({"rx"})

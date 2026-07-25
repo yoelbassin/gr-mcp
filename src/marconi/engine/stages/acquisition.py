@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import cmath
+import math
 from collections.abc import Mapping
 from typing import Any
 
@@ -8,9 +10,12 @@ from pydantic_core import PydanticCustomError
 
 from marconi.engine.compile.compile_context import CompileContext
 from marconi.engine.stages.base import DuplexStage, RxStage, Stage
-from marconi.engine.types.descriptor import Carrier
+from marconi.engine.types.descriptor import Carrier, Descriptor
 from marconi.engine.types.levels import Level
 from marconi.engine.types.params import StageParams
+
+_PREAMBLE_MODULUS_RTOL = 1e-3
+_PREAMBLE_GRID_ATOL = 0.05
 
 
 class _PreambleSyncParams(StageParams):
@@ -72,6 +77,37 @@ class PreambleSync(DuplexStage[CompileContext]):
             preamble_q=p.preamble_q,
             pad_symbols=p.pad_symbols,
         )
+
+    def validate_input(
+        self, in_desc: Descriptor, params: Mapping[str, Any]
+    ) -> str | None:
+        if in_desc.order is None:
+            return None
+        p = _PreambleSyncParams.model_validate(dict(params))
+        m = in_desc.order
+        points = [complex(i, q) for i, q in zip(p.preamble_i, p.preamble_q)]
+        radii = [abs(z) for z in points]
+        if min(radii) == 0.0:
+            return (
+                "preamble contains a zero point; constellation points "
+                "have nonzero modulus"
+            )
+        spread = (max(radii) - min(radii)) / max(radii)
+        if spread > _PREAMBLE_MODULUS_RTOL:
+            return (
+                f"preamble moduli spread {spread:.3g} exceeds "
+                f"{_PREAMBLE_MODULUS_RTOL}; an order-{m} constellation has "
+                "one radius"
+            )
+        ref = points[0].conjugate()
+        for k, z in enumerate(points[1:], start=1):
+            err = math.remainder(m * cmath.phase(z * ref), 2.0 * math.pi)
+            if abs(err) > _PREAMBLE_GRID_ATOL:
+                return (
+                    f"preamble point {k} sits {abs(err):.3g} rad (x{m}) off "
+                    f"the order-{m} phase grid relative to point 0"
+                )
+        return None
 
 
 class _FllParams(StageParams):

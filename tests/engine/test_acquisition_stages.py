@@ -9,6 +9,7 @@ from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Amplitude, Carrier, Descriptor
 from marconi.engine.types.levels import Level
 from marconi.engine.types.models import ModemSpec, ModemStep
+from marconi.engine.types.params import ParamValue
 
 _PRE = np.exp(1j * np.linspace(-3.0, 3.0, 64))
 _P = {
@@ -76,9 +77,15 @@ def test_float_symbols_into_preamble_sync_rejected_at_compile() -> None:
 def test_soft_complex_symbols_into_preamble_sync_compiles() -> None:
     """The valid composition still compiles: psk_demod emits complex soft
     symbols, exactly what preamble_sync accepts."""
+    qpsk_pre: dict[str, ParamValue] = {
+        "preamble_i": [0.7071, -0.7071, 0.7071, -0.7071],
+        "preamble_q": [0.7071, 0.7071, -0.7071, -0.7071],
+        "pad_symbols": 192,
+        "threshold": 0.9,
+    }
     pipe = _compile_rx(
         ModemStep(conv="psk_demod", params={"order": 4}),
-        ModemStep(conv="preamble_sync", params=_P),
+        ModemStep(conv="preamble_sync", params=qpsk_pre),
     )
     assert any(b.kind == "corr_est_cc" for b in pipe.blocks)
 
