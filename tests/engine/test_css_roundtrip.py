@@ -15,6 +15,14 @@ IQ = Descriptor(Level.IQ, "c")
 _OS, _ZP, _SYM = 2, 4, 1.0
 
 
+def _dechirp_of(p: dict[str, ParamValue]) -> dict[str, ParamValue]:
+    return {k: p[k] for k in ("sf", "oversample", "zero_pad")}
+
+
+def _demap_of(p: dict[str, ParamValue]) -> dict[str, ParamValue]:
+    return {"sf": p["sf"]}
+
+
 def _modem(sf: int, oversample: int = _OS) -> ModemSpec:
     p: dict[str, ParamValue] = {
         "sf": sf,
@@ -28,8 +36,8 @@ def _modem(sf: int, oversample: int = _OS) -> ModemSpec:
         symbol_rate=_SYM,
         path=[
             ModemStep(conv="chirp_sync", params=p),
-            ModemStep(conv="dechirp", params=p),
-            ModemStep(conv="css_demap", params=p),
+            ModemStep(conv="dechirp", params=_dechirp_of(p)),
+            ModemStep(conv="css_demap", params=_demap_of(p)),
         ],
     )
 
@@ -114,8 +122,8 @@ def test_dechirp_rate_check_tolerates_clock_correct_ppm(tmp_path: Path) -> None:
         path=[
             ModemStep(conv="clock_correct", params={"ppm": 50.0}),
             ModemStep(conv="chirp_sync", params=p),
-            ModemStep(conv="dechirp", params=p),
-            ModemStep(conv="css_demap", params=p),
+            ModemStep(conv="dechirp", params=_dechirp_of(p)),
+            ModemStep(conv="css_demap", params=_demap_of(p)),
         ],
     )
     _compile(m, "rx", 256.0, tmp_path / "i", tmp_path / "o")  # within tolerance

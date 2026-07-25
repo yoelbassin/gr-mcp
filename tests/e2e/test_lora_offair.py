@@ -118,14 +118,7 @@ def _phy_modem() -> ModemSpec:
             ),
             ModemStep(
                 conv="dechirp",
-                params={
-                    "sf": 11,
-                    "oversample": 2,
-                    "zero_pad": 10,
-                    "preamble_len": 8,
-                    "sfd_symbols": 2.25,
-                    "sync_symbols": 2,
-                },
+                params={"sf": 11, "oversample": 2, "zero_pad": 10},
             ),
             ModemStep(conv="burst_probe", params={}),
         ],

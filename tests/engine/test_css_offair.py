@@ -193,7 +193,10 @@ def test_css_offair_flinders_sf11_downchirp(tmp_path: Path) -> None:
             ModemStep(conv="channelize", params=chan_p),
             ModemStep(conv="resample", params=rs_p),
             ModemStep(conv="chirp_sync", params=p),
-            ModemStep(conv="dechirp", params=p),
+            ModemStep(
+                conv="dechirp",
+                params={k: p[k] for k in ("sf", "oversample", "zero_pad")},
+            ),
         ],
     )
     snk = tmp_path / "flinders_syms.s16"
@@ -250,7 +253,10 @@ def test_css_offair_lora_sf7_upchirp(tmp_path: Path) -> None:
         path=[
             ModemStep(conv="channelize", params=chan_p),
             ModemStep(conv="chirp_sync", params=p),
-            ModemStep(conv="dechirp", params=p),
+            ModemStep(
+                conv="dechirp",
+                params={k: p[k] for k in ("sf", "oversample", "zero_pad")},
+            ),
         ],
     )
     snk = tmp_path / "lora_sf7_syms.s16"
@@ -288,7 +294,10 @@ def test_css_offair_iq2_sf11(tmp_path: Path) -> None:
         path=[
             ModemStep(conv="resample", params={"interpolation": 2, "decimation": 8}),
             ModemStep(conv="chirp_sync", params=p),
-            ModemStep(conv="dechirp", params=p),
+            ModemStep(
+                conv="dechirp",
+                params={k: p[k] for k in ("sf", "oversample", "zero_pad")},
+            ),
         ],
     )
     snk = tmp_path / "iq2.s16"
@@ -328,7 +337,10 @@ def test_css_offair_iq12_sf11_sfo(tmp_path: Path) -> None:
             path.append(ModemStep(conv="clock_correct", params={"ppm": ppm}))
         path += [
             ModemStep(conv="chirp_sync", params=p),
-            ModemStep(conv="dechirp", params=p),
+            ModemStep(
+                conv="dechirp",
+                params={k: p[k] for k in ("sf", "oversample", "zero_pad")},
+            ),
         ]
         snk = tmp_path / name
         assert (

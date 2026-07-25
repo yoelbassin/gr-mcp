@@ -4,9 +4,8 @@ encoders that run the decoder's coding primitives in reverse."""
 from __future__ import annotations
 
 from engine._css_lora import HEADER, PARITY_MASKS
+from helpers import blockmath as coding
 from helpers.css_explicit import css_explicit_decode
-
-from marconi.engine.coding import primitives as coding
 
 # IQ_2 SF11/BW125/CR4-5/LDRO explicit-header frame — raw dechirp argmax bins
 # (8 header + 285 payload), known-good (V1 tests/phy/test_header_demux_stage.py).

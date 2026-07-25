@@ -1,6 +1,5 @@
 from engine._css_lora import PARITY_MASKS
-
-from marconi.engine.coding import primitives as coding
+from helpers import blockmath as coding
 
 # data_bits=4 (Hamming 4+cr,4) is LoRa's; supplied here, never in production.
 _DB = 4

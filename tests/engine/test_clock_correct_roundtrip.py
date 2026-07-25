@@ -26,6 +26,16 @@ def _p() -> dict[str, ParamValue]:
     }
 
 
+def _css_steps() -> list[ModemStep]:
+    return [
+        ModemStep(conv="chirp_sync", params=_p()),
+        ModemStep(
+            conv="dechirp", params={"sf": _SF, "oversample": _OS, "zero_pad": _ZP}
+        ),
+        ModemStep(conv="css_demap", params={"sf": _SF}),
+    ]
+
+
 def _compile(path, direction, rate, src, snk):
     from marconi.engine.stages.registry import stage_registry
 
@@ -56,11 +66,7 @@ def test_clock_correct_removes_sfo(ppm: float, tmp_path: Path) -> None:
         tmp_path / n for n in ("c.iq", "i.iq", "o0.bits", "o1.bits")
     )
 
-    tx = [
-        ModemStep(conv="chirp_sync", params=_p()),
-        ModemStep(conv="dechirp", params=_p()),
-        ModemStep(conv="css_demap", params=_p()),
-    ]
+    tx = _css_steps()
     assert be.run_pipeline(_compile(tx, "tx", rate, bp, clean)).status == "ok"
     channel(
         clean,
@@ -73,11 +79,7 @@ def test_clock_correct_removes_sfo(ppm: float, tmp_path: Path) -> None:
         seed=7,
     )
 
-    rx_no = [
-        ModemStep(conv="chirp_sync", params=_p()),
-        ModemStep(conv="dechirp", params=_p()),
-        ModemStep(conv="css_demap", params=_p()),
-    ]
+    rx_no = _css_steps()
     assert be.run_pipeline(_compile(rx_no, "rx", rate, imp, op_no)).status == "ok"
     assert (
         aligned_ber(read_bits(op_no), bits, max_shift=8 * _SF) > 0.0

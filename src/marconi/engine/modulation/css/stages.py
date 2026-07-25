@@ -16,6 +16,47 @@ _SF_MIN, _SF_MAX = 5, 14
 _OSR_MAX = 8
 
 
+def _check_sf(sf: int) -> None:
+    if not (_SF_MIN <= sf <= _SF_MAX):
+        raise PydanticCustomError(
+            "value_error",
+            "sf {sf} out of range [{lo}, {hi}]",
+            {"sf": sf, "lo": _SF_MIN, "hi": _SF_MAX, "field": "sf"},
+        )
+
+
+def _check_osr_pad(oversample: int, zero_pad: int) -> None:
+    if not (1 <= oversample <= _OSR_MAX):
+        raise PydanticCustomError(
+            "value_error",
+            "oversample {oversample} out of range [1, {hi}]",
+            {"oversample": oversample, "hi": _OSR_MAX, "field": "oversample"},
+        )
+    if zero_pad < 1:
+        raise PydanticCustomError("value_error", "zero_pad must be >= 1")
+
+
+class _CssSfParams(StageParams):
+    sf: StrictInt
+
+    @model_validator(mode="after")
+    def _ok(self) -> "_CssSfParams":
+        _check_sf(self.sf)
+        return self
+
+
+class _DechirpParams(StageParams):
+    sf: StrictInt
+    oversample: StrictInt
+    zero_pad: StrictInt
+
+    @model_validator(mode="after")
+    def _ok(self) -> "_DechirpParams":
+        _check_sf(self.sf)
+        _check_osr_pad(self.oversample, self.zero_pad)
+        return self
+
+
 class _CssParams(StageParams):
     sf: StrictInt
     oversample: StrictInt
@@ -26,20 +67,8 @@ class _CssParams(StageParams):
 
     @model_validator(mode="after")
     def _ok(self) -> "_CssParams":
-        if not (_SF_MIN <= self.sf <= _SF_MAX):
-            raise PydanticCustomError(
-                "value_error",
-                "sf {sf} out of range [{lo}, {hi}]",
-                {"sf": self.sf, "lo": _SF_MIN, "hi": _SF_MAX, "field": "sf"},
-            )
-        if not (1 <= self.oversample <= _OSR_MAX):
-            raise PydanticCustomError(
-                "value_error",
-                "oversample {oversample} out of range [1, {hi}]",
-                {"oversample": self.oversample, "hi": _OSR_MAX, "field": "oversample"},
-            )
-        if self.zero_pad < 1:
-            raise PydanticCustomError("value_error", "zero_pad must be >= 1")
+        _check_sf(self.sf)
+        _check_osr_pad(self.oversample, self.zero_pad)
         if self.preamble_len < 5:
             raise PydanticCustomError("value_error", "preamble_len must be >= 5")
         if self.sfd_symbols < 1.0:
@@ -100,10 +129,10 @@ class Dechirp(DuplexStage[CompileContext]):
     from_level = Level.IQ
     to_level = Level.SYMBOLS
     family = "css"
-    params_model = _CssParams
+    params_model = _DechirpParams
 
     def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
-        p = _CssParams.model_validate(dict(params))
+        p = _DechirpParams.model_validate(dict(params))
         n = 1 << p.sf
         sn = p.oversample * n
         bins = n * p.zero_pad
@@ -137,7 +166,7 @@ class Dechirp(DuplexStage[CompileContext]):
         b.chain("peak_decision", vlen=bins, divisor=p.zero_pad, modulo=n)
 
     def emit_tx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
-        p = _CssParams.model_validate(dict(params))
+        p = _DechirpParams.model_validate(dict(params))
         b.chain("chirp_mod", sf=p.sf, oversample=p.oversample)
 
     def out_descriptor(
@@ -150,7 +179,7 @@ class Dechirp(DuplexStage[CompileContext]):
     ) -> float | None:
         # the dechirp window is a fixed oversample*2^sf samples per symbol, so
         # the input must arrive at exactly that many samples per symbol.
-        p = _CssParams.model_validate(dict(params))
+        p = _DechirpParams.model_validate(dict(params))
         return p.oversample * (1 << p.sf) * symbol_rate
 
 
@@ -162,7 +191,7 @@ class CssDemap(DuplexStage[CompileContext]):
     from_level = Level.SYMBOLS
     to_level = Level.BITS
     family = "css"
-    params_model = _CssParams
+    params_model = _CssSfParams
     accepts_item_type = "s"
     accepts_carrier = Carrier.HARD
 

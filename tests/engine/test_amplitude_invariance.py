@@ -126,8 +126,11 @@ _RECIPES: dict[str, dict[str, object]] = {
         "agc": _agc(window_symbols=1.0),
         "path": [
             ModemStep(conv="chirp_sync", params=_CSS_PARAMS),
-            ModemStep(conv="dechirp", params=_CSS_PARAMS),
-            ModemStep(conv="css_demap", params=_CSS_PARAMS),
+            ModemStep(
+                conv="dechirp",
+                params={k: _CSS_PARAMS[k] for k in ("sf", "oversample", "zero_pad")},
+            ),
+            ModemStep(conv="css_demap", params={"sf": _CSS_PARAMS["sf"]}),
         ],
         "sample_rate": _CSS_RATE,
         "n_bits": _CSS_N_BITS,

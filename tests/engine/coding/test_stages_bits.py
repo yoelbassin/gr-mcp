@@ -2,16 +2,13 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+from helpers.blockmath import block_fec_decode, correct_codeword
 from pydantic import ValidationError
 
 from marconi.engine.coding import ops_bits
 from marconi.engine.coding.builder import CodingBuilder
 from marconi.engine.coding.carrier import CodingCarrier, Window
-from marconi.engine.coding.primitives import (
-    block_fec_decode,
-    can_correct,
-    correct_codeword,
-)
+from marconi.engine.coding.primitives import can_correct
 from marconi.engine.coding.stages_bits import (
     CODING_BITS_STAGES,
     BlockCode,

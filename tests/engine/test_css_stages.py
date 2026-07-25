@@ -84,14 +84,7 @@ def test_css_params_reject_sf_15() -> None:
     from marconi.engine.modulation.css.stages import Dechirp
 
     bad: list = []
-    complete = {
-        "sf": 15,
-        "oversample": 2,
-        "zero_pad": 4,
-        "preamble_len": 8,
-        "sfd_symbols": 2.25,
-        "sync_symbols": 2,
-    }
+    complete = {"sf": 15, "oversample": 2, "zero_pad": 4}
     validate_params("dechirp[0]", Dechirp().params_model, complete, bad)
     assert bad, "sf=15 should be rejected"
 
@@ -100,15 +93,7 @@ def test_css_params_accept_sf_11() -> None:
     from marconi.engine.modulation.css.stages import CssDemap
 
     ok: list = []
-    complete = {
-        "sf": 11,
-        "oversample": 2,
-        "zero_pad": 4,
-        "preamble_len": 8,
-        "sfd_symbols": 2.25,
-        "sync_symbols": 2,
-    }
-    validate_params("css_demap[0]", CssDemap().params_model, complete, ok)
+    validate_params("css_demap[0]", CssDemap().params_model, {"sf": 11}, ok)
     assert not ok, "sf=11 should be accepted"
 
 
@@ -132,14 +117,7 @@ def test_css_params_bound_oversample() -> None:
 
     for osr, expect_ok in ((0, False), (1, True), (8, True), (9, False)):
         issues: list = []
-        complete = {
-            "sf": 7,
-            "oversample": osr,
-            "zero_pad": 4,
-            "preamble_len": 8,
-            "sfd_symbols": 2.25,
-            "sync_symbols": 2,
-        }
+        complete = {"sf": 7, "oversample": osr, "zero_pad": 4}
         validate_params("dechirp[0]", Dechirp().params_model, complete, issues)
         assert (not issues) is expect_ok, f"oversample={osr}: {issues}"
 
@@ -214,14 +192,18 @@ def test_symbols_terminal_routing_smoke(tmp_path: Path) -> None:
         "sfd_symbols": 2.25,
         "sync_symbols": 2,
     }
+    dechirp_params: dict[str, ParamValue] = {
+        k: css_params[k] for k in ("sf", "oversample", "zero_pad")
+    }
+    demap_params: dict[str, ParamValue] = {"sf": css_params["sf"]}
 
     # --- TX: bits → IQ frame (via [chirp_sync, dechirp, css_demap]) ---
     tx_modem = ModemSpec(
         symbol_rate=SYMBOL_RATE,
         path=[
             ModemStep(conv="chirp_sync", params=css_params),
-            ModemStep(conv="dechirp", params=css_params),
-            ModemStep(conv="css_demap", params=css_params),
+            ModemStep(conv="dechirp", params=dechirp_params),
+            ModemStep(conv="css_demap", params=demap_params),
         ],
     )
     tx_pipe = compile_modem(
@@ -239,7 +221,7 @@ def test_symbols_terminal_routing_smoke(tmp_path: Path) -> None:
         symbol_rate=SYMBOL_RATE,
         path=[
             ModemStep(conv="chirp_sync", params=css_params),
-            ModemStep(conv="dechirp", params=css_params),
+            ModemStep(conv="dechirp", params=dechirp_params),
         ],
     )
     rx_pipe = compile_modem(

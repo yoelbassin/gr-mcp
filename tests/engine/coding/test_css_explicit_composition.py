@@ -27,10 +27,11 @@ from engine.coding._css_synth import assemble as _assemble
 from engine.coding._css_synth import encode_header as _encode_header
 from engine.coding._css_synth import encode_payload as _encode_payload
 from engine.coding._css_synth import run as _run
-from helpers import bitops, parse
+from helpers import bitops
+from helpers import blockmath as coding
+from helpers import parse
 
 from marconi.engine.coding import ops_bits
-from marconi.engine.coding import primitives as coding
 from marconi.engine.coding.carrier import CodingCarrier
 
 

@@ -6,8 +6,7 @@ from __future__ import annotations
 from itertools import permutations
 
 from engine._css_lora import PARITY_MASKS
-
-from marconi.engine.coding import primitives as coding
+from helpers import blockmath as coding
 
 # Binary-reflected Gray code, first 16 values as published (any standards text,
 # e.g. Knuth TAOCP 4A §7.2.1.1 / Wikipedia "Gray code" table).

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from marconi.engine.coding.primitives import block_fec_decode, correct_codeword
+from helpers.blockmath import block_fec_decode, correct_codeword
 
 ROW = [0b1011, 0b1101, 0b1110]  # 3 parity eqs over 4 data bits (caller data)
 

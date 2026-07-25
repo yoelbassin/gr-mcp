@@ -20,14 +20,7 @@ from marconi.engine.types.params import ParamValue
 
 MARKS = (3, 9)
 IQ = Descriptor(Level.IQ, "c")
-_DECHIRP: dict[str, ParamValue] = {
-    "sf": 11,
-    "oversample": 2,
-    "zero_pad": 4,
-    "preamble_len": 8,
-    "sfd_symbols": 2.25,
-    "sync_symbols": 2,
-}
+_DECHIRP: dict[str, ParamValue] = {"sf": 11, "oversample": 2, "zero_pad": 4}
 
 
 def _marked(windows: list[Window] | None = None) -> CodingCarrier:
@@ -76,7 +69,7 @@ def test_probe_marks_cannot_cross_a_rate_changing_gr_stage() -> None:
         path=[
             ModemStep(conv="dechirp", params=_DECHIRP),
             ModemStep(conv="burst_probe", params={}),
-            ModemStep(conv="css_demap", params=dict(_DECHIRP)),
+            ModemStep(conv="css_demap", params={"sf": _DECHIRP["sf"]}),
             ModemStep(conv="mark_frame", params={}),
         ],
     )

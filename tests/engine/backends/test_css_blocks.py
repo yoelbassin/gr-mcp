@@ -48,17 +48,7 @@ def _bits_to_bits_pipeline(
     ctx.chain("bits_file_source", path=str(bits_in))
     ctx.chain("css_map", sf=sf)
     ctx.chain("chirp_mod", sf=sf, oversample=os)
-    Dechirp().emit_rx(
-        ctx,
-        {
-            "sf": sf,
-            "oversample": os,
-            "zero_pad": zp,
-            "preamble_len": 8,
-            "sfd_symbols": 2.25,
-            "sync_symbols": 2,
-        },
-    )
+    Dechirp().emit_rx(ctx, {"sf": sf, "oversample": os, "zero_pad": zp})
     ctx.chain("css_demap", sf=sf)
     ctx.chain("bits_file_sink", path=str(bits_out))
     return ctx.build("css_roundtrip", rate)
@@ -183,17 +173,7 @@ def _full_chain_pipeline(
         sfd_symbols=2.25,
         sync_symbols=2,
     )
-    Dechirp().emit_rx(
-        ctx,
-        {
-            "sf": sf,
-            "oversample": os,
-            "zero_pad": zp,
-            "preamble_len": 8,
-            "sfd_symbols": 2.25,
-            "sync_symbols": 2,
-        },
-    )
+    Dechirp().emit_rx(ctx, {"sf": sf, "oversample": os, "zero_pad": zp})
     ctx.chain("css_demap", sf=sf)
     ctx.chain("bits_file_sink", path=str(bits_out))
     return ctx.build("css_full_chain", rate)

@@ -46,10 +46,15 @@ def _spec(*, probe: bool, sync: bool) -> ModemSpec:
     path = []
     if sync:
         path.append(ModemStep(conv="chirp_sync", params=_P))
-    path.append(ModemStep(conv="dechirp", params=_P))
+    path.append(
+        ModemStep(
+            conv="dechirp",
+            params={k: _P[k] for k in ("sf", "oversample", "zero_pad")},
+        )
+    )
     if probe:
         path.append(ModemStep(conv="burst_probe", params={}))
-    path.append(ModemStep(conv="css_demap", params=_P))
+    path.append(ModemStep(conv="css_demap", params={"sf": _P["sf"]}))
     return ModemSpec(symbol_rate=_SYM, path=path)
 
 

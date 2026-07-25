@@ -95,16 +95,15 @@ def test_css_coding_carries_no_parity_table() -> None:
     assert not re.search(r"\[\s*\[\s*[01]\s*,", src), "a parity table is inlined"
 
 
-def test_frame_length_is_parameterized_not_datasheet() -> None:
-    # css_explicit_frame_len must take the code/geometry as parameters; a bare
-    # implementation with the Semtech magic numbers inlined would not.
-    import inspect
+def test_coding_primitives_surface_is_minimal() -> None:
+    # The product keeps only what its ops consume: gray codes + the Hamming
+    # bound. The explicit-header frame algebra, diagonal deinterleaver, and
+    # symbol demap are datasheet-shaped and live in tests/helpers/blockmath.py;
+    # this pins the surface so none can quietly return to src/.
+    from marconi.engine.coding import primitives
 
-    from marconi.engine.coding import primitives as coding
-
-    sig = inspect.signature(coding.css_explicit_frame_len)
-    for needed in ("data_bits", "crc_bytes", "header_nibbles"):
-        assert needed in sig.parameters, f"{needed} must be a caller parameter"
+    public = {n for n in dir(primitives) if not n.startswith("_")}
+    assert public == {"annotations", "can_correct", "gray_decode", "gray_encode"}
 
 
 @pytest.mark.parametrize(
