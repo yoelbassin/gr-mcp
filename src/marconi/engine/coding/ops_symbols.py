@@ -33,7 +33,7 @@ def m_slice_rx(
     if sym is None:
         return c
     regions = np.searchsorted(
-        np.asarray(thresholds, np.float64), np.asarray(sym, np.float64)
+        np.asarray(thresholds, np.float32), np.asarray(sym, np.float32)
     )
     mapped = np.asarray(levels, np.int16)[regions]
     return replace(c, symbols=mapped.astype(np.int16))

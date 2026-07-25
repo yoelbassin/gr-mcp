@@ -7,9 +7,11 @@ import numpy as np
 
 from marconi.errors import register_error
 
-# The bits layer holds the whole capture unpacked (1 byte/bit) and every
-# BITS-level op allocates a fresh full-size array (~2-3x transient peak). Budget
-# it: 2^30 bits = ~1 GiB unpacked, ~2-3 GiB peak. A 4 GB cf32 @ sps 4, QPSK
+# The bits layer holds the whole capture unpacked (1 byte/bit) and each op
+# allocates fresh full-size arrays. MEASURED peak over input size on a windowless
+# whole-stream decode: unpack/pack ~1x, codebook ~3x, single-error block-code
+# correction ~7x (the syndrome/match arrays). Budget it: 2^30 bits = ~1 GiB
+# unpacked, so a blind correcting decode peaks ~7 GiB. A 4 GB cf32 @ sps 4, QPSK
 # capture is ~250M bits (well under); an hours-long multi-GB capture trips this
 # with an actionable error instead of OOM-ing. Raise the budget or slice.
 _MAX_BITS = 1 << 30

@@ -90,16 +90,26 @@ def _codebook_maps(
     return fwd, inv
 
 
+def _sym_dtype(width: int) -> type:
+    # width <= 31 fits int32 with room for the sign bit; wider needs int64.
+    return np.int64 if width > 31 else np.int32
+
+
 def _unpack_symbols(bits: np.ndarray, width: int) -> np.ndarray:
     n = bits.size // width
-    g = np.asarray(bits[: n * width], dtype=np.int64).reshape(n, width)
-    weights = 1 << np.arange(width - 1, -1, -1, dtype=np.int64)
-    return g @ weights
+    g = np.asarray(bits[: n * width], dtype=np.uint8).reshape(n, width)
+    out: np.ndarray = np.zeros(n, dtype=_sym_dtype(width))
+    for j in range(width):
+        out <<= 1
+        out |= g[:, j]
+    return out
 
 
 def _pack_symbols(values: np.ndarray, width: int) -> np.ndarray:
-    shifts = np.arange(width - 1, -1, -1, dtype=np.int64)
-    return ((values[:, None] >> shifts) & 1).reshape(-1).astype(np.uint8)
+    out = np.empty((values.size, width), np.uint8)
+    for j in range(width):
+        out[:, j] = (values >> (width - 1 - j)) & 1
+    return out.reshape(-1)
 
 
 def codebook_rx(
@@ -167,23 +177,27 @@ def _block_decode(
     n_words = bits.size // code_bits
     words = bits[: n_words * code_bits].reshape(n_words, code_bits).copy()
     if do_correct and n_words and parity_masks:
-        rows = np.array(
-            [[(m >> b) & 1 for b in range(data_bits)] for m in parity_masks],
-            np.int64,
-        )
-        data64 = words[:, :data_bits].astype(np.int64)
-        syndrome = (data64 @ rows.T + words[:, data_bits:]) & 1
-        weights = np.left_shift(1, np.arange(n_parity, dtype=np.int64))
-        s_int = syndrome @ weights
+        dtype = _sym_dtype(n_parity)
+        rows = [[(m >> b) & 1 for b in range(data_bits)] for m in parity_masks]
+        # syndrome stays uint8 (mod-2 XOR of selected data cols + parity col),
+        # then packs to a small per-word int - no (n_words, k) int matrix
+        s_int: np.ndarray = np.zeros(n_words, dtype)
+        for p, row in enumerate(rows):
+            col = words[:, data_bits + p].astype(np.uint8)
+            for c, bit in enumerate(row):
+                if bit:
+                    col = col ^ words[:, c]
+            s_int = (s_int << 1) | (col & 1)
         # a column's syndrome signature, data columns then the parity identity;
         # first ascending match flips, matching the scalar column scan
-        col_sig = np.concatenate([rows.T @ weights, weights])
+        weights = np.left_shift(1, np.arange(n_parity - 1, -1, -1, dtype=dtype))
+        col_sig = np.concatenate([np.asarray(rows, dtype).T @ weights, weights])
         bad = np.flatnonzero(s_int)
         if bad.size:
             match = s_int[bad, None] == col_sig[None, :]
-            col = match.argmax(axis=1)
+            col_idx = match.argmax(axis=1)
             fixable = match.any(axis=1)
-            words[bad[fixable], col[fixable]] ^= 1
+            words[bad[fixable], col_idx[fixable]] ^= 1
     out = words if emit == "codeword" else words[:, :data_bits]
     return out.reshape(-1)
 
