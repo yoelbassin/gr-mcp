@@ -177,3 +177,66 @@ def test_fec_conv_unterminated_frame_tail_bits_correct(tmp_path):
     assert r.status == "ok", r
     out = read_bits(snk)[:frame_bits]
     assert np.array_equal(out, info), np.flatnonzero(out != info)
+
+
+def test_fec_conv_rate_two_thirds_k2(tmp_path):
+    ensure_worker_warm()
+    from gnuradio import blocks as gb
+    from gnuradio import gr, trellis
+
+    k, rate_inv, polys = 2, 3, [0o7, 0o3, 0o5, 0o6, 0o4, 0o7]
+    frame_bits, tail = 128, 4
+    rng = np.random.default_rng(3)
+    info = rng.integers(0, 2, frame_bits).astype(np.uint8)
+    padded = np.concatenate([info, np.zeros(tail, np.uint8)])
+    syms_in = (padded[0::2] << 1) | padded[1::2]
+    fsm = trellis.fsm(k, rate_inv, polys)
+
+    class Enc(gr.top_block):
+        def __init__(self, data):
+            gr.top_block.__init__(self)
+            src = gb.vector_source_b(list(map(int, data)), False)
+            enc = trellis.encoder_bb(fsm, 0)
+            snk = gb.vector_sink_b()
+            self.connect(src, enc, snk)
+            self.snk = snk
+
+    e = Enc(syms_in)
+    e.run()
+    syms = np.array(e.snk.data(), np.int64)
+    soft = np.empty(syms.size * rate_inv, np.float32)
+    for i, s in enumerate(syms):
+        for d in range(rate_inv):
+            soft[i * rate_inv + d] = 1.0 - 2 * ((s >> (rate_inv - 1 - d)) & 1)
+    src = tmp_path / "k2.f32"
+    soft.tofile(src)
+    snk = tmp_path / "k2.u8"
+    modem = ModemSpec(
+        name="fec",
+        symbol_rate=1.0,
+        path=[
+            ModemStep(
+                conv="fec",
+                params={
+                    "scheme": "cc",
+                    "k": k,
+                    "rate_inv": rate_inv,
+                    "polys": polys,
+                    "frame_bits": frame_bits,
+                    "tail": tail,
+                },
+            )
+        ],
+    )
+    pipe = compile_modem(
+        modem,
+        stage_registry(),
+        direction="rx",
+        sample_rate=1.0,
+        start=Descriptor(Level.BITS, "f", "stream", Carrier.SOFT),
+        source_io={"path": str(src)},
+        sink_io={"path": str(snk)},
+    )
+    r = GnuRadioBackend().run_pipeline(pipe, timeout=30.0)
+    assert r.status == "ok", r
+    assert np.array_equal(read_bits(snk)[:frame_bits], info)

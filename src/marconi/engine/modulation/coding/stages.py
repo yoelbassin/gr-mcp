@@ -78,6 +78,7 @@ class _ConvParams(StageParams):
     polys: list[int] = Field(min_length=1)
     frame_bits: StrictInt = Field(ge=1)
     tail: StrictInt = Field(default=0, ge=0)
+    k: StrictInt = Field(default=1, ge=1)
 
     @model_validator(mode="after")
     def _ok(self) -> "_ConvParams":
@@ -86,6 +87,16 @@ class _ConvParams(StageParams):
                 "value_error",
                 "unknown fec scheme '{scheme}'; known: {known}",
                 {"scheme": self.scheme, "known": ", ".join(sorted(_FEC_EMIT))},
+            )
+        if len(self.polys) != self.k * self.rate_inv:
+            raise PydanticCustomError(
+                "value_error",
+                "need k*rate_inv={want} polys, got {have}",
+                {"want": self.k * self.rate_inv, "have": len(self.polys)},
+            )
+        if self.frame_bits % self.k or self.tail % self.k:
+            raise PydanticCustomError(
+                "value_error", "frame_bits and tail must be multiples of k"
             )
         return self
 
@@ -98,7 +109,9 @@ def _emit_cc(b: CompileContext, p: _ConvParams) -> None:
         polys=[int(x) for x in p.polys],
         frame_bits=fb,
         tail=t,
+        k=p.k,
     )
+    b.chain("unpack_k_bits_bb", k=p.k)
     b.chain("keep_m_in_n_b", m=fb, n=fb + t)
 
 

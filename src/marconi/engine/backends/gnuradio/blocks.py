@@ -494,6 +494,7 @@ GR_BLOCKS: dict[str, Callable[[_GrCtx, Params], Any]] = {
         polys=_as_int_list(p["polys"]),
         frame_bits=_as_int(p["frame_bits"]),
         tail=_as_int(p["tail"]),
+        k=_as_int(p["k"]),
     ),
     "keep_m_in_n_b": lambda c, p: c.blocks.keep_m_in_n(
         c.gr.sizeof_char, _as_int(p["m"]), _as_int(p["n"]), 0

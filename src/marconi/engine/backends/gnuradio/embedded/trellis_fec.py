@@ -8,14 +8,15 @@ from typing import Any
 
 
 def make_trellis_viterbi(
-    ctx: Any, *, rate_inv: int, polys: list, frame_bits: int, tail: int
+    ctx: Any, *, rate_inv: int, polys: list, frame_bits: int, tail: int, k: int
 ) -> Any:
-    fsm = ctx.trellis.fsm(1, rate_inv, [int(p) for p in polys])
-    o_card, d, k = fsm.O(), rate_inv, frame_bits + tail
+    fsm = ctx.trellis.fsm(k, rate_inv, [int(p) for p in polys])
+    o_card, d = fsm.O(), rate_inv
+    steps = (frame_bits + tail) // k
     table = [
         1.0 - 2.0 * ((o >> (d - 1 - j)) & 1) for o in range(o_card) for j in range(d)
     ]
     end = 0 if tail else -1
     return ctx.trellis.viterbi_combined_fb(
-        fsm, k, end, end, d, table, ctx.digital.TRELLIS_EUCLIDEAN
+        fsm, steps, end, end, d, table, ctx.digital.TRELLIS_EUCLIDEAN
     )
