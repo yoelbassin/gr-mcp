@@ -46,6 +46,68 @@ class _PskDemapParams(StageParams):
         return self
 
 
+class _SymbolSyncParams(StageParams):
+    sps: StrictInt  # explicit: rate_factor (1/sps) must be params-derivable
+    alpha: float = 0.35
+    loop_bw: float = 0.045
+    span: StrictInt = 11
+
+    @model_validator(mode="after")
+    def _ok(self) -> "_SymbolSyncParams":
+        if self.sps < 2:
+            raise PydanticCustomError(
+                "value_error", "sps must be >= 2 to recover symbol timing"
+            )
+        if not 0.0 < self.alpha <= 1.0:
+            raise PydanticCustomError("value_error", "alpha must be in (0, 1]")
+        if self.loop_bw <= 0.0:
+            raise PydanticCustomError("value_error", "loop_bw must be > 0")
+        if self.span < 1:
+            raise PydanticCustomError("value_error", "span must be >= 1")
+        return self
+
+
+class SymbolSync(RxStage[CompileContext]):
+    """Symbol-timing recovery, IQ->IQ: RRC matched filter + Gardner symbol_sync,
+    decimating an oversampled stream to one sample per symbol. This is
+    psk_demod's timing half split out, so a 1-sps seam opens where an equalizer
+    (or any per-symbol conditioning) can sit before carrier recovery. Unlike
+    psk_demod -- which hides its sps decimation inside the IQ->SYMBOLS level
+    change -- this stays at IQ and decimates honestly: rate_factor is 1/sps and
+    required_input_rate makes the explicit sps agree with the delivered rate.
+    RX-only; output amplitude is UNKNOWN (the filters rescale)."""
+
+    name = "symbol_sync"
+    from_level = Level.IQ
+    to_level = Level.IQ
+    family = "psk"
+    accepts_amplitude = frozenset(
+        {Amplitude.PEAK_UNITY, Amplitude.MEAN_MAG_UNITY, Amplitude.RMS_UNITY}
+    )
+    alters_amplitude = True
+    params_model = _SymbolSyncParams
+
+    def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
+        p = _SymbolSyncParams.model_validate(dict(params))
+        b.chain(
+            "rrc_filter_ccf",
+            interpolation=1,
+            rate=b.rate,
+            sps=p.sps,
+            alpha=p.alpha,
+            span=p.span,
+        )
+        b.chain("symbol_sync_cc", sps=p.sps, loop_bw=p.loop_bw)
+
+    def rate_factor(self, params: Mapping[str, Any]) -> float:
+        return 1.0 / int(params["sps"])
+
+    def required_input_rate(
+        self, params: Mapping[str, Any], symbol_rate: float
+    ) -> float | None:
+        return int(params["sps"]) * symbol_rate
+
+
 class PskDemod(DuplexStage[CompileContext]):
     """Coherent linear demod, IQ<->SYMBOLS. RX: RRC matched filter + Gardner
     symbol timing + costas carrier recovery -> soft complex symbols. TX: RRC
@@ -156,6 +218,7 @@ class PskSoftDemap(RxStage[CompileContext]):
 
 
 PSK_STAGES: tuple[type[Stage[CompileContext]], ...] = (
+    SymbolSync,
     PskDemod,
     PskDemap,
     PskSoftDemap,

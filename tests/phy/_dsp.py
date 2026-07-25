@@ -13,14 +13,19 @@ def channel(
     cfo_hz: float = 0.0,
     sto: float = 0.0,
     sfo_ppm: float = 0.0,
+    multipath: list[complex] | None = None,
     sample_rate: float = 1.0,
     seed: int = 0,
 ) -> Path:
-    """Apply realistic impairments to an IQ file: fractional sample-timing
-    offset (circular FFT delay), carrier frequency offset, sample-clock offset
-    (resample), then power-calibrated AWGN. Order is STO -> CFO -> SFO -> AWGN."""
+    """Apply realistic impairments to an IQ file: a multipath/frequency-selective
+    channel (FIR convolution with `multipath` taps), then fractional
+    sample-timing offset (circular FFT delay), carrier frequency offset,
+    sample-clock offset (resample), then power-calibrated AWGN. Order is
+    MULTIPATH -> STO -> CFO -> SFO -> AWGN."""
     x = np.fromfile(iq_path, dtype=np.complex64).astype(np.complex128)
     rng = np.random.default_rng(seed)
+    if multipath is not None:
+        x = np.convolve(x, np.asarray(multipath, dtype=np.complex128))
     if sto:
         fr = np.fft.fftfreq(len(x))
         x = np.fft.ifft(np.fft.fft(x) * np.exp(-2j * np.pi * fr * sto))
