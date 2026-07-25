@@ -278,6 +278,56 @@ class NibbleSwap(RxStage[CodingBuilder]):
         b.add(ops_bits.nibble_swap_rx)
 
 
+class RsCode(RxStage[CodingBuilder]):
+    name = "rs_code"
+    engine = "coding"
+    from_level = Level.BITS
+    to_level = Level.BITS
+    family = "coding"
+    accepts_item_type = "b"
+    accepts_carrier = Carrier.HARD
+
+    class _Params(StageParams):
+        symbol_bits: StrictInt = Field(ge=3, le=16)
+        n: StrictInt = Field(ge=3)
+        k: StrictInt = Field(ge=1)
+        prim_poly: StrictInt
+        fcr: StrictInt = Field(default=0, ge=0)
+        generator: StrictInt = Field(default=2, ge=1)
+        emit: str = "data"
+
+        @model_validator(mode="after")
+        def _shaped(self) -> "RsCode._Params":
+            if self.k >= self.n:
+                raise PydanticCustomError("value_error", "k must be < n")
+            if self.n > (1 << self.symbol_bits) - 1:
+                raise PydanticCustomError(
+                    "value_error", "n must be <= 2^symbol_bits - 1"
+                )
+            if self.prim_poly.bit_length() != self.symbol_bits + 1:
+                raise PydanticCustomError(
+                    "value_error", "prim_poly must have degree symbol_bits"
+                )
+            if self.emit not in ("data", "codeword"):
+                raise PydanticCustomError("value_error", "emit must be data|codeword")
+            return self
+
+    params_model = _Params
+
+    def emit_rx(self, b: CodingBuilder, params: Mapping[str, Any]) -> None:
+        p = self._Params.model_validate(dict(params))
+        b.add(
+            ops_bits.rs_code_rx,
+            symbol_bits=p.symbol_bits,
+            n=p.n,
+            k=p.k,
+            prim_poly=p.prim_poly,
+            fcr=p.fcr,
+            generator=p.generator,
+            emit=p.emit,
+        )
+
+
 class Descramble(RxStage[CodingBuilder]):
     name = "descramble"
     engine = "coding"
@@ -302,6 +352,7 @@ CODING_BITS_STAGES: tuple[type[Stage[CodingBuilder]], ...] = (
     NibbleSwap,
     Permute,
     Realign,
+    RsCode,
     Segment,
     SyncWord,
 )

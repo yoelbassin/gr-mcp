@@ -70,6 +70,8 @@ def test_index_destroying_ops_drop_marks() -> None:
         ops_bits.codebook_rx(_marked(), code_bits=2, data_bits=1, table=[1, 2]).marks
         == ()
     )
+    rs = ops_bits.rs_code_rx(_marked(), symbol_bits=4, n=7, k=3, prim_poly=0x13, fcr=1)
+    assert rs.marks == ()
 
 
 def test_css_explicit_decode_emits_a_clean_bits_carrier() -> None:

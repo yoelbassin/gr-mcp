@@ -7,6 +7,7 @@ dependencies = [
     "pyyaml",
     "numpy>=2",
     "scipy>=1.17",
+    "reedsolo>=1.7.0",
 ]
 
 [project.optional-dependencies]

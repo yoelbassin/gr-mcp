@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import replace
 from typing import Literal
 
 import numpy as np
+import reedsolo
 
 from marconi.core.coding import can_correct
 from marconi.phy.coding.carrier import CodingCarrier, Window
@@ -193,16 +195,19 @@ def block_code_rx(
     correct: bool | None = None,
     emit: str = "data",
 ) -> CodingCarrier:
+    return _decode_scoped(
+        c,
+        lambda bits: _block_decode(
+            bits, code_bits, data_bits, parity_masks, correct, emit
+        ),
+    )
+
+
+def _decode_scoped(
+    c: CodingCarrier, decode: Callable[[np.ndarray], np.ndarray]
+) -> CodingCarrier:
     if c.windows is None:
-        decoded = _block_decode(
-            np.asarray(c.bits, np.uint8),
-            code_bits,
-            data_bits,
-            parity_masks,
-            correct,
-            emit,
-        )
-        return CodingCarrier(bits=decoded)
+        return CodingCarrier(bits=decode(np.asarray(c.bits, np.uint8)))
     bits = np.asarray(c.bits, np.uint8)
     cursors = [w.cursor for w in c.windows]
     bounds = cursors[1:] + [int(bits.size)]
@@ -210,15 +215,58 @@ def block_code_rx(
     windows: list[Window] = []
     pos = 0
     for w, hi in zip(c.windows, bounds):
-        window_bits = bits[w.cursor : hi]
-        dec = _block_decode(
-            window_bits, code_bits, data_bits, parity_masks, correct, emit
-        )
+        dec = decode(bits[w.cursor : hi])
         windows.append(Window(start=pos, cursor=pos))
         pieces.append(dec)
         pos += int(dec.size)
     joined = np.concatenate(pieces) if pieces else np.zeros(0, np.uint8)
     return CodingCarrier(bits=joined, windows=windows)
+
+
+def _rs_decode_words(
+    bits: np.ndarray,
+    codec: reedsolo.RSCodec,
+    symbol_bits: int,
+    n: int,
+    k: int,
+    emit: str,
+) -> np.ndarray:
+    syms = _unpack_symbols(bits, symbol_bits)
+    out: list[int] = []
+    for w in range(syms.size // n):
+        word = [int(s) for s in syms[w * n : (w + 1) * n]]
+        try:
+            data, full, _ = codec.decode(word)
+            out.extend(full if emit == "codeword" else data)
+        except reedsolo.ReedSolomonError:
+            # uncorrectable is detectable, never repaired by guessing: emit the
+            # received word unchanged so downstream framing keeps its alignment
+            out.extend(word if emit == "codeword" else word[:k])
+    return _pack_symbols(np.asarray(out, np.int64), symbol_bits)
+
+
+def rs_code_rx(
+    c: CodingCarrier,
+    *,
+    symbol_bits: int,
+    n: int,
+    k: int,
+    prim_poly: int,
+    fcr: int = 0,
+    generator: int = 2,
+    emit: str = "data",
+) -> CodingCarrier:
+    codec = reedsolo.RSCodec(
+        nsym=n - k,
+        nsize=n,
+        fcr=fcr,
+        prim=prim_poly,
+        generator=generator,
+        c_exp=symbol_bits,
+    )
+    return _decode_scoped(
+        c, lambda bits: _rs_decode_words(bits, codec, symbol_bits, n, k, emit)
+    )
 
 
 def _perm_span(idx: np.ndarray) -> int:
