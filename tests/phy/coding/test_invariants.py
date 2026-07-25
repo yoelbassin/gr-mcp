@@ -1,0 +1,97 @@
+"""Architectural invariants for the coding engine: no gnuradio import (the
+old bits-package guarantee, re-homed to phy/coding, its replacement as the
+pure-python coding layer), plus a registry-driven sweep of every
+engine=='coding' stage against the rules the compiler and codec-shape
+validators lean on.
+
+The bits-engine's frame machinery (seeds_frames / self_slicing / slices_body,
+BITS->FRAMES transitions) is deleted, not renamed: the coding engine never
+leaves BITS/SYMBOLS, and seeds_windows is the one flag a window-establishing
+stage declares now. A coding stage that resurrected the old flags would
+silently be dead weight -- validate_codec-style machinery for them no longer
+exists on this path -- so the sweep below fails loud instead.
+"""
+
+from __future__ import annotations
+
+import ast
+import subprocess
+import sys
+from pathlib import Path
+
+from marconi.core.levels import Level
+from marconi.phy.stages import stage_registry
+
+_CODING_SRC = Path(__file__).resolve().parents[3] / "src" / "marconi" / "phy" / "coding"
+
+
+def _coding_modules() -> list[str]:
+    mods = []
+    for p in _CODING_SRC.rglob("*.py"):
+        if p.name == "__init__.py":
+            continue
+        rel = p.relative_to(_CODING_SRC).with_suffix("")
+        mods.append("marconi.phy.coding." + ".".join(rel.parts))
+    return sorted(mods)
+
+
+def test_coding_imports_without_gnuradio_or_fastmcp() -> None:
+    lines = [
+        "import builtins",
+        "_real = builtins.__import__",
+        "def _blocked(name, *a, **k):",
+        "    if name.split('.')[0] in ('gnuradio', 'fastmcp'):",
+        "        raise ImportError('blocked ' + name)",
+        "    return _real(name, *a, **k)",
+        "builtins.__import__ = _blocked",
+    ]
+    lines += [f"import {m}" for m in _coding_modules()]
+    lines.append("print('ok')")
+    r = subprocess.run(
+        [sys.executable, "-c", "\n".join(lines)], capture_output=True, text=True
+    )
+    assert r.returncode == 0 and r.stdout.strip().splitlines()[-1] == "ok", r.stderr
+
+
+def test_no_gnuradio_import_anywhere_in_coding() -> None:
+    for py in _CODING_SRC.rglob("*.py"):
+        mods: list[str] = []
+        for node in ast.walk(ast.parse(py.read_text())):
+            if isinstance(node, ast.Import):
+                mods += [a.name for a in node.names]
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                mods.append(node.module)
+        assert not any(m.split(".")[0] == "gnuradio" for m in mods), py
+
+
+def _coding_stages():
+    return {
+        name: stage
+        for name, stage in stage_registry().items()
+        if stage.engine == "coding"
+    }
+
+
+def test_coding_engine_has_stages() -> None:
+    assert _coding_stages(), "expected at least one engine=='coding' stage"
+
+
+def test_no_coding_stage_declares_deleted_frame_machinery() -> None:
+    for name, stage in _coding_stages().items():
+        assert not stage.seeds_frames, f"{name}: seeds_frames is bits-engine-only"
+        assert not stage.slices_body, f"{name}: slices_body is bits-engine-only"
+        assert not stage.self_slicing, f"{name}: self_slicing is bits-engine-only"
+
+
+def test_no_coding_stage_touches_the_frames_level() -> None:
+    coding_levels = {Level.BITS, Level.SYMBOLS}
+    for name, stage in _coding_stages().items():
+        assert stage.from_level in coding_levels, (name, stage.from_level)
+        assert stage.to_level in coding_levels, (name, stage.to_level)
+
+
+def test_coding_stages_are_rx_only() -> None:
+    # the coded-TX path is a compile error (tests/phy/coding/test_partition.py);
+    # every stage the registry offers on this engine backs that up statically.
+    for name, stage in _coding_stages().items():
+        assert stage.directions == frozenset({"rx"}), (name, stage.directions)
