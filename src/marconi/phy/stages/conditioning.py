@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import math
 from collections.abc import Callable, Mapping
 from typing import Any, Literal
 
-from pydantic import StrictInt, model_validator
+from pydantic import Field, StrictInt, model_validator
 from pydantic_core import PydanticCustomError
 
 from marconi.core.descriptor import Amplitude, Descriptor
@@ -351,6 +352,39 @@ class Am(RxStage[CompileContext]):
         return Descriptor(Level.AUDIO, "f", in_desc.layout, in_desc.carrier)
 
 
+class _FmParams(StageParams):
+    deviation: float = Field(gt=0)
+    dc_block_len: StrictInt = 1024
+
+    @model_validator(mode="after")
+    def _ok(self) -> "_FmParams":
+        if self.dc_block_len < 2:
+            raise PydanticCustomError("value_error", "dc_block_len must be >= 2")
+        return self
+
+
+class FmDemod(RxStage[CompileContext]):
+    """FM discriminator to audio: stock quadrature_demod scaled so +-deviation
+    maps to +-1.0, then dc_blocker (carrier frequency error rides the
+    discriminator output as DC). RX-only, IQ->AUDIO, rate unchanged."""
+
+    name = "fm_demod"
+    from_level = Level.IQ
+    to_level = Level.AUDIO
+    family = "conditioning"
+    params_model = _FmParams
+
+    def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
+        p = _FmParams.model_validate(dict(params))
+        b.chain("quadrature_demod", gain=b.rate / (2.0 * math.pi * p.deviation))
+        b.chain("dc_blocker_ff", d=p.dc_block_len)
+
+    def out_descriptor(
+        self, in_desc: Descriptor, params: Mapping[str, Any]
+    ) -> Descriptor:
+        return Descriptor(Level.AUDIO, "f", in_desc.layout, in_desc.carrier)
+
+
 class _AnalyticParams(StageParams):
     ntaps: StrictInt = 65
 
@@ -389,5 +423,6 @@ CONDITIONING_STAGES: tuple[type[RxStage[CompileContext]], ...] = (
     Agc,
     Squelch,
     Am,
+    FmDemod,
     Analytic,
 )
