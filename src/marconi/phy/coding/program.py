@@ -32,14 +32,18 @@ def _items(c: CodingCarrier) -> int:
     return 0
 
 
+def _windows(c: CodingCarrier) -> int | None:
+    return None if c.windows is None else len(c.windows)
+
+
 def _row(step: CodingStep, before: CodingCarrier, after: CodingCarrier) -> BlockCensus:
     return BlockCensus(
         block=step.name,
         kind=step.kind,
         items_in=_items(before),
         items_out=_items(after),
-        windows_in=len(before.windows),
-        windows_out=len(after.windows),
+        windows_in=_windows(before),
+        windows_out=_windows(after),
     )
 
 

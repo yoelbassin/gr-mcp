@@ -1,9 +1,11 @@
 """No signal present is the NORMAL case for a survey tool.
 
 The correct answer to silence, to a stuck rail, and to noise is zero
-decodes -- never an exception. Every shipped composition's coding tail is run
-against all three: a decode that crashes when the band is empty cannot be
-pointed at a band.
+decodes -- never an exception, and never fabricated bits. A tail whose seeder
+found nothing reports status "empty" with no stream; a tail that passes bits
+through reports "ok" and the decoder finds nothing valid in them. Every shipped
+composition's coding tail is run against all three inputs: a decode that
+crashes when the band is empty cannot be pointed at a band.
 
 Regression this guards: POCSAG's codec raised IndexError on all three inputs.
 permute's unseeded branch assumed perm was a permutation of range(len(perm)),
@@ -228,9 +230,11 @@ def test_shipped_composition_survives_no_signal(
         workdir=tmp_path,
         input_stream=stream,
     )
-    assert res.status == "ok", res
+    assert res.status in ("ok", "empty"), res
     empty = np.zeros(0, np.uint8)
     bits = read_bits(res.bitstream.path) if res.bitstream is not None else empty
+    if res.status == "empty":
+        assert res.bitstream is None and res.symbolstream is None
     n = decode(bits, res.windows)
     assert n == 0, f"{name} found a valid frame in {kind}"
 

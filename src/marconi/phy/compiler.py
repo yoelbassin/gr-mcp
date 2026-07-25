@@ -135,6 +135,34 @@ def _validate_descriptors(
                 )
 
 
+def _validate_probe_marks(
+    steps: Sequence[SpecStep],
+    registry: Mapping[str, Stage[Any]],
+    boundaries: Sequence[Descriptor],
+    rates: Sequence[float],
+    k: int,
+    direction: str,
+) -> None:
+    """A probe records burst marks in item units at its own graph position; the
+    engine hands them to the coding entry at the seam. If a GR stage between
+    the two changes the item rate or level, the marks reach the seam in the
+    wrong units and silently seed wrong windows."""
+    if direction != "rx" or k >= len(steps):
+        return
+    for j, step in enumerate(steps[:k]):
+        if _resolve(step, registry).family != "probe":
+            continue
+        if boundaries[k].level is not boundaries[j + 1].level or (
+            rates[k] != rates[j + 1]
+        ):
+            raise CompileError(
+                f"'{step.conv}' records burst marks in item units at its own "
+                f"position, but a later GR stage changes the item rate or "
+                f"level before the coding seam, so the marks would be misread "
+                f"there; move the probe to the end of the GR segment"
+            )
+
+
 def _validate(
     modem: ModemSpec,
     registry: Mapping[str, Stage[Any]],
@@ -251,6 +279,7 @@ def compile_pipeline(
     _validate_descriptors(
         steps, registry, boundaries, rates, modem.symbol_rate, direction
     )
+    _validate_probe_marks(steps, registry, boundaries, rates, k, direction)
     gr: GrPipeline | None = None
     if k or direction == "tx" or not steps:
         gr = _emit_gr_segment(

@@ -27,14 +27,14 @@ def _program() -> CodingProgram:
 def test_run_coding_applies_steps_in_order() -> None:
     out = run_coding(_program(), CodingCarrier(bits=np.zeros(8, np.uint8)))
     assert out.bits.size == 4
-    assert [w.start for w in out.windows] == [0]
+    assert [w.start for w in out.windows or []] == [0]
 
 
 def test_run_coding_census_rows_count_items_and_windows() -> None:
     census: list[BlockCensus] = []
     run_coding(_program(), CodingCarrier(bits=np.zeros(8, np.uint8)), census)
     assert [r.block for r in census] == ["seed[0]", "half[1]"]
-    assert census[0].windows_in == 0 and census[0].windows_out == 1
+    assert census[0].windows_in is None and census[0].windows_out == 1
     assert census[1].items_in == 8 and census[1].items_out == 4
 
 

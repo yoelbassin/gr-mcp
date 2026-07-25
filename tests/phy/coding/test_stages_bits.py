@@ -24,7 +24,7 @@ def test_sync_word_seeds_window_past_each_match() -> None:
     pat = np.array([0, 1, 1, 1, 1, 1, 1, 0], np.uint8)  # 0x7e
     bits = np.concatenate([np.zeros(5, np.uint8), pat, np.ones(16, np.uint8)])
     out = ops_bits.sync_word_rx(CodingCarrier(bits=bits), sync="7e", max_errors=0)
-    assert [w.start for w in out.windows] == [13]
+    assert [w.start for w in _wins(out)] == [13]
 
 
 def test_block_code_window_scope_decodes_per_window_stride() -> None:
@@ -39,7 +39,7 @@ def test_block_code_window_scope_decodes_per_window_stride() -> None:
         c, code_bits=7, data_bits=4, parity_masks=masks, correct=True, emit="data"
     )
     assert out.bits.tolist() == [1, 0, 1, 1, 1, 0, 1, 1]
-    assert [w.start for w in out.windows] == [0, 4]
+    assert [w.start for w in _wins(out)] == [0, 4]
 
 
 def test_all_bit_stages_declare_coding_engine() -> None:
@@ -57,6 +57,11 @@ def test_descramble_restarts_sequence_per_window() -> None:
     assert out.bits.tolist() == np.tile(seq_bits, 2).tolist()
 
 
+def _wins(c: CodingCarrier) -> list[Window]:
+    assert c.windows is not None
+    return c.windows
+
+
 def _sync_bits(*byte_vals: int) -> np.ndarray:
     return np.unpackbits(np.array(byte_vals, dtype=np.uint8))
 
@@ -66,7 +71,7 @@ def test_seeds_a_window_after_each_sync() -> None:
         [_sync_bits(0x7A, 0x96, 0x11), _sync_bits(0x7A, 0x96, 0x22)]
     )
     c = ops_bits.sync_word_rx(CodingCarrier(bits=stream), sync="7a96")
-    assert [w.cursor for w in c.windows] == [16, 40]
+    assert [w.cursor for w in _wins(c)] == [16, 40]
 
 
 def test_exact_match_rejects_corrupted_sync() -> None:
@@ -78,7 +83,7 @@ def test_exact_match_rejects_corrupted_sync() -> None:
 def test_correlator_tolerates_errors_within_threshold() -> None:
     stream = _sync_bits(0x7B, 0x96, 0x11)  # Hamming-1 from 0x7a96
     c = ops_bits.sync_word_rx(CodingCarrier(bits=stream), sync="7a96", max_errors=1)
-    assert [w.cursor for w in c.windows] == [16]
+    assert [w.cursor for w in _wins(c)] == [16]
 
 
 def test_sync_word_stage_declares_seeder_and_validates_hex() -> None:
@@ -92,7 +97,7 @@ def test_mark_frame_seeds_one_window_per_mark() -> None:
     out = ops_bits.mark_frame_rx(
         CodingCarrier(bits=np.zeros(20, np.uint8), marks=(0, 8)), offset_bits=0
     )
-    assert [(w.start, w.cursor) for w in out.windows] == [(0, 0), (8, 8)]
+    assert [(w.start, w.cursor) for w in _wins(out)] == [(0, 0), (8, 8)]
 
 
 def test_mark_frame_drops_out_of_bounds() -> None:
@@ -107,7 +112,7 @@ def test_mark_frame_preserves_marks_and_bits() -> None:
     out = ops_bits.mark_frame_rx(CodingCarrier(bits=bits, marks=(2,)), offset_bits=1)
     assert out.marks == (2,)
     assert out.bits.tolist() == bits.tolist()
-    assert [(w.start, w.cursor) for w in out.windows] == [(3, 3)]
+    assert [(w.start, w.cursor) for w in _wins(out)] == [(3, 3)]
 
 
 def test_mark_frame_stage_declares_seeder() -> None:
@@ -117,13 +122,13 @@ def test_mark_frame_stage_declares_seeder() -> None:
 def test_segment_seeds_fixed_stride_windows() -> None:
     bits = np.unpackbits(np.array([0xAB, 0xCD, 0x12, 0x34], dtype=np.uint8))
     out = ops_bits.segment_rx(CodingCarrier(bits=bits), frame_body_len=16)
-    assert [w.start for w in out.windows] == [0, 16]
+    assert [w.start for w in _wins(out)] == [0, 16]
 
 
 def test_segment_drops_short_tail() -> None:
     bits = np.zeros(33, dtype=np.uint8)
     out = ops_bits.segment_rx(CodingCarrier(bits=bits), frame_body_len=16)
-    assert len(out.windows) == 2
+    assert len(_wins(out)) == 2
 
 
 _3OF6 = [
@@ -319,7 +324,7 @@ def test_block_code_seeded_decodes_within_window() -> None:
         emit="data",
     )
     assert out.bits.tolist() == [1, 0, 0, 1]
-    assert [w.cursor for w in out.windows] == [0, 2]  # remapped after shrink
+    assert [w.cursor for w in _wins(out)] == [0, 2]  # remapped after shrink
 
 
 _CODES = [
@@ -432,7 +437,7 @@ def test_permute_seeded_gathers_relative_to_cursor_and_can_drop_bits() -> None:
     c = CodingCarrier(bits=bits, windows=[Window(0, 0)])
     out = ops_bits.permute_rx(c, perm=[0, 1, 3, 4, 5, 7])  # drop indices 2 and 6
     assert out.bits.tolist() == [1, 0, 1, 0, 1, 1]
-    assert out.windows[0].cursor == 0
+    assert _wins(out)[0].cursor == 0
 
 
 def test_permute_stage_wired() -> None:
@@ -446,13 +451,13 @@ def test_realign_drops_leading_bits() -> None:
     c = CodingCarrier(bits=np.array([1, 1, 0, 1, 0], np.uint8))
     out = ops_bits.realign_rx(c, bit_offset=2)
     assert out.bits.tolist() == [0, 1, 0]
-    assert out.windows == []
+    assert out.windows is None
 
 
 def test_realign_seeded_advances_cursor() -> None:
     c = CodingCarrier(bits=np.zeros(10, np.uint8), windows=[Window(2, 2)])
     out = ops_bits.realign_rx(c, bit_offset=3)
-    assert [(w.start, w.cursor) for w in out.windows] == [(2, 5)]
+    assert [(w.start, w.cursor) for w in _wins(out)] == [(2, 5)]
 
 
 def test_realign_emit_tx_raises() -> None:

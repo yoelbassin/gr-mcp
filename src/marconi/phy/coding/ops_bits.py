@@ -31,7 +31,7 @@ def segment_rx(c: CodingCarrier, *, frame_body_len: int) -> CodingCarrier:
     while i + frame_body_len <= len(c.bits):
         windows.append(Window(start=i, cursor=i))
         i += frame_body_len
-    return CodingCarrier(bits=c.bits, windows=windows)
+    return CodingCarrier(bits=c.bits, windows=windows, marks=c.marks)
 
 
 def sync_word_rx(c: CodingCarrier, *, sync: str, max_errors: int = 0) -> CodingCarrier:
@@ -44,7 +44,7 @@ def sync_word_rx(c: CodingCarrier, *, sync: str, max_errors: int = 0) -> CodingC
     m = pat.size
     windows: list[Window] = []
     if m == 0 or bits.size < m:
-        return CodingCarrier(bits=bits, windows=windows)
+        return CodingCarrier(bits=bits, windows=windows, marks=c.marks)
     view = np.lib.stride_tricks.sliding_window_view(bits, m)
     hits = np.flatnonzero((view != pat).sum(axis=1) <= max_errors)
     reach = 0
@@ -54,7 +54,7 @@ def sync_word_rx(c: CodingCarrier, *, sync: str, max_errors: int = 0) -> CodingC
         start = int(i) + m
         windows.append(Window(start=start, cursor=start))
         reach = int(i) + m
-    return CodingCarrier(bits=bits, windows=windows)
+    return CodingCarrier(bits=bits, windows=windows, marks=c.marks)
 
 
 def mark_frame_rx(c: CodingCarrier, *, offset_bits: int = 0) -> CodingCarrier:
@@ -116,7 +116,7 @@ def codebook_rx(
         )
         marks = tuple(int(m) * data_bits for m in c.marks)
         return CodingCarrier(bits=bits, marks=marks)
-    if c.windows:
+    if c.windows is not None:
 
         def _decode(bits: np.ndarray) -> np.ndarray:
             return _pack_symbols(inv[_unpack_symbols(bits, code_bits)], data_bits)
@@ -188,7 +188,7 @@ def block_code_rx(
     correct: bool | None = None,
     emit: str = "data",
 ) -> CodingCarrier:
-    if not c.windows:
+    if c.windows is None:
         decoded = _block_decode(
             np.asarray(c.bits, np.uint8),
             code_bits,
@@ -227,7 +227,7 @@ def _perm_span(idx: np.ndarray) -> int:
 def permute_rx(c: CodingCarrier, *, perm: list[int]) -> CodingCarrier:
     idx = np.asarray(perm, np.int64)
     span = _perm_span(idx)
-    if not c.windows:
+    if c.windows is None:
         bits = np.asarray(c.bits, np.uint8)
         n = bits.size // span if span else 0
         out = bits[: n * span].reshape(n, span)[:, idx].reshape(-1)
@@ -246,21 +246,22 @@ def permute_rx(c: CodingCarrier, *, perm: list[int]) -> CodingCarrier:
 
 
 def realign_rx(c: CodingCarrier, *, bit_offset: int) -> CodingCarrier:
-    if not c.windows:
-        return CodingCarrier(bits=np.asarray(c.bits, np.uint8)[bit_offset:])
+    if c.windows is None:
+        marks = tuple(m - bit_offset for m in c.marks if m >= bit_offset)
+        return CodingCarrier(
+            bits=np.asarray(c.bits, np.uint8)[bit_offset:], marks=marks
+        )
     windows = [Window(start=w.start, cursor=w.cursor + bit_offset) for w in c.windows]
-    return CodingCarrier(bits=np.asarray(c.bits, np.uint8), windows=windows)
+    return replace(c, bits=np.asarray(c.bits, np.uint8), windows=windows)
 
 
 def differential_rx(c: CodingCarrier, *, invert: bool = False) -> CodingCarrier:
     b = np.asarray(c.bits, dtype=np.uint8)
     if b.size == 0:
-        return CodingCarrier(bits=b, windows=c.windows)
+        return replace(c, bits=b)
     prev = np.concatenate(([np.uint8(0)], b[:-1]))
     inv = np.uint8(1 if invert else 0)
-    return CodingCarrier(
-        bits=np.bitwise_xor(np.bitwise_xor(b, prev), inv), windows=c.windows
-    )
+    return replace(c, bits=np.bitwise_xor(np.bitwise_xor(b, prev), inv))
 
 
 def _nibble_swap_bits(bits: np.ndarray) -> np.ndarray:
@@ -273,7 +274,7 @@ def _nibble_swap_bits(bits: np.ndarray) -> np.ndarray:
 
 
 def nibble_swap_rx(c: CodingCarrier) -> CodingCarrier:
-    return CodingCarrier(bits=_nibble_swap_bits(c.bits), windows=c.windows)
+    return replace(c, bits=_nibble_swap_bits(c.bits))
 
 
 def _seq_bits(sequence: str) -> np.ndarray:
@@ -285,7 +286,7 @@ def descramble_rx(c: CodingCarrier, *, sequence: str = "") -> CodingCarrier:
     bits = np.asarray(c.bits, dtype=np.uint8)
     if seq.size == 0 or bits.size == 0:
         return c
-    if not c.windows:
+    if c.windows is None:
         return replace(c, bits=np.bitwise_xor(bits, np.resize(seq, bits.size)))
     out = bits.copy()
     cursors = [w.cursor for w in c.windows]

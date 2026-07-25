@@ -8,8 +8,6 @@ failure. The coding math lives in marconi.core.coding."""
 
 from __future__ import annotations
 
-from dataclasses import replace
-
 import numpy as np
 
 from marconi.core import coding
@@ -152,4 +150,4 @@ def css_explicit_decode_rx(
                 break
             out.extend(_frame_bits(pos, frame_len, payload_cr, declared, carry))
             pos = need
-    return replace(carrier, bits=np.asarray(out, dtype=np.uint8))
+    return CodingCarrier(bits=np.asarray(out, dtype=np.uint8))

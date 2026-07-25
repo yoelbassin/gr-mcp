@@ -22,7 +22,7 @@ from marconi.core.stages import Stage
 from marconi.phy.backends.base import Backend, BlockCensus
 from marconi.phy.coding.carrier import CodingCarrier
 from marconi.phy.coding.program import run_coding
-from marconi.phy.compiler import CompiledPipeline, compile_pipeline
+from marconi.phy.compiler import CompiledPipeline, CompileError, compile_pipeline
 from marconi.phy.models import ModemSpec
 
 
@@ -96,7 +96,7 @@ def _wrap_result(
     census: list[BlockCensus],
     diagnostics: dict[str, dict[str, int | list[int]]],
 ) -> PipelineResult:
-    windows = [w.start for w in carrier.windows]
+    windows = [w.start for w in carrier.windows or []]
     if final.level is Level.BITS:
         path = workdir / "out.u8"
         write_bits(path, carrier.bits)
@@ -133,6 +133,71 @@ def _wrap_result(
     )
 
 
+_SCAN_DTYPES: dict[str, type] = {"c": np.complex64, "f": np.float32}
+_SCAN_CHUNK = 1 << 22
+
+
+def _first_nonfinite(path: Path, item_type: str) -> int | None:
+    """Bounded-memory scan of a float-format input file; integer formats
+    cannot hold non-finite values and are never scanned."""
+    dtype = _SCAN_DTYPES.get(item_type)
+    if dtype is None or not path.is_file():
+        return None
+    offset = 0
+    with path.open("rb") as f:
+        while True:
+            block: np.ndarray = np.fromfile(f, dtype=dtype, count=_SCAN_CHUNK)
+            if block.size == 0:
+                return None
+            bad = ~np.isfinite(block)
+            if bad.any():
+                return offset + int(bad.argmax())
+            offset += int(block.size)
+
+
+def _nonfinite_input(path: Path, item_type: str) -> PipelineResult | None:
+    bad = _first_nonfinite(path, item_type)
+    if bad is None:
+        return None
+    return PipelineResult(
+        status="error",
+        error=f"input contains non-finite samples (first at item {bad}); the "
+        "capture is corrupt — repair or re-record it before decoding",
+    )
+
+
+def _flag_empty_coding(result: PipelineResult) -> PipelineResult:
+    """The coding tail's mirror of the GR worker's empty-sink flag: a run whose
+    final stream holds zero items decoded nothing, and 'ok' would be a lie.
+    Name the first census row whose items or windows fell to zero — the
+    gradient a parameter search needs."""
+    if result.status != "ok":
+        return result
+    items = (
+        result.bitstream.num_bits
+        if result.bitstream is not None
+        else result.symbolstream.num_symbols if result.symbolstream is not None else 0
+    )
+    if items > 0:
+        return result
+    stall = next(
+        (c for c in result.census if c.items_out == 0 or c.windows_out == 0), None
+    )
+    where = ""
+    if stall is not None:
+        what = "windows" if stall.windows_out == 0 and stall.items_out else "items"
+        where = f" (no {what} past {stall.kind})"
+    return result.model_copy(
+        update={
+            "status": "empty",
+            "stalled_at": stall.block if stall else None,
+            "error": f"coding tail produced 0 items{where}",
+            "bitstream": None,
+            "symbolstream": None,
+        }
+    )
+
+
 def run_rx(
     modem: ModemSpec,
     registry: Mapping[str, Stage[Any]],
@@ -156,6 +221,12 @@ def run_rx(
         sink_io={"path": str(seam)},
         name=modem.name,
     )
+    if cp.final.level is Level.IQ:
+        raise CompileError(
+            "rx pipeline ends at IQ; run_rx extracts symbol/bit streams — end "
+            "the path with a demodulation stage (for conditioned-IQ output use "
+            "compile_modem and run the backend directly)"
+        )
     if cp.gr is not None and input_stream is not None:
         raise ValueError(
             "this modem's path has a GR segment fed by source_io; input_stream "
@@ -183,6 +254,16 @@ def run_rx(
                 f"input_stream item_type {input_stream.item_type!r} does not "
                 f"match the entry boundary item_type {cp.boundary.item_type!r}"
             )
+    if isinstance(input_stream, Symbolstream) and input_stream.item_type == "f":
+        flagged = _nonfinite_input(input_stream.path, "f")
+        if flagged is not None:
+            return flagged
+    if cp.gr is not None:
+        src = (source_io or {}).get("path")
+        if isinstance(src, str):
+            flagged = _nonfinite_input(Path(src), start.item_type)
+            if flagged is not None:
+                return flagged
     census: list[BlockCensus] = []
     diagnostics: dict[str, dict[str, int | list[int]]] = {}
     marks: list[int] = []
@@ -211,4 +292,6 @@ def run_rx(
         return _wrap_gr_only(cp, seam, marks, census, diagnostics)
     carrier = _entry_carrier(cp.boundary, entry_path, marks)
     out = run_coding(cp.coding, carrier, census)
-    return _wrap_result(cp.final, out, workdir, marks, census, diagnostics)
+    return _flag_empty_coding(
+        _wrap_result(cp.final, out, workdir, marks, census, diagnostics)
+    )

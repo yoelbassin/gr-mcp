@@ -9,6 +9,7 @@ from marconi.core.levels import Level
 from marconi.core.models import Bitstream, Symbolstream
 from marconi.phy.backends.base import Backend, BlockCensus, RunResult
 from marconi.phy.backends.gnuradio.runner import ensure_worker_warm
+from marconi.phy.compiler import CompileError
 from marconi.phy.engine import run_rx
 from marconi.phy.ir import GrPipeline
 from marconi.phy.models import ModemSpec, ModemStep
@@ -186,6 +187,63 @@ def test_marks_split_acquisition_harvest_from_coding_state(tmp_path: Path) -> No
     assert res.marks == [0]
     assert res.symbolstream is not None
     assert res.symbolstream.marks == [2]
+
+
+def test_iq_terminal_pipeline_is_rejected_before_running(tmp_path: Path) -> None:
+    iq = tmp_path / "in.cf32"
+    np.zeros(8, np.complex64).tofile(iq)
+    modem = ModemSpec(symbol_rate=1.0, path=[ModemStep(conv="invert")])
+    with pytest.raises(CompileError, match="IQ"):
+        run_rx(
+            modem,
+            stage_registry(),
+            sample_rate=8.0,
+            start=Descriptor(Level.IQ, "c"),
+            workdir=tmp_path,
+            source_io={"path": str(iq)},
+        )
+
+
+def test_nonfinite_iq_source_is_an_error_before_the_gr_run(tmp_path: Path) -> None:
+    iq = np.ones(64, np.complex64)
+    iq[3] = np.nan + 0j
+    p = tmp_path / "in.cf32"
+    iq.tofile(p)
+    modem = ModemSpec(
+        symbol_rate=2400.0,
+        path=[
+            ModemStep(conv="fsk", params={"deviation": 600.0}),
+            ModemStep(conv="slice"),
+        ],
+    )
+    res = run_rx(
+        modem,
+        stage_registry(),
+        sample_rate=48000.0,
+        start=Descriptor(Level.IQ, "c"),
+        workdir=tmp_path,
+        source_io={"path": str(p)},
+        backend=_CannedBackend(RunResult(status="ok")),
+    )
+    assert res.status == "error"
+    assert res.error is not None and "non-finite" in res.error and "3" in res.error
+
+
+def test_nonfinite_soft_symbol_input_is_an_error(tmp_path: Path) -> None:
+    soft = np.array([0.5, -1.0, np.inf, 1.0], np.float32)
+    p = tmp_path / "syms.f32"
+    soft.tofile(p)
+    stream = Symbolstream(path=p, num_symbols=int(soft.size), item_type="f")
+    res = run_rx(
+        _sync_symbols_modem(),
+        stage_registry(),
+        sample_rate=1.0,
+        start=SOFT_SYMBOLS,
+        workdir=tmp_path,
+        input_stream=stream,
+    )
+    assert res.status == "error"
+    assert res.error is not None and "non-finite" in res.error and "2" in res.error
 
 
 def test_pure_coding_path_without_input_stream_is_an_error(tmp_path: Path) -> None:
