@@ -7,7 +7,13 @@ from typing import Any, Literal, cast
 import numpy as np
 from pydantic import BaseModel
 
-from marconi.core.bitfile import read_bits, read_symbols, write_bits, write_symbols
+from marconi.core.bitfile import (
+    read_bits,
+    read_symbols,
+    write_bits,
+    write_llrs,
+    write_symbols,
+)
 from marconi.core.descriptor import Descriptor
 from marconi.core.levels import Level
 from marconi.core.models import Bitstream, Symbolstream
@@ -21,13 +27,14 @@ from marconi.phy.models import ModemSpec
 
 
 class PipelineResult(BaseModel):
-    status: Literal["ok", "error", "timeout"]
+    status: Literal["ok", "error", "timeout", "empty"]
     bitstream: Bitstream | None = None
     symbolstream: Symbolstream | None = None
     windows: list[int] = []
     marks: list[int] = []
     census: list[BlockCensus] = []
     diagnostics: dict[str, dict[str, int | list[int]]] = {}
+    stalled_at: str | None = None
     error: str | None = None
 
 
@@ -103,11 +110,17 @@ def _wrap_result(
             diagnostics=diagnostics,
         )
     symbols = carrier.symbols if carrier.symbols is not None else np.zeros(0, np.int16)
-    path = workdir / "out.i16"
-    write_symbols(path, symbols)
+    item_type = cast(Literal["s", "f"], final.item_type)
+    if item_type == "f":
+        path = workdir / "out.f32"
+        write_llrs(path, symbols)
+    else:
+        path = workdir / "out.i16"
+        write_symbols(path, symbols)
     symbolstream = Symbolstream(
         path=path,
         num_symbols=int(np.asarray(symbols).size),
+        item_type=item_type,
         marks=list(carrier.marks),
     )
     return PipelineResult(
@@ -143,6 +156,16 @@ def run_rx(
         sink_io={"path": str(seam)},
         name=modem.name,
     )
+    if cp.gr is not None and input_stream is not None:
+        raise ValueError(
+            "this modem's path has a GR segment fed by source_io; input_stream "
+            "only enters a path that starts with a coding stage"
+        )
+    if cp.gr is None and input_stream is None:
+        raise ValueError(
+            "this modem's path starts with a coding stage, so no GR segment "
+            "writes the seam file; supply input_stream"
+        )
     census: list[BlockCensus] = []
     diagnostics: dict[str, dict[str, int | list[int]]] = {}
     marks: list[int] = []
@@ -155,11 +178,12 @@ def run_rx(
         r = backend.run_pipeline(cp.gr, timeout=timeout)
         census, diagnostics = list(r.census), dict(r.diagnostics)
         if r.status != "ok":
-            status: Literal["error", "timeout"] = (
-                "timeout" if r.status == "timeout" else "error"
-            )
             return PipelineResult(
-                status=status, error=r.error, census=census, diagnostics=diagnostics
+                status=r.status,
+                error=r.error,
+                stalled_at=r.stalled_at,
+                census=census,
+                diagnostics=diagnostics,
             )
         marks = _harvest_marks(diagnostics)
     if input_stream is not None:
