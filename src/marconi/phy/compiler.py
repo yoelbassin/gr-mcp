@@ -197,19 +197,25 @@ def _emit_gr_segment(
     return ctx.build(name, sample_rate)
 
 
+def _known_engine(step: SpecStep, registry: Mapping[str, Stage[Any]]) -> str | None:
+    stage = registry.get(step.conv)
+    return stage.engine if stage is not None else None
+
+
 def _split_index(
     steps: Sequence[SpecStep], registry: Mapping[str, Stage[Any]], direction: str
 ) -> int:
-    k = next(
-        (i for i, s in enumerate(steps) if _resolve(s, registry).engine == "coding"),
-        len(steps),
-    )
+    # Unknown names map to None so _validate stays the sole (aggregating)
+    # reporter of unknown-stage issues; they neither start the coding segment
+    # nor count as a GR re-entry.
+    engines = [_known_engine(s, registry) for s in steps]
+    k = next((i for i, e in enumerate(engines) if e == "coding"), len(steps))
     if direction == "tx" and k < len(steps):
         raise CompileError(
             f"stage '{steps[k].conv}' is a coding stage; coded tx is not supported yet"
         )
     for i in range(k, len(steps)):
-        if _resolve(steps[i], registry).engine != "coding":
+        if engines[i] not in (None, "coding"):
             raise CompileError(
                 f"stage '{steps[i].conv}' would re-enter the GR engine after "
                 f"'{steps[k].conv}'; a pipeline never re-enters GR"
@@ -246,7 +252,7 @@ def compile_pipeline(
         steps, registry, boundaries, rates, modem.symbol_rate, direction
     )
     gr: GrPipeline | None = None
-    if k or direction == "tx":
+    if k or direction == "tx" or not steps:
         gr = _emit_gr_segment(
             steps[:k],
             registry,

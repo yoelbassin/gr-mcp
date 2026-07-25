@@ -81,6 +81,42 @@ def test_tx_with_coding_stage_is_a_compile_error() -> None:
         )
 
 
+def test_unknown_stage_aggregates_with_other_spec_issues() -> None:
+    spec = ModemSpec(
+        symbol_rate=1200.0,
+        path=[
+            ModemStep(conv="totally_bogus_stage", params={}),
+            ModemStep(conv="fsk", params={}),
+        ],
+    )
+    with pytest.raises(CompileError) as e:
+        compile_pipeline(
+            spec,
+            stage_registry(),
+            direction="rx",
+            sample_rate=128000.0,
+            start=IQ,
+            source_io={},
+            sink_io={},
+        )
+    msg = str(e.value)
+    assert "totally_bogus_stage[0]" in msg and "unknown converter" in msg
+    assert "fsk[1].deviation" in msg
+
+
+def test_empty_rx_path_builds_passthrough_gr_pipeline() -> None:
+    pipe = compile_modem(
+        ModemSpec(symbol_rate=1200.0, path=[]),
+        stage_registry(),
+        direction="rx",
+        sample_rate=128000.0,
+        start=IQ,
+        source_io={"path": "in.cf32"},
+        sink_io={"path": "out.cf32"},
+    )
+    assert [b.kind for b in pipe.blocks] == ["iq_file_source", "iq_file_sink"]
+
+
 def test_compile_modem_rejects_coding_stages() -> None:
     with pytest.raises(CompileError):
         compile_modem(
