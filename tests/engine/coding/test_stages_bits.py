@@ -561,3 +561,23 @@ def test_correct_single_accepts_bch_31_21() -> None:
         code_bits=31, data_bits=21, parity_masks=masks, correct_single=True
     )
     assert p.correct_single is True
+
+
+def test_correct_single_rejects_weight_one_parity_column() -> None:
+    with pytest.raises(ValidationError, match="weight"):
+        BlockCode._Params(
+            code_bits=4,
+            data_bits=2,
+            parity_masks=[0b01, 0b11],
+            correct_single=True,
+        )
+
+
+def test_correct_single_rejects_zero_parity_column() -> None:
+    with pytest.raises(ValidationError, match="weight"):
+        BlockCode._Params(
+            code_bits=6,
+            data_bits=3,
+            parity_masks=[0b110, 0b100, 0b010],
+            correct_single=True,
+        )

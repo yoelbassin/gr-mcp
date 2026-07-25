@@ -183,13 +183,12 @@ class BlockCode(RxStage[CodingBuilder]):
                     tuple((mask >> j) & 1 for mask in self.parity_masks)
                     for j in range(self.data_bits)
                 ]
-                zero = (0,) * len(self.parity_masks)
-                if zero in cols or len(set(cols)) != len(cols):
+                if any(sum(col) < 2 for col in cols) or len(set(cols)) != len(cols):
                     raise PydanticCustomError(
                         "value_error",
-                        "correct_single needs nonzero, pairwise-distinct "
-                        "parity-check columns - single-error syndromes must "
-                        "be unique",
+                        "correct_single needs pairwise-distinct parity-check "
+                        "columns of weight >= 2 - single-error syndromes must "
+                        "be unique across data and parity positions",
                     )
             return self
 
