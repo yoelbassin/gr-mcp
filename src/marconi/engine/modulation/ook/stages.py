@@ -3,6 +3,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from pydantic import Field
+
 from marconi.engine.compile.compile_context import CompileContext
 from marconi.engine.stages.base import DuplexStage
 from marconi.engine.types.descriptor import Amplitude, Carrier, Descriptor
@@ -11,7 +13,7 @@ from marconi.engine.types.params import StageParams
 
 
 class _OokParams(StageParams):
-    loop_bw: float = 0.045
+    loop_bw: float = Field(default=0.045, ge=0)
 
 
 class OokEnvelope(DuplexStage[CompileContext]):

@@ -4,7 +4,7 @@ import math
 from collections.abc import Mapping
 from typing import Any
 
-from pydantic import model_validator
+from pydantic import Field, model_validator
 from pydantic_core import PydanticCustomError
 
 from marconi.engine.compile.compile_context import CompileContext
@@ -16,7 +16,7 @@ from marconi.engine.types.params import StageParams
 
 class _FskParams(StageParams):
     deviation: float
-    loop_bw: float = 0.045
+    loop_bw: float = Field(default=0.045, ge=0)
 
 
 class Fsk(DuplexStage[CompileContext]):

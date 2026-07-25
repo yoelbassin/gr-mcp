@@ -79,3 +79,18 @@ def test_aligned_ber_best_returns_the_locking_candidate() -> None:
     tx = rng.integers(0, 2, 4096).astype(np.uint8)
     rx = np.concatenate([np.zeros(32, dtype=np.uint8), tx])
     assert aligned_ber_best([1 - rx, rx], tx, max_shift=64) == 0.0
+
+
+def test_fsk_and_ook_accept_open_loop_reject_negative() -> None:
+    from pydantic import ValidationError
+
+    from marconi.engine.modulation.fsk.stages import _FskParams
+    from marconi.engine.modulation.ook.stages import _OokParams
+    from marconi.engine.types.params import OPEN_LOOP
+
+    assert _FskParams(deviation=2400.0, loop_bw=OPEN_LOOP).loop_bw == 0.0
+    assert _OokParams(loop_bw=OPEN_LOOP).loop_bw == 0.0
+    with pytest.raises(ValidationError):
+        _FskParams(deviation=2400.0, loop_bw=-0.01)
+    with pytest.raises(ValidationError):
+        _OokParams(loop_bw=-0.01)

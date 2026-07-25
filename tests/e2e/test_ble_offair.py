@@ -32,6 +32,7 @@ from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Descriptor
 from marconi.engine.types.levels import Level
 from marconi.engine.types.models import ModemSpec, ModemStep
+from marconi.engine.types.params import OPEN_LOOP
 
 IQ = Descriptor(Level.IQ, "c")
 RATE = 5_000_000.0
@@ -94,7 +95,9 @@ def _ble_modem() -> ModemSpec:
                     "center_hz": -1_000_000.0,
                 },
             ),
-            ModemStep(conv="fsk", params={"deviation": 250_000.0, "loop_bw": 0.0}),
+            ModemStep(
+                conv="fsk", params={"deviation": 250_000.0, "loop_bw": OPEN_LOOP}
+            ),
             ModemStep(conv="slice", params={}),
             ModemStep(conv="sync_word", params={"sync": AA_HEX, "max_errors": 0}),
         ],
