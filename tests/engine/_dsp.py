@@ -35,7 +35,15 @@ def channel(
     if sfo_ppm:
         from scipy.signal import resample
 
-        x = resample(x, int(round(len(x) * (1.0 + sfo_ppm * 1e-6))))
+        n_out = int(round(len(x) * (1.0 + sfo_ppm * 1e-6)))
+        if n_out == len(x):
+            raise ValueError(
+                f"sfo_ppm={sfo_ppm} on {len(x)} samples is a silent no-op: "
+                "same-length resample is identity. Drift needs "
+                "|ppm| * n_samples >= ~1e6; use an exaggerated ppm for "
+                "short bursts."
+            )
+        x = resample(x, n_out)
     if snr_db is not None:
         p = float(np.mean(np.abs(x) ** 2)) or 1.0
         amp = np.sqrt(p / (2 * 10 ** (snr_db / 10)))
