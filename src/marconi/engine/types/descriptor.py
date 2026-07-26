@@ -31,8 +31,16 @@ class Descriptor:
     carrier: Carrier = Carrier.HARD  # decision-hardness, a seam invariant
     amplitude: Amplitude = Amplitude.UNKNOWN
     order: int | None = None
+    # Items per frame when the stream is back-to-back framed (a framing stage
+    # pinned it), else None. Never propagated by default — a frame dies on any
+    # item-count change, so only frame-aware stages carry it: producers pin,
+    # 1:1 stages pass it through explicitly, expanders rescale, consumers with
+    # fixed frame geometry check it and fail the compile on mismatch.
+    frame_len: int | None = None
 
     def __post_init__(self) -> None:
+        if self.frame_len is not None and self.frame_len < 1:
+            raise ValueError(f"frame_len must be >= 1, got {self.frame_len}")
         if self.order is None:
             return
         if self.level is not Level.SYMBOLS:

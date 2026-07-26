@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
+from dataclasses import replace
 from typing import Any
 
 from pydantic import Field, StrictInt, model_validator
@@ -31,6 +32,24 @@ class Deinterleave(RxStage[CompileContext]):
 
     def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
         b.chain("blockinterleaver_ff", perm=[int(x) for x in params["perm"]], mode=True)
+
+    def out_descriptor(
+        self, in_desc: Descriptor, params: Mapping[str, Any]
+    ) -> Descriptor:
+        return in_desc
+
+    def validate_input(
+        self, in_desc: Descriptor, params: Mapping[str, Any]
+    ) -> str | None:
+        span = len(list(params["perm"]))
+        if in_desc.frame_len is not None and in_desc.frame_len % span:
+            return (
+                f"permutes blocks of {span} items but the input is framed at "
+                f"{in_desc.frame_len}, which {span} does not divide; permute "
+                f"blocks would straddle frame boundaries and every frame after "
+                f"the first would decode misaligned"
+            )
+        return None
 
 
 class _DepunctureParams(StageParams):
@@ -71,6 +90,29 @@ class Depuncture(RxStage[CompileContext]):
         b.connect(b.add("null_source_f"), il, dst_port=1)
         b.set_tail(il)
 
+    def out_descriptor(
+        self, in_desc: Descriptor, params: Mapping[str, Any]
+    ) -> Descriptor:
+        p = _DepunctureParams.model_validate(dict(params))
+        kept = sum(1 for m in p.keep_mask if m)
+        frame = in_desc.frame_len
+        if frame is None or frame % kept:
+            return replace(in_desc, frame_len=None)
+        return replace(in_desc, frame_len=frame // kept * len(p.keep_mask))
+
+    def validate_input(
+        self, in_desc: Descriptor, params: Mapping[str, Any]
+    ) -> str | None:
+        p = _DepunctureParams.model_validate(dict(params))
+        kept = sum(1 for m in p.keep_mask if m)
+        if in_desc.frame_len is not None and in_desc.frame_len % kept:
+            return (
+                f"keeps {kept} of every {len(p.keep_mask)} codeword positions "
+                f"but the input is framed at {in_desc.frame_len}, not a "
+                f"multiple of {kept}; the mask would drift against the frames"
+            )
+        return None
+
 
 class Harden(RxStage[CompileContext]):
     """Soft-LLR -> hard-bit decision, BITS->BITS. The non-FEC soft->hard bridge
@@ -97,7 +139,7 @@ class Harden(RxStage[CompileContext]):
     def out_descriptor(
         self, in_desc: Descriptor, params: Mapping[str, Any]
     ) -> Descriptor:
-        return Descriptor(Level.BITS, "b", Carrier.HARD)
+        return Descriptor(Level.BITS, "b", Carrier.HARD, frame_len=in_desc.frame_len)
 
 
 class _SyncAlignParams(StageParams):
@@ -146,6 +188,11 @@ class SyncAlign(RxStage[CompileContext]):
         )
         b.chain("tag_gate", frame_len=p.frame_len, tag_name="frame_sync")
         b.chain("multiply_const_ff", value=-1.0)
+
+    def out_descriptor(
+        self, in_desc: Descriptor, params: Mapping[str, Any]
+    ) -> Descriptor:
+        return replace(in_desc, frame_len=int(params["frame_len"]))
 
 
 class _ConvParams(StageParams):
@@ -214,7 +261,23 @@ class Fec(RxStage[CompileContext]):
     def out_descriptor(
         self, in_desc: Descriptor, params: Mapping[str, Any]
     ) -> Descriptor:
-        return Descriptor(Level.BITS, "b", Carrier.HARD)
+        return Descriptor(
+            Level.BITS, "b", Carrier.HARD, frame_len=int(params["frame_bits"])
+        )
+
+    def validate_input(
+        self, in_desc: Descriptor, params: Mapping[str, Any]
+    ) -> str | None:
+        p = _ConvParams.model_validate(dict(params))
+        need = (p.frame_bits + p.tail) // p.k * p.rate_inv
+        if in_desc.frame_len is not None and in_desc.frame_len != need:
+            return (
+                f"decodes frames of {need} soft bits ((frame_bits "
+                f"{p.frame_bits} + tail {p.tail}) / k {p.k} * rate_inv "
+                f"{p.rate_inv}) but the input is framed at {in_desc.frame_len}"
+                f"; align sync_align.frame_len with the fec frame geometry"
+            )
+        return None
 
 
 CODING_STAGES: tuple[type[Stage[CompileContext]], ...] = (
