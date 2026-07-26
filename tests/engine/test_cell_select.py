@@ -104,3 +104,45 @@ def test_cell_select_rejects_frame_len_mismatch(tmp_path: Path) -> None:
     )
     with pytest.raises(CompileError, match="framed at 5"):
         _compile(modem, tmp_path / "a", tmp_path / "b", start=framed)
+
+
+def test_cell_select_accepts_frame_len_whole_blocks_tile_frame(tmp_path: Path) -> None:
+    # frame_len=12, select_perm len 3: whole gather blocks tile exactly into one
+    # upstream frame (12 % 3 == 0, no straddle)
+    framed = Descriptor(Level.SYMBOLS, "c", Carrier.SOFT, frame_len=12)
+    modem = ModemSpec(
+        symbol_rate=1.0,
+        path=[
+            ModemStep(
+                conv="cell_select",
+                params={
+                    "select_perm": cast("list[float | int]", [1, 0, 2]),
+                    "keep": 2,
+                },
+            )
+        ],
+    )
+    # Should compile successfully without CompileError
+    _compile(modem, tmp_path / "a", tmp_path / "b", start=framed)
+
+
+def test_cell_select_accepts_frame_len_gather_spans_whole_frames(
+    tmp_path: Path,
+) -> None:
+    # frame_len=3, select_perm len 12: gather span divides evenly by frame_len
+    # (12 % 3 == 0, gather blocks span whole frames, no straddle)
+    framed = Descriptor(Level.SYMBOLS, "c", Carrier.SOFT, frame_len=3)
+    modem = ModemSpec(
+        symbol_rate=1.0,
+        path=[
+            ModemStep(
+                conv="cell_select",
+                params={
+                    "select_perm": cast("list[float | int]", list(range(12))),
+                    "keep": 3,
+                },
+            )
+        ],
+    )
+    # Should compile successfully without CompileError
+    _compile(modem, tmp_path / "a", tmp_path / "b", start=framed)

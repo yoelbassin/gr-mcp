@@ -274,12 +274,14 @@ class CellSelect(RxStage[CompileContext]):
         self, in_desc: Descriptor, params: Mapping[str, Any]
     ) -> str | None:
         span = len(list(params["select_perm"]))
-        if in_desc.frame_len is not None and span % in_desc.frame_len:
-            return (
-                f"gathers blocks of {span} cells but the input is framed at "
-                f"{in_desc.frame_len}, which does not divide {span}; gather "
-                f"blocks would straddle frame boundaries"
-            )
+        if in_desc.frame_len is not None:
+            # Accept if either divides the other; reject only if both straddle
+            if span % in_desc.frame_len != 0 and in_desc.frame_len % span != 0:
+                return (
+                    f"gathers blocks of {span} cells but the input is framed at "
+                    f"{in_desc.frame_len}; neither divides the other, so gather "
+                    f"blocks would straddle frame boundaries"
+                )
         return None
 
 
