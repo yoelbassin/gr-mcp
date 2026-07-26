@@ -14,20 +14,12 @@ CodecSpec-based fac_codec/sdc_codec/SdcCrc16."""
 from __future__ import annotations
 
 import math
-from collections.abc import Mapping
 from typing import Any
 
 import numpy as np
 from helpers import bitops, crc
-from pydantic import StrictInt
 
-from marconi.engine.compile.compile_context import CompileContext
-from marconi.engine.stages.base import RxStage, Stage
-from marconi.engine.stages.registry import stage_registry
-from marconi.engine.types.descriptor import Carrier, Descriptor
-from marconi.engine.types.levels import Level
 from marconi.engine.types.models import ModemStep
-from marconi.engine.types.params import StageParams
 
 FFT_LEN = 256
 CP_LEN = 64
@@ -78,6 +70,13 @@ _WARMUP_SYMS = 300
 
 def sync_params() -> dict[str, Any]:
     carriers, values = pilot_tables()
+    # Dream's ported pilot phases (scat_ref/FP_VALUES, kept verbatim -- they're
+    # golden-pinned against drm_phy_ref.md in test_drm_caller_data.py) are
+    # pi-off vs pilot_lattice's equalizer convention -- same genus as the
+    # bit-reversed ConvEncoder masks noted below. Negating them only here, at
+    # the equalizer boundary, lands cells true-phased so the negating
+    # soft_demap -> fec convention holds (bit1-negative, measured); both
+    # scattered and frequency pilots flip together.
     return {
         "fft_len": FFT_LEN,
         "cp_len": CP_LEN,
@@ -89,11 +88,11 @@ def sync_params() -> dict[str, Any]:
         "warmup_syms": _WARMUP_SYMS,
         "pilot_lens": [len(ks) for ks in carriers],
         "pilot_carriers": [int(k) for ks in carriers for k in ks],
-        "pilot_i": [float(v.real) for vs in values for v in vs],
-        "pilot_q": [float(v.imag) for vs in values for v in vs],
+        "pilot_i": [float(-v.real) for vs in values for v in vs],
+        "pilot_q": [float(-v.imag) for vs in values for v in vs],
         "fp_carriers": [int(k) for k in FP_CARRIERS],
-        "fp_i": [float(v.real) for v in FP_VALUES],
-        "fp_q": [float(v.imag) for v in FP_VALUES],
+        "fp_i": [float(-v.real) for v in FP_VALUES],
+        "fp_q": [float(-v.imag) for v in FP_VALUES],
     }
 
 
@@ -377,44 +376,6 @@ def parse_sdc_label(block316: bytes) -> str:
     return ""
 
 
-class _CellSelectDemapParams(StageParams):
-    select_perm: list[int]
-    keep: StrictInt
-    scheme: str
-    order: StrictInt
-
-
-class CellSelectSoftDemap(RxStage[CompileContext]):
-    """SYMBOLS(complex)->BITS(soft): gather the wanted cells to the front of each
-    equalized carrier block (blockinterleaver_cc over a full-block select perm),
-    keep them (keep_m_in_n_c), then soft-demap (constellation_soft_decoder). The
-    select perm, keep count and constellation are caller data — FAC and SDC differ
-    only there. Composed from stock GR blocks, so it lives test-side, never src/."""
-
-    name = "cell_select_soft_demap"
-    from_level = Level.SYMBOLS
-    to_level = Level.BITS
-    family = "ofdm"
-    params_model = _CellSelectDemapParams
-    accepts_item_type = "c"
-    accepts_carrier = Carrier.SOFT
-
-    def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
-        p = _CellSelectDemapParams.model_validate(dict(params))
-        b.chain("blockinterleaver_cc", perm=[int(x) for x in p.select_perm], mode=True)
-        b.chain("keep_m_in_n_c", m=int(p.keep), n=len(p.select_perm))
-        b.chain("constellation_soft_decoder", scheme=p.scheme, order=int(p.order))
-
-    def out_descriptor(
-        self, in_desc: Descriptor, params: Mapping[str, Any]
-    ) -> Descriptor:
-        return Descriptor(Level.BITS, "f", Carrier.SOFT)
-
-
-def fac_stage_registry() -> dict[str, Stage[CompileContext]]:
-    return {**stage_registry(), CellSelectSoftDemap.name: CellSelectSoftDemap()}
-
-
 def energy_prbs_hex(n_bits: int) -> str:
     # descramble tiles a byte-granular hex sequence over the bit stream, so a
     # PRBS whose period isn't a byte multiple (SDC's 316) would drift by its pad
@@ -429,14 +390,10 @@ def fac_phy_steps() -> list[ModemStep]:
     return [
         ModemStep(conv="ofdm_coherent_sync", params=sync_params()),
         ModemStep(
-            conv=CellSelectSoftDemap.name,
-            params={
-                "select_perm": list(fac_select_perm()),
-                "keep": len(FAC_CELLS),
-                "scheme": "psk",
-                "order": 4,
-            },
+            conv="cell_select",
+            params={"select_perm": list(fac_select_perm()), "keep": len(FAC_CELLS)},
         ),
+        ModemStep(conv="soft_demap", params={"scheme": "psk", "order": 4}),
         ModemStep(conv="deinterleave", params={"perm": list(fac_deinterleave_perm())}),
         ModemStep(conv="depuncture", params={"keep_mask": list(FAC_PUNCTURE_KEEP)}),
         ModemStep(
@@ -460,14 +417,13 @@ def sdc_phy_steps(phase: int) -> list[ModemStep]:
     return [
         ModemStep(conv="ofdm_coherent_sync", params=sync_params()),
         ModemStep(
-            conv=CellSelectSoftDemap.name,
+            conv="cell_select",
             params={
                 "select_perm": list(sdc_select_perm(phase)),
                 "keep": len(SDC_CELLS),
-                "scheme": "psk",
-                "order": 4,
             },
         ),
+        ModemStep(conv="soft_demap", params={"scheme": "psk", "order": 4}),
         ModemStep(conv="deinterleave", params={"perm": list(sdc_deinterleave_perm())}),
         ModemStep(conv="depuncture", params={"keep_mask": list(SDC_PUNCTURE_KEEP)}),
         ModemStep(

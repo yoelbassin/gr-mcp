@@ -5,7 +5,7 @@ the FAC channel-parameter invariants. Known-good on this slice: 109/109 CRC-8
 across the super-frame. The gate is 109 minus margin — enough for
 cross-machine float drift, far above any partial-decode regression.
 
-The PHY (ofdm_coherent_sync/cell_select_soft_demap/deinterleave/depuncture/fec)
+The PHY (ofdm_coherent_sync/cell_select/soft_demap/deinterleave/depuncture/fec)
 and the energy-dispersal descramble + frame segmentation compose in a single
 ModemSpec (_drm.fac_phy_steps/_drm.sdc_phy_steps) — descramble/segment are
 product coding stages, the same GR-chain-then-coding-tail composition as the
@@ -25,6 +25,7 @@ from helpers import framing
 from marconi.engine.backends.gnuradio.runner import ensure_worker_warm
 from marconi.engine.io.bitfile import read_bits
 from marconi.engine.run import run_rx
+from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Descriptor
 from marconi.engine.types.levels import Level
 from marconi.engine.types.models import ModemSpec
@@ -51,7 +52,7 @@ def test_drm_fac(tmp_path: Path) -> None:
     )
     res = run_rx(
         modem,
-        _drm.fac_stage_registry(),
+        stage_registry(),
         sample_rate=_drm.RATE,
         start=IQ,
         workdir=tmp_path,
@@ -98,7 +99,7 @@ def test_drm_sdc(tmp_path: Path) -> None:
         )
         res = run_rx(
             modem,
-            _drm.fac_stage_registry(),
+            stage_registry(),
             sample_rate=_drm.RATE,
             start=IQ,
             workdir=workdir,
