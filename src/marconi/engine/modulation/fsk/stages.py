@@ -146,5 +146,8 @@ class MfskSoftDemap(RxStage[CompileContext]):
     ) -> Descriptor:
         return Descriptor(Level.BITS, "f", Carrier.SOFT)
 
+    def required_input_order(self, params: Mapping[str, Any]) -> int | None:
+        return len(list(params["levels"]))
+
 
 FSK_STAGES: tuple[type[Stage[CompileContext]], ...] = (Fsk, Msk, MfskSoftDemap)

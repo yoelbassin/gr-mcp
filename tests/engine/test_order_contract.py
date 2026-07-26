@@ -1,6 +1,10 @@
 import pytest
 
-from marconi.engine.compile.compiler import CompileError, compile_modem
+from marconi.engine.compile.compiler import (
+    CompileError,
+    compile_modem,
+    compile_pipeline,
+)
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Carrier, Descriptor
 from marconi.engine.types.levels import Level
@@ -197,6 +201,39 @@ def test_unpinned_boundary_skips_preamble_check() -> None:
     )
 
 
+SYM_F = Descriptor(Level.SYMBOLS, "f", carrier=Carrier.SOFT)
+_M_SLICE: dict[str, ParamValue] = {"thresholds": [0.0], "levels": [0, 1]}
+
+
+def test_m_slice_pins_order() -> None:
+    out = stage_registry()["m_slice"].out_descriptor(SYM_F, _M_SLICE)
+    assert out.order == 2
+
+
+def test_m_slice_declares_required_order() -> None:
+    assert stage_registry()["m_slice"].required_input_order(_M_SLICE) == 2
+
+
+def test_mfsk_soft_demap_declares_required_order() -> None:
+    levels: dict[str, ParamValue] = {"levels": [-3.0, -1.0, 1.0, 3.0]}
+    assert stage_registry()["mfsk_soft_demap"].required_input_order(levels) == 4
+
+
+def test_m_slice_conflicting_upstream_pin_fails_at_compile() -> None:
+    pinned = Descriptor(Level.SYMBOLS, "f", Carrier.SOFT, order=4)
+    with pytest.raises(CompileError) as exc:
+        compile_pipeline(
+            ModemSpec(symbol_rate=1.0, path=[_step("m_slice", **_M_SLICE)]),
+            stage_registry(),
+            direction="rx",
+            sample_rate=1.0,
+            start=pinned,
+            source_io={"path": "/dev/null"},
+            sink_io={"path": "/dev/null"},
+        )
+    assert "order-2" in str(exc.value) and "order-4" in str(exc.value)
+
+
 _ORDER_MATRIX: dict[str, tuple[dict[str, ParamValue], int]] = {
     "psk_demod": ({"order": 4}, 4),
     "psk_demap": ({"order": 4}, 4),
@@ -206,13 +243,14 @@ _ORDER_MATRIX: dict[str, tuple[dict[str, ParamValue], int]] = {
     "dechirp": (_DECHIRP_PARAMS, 128),
     "css_demap": ({"sf": 7}, 128),
     "dqpsk_soft_demap": ({"data_syms": 4, "n_carriers": 4}, 4),
+    "mfsk_soft_demap": ({"levels": [-1.0, 1.0]}, 2),
 }
 
 
 def test_order_bearing_stages_are_in_the_contract() -> None:
     for name, stage in stage_registry().items():
         fields = set(stage.params_model.model_fields)
-        if not {"order", "sf"} & fields:
+        if not {"order", "sf", "levels"} & fields:
             continue
         produces = (
             stage.to_level is Level.SYMBOLS and stage.from_level is not Level.SYMBOLS

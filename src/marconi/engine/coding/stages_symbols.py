@@ -109,7 +109,15 @@ class MSlice(RxStage[CodingBuilder]):
     def out_descriptor(
         self, in_desc: Descriptor, params: Mapping[str, Any]
     ) -> Descriptor:
-        return replace(in_desc, item_type="s", carrier=Carrier.HARD)
+        return replace(
+            in_desc,
+            item_type="s",
+            carrier=Carrier.HARD,
+            order=len(list(params["levels"])),
+        )
+
+    def required_input_order(self, params: Mapping[str, Any]) -> int | None:
+        return len(list(params["levels"]))
 
 
 class SymbolMap(RxStage[CodingBuilder]):
