@@ -282,3 +282,48 @@ def test_frame_sync_buffer_stays_bounded():
     assert out.size == expected.size
     assert np.allclose(out, expected, atol=1e-4)
     assert blk._buf.size <= 2 * frame + 8192, f"buffer held {blk._buf.size}"
+
+
+def test_frame_sync_reports_truncated_final_frame():
+    """A frame whose usefuls never fully arrive (end-of-stream mid-frame) is
+    dropped by design — frames are atomic — but the drop must be visible:
+    diagnostics carry the missing item count. A capture ending cleanly after
+    its last frame reports zero."""
+    from marconi.engine.backends.gnuradio.embedded.ofdm import make_ofdm_frame_sync
+
+    rng = np.random.default_rng(0)
+
+    def frame_parts():
+        us = [
+            rng.standard_normal(FFT) + 1j * rng.standard_normal(FFT)
+            for _ in range(DS + 1)
+        ]
+        return [np.zeros(NULL, complex)] + [np.concatenate([u[-CP:], u]) for u in us]
+
+    def mk():
+        return make_ofdm_frame_sync(
+            _FakeGr,
+            fft_len=FFT,
+            cp_len=CP,
+            sym_len=SYM,
+            null_len=NULL,
+            frame_len=FRAME,
+            data_syms=DS,
+        )
+
+    complete = np.concatenate(frame_parts()).astype(np.complex64)
+    blk = mk()
+    out = _drive(blk, complete, chunk=1000)
+    assert out.size == (DS + 1) * FFT
+    assert blk.diagnostics["truncated_frame_items"] == 0
+
+    # second frame's null arrives but only two of its four symbols do
+    truncated = np.concatenate(frame_parts() + frame_parts()[:3]).astype(np.complex64)
+    blk = mk()
+    out = _drive(blk, truncated, chunk=1000)
+    assert out.size == (DS + 1) * FFT  # first frame intact, second dropped
+    usefuls_len = (DS + 1) * SYM
+    # find_null's known +/-1 boundary quirk shifts the counted base a sample
+    # or two; the metric's job is magnitude, not sample-exactness
+    missing = blk.diagnostics["truncated_frame_items"]
+    assert abs(missing - (usefuls_len - 2 * SYM)) <= 2, missing

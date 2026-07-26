@@ -25,6 +25,9 @@ def make_tag_gate(gr: Any, *, frame_len: int, tag_name: str) -> Any:
                 out_sig=[np.float32],
             )
             self._end = 0  # absolute input offset where the active frame ends
+            # post-run value = items of the open frame the stream ended short
+            # of; a truncated final frame is unrecoverable but must be visible
+            self.diagnostics = {"truncated_frame_items": 0}
 
         def forecast(self, noutput_items: int, ninputs: int) -> list[int]:
             return [noutput_items] * ninputs
@@ -57,6 +60,7 @@ def make_tag_gate(gr: Any, *, frame_len: int, tag_name: str) -> Any:
                 r = nxt - base  # drop the inter-frame gap
                 self._end = nxt + frame_len
             self.consume(0, r)
+            self.diagnostics["truncated_frame_items"] = max(0, self._end - (base + r))
             return int(w)
 
     return _TagGate()

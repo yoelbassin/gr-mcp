@@ -87,7 +87,9 @@ def test_css_ber0_impaired(sf: int, osr: int, tmp_path: Path) -> None:
     )
     assert be.run_pipeline(_compile(m, "rx", rate, imp, op)).status == "ok"
     out = read_bits(op)
-    assert len(out) >= sf * 30  # preamble stripped, payload recovered
+    # full payload, no trailing pad: the capture ends right after the last
+    # symbol and the eof flush must still deliver every one of them
+    assert len(out) >= sf * 40
     assert aligned_ber(out, bits, max_shift=8 * sf) == 0.0
 
 
@@ -177,17 +179,6 @@ def test_css_two_burst_capture_decodes_both(tmp_path: Path) -> None:
     assert aligned_ber(out[len(bits1) :], bits2, max_shift=40 * sf) == 0.0
 
 
-def _append_noise_tail(iq_path: Path, sn: int, seed: int, windows: int = 14) -> None:
-    # chirp_sync's emission trails its always-on hunt by a scan-claim margin
-    # withheld at EOF; trailing noise (as real captures carry) flushes the
-    # payload through it. Zeros would pin the detector.
-    rng = np.random.default_rng(seed)
-    n = windows * sn
-    tail = 0.02 * (rng.standard_normal(n) + 1j * rng.standard_normal(n))
-    frame = np.fromfile(iq_path, dtype=np.complex64)
-    np.concatenate([frame, tail.astype(np.complex64)]).tofile(iq_path)
-
-
 def _anatomy_modem(
     sf: int, osr: int, sfd_symbols: float, sync_symbols: int, preamble_len: int = 8
 ) -> ModemSpec:
@@ -233,7 +224,6 @@ def test_css_nosfd_ber0_impaired(sf: int, osr: int, cfo_bins: float, tmp_path) -
     clean, imp, op = tmp_path / "c.iq", tmp_path / "i.iq", tmp_path / "o.bits"
     m = _anatomy_modem(sf, osr, sfd_symbols=0.0, sync_symbols=0)
     assert be.run_pipeline(_compile(m, "tx", rate, bp, clean)).status == "ok"
-    _append_noise_tail(clean, osr * (1 << sf), seed=sf)
     channel(
         clean,
         imp,
@@ -264,7 +254,6 @@ def test_css_single_symbol_sfd_ber0(tmp_path) -> None:
     clean, imp, op = tmp_path / "c.iq", tmp_path / "i.iq", tmp_path / "o.bits"
     m = _anatomy_modem(sf, osr, sfd_symbols=1.0, sync_symbols=0)
     assert be.run_pipeline(_compile(m, "tx", rate, bp, clean)).status == "ok"
-    _append_noise_tail(clean, osr * (1 << sf), seed=3)
     channel(
         clean,
         imp,

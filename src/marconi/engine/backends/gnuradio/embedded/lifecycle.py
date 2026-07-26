@@ -62,3 +62,27 @@ def forecast_drain(work_pending: bool, ninputs: int) -> list[int]:
     drainability is what buys both mid-stream wakeups and the EOF flush —
     and [1] otherwise."""
     return [0 if work_pending else 1] * ninputs
+
+
+class EofProbe:
+    """The missing half of the EOF story (forecast_drain is the other):
+    ``exhausted()`` is true once the pipeline's sole file source has written
+    its entire file into the graph — no NEW sample will ever enter, though
+    already-written ones may still be in flight through upstream buffers, so
+    it licenses only actions that stay correct if more input arrives (e.g.
+    releasing whole-window margins early). ``expected_items`` is set when the
+    source feeds the holding block DIRECTLY: then nitems_read reaching it
+    proves every sample is already in the block's hands — true finality, safe
+    for irreversible steps like padding out a filter tail. nitems_written is
+    a monotonic counter safe to read cross-thread; a stale read only delays
+    the flush by one wakeup."""
+
+    def __init__(
+        self, source: Any, total_items: int, expected_items: int | None = None
+    ) -> None:
+        self._source = source
+        self._total = int(total_items)
+        self.expected_items = None if expected_items is None else int(expected_items)
+
+    def exhausted(self) -> bool:
+        return int(self._source.nitems_written(0)) >= self._total

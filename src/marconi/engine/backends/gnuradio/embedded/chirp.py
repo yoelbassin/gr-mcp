@@ -343,6 +343,10 @@ def make_chirp_sync(
     _HUNT_SPAN = (
         preamble_len + sync_symbols + int(np.ceil(sfd_symbols)) + 2
     ) * sn  # the whole declared anatomy plus detector slack
+    # FIR group delay + fractional-timing rounding slack; stays under one
+    # symbol window (sn >= 32) so pad zeros can only complete the final real
+    # window, never form a bogus trailing one
+    _EOF_PAD = _HALF + 8
     _OUT_CAP = 1 << 16  # pending-out saturation: stop consuming, let GR backpressure
 
     class _ChirpSync(gr.basic_block):
@@ -362,11 +366,45 @@ def make_chirp_sync(
             self._det_x: int | None = None
             self._out = OutQueue(np.complex64)
             self._tagq: list[int] = []  # _out indices (absolute) of burst starts
-            self.diagnostics = {"locks": 0}
+            self.eof_probe: Any = None
+            self._eof_padded = False  # FIR tail zeros injected (once, at flush)
+            self.diagnostics = {"locks": 0, "eof_flushed": 0}
 
         def forecast(self, noutput_items: int, ninputs: int) -> list[int]:
-            work = self._out.pending or (self._armed and self._cleared() > 0)
+            work = (
+                self._out.pending
+                or (self._armed and self._cleared() > 0)
+                or self._eof_flushable() > 0
+            )
             return forecast_drain(bool(work), ninputs)
+
+        def _eof_flushable(self) -> int:
+            """Whole symbol windows of buffered payload releasable once the
+            source is exhausted: emitting them early is exactly what normal
+            streaming would do, so a straggler still in flight through an
+            upstream buffer appends seamlessly (window alignment holds)."""
+            if (
+                not self._armed
+                or self.eof_probe is None
+                or not self.eof_probe.exhausted()
+            ):
+                return 0
+            return max(0, (self._seg + len(self._buf)) // sn * sn - self._seg)
+
+        def _eof_final(self) -> bool:
+            """True only when every source sample is provably in _buf already
+            (direct source feed + read counter at total) — the license for
+            the irreversible FIR-tail pad. exhausted() alone is NOT finality:
+            for a small capture the source finishes almost immediately while
+            the stream is still in flight, and a mid-stream pad would splice
+            zeros into real payload."""
+            p = self.eof_probe
+            return (
+                self._armed
+                and p is not None
+                and p.expected_items is not None
+                and self.nitems_read(0) >= p.expected_items
+            )
 
         def _cleared(self) -> int:
             """Samples of _buf beyond any claim by an in-progress detection
@@ -480,7 +518,21 @@ def make_chirp_sync(
                     break
                 self._relock(*lock)
             if self._armed and self._out.size < _OUT_CAP:
-                self._fir_to_out(self._cleared())
+                upto = self._cleared()
+                if self._eof_final() and not self._eof_padded:
+                    # the FIR's last outputs need future samples (group delay
+                    # plus the fractional-timing shift); none can ever come,
+                    # so zeros expel the real tail — they only feed the
+                    # interpolation edge past the last sample
+                    self._buf = np.concatenate(
+                        [self._buf, np.zeros(_EOF_PAD, np.complex64)]
+                    )
+                    self._eof_padded = True
+                flush = self._eof_flushable()
+                if flush > upto:
+                    self.diagnostics["eof_flushed"] += flush - upto
+                    upto = flush
+                self._fir_to_out(upto)
             elif not self._armed:
                 self._trim(self._cleared())
             before = self._out.drained_total

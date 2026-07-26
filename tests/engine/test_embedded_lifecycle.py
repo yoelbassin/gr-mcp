@@ -13,6 +13,7 @@ import numpy as np
 from engine._fakegr import FAKE_GR, drive
 
 from marconi.engine.backends.gnuradio.embedded.chirp import (
+    _modulate_symbol,
     chirp_prefix,
     make_chirp_sync,
 )
@@ -121,6 +122,66 @@ def test_chirp_sync_memory_bounded_under_slow_consumer() -> None:
     bound = (1 << 16) + 3 * 8192 + (pl + 6) * sn
     assert peak <= bound, f"internal buffering peaked at {peak} > {bound}"
     assert drained > 100 * sn  # the stream still flows under backpressure
+
+
+def test_chirp_sync_eof_probe_flushes_withheld_tail() -> None:
+    """Without EOF knowledge chirp_sync withholds its scan-claim margin
+    forever (the scheduler kills it without a final call once forecast
+    demands input). With an exhausted eof_probe it must announce
+    drainability and flush the buffered payload tail in whole symbol
+    windows on the termination sweep."""
+    sf, osr, zp, pl = 7, 2, 4, 8
+    sn = osr * (1 << sf)
+    payload_syms = 24
+    rng = np.random.default_rng(7)
+    payload = np.concatenate(
+        [
+            _modulate_symbol(int(s), sf, osr)
+            for s in rng.integers(1, 1 << sf, payload_syms)
+        ]
+    )
+    sig = np.concatenate([chirp_prefix(sf, osr, pl, 2.25), payload]).astype(
+        np.complex64
+    )
+
+    class _Exhausted:
+        # exhausted() true from the first call — the small-capture reality
+        # (the source finishes writing almost immediately); expected_items
+        # is what licenses the irreversible FIR-tail pad, only once every
+        # sample is provably consumed.
+        expected_items = sig.size
+
+        def exhausted(self) -> bool:
+            return True
+
+    def run(probe) -> np.ndarray:
+        blk = make_chirp_sync(FAKE_GR, sf, osr, zp, pl, float(1 << sf), 2.25, 2)
+        blk.eof_probe = probe
+        parts = [drive(blk, sig, chunk=sn, out_dtype=np.complex64)]
+        # the scheduler's termination sweep: zero-input calls arrive only
+        # while forecast announces drainability
+        for _ in range(64):
+            if blk.forecast(1 << 16, 1) != [0]:
+                break
+            out = np.zeros(1 << 16, np.complex64)
+            k = int(blk.general_work([sig[0:0]], [out]))
+            assert k, "announced drainability but emitted nothing (would spin)"
+            blk._nwritten += k
+            parts.append(out[:k].copy())
+        return np.concatenate(parts)
+
+    withheld = run(None)
+    flushed = run(_Exhausted())
+    assert flushed.size == payload_syms * sn, (
+        f"flushed run emitted {flushed.size} of {payload_syms * sn} " f"payload samples"
+    )
+    assert flushed.size >= withheld.size + 4 * sn, (
+        f"probe recovered only {flushed.size - withheld.size} samples over "
+        f"the withholding run ({withheld.size})"
+    )
+    # an early-exhausted probe must never corrupt content: the flushed run
+    # is a strict extension of the withholding run, sample for sample
+    assert np.array_equal(flushed[: withheld.size], withheld)
 
 
 def test_lifecycle_owned_by_shared_module() -> None:

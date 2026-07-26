@@ -239,15 +239,6 @@ def test_symbols_terminal_routing_smoke(tmp_path: Path) -> None:
     tx_result = be.run_pipeline(tx_pipe)
     assert tx_result.status == "ok", f"TX pipeline failed: {tx_result}"
 
-    # chirp_sync's emission trails its always-on burst hunt, withholding a
-    # bounded detector margin at EOF; pad with noise so the payload clears it
-    # (real captures carry trailing noise anyway; zeros would pin the detector).
-    sn = OS * (1 << SF)
-    rng = np.random.default_rng(9)
-    pad = 0.01 * (rng.standard_normal(12 * sn) + 1j * rng.standard_normal(12 * sn))
-    frame = np.fromfile(iq_path, dtype=np.complex64)
-    np.concatenate([frame, pad.astype(np.complex64)]).tofile(iq_path)
-
     rx_result = be.run_pipeline(rx_pipe)
     assert rx_result.status == "ok", f"RX pipeline failed: {rx_result}"
 

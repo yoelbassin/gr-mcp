@@ -62,3 +62,27 @@ def test_gate_no_tags_emits_nothing() -> None:
     blk.in_tags = []
     out = drive(blk, np.full(40, 0.3, np.float32), chunk=7, out_dtype=np.float32)
     assert out.size == 0
+
+
+def test_gate_reports_truncated_final_frame() -> None:
+    """A frame cut short by end-of-stream is unrecoverable (its items never
+    arrive), so the gate must say so: diagnostics carry how many items of the
+    open frame are missing — the honest EOF signal a consumer can act on."""
+    L = 12
+    frame = np.arange(L).astype(np.float32)
+    blk = _gate(L)
+    blk.in_tags = [FakeTag(4, "sync")]
+    stream = np.concatenate([np.full(4, 0.3, np.float32), frame[:5]])
+    out = drive(blk, stream, chunk=100, out_dtype=np.float32)
+    assert out.tolist() == frame[:5].tolist()
+    assert blk.diagnostics["truncated_frame_items"] == L - 5
+
+
+def test_gate_truncation_zero_when_frames_complete() -> None:
+    L = 12
+    frames = [(np.arange(L) + 100 * (i + 1)).astype(np.float32) for i in range(2)]
+    stream, offsets = _stream(L, [5, 9], frames)
+    blk = _gate(L)
+    blk.in_tags = [FakeTag(o, "sync") for o in offsets]
+    drive(blk, stream, chunk=1000, out_dtype=np.float32)
+    assert blk.diagnostics["truncated_frame_items"] == 0

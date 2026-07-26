@@ -74,6 +74,9 @@ def make_ofdm_frame_sync(
             self._emitted = False
             self._detect_len = null_len + usefuls_len
             self._out = OutQueue(np.complex64)
+            # post-run value = usefuls of the open frame the stream ended
+            # short of; the atomic-frame drop at EOF made visible
+            self.diagnostics = {"truncated_frame_items": 0}
 
         def forecast(self, noutput_items: int, ninputs: int) -> list[int]:
             usefuls_ready = (
@@ -134,6 +137,11 @@ def make_ofdm_frame_sync(
                 self._buf = self._buf[nb:]
                 self._base = 0
                 self._emitted = False
+            self.diagnostics["truncated_frame_items"] = (
+                max(0, self._base + usefuls_len - self._buf.size)
+                if self._base is not None and not self._emitted
+                else 0
+            )
             return self._out.drain(output_items[0])
 
     return _OfdmFrameSync()
