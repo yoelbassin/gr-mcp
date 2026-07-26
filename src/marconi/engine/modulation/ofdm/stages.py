@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import replace
 from typing import Any
 
-from pydantic import StrictInt, model_validator
+from pydantic import Field, StrictInt, model_validator
+from pydantic_core import PydanticCustomError
 
 from marconi.engine.compile.compile_context import CompileContext
 from marconi.engine.stages.base import RxStage, Stage
@@ -214,9 +216,77 @@ class OfdmCoherentSync(RxStage[CompileContext]):
         return Descriptor(Level.SYMBOLS, "c", Carrier.SOFT)
 
 
+class _CellSelectParams(StageParams):
+    select_perm: list[int]
+    keep: StrictInt = Field(ge=1)
+
+    @model_validator(mode="after")
+    def _shaped(self) -> "_CellSelectParams":
+        if sorted(self.select_perm) != list(range(len(self.select_perm))):
+            raise PydanticCustomError(
+                "value_error",
+                "select_perm must be a permutation of 0..len-1; the gather "
+                "walks one whole block per output block",
+            )
+        if self.keep > len(self.select_perm):
+            raise PydanticCustomError(
+                "value_error",
+                "keep must be <= len(select_perm); cannot keep more cells "
+                "than a block holds",
+            )
+        return self
+
+
+class CellSelect(RxStage[CompileContext]):
+    """SYMBOLS(c)->SYMBOLS(c) cell gather: reorder each fixed-size symbol
+    block by a whole-block permutation (stock blockinterleaver_cc) with the
+    wanted cells at the front, then keep that front (keep_m_in_n). Which
+    cells matter is the caller's anatomy — the perm and keep count are
+    params. Pins frame_len=keep so downstream frame geometry is checked."""
+
+    name = "cell_select"
+    from_level = Level.SYMBOLS
+    to_level = Level.SYMBOLS
+    family = "ofdm"
+    params_model = _CellSelectParams
+    accepts_item_type = "c"
+    accepts_carrier = Carrier.SOFT
+
+    def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
+        p = _CellSelectParams.model_validate(dict(params))
+        b.chain(
+            "blockinterleaver_cc",
+            perm=[int(x) for x in p.select_perm],
+            mode=True,
+        )
+        b.chain("keep_m_in_n_c", m=int(p.keep), n=len(p.select_perm))
+
+    def out_descriptor(
+        self, in_desc: Descriptor, params: Mapping[str, Any]
+    ) -> Descriptor:
+        return replace(in_desc, frame_len=int(params["keep"]))
+
+    def rate_factor(self, params: Mapping[str, Any]) -> float:
+        p = _CellSelectParams.model_validate(dict(params))
+        return p.keep / len(p.select_perm)
+
+    def validate_input(
+        self, in_desc: Descriptor, params: Mapping[str, Any]
+    ) -> str | None:
+        span = len(list(params["select_perm"]))
+        if in_desc.frame_len is not None and span % in_desc.frame_len:
+            return (
+                f"gathers blocks of {span} cells but the input is framed at "
+                f"{in_desc.frame_len}, which does not divide {span}; gather "
+                f"blocks would straddle frame boundaries"
+            )
+        return None
+
+
 OFDM_STAGES: tuple[type[Stage[CompileContext]], ...] = (
     OfdmDemod,
     DqpskSoftDemap,
     OfdmFrameSyncProbe,
     OfdmCoherentSync,
+    CellSelect,
 )
