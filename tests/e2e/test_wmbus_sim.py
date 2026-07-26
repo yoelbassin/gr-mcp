@@ -172,3 +172,46 @@ def test_wmbus_crc_is_a_real_oracle(tmp_path: Path) -> None:
     decoded_bits, windows = _run_decode(tmp_path, _encode(_MSG))
     num_frames, num_crc_ok, _messages = _decode(decoded_bits, windows, poly=0x1021)
     assert num_frames == 1 and num_crc_ok == 0
+
+
+def test_wmbus_nearest_decode_survives_a_chip_flip(tmp_path: Path) -> None:
+    # exact 3-of-6 decode silently corrupts the nibble on one chip error and
+    # the CRC kills the frame; nearest decode corrects it.
+    wire = _encode(_MSG)
+    wire = wire.copy()
+    wire[wire.size // 2] ^= 1
+    decoded_bits, windows = _run_decode(tmp_path, wire)
+    _, num_crc_ok, _ = _decode(decoded_bits, windows, poly=CRC_PARAMS["poly"])
+    assert num_crc_ok == 0
+
+    near_modem = ModemSpec(
+        symbol_rate=1.0,
+        path=[
+            ModemStep(
+                conv="codebook",
+                params={
+                    "code_bits": 6,
+                    "data_bits": 4,
+                    "table": cast("list[float | int]", THREE_OF_SIX),
+                    "decode": "nearest",
+                },
+            ),
+            ModemStep(conv="sync_word", params={"sync": SYNC}),
+        ],
+    )
+    p = tmp_path / "near.u8"
+    write_bits(p, wire)
+    (tmp_path / "near_wd").mkdir()
+    res = run_rx(
+        near_modem,
+        stage_registry(),
+        sample_rate=1.0,
+        start=BITS,
+        workdir=tmp_path / "near_wd",
+        input_stream=Bitstream(path=p, num_bits=int(wire.size)),
+    )
+    assert res.status == "ok", res
+    assert res.bitstream is not None
+    bits = read_bits(res.bitstream.path)
+    _, num_crc_ok, messages = _decode(bits, res.windows, poly=CRC_PARAMS["poly"])
+    assert num_crc_ok == 1 and messages == [_MSG]
