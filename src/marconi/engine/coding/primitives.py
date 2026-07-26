@@ -67,5 +67,7 @@ def syndrome_table(
     on syndrome collision (including a nonzero pattern landing on the zero
     syndrome) — the code cannot correct ``t`` errors. Memoized on
     (parity_masks, code_bits, data_bits, t): a decode call rebuilding the
-    same code's table on every word would cost O(2^n_parity) per word."""
-    return _syndrome_table_cached(tuple(parity_masks), code_bits, data_bits, t)
+    same code's table on every word would cost O(2^n_parity) per word. Each
+    call returns a fresh copy, never the cached dict itself, so a caller's
+    mutation can't corrupt a later caller sharing the same cache key."""
+    return dict(_syndrome_table_cached(tuple(parity_masks), code_bits, data_bits, t))

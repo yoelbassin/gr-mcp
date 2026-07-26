@@ -28,6 +28,17 @@ def test_golay_syndrome_table_is_perfect() -> None:
     assert len(table) == 23 + 253 + 1771  # 2^11 - 1: every syndrome used
 
 
+def test_syndrome_table_is_not_the_shared_cache_object() -> None:
+    masks = golay_masks()
+    first = syndrome_table(masks, 23, 12, 3)
+    second = syndrome_table(masks, 23, 12, 3)
+    assert first == second
+    assert first is not second
+    first[next(iter(first))] = -1
+    third = syndrome_table(masks, 23, 12, 3)
+    assert third == second
+
+
 def test_golay_corrects_every_triple_error() -> None:
     data = 0b101100111010
     clean = golay_codeword(data)
