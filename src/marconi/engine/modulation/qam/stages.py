@@ -67,6 +67,7 @@ class QamDemod(DuplexStage[CompileContext]):
     # 0.91 at every gain and mean-mag is 0.87/0.00/0.92 (invariant only at
     # unity). A fixed-radius constellation needs the RMS statistic.
     accepts_amplitude = frozenset({Amplitude.RMS_UNITY})
+    min_input_sps = 2.0
     params_model = _QamDemodParams
 
     def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:

@@ -189,6 +189,7 @@ class PskDemod(DuplexStage[CompileContext]):
     accepts_amplitude = frozenset(
         {Amplitude.PEAK_UNITY, Amplitude.MEAN_MAG_UNITY, Amplitude.RMS_UNITY}
     )
+    min_input_sps = 2.0
     params_model = _PskDemodParams
 
     def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:

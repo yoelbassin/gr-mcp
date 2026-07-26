@@ -74,6 +74,12 @@ class Stage(ABC, Generic[B]):
     # measured across a gain sweep, not assumed.
     accepts_amplitude: frozenset[Amplitude] | None = None
     alters_amplitude: bool = False
+    # The minimum samples-per-symbol an internal timing-recovery loop needs on
+    # RX, or None for stages that do not recover symbol timing. Gardner-class
+    # TEDs need 2: below that the loop either fails to construct in the backend
+    # or, worse, runs and emits confident garbage (measured BER 0.504 with
+    # status "ok" at 1.5 sps), so the compiler rejects the rate pair up front.
+    min_input_sps: float | None = None
 
     @abstractmethod
     def emit_rx(self, b: B, params: Mapping[str, Any]) -> None: ...

@@ -143,6 +143,15 @@ def _validate_descriptors(
                     f"but the pipeline delivers {rates[i]:g} at that boundary; "
                     f"check resample ratios, oversample, and symbol_rate"
                 )
+        if direction == "rx" and stage.min_input_sps is not None:
+            sps = rates[i] / symbol_rate
+            if sps < stage.min_input_sps * (1.0 - _RATE_TOL):
+                raise CompileError(
+                    f"stage '{step.conv}' recovers symbol timing and needs >= "
+                    f"{stage.min_input_sps:g} samples per symbol but the "
+                    f"pipeline delivers {sps:g} ({rates[i]:g} into symbol_rate "
+                    f"{symbol_rate:g}); resample the input or fix symbol_rate"
+                )
         problem = stage.validate_input(in_desc, step.params)
         if problem is not None:
             raise CompileError(f"stage '{step.conv}': {problem}")

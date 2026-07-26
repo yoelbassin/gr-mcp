@@ -30,6 +30,7 @@ class OokEnvelope(DuplexStage[CompileContext]):
     # mean-mag statistic is not gain-invariant for an on/off envelope
     # (0.51/0.00/1.00), whose duty cycle sets the mean.
     accepts_amplitude = frozenset({Amplitude.PEAK_UNITY, Amplitude.RMS_UNITY})
+    min_input_sps = 2.0
     params_model = _OokParams
 
     def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:

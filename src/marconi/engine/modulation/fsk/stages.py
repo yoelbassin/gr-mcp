@@ -29,6 +29,7 @@ class Fsk(DuplexStage[CompileContext]):
     from_level = Level.IQ
     to_level = Level.SYMBOLS
     family = "fsk"
+    min_input_sps = 2.0
     params_model = _FskParams
 
     def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
@@ -66,6 +67,7 @@ class Msk(RxStage[CompileContext]):
     from_level = Level.IQ
     to_level = Level.SYMBOLS
     family = "fsk"
+    min_input_sps = 2.0
     params_model = _MskParams
 
     def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
