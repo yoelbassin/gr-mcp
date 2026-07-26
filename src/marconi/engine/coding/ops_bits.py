@@ -94,6 +94,8 @@ def _nearest_values(
     grouped: np.ndarray, table: list[int], code_bits: int
 ) -> np.ndarray:
     fwd = np.asarray(table, dtype=np.int64)
+    if fwd.size and int(fwd.max()) >= (1 << code_bits):
+        raise ValueError("codebook symbol exceeds code_bits width")
     tbl = np.zeros((fwd.size, code_bits), np.uint8)
     for j in range(code_bits):
         tbl[:, j] = (fwd >> (code_bits - 1 - j)) & 1
