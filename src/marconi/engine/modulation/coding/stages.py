@@ -72,6 +72,34 @@ class Depuncture(RxStage[CompileContext]):
         b.set_tail(il)
 
 
+class Harden(RxStage[CompileContext]):
+    """Soft-LLR -> hard-bit decision, BITS->BITS. The non-FEC soft->hard bridge
+    (fec is the FEC one): this engine's LLR is bit 1 = negative, so negate to the
+    slicer's >=0 -> 1 convention then binary_slicer. Lets a soft correlate/gate
+    front (sync_align) feed a hard coding tail (permute/block_code)."""
+
+    name = "harden"
+    from_level = Level.BITS
+    to_level = Level.BITS
+    family = "coding"
+
+    class _Params(StageParams):
+        pass
+
+    params_model = _Params
+    accepts_item_type = "f"
+    accepts_carrier = Carrier.SOFT
+
+    def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
+        b.chain("multiply_const_ff", value=-1.0)
+        b.chain("binary_slicer")
+
+    def out_descriptor(
+        self, in_desc: Descriptor, params: Mapping[str, Any]
+    ) -> Descriptor:
+        return Descriptor(Level.BITS, "b", Carrier.HARD)
+
+
 class _SyncAlignParams(StageParams):
     access_code: str
     frame_len: StrictInt = Field(ge=1)
@@ -193,5 +221,6 @@ CODING_STAGES: tuple[type[Stage[CompileContext]], ...] = (
     Deinterleave,
     Depuncture,
     Fec,
+    Harden,
     SyncAlign,
 )

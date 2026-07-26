@@ -110,8 +110,63 @@ def _pocsag_modem() -> ModemSpec:
     )
 
 
+BATCH_BITS = BATCH_CODEWORDS * 32  # 512: 16 codewords x 32 bits after each sync
+SC_ACCESS = format(SC, "032b")  # sync codeword as a correlator bit string
+
+
+def _pocsag_sync_align_modem() -> ModemSpec:
+    """The same decode, but the frame sync codeword is found and gated IN GR by
+    sync_align instead of the coding-layer sync_word. The soft path (mfsk_soft_demap
+    -> sync_align -> harden) reproduces slice bit-for-bit (verified), then segment
+    re-seeds a window per gated 512-bit batch for the seeded permute/block_code."""
+    return ModemSpec(
+        symbol_rate=1200.0,
+        path=[
+            ModemStep(
+                conv="channelize",
+                params={"decim": 4, "bandwidth_hz": 14000.0, "center_hz": -10250.0},
+            ),
+            ModemStep(conv="agc", params={"window_symbols": 64.0}),
+            ModemStep(conv="fsk", params={"deviation": 4500.0}),
+            ModemStep(
+                conv="mfsk_soft_demap",
+                params={"levels": cast("list[float | int]", [-1.0, 1.0])},
+            ),
+            ModemStep(
+                conv="sync_align",
+                params={"access_code": SC_ACCESS, "frame_len": BATCH_BITS},
+            ),
+            ModemStep(conv="harden", params={}),
+            ModemStep(conv="segment", params={"frame_body_len": BATCH_BITS}),
+            ModemStep(conv="permute", params={"perm": cast("list[float | int]", PERM)}),
+            ModemStep(
+                conv="block_code",
+                params={
+                    "code_bits": CODE_BITS,
+                    "data_bits": DATA_BITS,
+                    "parity_masks": cast("list[float | int]", PARITY_MASKS),
+                    "correct_single": True,
+                    "emit": "data",
+                },
+            ),
+        ],
+    )
+
+
 def _word(bits: np.ndarray, lo: int, hi: int) -> int:
     return int(bits[lo:hi].dot(1 << np.arange(hi - lo - 1, -1, -1, dtype=np.int64)))
+
+
+def _pocsag_rics(bits: np.ndarray, windows: list[int]) -> dict[int, int]:
+    found: dict[int, int] = {}
+    for batch in framing.carve_fixed(bits, windows, BATCH_CODEWORDS * DATA_BITS):
+        for d in batch.reshape(-1, DATA_BITS):
+            if int(d[0]) != 0:
+                continue
+            if _word(d, 0, DATA_BITS) == IDLE_DATA:
+                continue
+            found[_word(d, 1, 19)] = _word(d, 19, 21)
+    return found
 
 
 @pytest.mark.skipif(
@@ -131,16 +186,32 @@ def test_pocsag_offair(tmp_path: Path) -> None:
     assert res.status == "ok", res
     assert res.windows, "no POCSAG batches framed"
     assert res.bitstream is not None
-    bits = read_bits(res.bitstream.path)
-    batches = framing.carve_fixed(bits, res.windows, BATCH_CODEWORDS * DATA_BITS)
-
-    found: dict[int, int] = {}
-    for batch in batches:
-        for d in batch.reshape(-1, DATA_BITS):
-            if int(d[0]) != 0:
-                continue
-            if _word(d, 0, DATA_BITS) == IDLE_DATA:
-                continue
-            found[_word(d, 1, 19)] = _word(d, 19, 21)
-
+    found = _pocsag_rics(read_bits(res.bitstream.path), res.windows)
     assert found == ORACLE, f"decoded {found}, oracle {ORACLE}"
+
+
+@pytest.mark.skipif(
+    not _SLICE.exists(),
+    reason="POCSAG slice absent — run tests/e2e/make_pocsag_slice.py",
+)
+def test_pocsag_offair_sync_align(tmp_path: Path) -> None:
+    """Off-air exercise of the GR-native sync_align: the frame sync codeword is
+    detected and each batch gated inside the GR flowgraph (correlate_access_code
+    + tag_gate), then decoded to the same multimon RICs. Exercises sync_align's
+    sync-detect + fixed-frame gate end to end on real RF; the sync->Viterbi
+    pairing is covered by tests/engine/test_sync_align.py (no off-air conv-coded
+    burst exists in the assets)."""
+    ensure_worker_warm()
+    res = run_rx(
+        _pocsag_sync_align_modem(),
+        stage_registry(),
+        sample_rate=RATE,
+        start=IQ,
+        workdir=tmp_path,
+        source_io={"path": str(_SLICE)},
+    )
+    assert res.status == "ok", res
+    assert res.windows, "no POCSAG batches gated by sync_align"
+    assert res.bitstream is not None
+    found = _pocsag_rics(read_bits(res.bitstream.path), res.windows)
+    assert found == ORACLE, f"sync_align decoded {found}, oracle {ORACLE}"
