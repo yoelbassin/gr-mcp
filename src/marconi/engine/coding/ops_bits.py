@@ -90,6 +90,22 @@ def _codebook_maps(
     return fwd, inv
 
 
+def _nearest_values(
+    grouped: np.ndarray, table: list[int], code_bits: int
+) -> np.ndarray:
+    fwd = np.asarray(table, dtype=np.int64)
+    tbl = np.zeros((fwd.size, code_bits), np.uint8)
+    for j in range(code_bits):
+        tbl[:, j] = (fwd >> (code_bits - 1 - j)) & 1
+    out = np.empty(grouped.shape[0], np.int64)
+    chunk = 1 << 16
+    for lo in range(0, grouped.shape[0], chunk):
+        seg = grouped[lo : lo + chunk]
+        dist = (seg[:, None, :] != tbl[None, :, :]).sum(axis=2)
+        out[lo : lo + seg.shape[0]] = dist.argmin(axis=1)
+    return out
+
+
 def _sym_dtype(width: int) -> type:
     # width <= 31 fits int32 with room for the sign bit; wider needs int64.
     return np.int64 if width > 31 else np.int32
@@ -119,25 +135,43 @@ def codebook_rx(
     data_bits: int,
     table: list[int],
     symbol_input: bool = False,
+    decode: str = "exact",
 ) -> CodingCarrier:
     """Fixed-width symbol substitution (a line/block code): each ``code_bits``
-    input symbol maps to its ``data_bits`` inverse-table value. One op expresses
-    3-of-6, Manchester, PPM chip-pairs — the table and widths are caller data."""
-    _, inv = _codebook_maps(code_bits, data_bits, table)
+    input symbol maps to its ``data_bits`` table value. One op expresses
+    3-of-6, Manchester, PPM chip-pairs — the table and widths are caller data.
+    ``decode="exact"`` is an inverse-table lookup (unknown codewords degrade to
+    0); ``decode="nearest"`` is min-Hamming-distance against the table, ties
+    broken by lowest table index, and never builds the ``2**code_bits``
+    inverse table — the only mode safe for wide chip codes."""
+    if decode == "nearest":
+
+        def _values(syms: np.ndarray) -> np.ndarray:
+            rows = _pack_symbols(syms, code_bits).reshape(-1, code_bits)
+            return _nearest_values(rows, table, code_bits)
+
+    else:
+        _, inv = _codebook_maps(code_bits, data_bits, table)
+
+        def _values(syms: np.ndarray) -> np.ndarray:
+            return inv[syms]
+
     if symbol_input:
         if c.symbols is None:
             raise ValueError("codebook(symbol_input=True) needs a symbols carrier")
         syms = np.asarray(c.symbols, np.int64)
         bits = (
-            _pack_symbols(inv[syms], data_bits) if syms.size else np.zeros(0, np.uint8)
+            _pack_symbols(_values(syms), data_bits)
+            if syms.size
+            else np.zeros(0, np.uint8)
         )
         marks = tuple(int(m) * data_bits for m in c.marks)
         return CodingCarrier(bits=bits, marks=marks)
+
+    def _decode(bits: np.ndarray) -> np.ndarray:
+        return _pack_symbols(_values(_unpack_symbols(bits, code_bits)), data_bits)
+
     if c.windows is not None:
-
-        def _decode(bits: np.ndarray) -> np.ndarray:
-            return _pack_symbols(inv[_unpack_symbols(bits, code_bits)], data_bits)
-
         bits_arr = np.asarray(c.bits, np.uint8)
         cursors = [w.cursor for w in c.windows]
         if any(b <= a for a, b in zip(cursors, cursors[1:])):
@@ -152,8 +186,8 @@ def codebook_rx(
             pos += int(dec.size)
         joined = np.concatenate(pieces) if pieces else np.zeros(0, np.uint8)
         return CodingCarrier(bits=joined, windows=windows)
-    data = inv[_unpack_symbols(np.asarray(c.bits, np.uint8), code_bits)]
-    return CodingCarrier(bits=_pack_symbols(data, data_bits), windows=c.windows)
+    data = _decode(np.asarray(c.bits, np.uint8))
+    return CodingCarrier(bits=data, windows=c.windows)
 
 
 def _block_decode(

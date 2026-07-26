@@ -35,6 +35,7 @@ class _CodebookParams(StageParams):
     code_bits: StrictInt = Field(ge=1)
     data_bits: StrictInt = Field(ge=1)
     table: list[int]
+    decode: str = "exact"
 
     @model_validator(mode="after")
     def _sized(self) -> "_CodebookParams":
@@ -49,6 +50,14 @@ class _CodebookParams(StageParams):
                     "have": len(self.table),
                 },
             )
+        if self.decode not in ("exact", "nearest"):
+            raise PydanticCustomError("value_error", "decode must be exact|nearest")
+        if self.decode == "exact" and self.code_bits > 24:
+            raise PydanticCustomError(
+                "value_error",
+                "exact decode builds a 2^code_bits inverse table; beyond 24 "
+                "bits use decode='nearest', which never builds it",
+            )
         return self
 
 
@@ -57,6 +66,7 @@ def _codebook_kw(params: Mapping[str, Any]) -> dict[str, Any]:
         "code_bits": int(params["code_bits"]),
         "data_bits": int(params["data_bits"]),
         "table": [int(x) for x in params["table"]],
+        "decode": str(params.get("decode", "exact")),
     }
 
 
