@@ -26,19 +26,18 @@ _CFG = {16: (24000, 0.002, 32.0, 1500), 64: (36000, 0.001, 40.0, 1500)}
 
 
 def _const_points(order: int):
-    from gnuradio import digital  # in-process GR for oracle ground truth (allowed)
+    # Same constellation construction as the backend's _const_qam (blocks.py):
+    # qam_constellation(..., GRAY_CODE) for every order, not the stock
+    # constellation_16qam, which labels points differently over the same
+    # geometric grid.
+    from gnuradio.digital import mod_codes, qam  # in-process GR oracle (allowed)
 
-    if order == 16:
-        c = digital.constellation_16qam()
-    else:
-        from gnuradio.digital import mod_codes, qam
-
-        c = qam.qam_constellation(
-            constellation_points=order,
-            differential=False,
-            mod_code=mod_codes.GRAY_CODE,
-            large_ampls_to_corners=False,
-        )
+    c = qam.qam_constellation(
+        constellation_points=order,
+        differential=False,
+        mod_code=mod_codes.GRAY_CODE,
+        large_ampls_to_corners=False,
+    )
     return np.asarray(c.points()), c.bits_per_symbol()
 
 

@@ -130,17 +130,14 @@ def _const_psk(c: _GrCtx, p: Params) -> Any:
 
 def _const_qam(c: _GrCtx, p: Params) -> Any:
     order = _as_int(p["order"])
-    if order == 16:
-        con = c.digital.constellation_16qam()
-    elif order == 64:
-        con = c.digital.qam.qam_constellation(
-            constellation_points=64,
-            differential=False,
-            mod_code=c.digital.mod_codes.GRAY_CODE,
-            large_ampls_to_corners=False,
-        )
-    else:
+    if order not in (16, 64):
         raise BackendError(f"unsupported qam order {order}")
+    con = c.digital.qam.qam_constellation(
+        constellation_points=order,
+        differential=False,
+        mod_code=c.digital.mod_codes.GRAY_CODE,
+        large_ampls_to_corners=False,
+    )
     con.normalize(c.digital.constellation.POWER_NORMALIZATION)
     return con
 

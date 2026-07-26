@@ -125,41 +125,30 @@ def test_soft_demap_rejects_malformed_params(params: dict[str, ParamValue]) -> N
         stage_registry()["soft_demap"].params_model.model_validate(params)
 
 
-def test_soft_demap_qam_16_round_trips_through_backend(tmp_path: Path) -> None:
-    # Test soft_demap with scheme="qam" by repeating each of the 16 QAM
-    # constellation points. Verifies soft_demap(qam,16) + harden decodes each
-    # point consistently. Tests the qam scheme branch end-to-end
-    # (constellation_soft_decoder for qam differs from psk: 16 vs 64,
-    # GRAY_CODE, POWER_NORMALIZATION). Noiseless symbols at unit RMS →
-    # hard decisions should be deterministic per point.
+def test_soft_demap_qam16_decodes_every_point_to_its_index(tmp_path: Path) -> None:
     from gnuradio import digital
 
-    # Get 16QAM constellation from GR (same source the backend uses)
-    c = digital.constellation_16qam()
-    points = np.asarray(c.points(), dtype=np.complex64)
+    con = digital.qam.qam_constellation(
+        constellation_points=16,
+        differential=False,
+        mod_code=digital.mod_codes.GRAY_CODE,
+        large_ampls_to_corners=False,
+    )
+    con.normalize(digital.constellation.POWER_NORMALIZATION)
+    pts = np.asarray(con.points(), dtype=np.complex64)
+    reps = np.tile(pts, 8)
+    bits = _run_bits(tmp_path, reps, {"scheme": "qam", "order": 16})
+    expect = np.tile(
+        np.array(
+            [[(v >> (3 - j)) & 1 for j in range(4)] for v in range(16)], np.uint8
+        ).reshape(-1),
+        8,
+    )
+    assert bits.tolist() == expect.tolist()
 
-    # Create a test that feeds each constellation point and verifies
-    # consistent decoding. All 16 points 4 times = 64 symbols.
-    (tmp_path / "qam").mkdir(exist_ok=True)
 
-    syms = np.tile(points, 4).astype(np.complex64)
-    decoded = _run_bits(tmp_path / "qam", syms, {"scheme": "qam", "order": 16})
-
-    # Verify consistency: each occurrence of a constellation point should
-    # decode to the same bit pattern. This ensures soft_demap(qam) is
-    # deterministic and functioning end-to-end.
-    k = 4  # bits per symbol
-    for idx in range(16):
-        # Collect all decoding s of point idx
-        decoded_bits_list = []
-        for cycle in range(4):
-            sym_idx = cycle * 16 + idx
-            bit_start = sym_idx * k
-            decoded_bits_list.append(tuple(decoded[bit_start : bit_start + k]))
-
-        # All occurrences should decode identically
-        first_decoding = decoded_bits_list[0]
-        for decoding in decoded_bits_list[1:]:
-            assert (
-                decoding == first_decoding
-            ), f"point {idx}: inconsistent decodings {decoded_bits_list}"
+def test_soft_demap_qam64_is_rejected() -> None:
+    with pytest.raises(Exception, match="order 16 only"):
+        stage_registry()["soft_demap"].params_model.model_validate(
+            {"scheme": "qam", "order": 64}
+        )

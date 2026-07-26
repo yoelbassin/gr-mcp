@@ -230,6 +230,13 @@ class _SoftDemapParams(StageParams):
                     "value_error",
                     "named schemes take order, not points",
                 )
+            if self.scheme == "qam" and self.order != 16:
+                raise PydanticCustomError(
+                    "value_error",
+                    "qam soft decode supports order 16 only: GR's 64-QAM "
+                    "constellations emit collapsed soft decisions (measured: 64 "
+                    "clean points decode to 16 distinct values)",
+                )
         elif self.scheme == "explicit":
             if self.order is not None or self.points_i is None or self.points_q is None:
                 raise PydanticCustomError(
