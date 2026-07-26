@@ -1,8 +1,10 @@
 """Per-packet seeded whitening through the GENERIC vocabulary: sync_word
 seeds a window per packet, descramble's LFSR mode restarts from the seed at
-each window — the shape of clock-seeded whitening (BT BR/EDR-like). Two
-frames at byte-misaligned offsets prove a fixed XOR sequence cannot fake it.
-LFSR polynomial/seed, sync word and CRC are caller data, only here."""
+each window — the shape of clock-seeded whitening (BT BR/EDR-like). A fixed
+XOR sequence shorter than a frame body wraps mid-frame, diverging from the
+non-periodic LFSR it's standing in for — proving the per-window reset is
+load-bearing. LFSR polynomial/seed, sync word and CRC are caller data, only
+here."""
 
 from __future__ import annotations
 
@@ -44,8 +46,8 @@ def _frame(payload: bytes) -> np.ndarray:
 
 
 def _wire() -> np.ndarray:
-    # 13 junk bits between frames: frame 2 starts byte-misaligned, so no
-    # fixed byte-tiled XOR sequence can whiten both frames.
+    # junk gaps put each frame at an arbitrary bit offset — realistic
+    # framing; see the control test for the actual discriminator.
     return np.concatenate(
         [
             np.zeros(9, np.uint8),
