@@ -386,17 +386,52 @@ def _seq_bits(sequence: str) -> np.ndarray:
     return np.unpackbits(np.frombuffer(bytes.fromhex(sequence), dtype=np.uint8))
 
 
-def descramble_rx(c: CodingCarrier, *, sequence: str = "") -> CodingCarrier:
-    seq = _seq_bits(sequence)
+def _lfsr_seq(mask: int, seed: int, length: int, n: int) -> np.ndarray:
+    out, s = np.empty(n, np.uint8), seed
+    for i in range(n):
+        out[i] = s & 1
+        fb = (s & mask).bit_count() & 1
+        s = (s >> 1) | (fb << (length - 1))
+    return out
+
+
+def descramble_rx(
+    c: CodingCarrier,
+    *,
+    sequence: str = "",
+    lfsr_mask: int | None = None,
+    lfsr_seed: int | None = None,
+    lfsr_len: int | None = None,
+) -> CodingCarrier:
     bits = np.asarray(c.bits, dtype=np.uint8)
-    if seq.size == 0 or bits.size == 0:
+    if bits.size == 0:
+        return c
+
+    # LFSR mode
+    if lfsr_mask is not None:
+        assert lfsr_seed is not None and lfsr_len is not None
+        if c.windows is None:
+            lfsr_seq = _lfsr_seq(lfsr_mask, lfsr_seed, lfsr_len, bits.size)
+            return replace(c, bits=np.bitwise_xor(bits, lfsr_seq))
+        out = bits.copy()
+        cursors = [int(w.cursor) for w in c.windows]
+        bounds: list[int] = cursors[1:] + [int(bits.size)]
+        for lo, hi in zip(cursors, bounds):
+            span_len = hi - lo
+            lfsr_seq = _lfsr_seq(lfsr_mask, lfsr_seed, lfsr_len, span_len)
+            out[lo:hi] = np.bitwise_xor(bits[lo:hi], lfsr_seq)
+        return replace(c, bits=out)
+
+    # Sequence mode
+    seq = _seq_bits(sequence)
+    if seq.size == 0:
         return c
     if c.windows is None:
         return replace(c, bits=np.bitwise_xor(bits, np.resize(seq, bits.size)))
     out = bits.copy()
-    cursors = [w.cursor for w in c.windows]
-    bounds = cursors[1:] + [int(bits.size)]
-    for lo, hi in zip(cursors, bounds):
-        span = out[lo:hi]
+    cursors = [int(w.cursor) for w in c.windows]
+    bounds_seq: list[int] = cursors[1:] + [int(bits.size)]
+    for lo, hi in zip(cursors, bounds_seq):
+        span: np.ndarray = out[lo:hi]
         out[lo:hi] = np.bitwise_xor(span, np.resize(seq, span.size))
     return replace(c, bits=out)

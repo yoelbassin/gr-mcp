@@ -70,17 +70,42 @@ def _codebook_kw(params: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
-class _SequenceParams(StageParams):
-    sequence: str
+class _DescrambleParams(StageParams):
+    sequence: str = ""
+    lfsr_mask: StrictInt | None = None
+    lfsr_seed: StrictInt | None = None
+    lfsr_len: StrictInt | None = Field(default=None, ge=2, le=64)
 
     @model_validator(mode="after")
-    def _ok(self) -> "_SequenceParams":
-        try:
-            bytes.fromhex(self.sequence)
-        except ValueError:
+    def _one_mode(self) -> "_DescrambleParams":
+        triple = (self.lfsr_mask, self.lfsr_seed, self.lfsr_len)
+        has_lfsr = any(v is not None for v in triple)
+        if has_lfsr and None in triple:
             raise PydanticCustomError(
-                "value_error", "sequence must be an even-length hex string"
-            ) from None
+                "value_error", "lfsr_mask, lfsr_seed and lfsr_len come together"
+            )
+        if has_lfsr == bool(self.sequence):
+            raise PydanticCustomError(
+                "value_error", "exactly one of sequence or lfsr_* must be set"
+            )
+        if has_lfsr:
+            assert self.lfsr_mask is not None and self.lfsr_seed is not None
+            assert self.lfsr_len is not None
+            top = 1 << self.lfsr_len
+            if not 0 < self.lfsr_mask < top or not 0 < self.lfsr_seed < top:
+                raise PydanticCustomError(
+                    "value_error",
+                    "lfsr_mask and lfsr_seed must be nonzero and fit lfsr_len",
+                )
+        else:
+            try:
+                if not bytes.fromhex(self.sequence):
+                    raise ValueError
+            except ValueError:
+                raise PydanticCustomError(
+                    "value_error",
+                    "sequence must be a non-empty even-length hex string",
+                ) from None
         return self
 
 
@@ -365,10 +390,17 @@ class Descramble(RxStage[CodingBuilder]):
     accepts_item_type = "b"
     accepts_carrier = Carrier.HARD
 
-    params_model = _SequenceParams
+    params_model = _DescrambleParams
 
     def emit_rx(self, b: CodingBuilder, params: Mapping[str, Any]) -> None:
-        b.add(ops_bits.descramble_rx, sequence=str(params["sequence"]))
+        p = _DescrambleParams.model_validate(dict(params))
+        b.add(
+            ops_bits.descramble_rx,
+            sequence=p.sequence,
+            lfsr_mask=p.lfsr_mask,
+            lfsr_seed=p.lfsr_seed,
+            lfsr_len=p.lfsr_len,
+        )
 
 
 CODING_BITS_STAGES: tuple[type[Stage[CodingBuilder]], ...] = (
