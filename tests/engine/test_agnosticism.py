@@ -55,6 +55,11 @@ _PROTOCOL_TOKENS = [
     r"1024-?phase",
     r"gain\s*reference",
     r"168,\s*255,\s*161",  # DRM scattered-pilot Z-row literal
+    r"zigbee",
+    r"802\.?15\.?4",
+    r"\brds\b",
+    r"\bwm-?bus\b",
+    r"\bm-?bus\b",
 ]
 _PATTERN = re.compile("|".join(_PROTOCOL_TOKENS), re.IGNORECASE)
 
