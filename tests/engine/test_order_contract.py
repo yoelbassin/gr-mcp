@@ -238,6 +238,7 @@ _ORDER_MATRIX: dict[str, tuple[dict[str, ParamValue], int]] = {
     "psk_demod": ({"order": 4}, 4),
     "psk_demap": ({"order": 4}, 4),
     "psk_soft_demap": ({"order": 4}, 4),
+    "soft_demap": ({"scheme": "psk", "order": 4}, 4),
     "qam_demod": ({"order": 16}, 16),
     "qam_demap": ({"order": 16}, 16),
     "dechirp": (_DECHIRP_PARAMS, 128),

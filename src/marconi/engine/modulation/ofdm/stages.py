@@ -216,6 +216,45 @@ class OfdmCoherentSync(RxStage[CompileContext]):
         return Descriptor(Level.SYMBOLS, "c", Carrier.SOFT)
 
 
+class _SoftDemapParams(StageParams):
+    scheme: str = "explicit"
+    order: StrictInt | None = None
+    points_i: list[float] | None = None
+    points_q: list[float] | None = None
+
+    @model_validator(mode="after")
+    def _shaped(self) -> "_SoftDemapParams":
+        if self.scheme in ("psk", "qam"):
+            if self.order is None or self.points_i is not None:
+                raise PydanticCustomError(
+                    "value_error",
+                    "named schemes take order, not points",
+                )
+        elif self.scheme == "explicit":
+            if self.order is not None or self.points_i is None or self.points_q is None:
+                raise PydanticCustomError(
+                    "value_error",
+                    "explicit takes points_i/points_q, not order",
+                )
+            n = len(self.points_i)
+            if len(self.points_q) != n:
+                raise PydanticCustomError(
+                    "value_error", "points_i and points_q must be equal length"
+                )
+            if n < 2 or n & (n - 1):
+                raise PydanticCustomError(
+                    "value_error",
+                    "explicit needs a power-of-two point count >= 2; a "
+                    "point's bit pattern is its index",
+                )
+        else:
+            raise PydanticCustomError("value_error", "scheme must be psk|qam|explicit")
+        return self
+
+    def alphabet(self) -> int:
+        return int(self.order) if self.order is not None else len(self.points_i or [])
+
+
 class _CellSelectParams(StageParams):
     select_perm: list[int]
     keep: StrictInt = Field(ge=1)
@@ -235,6 +274,47 @@ class _CellSelectParams(StageParams):
                 "than a block holds",
             )
         return self
+
+
+class SoftDemap(RxStage[CompileContext]):
+    """Constellation soft demap, SYMBOLS->BITS soft, for any constellation:
+    named psk/qam schemes or explicit caller points (a point's bit pattern is
+    its index, MSB-first; points are power-normalized so input must be unit
+    RMS). Negates constellation_soft_decoder's LLR to this engine's
+    bit-1-negative convention. The generic door from a cell stream into the
+    soft coding lane (deinterleave/depuncture/fec)."""
+
+    name = "soft_demap"
+    from_level = Level.SYMBOLS
+    to_level = Level.BITS
+    family = "ofdm"
+    params_model = _SoftDemapParams
+    accepts_item_type = "c"
+    accepts_carrier = Carrier.SOFT
+
+    def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
+        p = _SoftDemapParams.model_validate(dict(params))
+        if p.scheme == "explicit":
+            b.chain(
+                "constellation_soft_decoder",
+                scheme=p.scheme,
+                points_i=[float(x) for x in p.points_i or []],
+                points_q=[float(x) for x in p.points_q or []],
+            )
+        else:
+            b.chain("constellation_soft_decoder", scheme=p.scheme, order=p.alphabet())
+        b.chain("multiply_const_ff", value=-1.0)
+
+    def out_descriptor(
+        self, in_desc: Descriptor, params: Mapping[str, Any]
+    ) -> Descriptor:
+        p = _SoftDemapParams.model_validate(dict(params))
+        k = p.alphabet().bit_length() - 1
+        frame = None if in_desc.frame_len is None else in_desc.frame_len * k
+        return Descriptor(Level.BITS, "f", Carrier.SOFT, frame_len=frame)
+
+    def required_input_order(self, params: Mapping[str, Any]) -> int | None:
+        return _SoftDemapParams.model_validate(dict(params)).alphabet()
 
 
 class CellSelect(RxStage[CompileContext]):
@@ -291,4 +371,5 @@ OFDM_STAGES: tuple[type[Stage[CompileContext]], ...] = (
     OfdmFrameSyncProbe,
     OfdmCoherentSync,
     CellSelect,
+    SoftDemap,
 )
