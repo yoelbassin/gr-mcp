@@ -8,7 +8,7 @@ import numpy as np
 import reedsolo
 
 from marconi.engine.coding.carrier import CodingCarrier, Window
-from marconi.engine.coding.primitives import can_correct
+from marconi.engine.coding.primitives import can_correct, syndrome_table
 
 
 def _bitorder(bit_order: str) -> Literal["little", "big"]:
@@ -192,12 +192,31 @@ def codebook_rx(
     return CodingCarrier(bits=data, windows=c.windows)
 
 
+def _syndromes(
+    words: np.ndarray, parity_masks: list[int], code_bits: int, data_bits: int
+) -> np.ndarray:
+    # syndrome stays uint8 (mod-2 XOR of selected data cols + parity col),
+    # then packs to a small per-word int - no (n_words, k) int matrix
+    n_parity = code_bits - data_bits
+    dtype = _sym_dtype(n_parity)
+    rows = [[(m >> b) & 1 for b in range(data_bits)] for m in parity_masks]
+    s_int: np.ndarray = np.zeros(words.shape[0], dtype)
+    for p, row in enumerate(rows):
+        col = words[:, data_bits + p].astype(np.uint8)
+        for c, bit in enumerate(row):
+            if bit:
+                col = col ^ words[:, c]
+        s_int = (s_int << 1) | (col & 1)
+    return s_int
+
+
 def _block_decode(
     bits: np.ndarray,
     code_bits: int,
     data_bits: int,
     parity_masks: list[int],
     correct_single: bool | None,
+    correct: int | None,
     emit: str,
 ) -> np.ndarray:
     # Codeword basis is LSB-first: stream bit j of a stride is codeword bit j,
@@ -207,23 +226,22 @@ def _block_decode(
     # must reconcile the basis (supply masks LSB-first, or reverse each
     # stride).
     n_parity = code_bits - data_bits
-    do_correct = (
-        can_correct(n_parity, data_bits) if correct_single is None else correct_single
-    )
+    if correct is not None:
+        t = correct
+    else:
+        do_correct_single = (
+            can_correct(n_parity, data_bits)
+            if correct_single is None
+            else correct_single
+        )
+        t = 1 if do_correct_single else 0
     n_words = bits.size // code_bits
     words = bits[: n_words * code_bits].reshape(n_words, code_bits).copy()
+    do_correct = t == 1
     if do_correct and n_words and parity_masks:
         dtype = _sym_dtype(n_parity)
         rows = [[(m >> b) & 1 for b in range(data_bits)] for m in parity_masks]
-        # syndrome stays uint8 (mod-2 XOR of selected data cols + parity col),
-        # then packs to a small per-word int - no (n_words, k) int matrix
-        s_int: np.ndarray = np.zeros(n_words, dtype)
-        for p, row in enumerate(rows):
-            col = words[:, data_bits + p].astype(np.uint8)
-            for c, bit in enumerate(row):
-                if bit:
-                    col = col ^ words[:, c]
-            s_int = (s_int << 1) | (col & 1)
+        s_int = _syndromes(words, parity_masks, code_bits, data_bits)
         # a column's syndrome signature, data columns then the parity identity;
         # first ascending match flips, matching the scalar column scan
         weights = np.left_shift(1, np.arange(n_parity - 1, -1, -1, dtype=dtype))
@@ -234,6 +252,22 @@ def _block_decode(
             col_idx = match.argmax(axis=1)
             fixable = match.any(axis=1)
             words[bad[fixable], col_idx[fixable]] ^= 1
+    if t >= 2 and n_words:
+        lut = syndrome_table(parity_masks, code_bits, data_bits, t)
+        keys = np.fromiter(lut.keys(), np.int64, len(lut))
+        flips = np.fromiter(lut.values(), np.int64, len(lut))
+        order_ = np.argsort(keys)
+        keys, flips = keys[order_], flips[order_]
+        s_int = _syndromes(words, parity_masks, code_bits, data_bits).astype(np.int64)
+        bad = np.flatnonzero(s_int)
+        if bad.size:
+            pos = np.searchsorted(keys, s_int[bad])
+            pos = np.clip(pos, 0, keys.size - 1)
+            hit = keys[pos] == s_int[bad]
+            flip = flips[pos[hit]]
+            rows = bad[hit]
+            flip_bits = ((flip[:, None] >> np.arange(code_bits)) & 1).astype(np.uint8)
+            words[rows] ^= flip_bits
     out = words if emit == "codeword" else words[:, :data_bits]
     return out.reshape(-1)
 
@@ -245,12 +279,13 @@ def block_code_rx(
     data_bits: int,
     parity_masks: list[int],
     correct_single: bool | None = None,
+    correct: int | None = None,
     emit: str = "data",
 ) -> CodingCarrier:
     return _decode_scoped(
         c,
         lambda bits: _block_decode(
-            bits, code_bits, data_bits, parity_masks, correct_single, emit
+            bits, code_bits, data_bits, parity_masks, correct_single, correct, emit
         ),
     )
 

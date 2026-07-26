@@ -8,7 +8,7 @@ from pydantic_core import PydanticCustomError
 
 from marconi.engine.coding import ops_bits
 from marconi.engine.coding.builder import CodingBuilder
-from marconi.engine.coding.primitives import can_correct
+from marconi.engine.coding.primitives import can_correct, syndrome_table
 from marconi.engine.stages.base import RxStage, Stage
 from marconi.engine.types.descriptor import Carrier
 from marconi.engine.types.levels import Level
@@ -193,6 +193,7 @@ class BlockCode(RxStage[CodingBuilder]):
         data_bits: StrictInt = Field(ge=1)
         parity_masks: list[int]
         correct_single: bool | None = None
+        correct: StrictInt | None = Field(default=None, ge=0, le=3)
         emit: str = "data"
 
         @model_validator(mode="after")
@@ -214,12 +215,32 @@ class BlockCode(RxStage[CodingBuilder]):
                 )
             if self.emit not in ("data", "codeword"):
                 raise PydanticCustomError("value_error", "emit must be data|codeword")
-            corrects = (
-                can_correct(self.code_bits - self.data_bits, self.data_bits)
-                if self.correct_single is None
-                else self.correct_single
+            if self.correct is not None and self.correct_single is not None:
+                raise PydanticCustomError(
+                    "value_error", "set correct or correct_single, not both"
+                )
+            if self.correct is not None and self.correct >= 2:
+                try:
+                    syndrome_table(
+                        [int(m) for m in self.parity_masks],
+                        self.code_bits,
+                        self.data_bits,
+                        self.correct,
+                    )
+                except ValueError as e:
+                    raise PydanticCustomError(
+                        "value_error", "{msg}", {"msg": str(e)}
+                    ) from None
+            single_check = (
+                self.correct == 1
+                if self.correct is not None
+                else (
+                    can_correct(self.code_bits - self.data_bits, self.data_bits)
+                    if self.correct_single is None
+                    else self.correct_single
+                )
             )
-            if corrects:
+            if single_check:
                 cols = [
                     tuple((mask >> j) & 1 for mask in self.parity_masks)
                     for j in range(self.data_bits)
@@ -243,6 +264,7 @@ class BlockCode(RxStage[CodingBuilder]):
             data_bits=p.data_bits,
             parity_masks=[int(x) for x in p.parity_masks],
             correct_single=p.correct_single,
+            correct=p.correct,
             emit=p.emit,
         )
 

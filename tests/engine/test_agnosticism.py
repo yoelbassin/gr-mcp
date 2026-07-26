@@ -96,14 +96,21 @@ def test_css_coding_carries_no_parity_table() -> None:
 
 
 def test_coding_primitives_surface_is_minimal() -> None:
-    # The product keeps only what its ops consume: gray codes + the Hamming
-    # bound. The explicit-header frame algebra, diagonal deinterleaver, and
-    # symbol demap are datasheet-shaped and live in tests/helpers/blockmath.py;
-    # this pins the surface so none can quietly return to src/.
+    # The product keeps only what its ops consume: gray codes, the Hamming
+    # bound, and the syndrome-LUT correction math. The explicit-header frame
+    # algebra, diagonal deinterleaver, and symbol demap are datasheet-shaped
+    # and live in tests/helpers/blockmath.py; this pins the surface so none
+    # can quietly return to src/.
     from marconi.engine.coding import primitives
 
     public = {n for n in dir(primitives) if not n.startswith("_")}
-    assert public == {"annotations", "can_correct", "gray_decode", "gray_encode"}
+    assert public == {
+        "annotations",
+        "can_correct",
+        "gray_decode",
+        "gray_encode",
+        "syndrome_table",
+    }
 
 
 @pytest.mark.parametrize(
