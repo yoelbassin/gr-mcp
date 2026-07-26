@@ -41,12 +41,18 @@ class _Grid:
         return self.oversample * (1 << self.sf)
 
 
-def _folded(signal: np.ndarray, x: int, grid: _Grid, up: bool = True) -> np.ndarray:
-    sn = grid.sample_num
-    seg = signal[x : x + sn]
+def _spectrum(signal: np.ndarray, x: int, grid: _Grid, up: bool = True) -> np.ndarray:
+    seg = signal[x : x + grid.sample_num]
     ref = grid.up_ref if up else grid.down_ref
-    spec = np.fft.fft(seg * ref, grid.fft_len)
+    return np.fft.fft(seg * ref, grid.fft_len)
+
+
+def _folded_mag(spec: np.ndarray, grid: _Grid) -> np.ndarray:
     return np.abs(spec[: grid.bins]) + np.abs(spec[grid.fft_len - grid.bins :])
+
+
+def _folded(signal: np.ndarray, x: int, grid: _Grid, up: bool = True) -> np.ndarray:
+    return _folded_mag(_spectrum(signal, x, grid, up), grid)
 
 
 def _fine_peak(
@@ -110,6 +116,17 @@ def _sfd_sync(
     return x + int(round(sfd_syms * sn))
 
 
+def _preamble_end(signal: np.ndarray, x: int, grid: _Grid, cap: int) -> int | None:
+    sn = grid.sample_num
+    while x < len(signal) - sn:
+        if x >= cap:
+            raise ValueError("preamble run never departs within its declared span")
+        if abs(_peak_bin(signal, x, grid, up=True)) > grid.zero_pad:
+            return x
+        x += sn
+    return None
+
+
 def _parabolic(f: np.ndarray, p: int) -> float:
     """3-point parabolic sub-bin refinement of an FFT-magnitude peak at index p."""
     if 0 < p < len(f) - 1:
@@ -126,32 +143,58 @@ def _peak_bin(signal: np.ndarray, x: int, grid: _Grid, up: bool) -> float:
     return b - grid.bins if b > grid.bins / 2 else b
 
 
+def _peak_complex(signal: np.ndarray, x: int, grid: _Grid) -> complex:
+    """Complex dechirp coefficient at the window's folded peak (the stronger
+    of the two spectral images)."""
+    spec = _spectrum(signal, x, grid)
+    p = int(np.argmax(_folded_mag(spec, grid)))
+    lo, hi = spec[p], spec[grid.fft_len - grid.bins + p]
+    return complex(lo if abs(lo) >= abs(hi) else hi)
+
+
 def _joint_sync(
     signal: np.ndarray,
     payload_start: int,
     grid: _Grid,
     preamble_len: int,
     sfd_symbols: float,
+    sync_symbols: int,
 ) -> tuple[float, float]:
     """Joint estimate from the preamble up-chirps + SFD down-chirps. A preamble
     up-chirp dechirps to bin ~ (CFO + STO); an SFD down-chirp to ~ (CFO - STO).
     Returns (cfo_bins, sto_bins) as signed fractional fold-bins."""
     sn = grid.sample_num
     sfd_start = payload_start - int(round(sfd_symbols * sn))
-    u = float(
+    ups = [sfd_start - (sync_symbols + i) * sn for i in range(1, preamble_len)]
+    u = float(np.median([_peak_bin(signal, x, grid, True) for x in ups if x >= 0]))
+    down_windows = min(2, int(sfd_symbols))
+    d = float(
         np.median(
             [
-                _peak_bin(signal, sfd_start - i * sn, grid, True)
-                for i in range(1, preamble_len)
+                _peak_bin(signal, sfd_start + j * sn, grid, False)
+                for j in range(down_windows)
             ]
         )
     )
-    d = float(
-        np.median(
-            [_peak_bin(signal, sfd_start + j * sn, grid, False) for j in range(2)]
-        )
-    )
     return (u + d) / 2.0, (u - d) / 2.0
+
+
+def _preamble_sync(
+    signal: np.ndarray, end: int, grid: _Grid, preamble_len: int
+) -> tuple[float, float]:
+    """Estimate from the preamble run alone (no SFD). The dechirp peak carries
+    (CFO + STO) jointly; the CFO alone advances the dechirped tone's phase by
+    2*pi*CFO*T_sym per symbol, so the inter-symbol phase slope recovers CFO
+    within +/- half a bin. Any whole-bin CFO remainder lands in the STO term,
+    where its timing and carrier residuals cancel in payload dechirp bins.
+    Returns (cfo_bins, sto_bins) as signed fractional fold-bins."""
+    sn = grid.sample_num
+    xs = [end - i * sn for i in range(preamble_len, 0, -1) if end - i * sn >= 0]
+    b = float(np.median([_peak_bin(signal, x, grid, True) for x in xs]))
+    zs = [_peak_complex(signal, x, grid) for x in xs]
+    rot = complex(sum(z2 * np.conj(z1) for z1, z2 in zip(zs, zs[1:])))
+    cfo = float(np.angle(rot)) / (2.0 * np.pi) * grid.zero_pad
+    return cfo, b - cfo
 
 
 def _modulate_symbol(s: int, sf: int, oversample: int) -> np.ndarray:
@@ -297,7 +340,9 @@ def make_chirp_sync(
     detect_run = preamble_len - sync_symbols
     _NTAPS = 33
     _HALF = (_NTAPS - 1) // 2
-    _SFD_SPAN = (preamble_len + 6) * sn
+    _HUNT_SPAN = (
+        preamble_len + sync_symbols + int(np.ceil(sfd_symbols)) + 2
+    ) * sn  # the whole declared anatomy plus detector slack
     _OUT_CAP = 1 << 16  # pending-out saturation: stop consuming, let GR backpressure
 
     class _ChirpSync(gr.basic_block):
@@ -336,19 +381,34 @@ def make_chirp_sync(
                 self._det_x = self._scan.step(self._buf)
             if self._det_x is None:
                 return None
+            cap = self._det_x + _HUNT_SPAN
             try:
-                payload_start = _sfd_sync(
-                    self._buf, self._det_x, grid, self._det_x + _SFD_SPAN, sfd_symbols
-                )
+                if sfd_symbols:
+                    payload_start = _sfd_sync(
+                        self._buf, self._det_x, grid, cap, sfd_symbols
+                    )
+                else:
+                    end = _preamble_end(self._buf, self._det_x, grid, cap)
+                    payload_start = None if end is None else end + sync_symbols * sn
             except ValueError:
                 self._det_x = None
                 self._scan.run = []
                 return None
             if payload_start is None or payload_start + sn > len(self._buf):
                 return None
-            cfo_bins, sto_bins = _joint_sync(
-                self._buf, payload_start, grid, preamble_len, sfd_symbols
-            )
+            if sfd_symbols:
+                cfo_bins, sto_bins = _joint_sync(
+                    self._buf,
+                    payload_start,
+                    grid,
+                    preamble_len,
+                    sfd_symbols,
+                    sync_symbols,
+                )
+            else:
+                cfo_bins, sto_bins = _preamble_sync(
+                    self._buf, payload_start - sync_symbols * sn, grid, preamble_len
+                )
             return payload_start, cfo_bins, sto_bins
 
         def _fir_to_out(self, upto: int) -> None:

@@ -303,6 +303,43 @@ def test_css_params_accept_preamble_len_5() -> None:
     assert not ok, ok
 
 
+def test_css_params_accept_no_sfd_no_sync() -> None:
+    # sfd_symbols=0 (no SFD) + sync_symbols=0 (no gap) is the minimal CSS
+    # anatomy: a bare preamble run straight into payload. Anything less
+    # parametric is LoRa's frame layout masquerading as the CSS family.
+    from marconi.engine.modulation.css.stages import ChirpSync
+
+    ok: list = []
+    complete = {
+        "sf": 7,
+        "oversample": 2,
+        "zero_pad": 4,
+        "preamble_len": 8,
+        "sfd_symbols": 0.0,
+        "sync_symbols": 0,
+    }
+    validate_params("chirp_sync[0]", ChirpSync().params_model, complete, ok)
+    assert not ok, ok
+
+
+def test_css_params_reject_sub_symbol_sfd() -> None:
+    # (0, 1) is neither "no SFD" nor a detectable one: a window holding a
+    # fraction of a down-chirp never dominates its up-chirp energy.
+    from marconi.engine.modulation.css.stages import ChirpSync
+
+    issues: list = []
+    complete = {
+        "sf": 7,
+        "oversample": 2,
+        "zero_pad": 4,
+        "preamble_len": 8,
+        "sfd_symbols": 0.5,
+        "sync_symbols": 0,
+    }
+    validate_params("chirp_sync[0]", ChirpSync().params_model, complete, issues)
+    assert issues, "sfd_symbols=0.5 should be rejected"
+
+
 def test_detect_scan_chunked_equals_oneshot() -> None:
     from marconi.engine.backends.gnuradio.embedded import chirp
 
@@ -378,3 +415,29 @@ def test_sfd_sync_pending_vs_miss() -> None:
 
     with _pytest.raises(ValueError):
         chirp._sfd_sync(long_up, 0, grid, (pl + 6) * sn, 2.25)
+
+
+def test_preamble_end_pending_vs_miss() -> None:
+    # the no-SFD analog of _sfd_sync: anchor on the first window that departs
+    # the base-chirp bin, with the same pending/found/miss trichotomy
+    from marconi.engine.backends.gnuradio.embedded import chirp
+
+    sf, os_, zp, pl = 7, 2, 4, 8
+    grid = chirp._Grid(sf, os_, zp)
+    sn = grid.sample_num
+    up = chirp._base_upchirp(sf, os_)
+    cap = (pl + 2) * sn
+
+    pending = np.tile(up, pl).astype(np.complex64)  # payload not yet arrived
+    assert chirp._preamble_end(pending, 0, grid, cap) is None
+
+    found = np.concatenate(
+        [np.tile(up, pl), chirp._modulate_symbol(40, sf, os_), np.tile(up, 2)]
+    ).astype(np.complex64)
+    assert chirp._preamble_end(found, 0, grid, cap) == pl * sn
+
+    long_up = np.tile(up, pl + 12).astype(np.complex64)  # run never departs
+    import pytest as _pytest
+
+    with _pytest.raises(ValueError):
+        chirp._preamble_end(long_up, 0, grid, cap)

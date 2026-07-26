@@ -177,6 +177,171 @@ def test_css_two_burst_capture_decodes_both(tmp_path: Path) -> None:
     assert aligned_ber(out[len(bits1) :], bits2, max_shift=40 * sf) == 0.0
 
 
+def _append_noise_tail(iq_path: Path, sn: int, seed: int, windows: int = 14) -> None:
+    # chirp_sync's emission trails its always-on hunt by a scan-claim margin
+    # withheld at EOF; trailing noise (as real captures carry) flushes the
+    # payload through it. Zeros would pin the detector.
+    rng = np.random.default_rng(seed)
+    n = windows * sn
+    tail = 0.02 * (rng.standard_normal(n) + 1j * rng.standard_normal(n))
+    frame = np.fromfile(iq_path, dtype=np.complex64)
+    np.concatenate([frame, tail.astype(np.complex64)]).tofile(iq_path)
+
+
+def _anatomy_modem(
+    sf: int, osr: int, sfd_symbols: float, sync_symbols: int, preamble_len: int = 8
+) -> ModemSpec:
+    p: dict[str, ParamValue] = {
+        "sf": sf,
+        "oversample": osr,
+        "zero_pad": _ZP,
+        "preamble_len": preamble_len,
+        "sfd_symbols": sfd_symbols,
+        "sync_symbols": sync_symbols,
+    }
+    return ModemSpec(
+        symbol_rate=_SYM,
+        path=[
+            ModemStep(conv="chirp_sync", params=p),
+            ModemStep(conv="dechirp", params=_dechirp_of(p)),
+            ModemStep(conv="css_demap", params=_demap_of(p)),
+        ],
+    )
+
+
+@pytest.mark.parametrize(
+    ("sf", "osr", "cfo_bins"),
+    [(7, 2, 0.4), (11, 2, 0.4), (7, 2, 3.84)],
+    # Without a down-chirp the CFO/STO split is only resolvable modulo one bin
+    # (both project onto the same dechirp peak); the phase-slope estimator
+    # recovers the fractional part and any whole-bin remainder self-cancels in
+    # the payload dechirp bins (timing and carrier residuals are equal and
+    # opposite). 0.4 pins the in-range case, 3.84 the whole-bin cancellation.
+)
+def test_css_nosfd_ber0_impaired(sf: int, osr: int, cfo_bins: float, tmp_path) -> None:
+    """The second CSS anatomy: bare preamble run straight into payload — no
+    down-chirp SFD, no sync gap. Pins that chirp_sync's acquisition grammar is
+    parametric, not LoRa's frame layout."""
+    ensure_worker_warm()
+    be = GnuRadioBackend()
+    rate = osr * (1 << sf) * _SYM
+    bits = np.random.default_rng(sf).integers(0, 2, sf * 40).astype(np.uint8)
+    # Departure from the preamble anchors on the first non-base window, so the
+    # first payload symbol must sit clear of bin 0 — set its MSB.
+    bits[0] = 1
+    bp = write_bits(tmp_path / "in.bits", bits)
+    clean, imp, op = tmp_path / "c.iq", tmp_path / "i.iq", tmp_path / "o.bits"
+    m = _anatomy_modem(sf, osr, sfd_symbols=0.0, sync_symbols=0)
+    assert be.run_pipeline(_compile(m, "tx", rate, bp, clean)).status == "ok"
+    _append_noise_tail(clean, osr * (1 << sf), seed=sf)
+    channel(
+        clean,
+        imp,
+        snr_db=15.0,
+        cfo_hz=cfo_bins * _SYM,
+        sto=1.5,
+        sfo_ppm=0.0,
+        sample_rate=rate,
+        seed=sf,
+    )
+    assert be.run_pipeline(_compile(m, "rx", rate, imp, op)).status == "ok"
+    out = read_bits(op)
+    assert len(out) >= sf * 40
+    assert aligned_ber(out, bits, max_shift=8 * sf) == 0.0
+
+
+def test_css_single_symbol_sfd_ber0(tmp_path) -> None:
+    """sfd_symbols=1.0 has always been validator-legal; the joint estimator
+    must read exactly the down-chirp windows the params declare, not LoRa's
+    two — one payload window mistaken for SFD corrupts the timing estimate."""
+    ensure_worker_warm()
+    be = GnuRadioBackend()
+    sf, osr = 7, 2
+    rate = osr * (1 << sf) * _SYM
+    bw = _SYM * (1 << sf)
+    bits = np.random.default_rng(3).integers(0, 2, sf * 40).astype(np.uint8)
+    bp = write_bits(tmp_path / "in.bits", bits)
+    clean, imp, op = tmp_path / "c.iq", tmp_path / "i.iq", tmp_path / "o.bits"
+    m = _anatomy_modem(sf, osr, sfd_symbols=1.0, sync_symbols=0)
+    assert be.run_pipeline(_compile(m, "tx", rate, bp, clean)).status == "ok"
+    _append_noise_tail(clean, osr * (1 << sf), seed=3)
+    channel(
+        clean,
+        imp,
+        snr_db=15.0,
+        cfo_hz=0.03 * bw,
+        sto=1.5,
+        sfo_ppm=0.0,
+        sample_rate=rate,
+        seed=3,
+    )
+    assert be.run_pipeline(_compile(m, "rx", rate, imp, op)).status == "ok"
+    out = read_bits(op)
+    assert len(out) >= sf * 40
+    assert aligned_ber(out, bits, max_shift=8 * sf) == 0.0
+
+
+def test_css_long_sync_gap_locks(tmp_path) -> None:
+    """A declared 9-symbol gap between preamble run and SFD must be honored:
+    the SFD hunt span derives from the declared anatomy (not a constant sized
+    to LoRa's 2+2.25), and the preamble look-back skips the gap instead of
+    letting gap symbols pollute the estimator's median (low same-sign gap
+    bins outnumber the preamble windows in the look-back, so a median over
+    the mixture lands on a gap bin, not the preamble's)."""
+    from marconi.engine.backends.gnuradio.embedded import chirp
+
+    ensure_worker_warm()
+    be = GnuRadioBackend()
+    sf, osr, pl, sync = 7, 2, 12, 9
+    rate = osr * (1 << sf) * _SYM
+    bw = _SYM * (1 << sf)
+    sn = osr * (1 << sf)
+    sync_syms = [20, 30, 40, 25, 35, 45, 28, 38, 22]
+    payload = [37, 101, 5, 64, 90, 12, 77, 55, 3, 118]
+    rng = np.random.default_rng(11)
+    lead = 0.02 * (
+        rng.standard_normal(2 * sn + 37) + 1j * rng.standard_normal(2 * sn + 37)
+    )
+    tail = 0.02 * (rng.standard_normal(14 * sn) + 1j * rng.standard_normal(14 * sn))
+    frame = np.concatenate(
+        [
+            lead.astype(np.complex64),
+            chirp.chirp_prefix(sf, osr, pl, 0.0),
+            np.concatenate([chirp._modulate_symbol(s, sf, osr) for s in sync_syms]),
+            chirp.chirp_prefix(sf, osr, 0, 2.25),
+            np.concatenate([chirp._modulate_symbol(s, sf, osr) for s in payload]),
+            tail.astype(np.complex64),
+        ]
+    ).astype(np.complex64)
+    cap_p, imp = tmp_path / "cap.iq", tmp_path / "imp.iq"
+    frame.tofile(cap_p)
+    channel(cap_p, imp, snr_db=20.0, cfo_hz=0.02 * bw, sample_rate=rate, seed=11)
+    p: dict[str, ParamValue] = {
+        "sf": sf,
+        "oversample": osr,
+        "zero_pad": _ZP,
+        "preamble_len": pl,
+        "sfd_symbols": 2.25,
+        "sync_symbols": sync,
+    }
+    m = ModemSpec(
+        symbol_rate=_SYM,
+        path=[
+            ModemStep(conv="chirp_sync", params=p),
+            ModemStep(conv="dechirp", params=_dechirp_of(p)),
+        ],
+    )
+    snk = tmp_path / "syms.s16"
+    r = be.run_pipeline(_compile(m, "rx", rate, imp, snk))
+    assert r.status == "ok", r
+    syms = np.fromfile(snk, dtype=np.int16)
+    assert len(syms) >= len(payload), f"no lock or truncated: {len(syms)} symbols"
+    assert syms[: len(payload)].tolist() == payload, (
+        f"payload mismatch:\n  got:    {syms[: len(payload)].tolist()}\n"
+        f"  expect: {payload}"
+    )
+
+
 @pytest.mark.xfail(
     reason="chirp_sync does not correct SFO; clock_correct owns it "
     "(see test_clock_correct_roundtrip). Pins the coverage boundary.",

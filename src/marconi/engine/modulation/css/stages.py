@@ -71,23 +71,28 @@ class _CssParams(StageParams):
         _check_osr_pad(self.oversample, self.zero_pad)
         if self.preamble_len < 5:
             raise PydanticCustomError("value_error", "preamble_len must be >= 5")
-        if self.sfd_symbols < 1.0:
-            raise PydanticCustomError("value_error", "sfd_symbols must be >= 1")
-        if not (1 <= self.sync_symbols < self.preamble_len - 2):
+        if self.sfd_symbols != 0.0 and self.sfd_symbols < 1.0:
+            raise PydanticCustomError(
+                "value_error", "sfd_symbols must be 0 (no SFD) or >= 1"
+            )
+        if not (0 <= self.sync_symbols <= self.preamble_len - 3):
             raise PydanticCustomError(
                 "value_error",
-                "sync_symbols {sync_symbols} must be in [1, preamble_len-3]",
+                "sync_symbols {sync_symbols} must be in [0, preamble_len-3]",
                 {"sync_symbols": self.sync_symbols, "field": "sync_symbols"},
             )
         return self
 
 
 class ChirpSync(DuplexStage[CompileContext]):
-    """CSS acquisition, IQ<->IQ. TX prepends a preamble (up-chirps) and a
-    start-of-frame delimiter (down-chirps). RX detects the preamble, aligns on
-    the SFD, derotates the carrier offset, and strips to payload. The SFD length
-    and the count of sync symbols between preamble and SFD are parameters. The
-    CSS analog of preamble_sync."""
+    """CSS acquisition, IQ<->IQ. TX prepends a preamble (up-chirps) and an
+    optional start-of-frame delimiter (down-chirps). RX detects the preamble,
+    aligns on the SFD when one is declared (sfd_symbols >= 1) or on the end of
+    the preamble run when none is (sfd_symbols = 0, where the CFO/STO split is
+    resolvable only to within one bin), derotates the carrier offset, and
+    strips to payload. sync_symbols is the count of arbitrary-bin symbols
+    between the preamble run and the SFD (or payload). The CSS analog of
+    preamble_sync."""
 
     name = "chirp_sync"
     from_level = Level.IQ
