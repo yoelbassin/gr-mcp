@@ -416,10 +416,12 @@ def descramble_rx(
         out = bits.copy()
         cursors = [int(w.cursor) for w in c.windows]
         bounds: list[int] = cursors[1:] + [int(bits.size)]
-        for lo, hi in zip(cursors, bounds):
-            span_len = hi - lo
-            lfsr_seq = _lfsr_seq(lfsr_mask, lfsr_seed, lfsr_len, span_len)
-            out[lo:hi] = np.bitwise_xor(bits[lo:hi], lfsr_seq)
+        spans = [hi - lo for lo, hi in zip(cursors, bounds)]
+        max_span = max(spans) if spans else 0
+        if max_span > 0:
+            lfsr_seq = _lfsr_seq(lfsr_mask, lfsr_seed, lfsr_len, max_span)
+            for (lo, hi), span_len in zip(zip(cursors, bounds), spans):
+                out[lo:hi] = np.bitwise_xor(bits[lo:hi], lfsr_seq[:span_len])
         return replace(c, bits=out)
 
     # Sequence mode
