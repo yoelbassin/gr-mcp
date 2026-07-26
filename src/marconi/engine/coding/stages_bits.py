@@ -212,48 +212,6 @@ class BlockCode(RxStage[CodingBuilder]):
         )
 
 
-class ConvCode(RxStage[CodingBuilder]):
-    name = "conv_code"
-    engine = "coding"
-    from_level = Level.BITS
-    to_level = Level.BITS
-    family = "coding"
-    accepts_item_type = "b"
-    accepts_carrier = Carrier.HARD
-
-    class _Params(StageParams):
-        rate_inv: StrictInt = Field(ge=2)
-        polys: list[int] = Field(min_length=2)
-        frame_bits: StrictInt = Field(ge=1)
-        tail: StrictInt = Field(default=0, ge=0)
-
-        @model_validator(mode="after")
-        def _shaped(self) -> "ConvCode._Params":
-            if len(self.polys) != self.rate_inv:
-                raise PydanticCustomError(
-                    "value_error",
-                    "need rate_inv={want} polys, got {have}",
-                    {"want": self.rate_inv, "have": len(self.polys)},
-                )
-            if any(int(p).bit_length() < 2 for p in self.polys):
-                raise PydanticCustomError(
-                    "value_error", "each poly needs memory (bit_length >= 2)"
-                )
-            return self
-
-    params_model = _Params
-
-    def emit_rx(self, b: CodingBuilder, params: Mapping[str, Any]) -> None:
-        p = self._Params.model_validate(dict(params))
-        b.add(
-            ops_bits.conv_code_rx,
-            rate_inv=p.rate_inv,
-            polys=[int(x) for x in p.polys],
-            frame_bits=p.frame_bits,
-            tail=p.tail,
-        )
-
-
 class Permute(RxStage[CodingBuilder]):
     name = "permute"
     engine = "coding"
@@ -406,7 +364,6 @@ class Descramble(RxStage[CodingBuilder]):
 CODING_BITS_STAGES: tuple[type[Stage[CodingBuilder]], ...] = (
     BlockCode,
     Codebook,
-    ConvCode,
     Descramble,
     Differential,
     MarkFrame,

@@ -72,6 +72,54 @@ class Depuncture(RxStage[CompileContext]):
         b.set_tail(il)
 
 
+class _SyncAlignParams(StageParams):
+    access_code: str
+    frame_len: StrictInt = Field(ge=1)
+    threshold: StrictInt = Field(default=0, ge=0)
+
+    @model_validator(mode="after")
+    def _ok(self) -> "_SyncAlignParams":
+        if not self.access_code or any(c not in "01" for c in self.access_code):
+            raise PydanticCustomError(
+                "value_error", "access_code must be a non-empty bit string of 0/1"
+            )
+        if self.threshold >= len(self.access_code):
+            raise PydanticCustomError(
+                "value_error", "threshold must be < the access-code length"
+            )
+        return self
+
+
+class SyncAlign(RxStage[CompileContext]):
+    """Correlating frame align, BITS->BITS soft. Detects an uncoded sync word in
+    the soft stream (stock correlate_access_code_tag_ff), then gates the
+    fixed-length coded frame after each match (tag_gate), dropping inter-frame
+    junk. The output is back-to-back frames that a downstream fec decodes
+    contiguously — this is what makes GR-native sync-then-Viterbi expressible.
+    The multiply_const_ff pair maps the soft-LLR sign (bit 1 negative here) to
+    the correlator's convention (bit 1 positive) and back."""
+
+    name = "sync_align"
+    from_level = Level.BITS
+    to_level = Level.BITS
+    family = "coding"
+    params_model = _SyncAlignParams
+    accepts_item_type = "f"
+    accepts_carrier = Carrier.SOFT
+
+    def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
+        p = _SyncAlignParams.model_validate(dict(params))
+        b.chain("multiply_const_ff", value=-1.0)
+        b.chain(
+            "correlate_access_code_tag_ff",
+            access_code=p.access_code,
+            threshold=p.threshold,
+            tag_name="frame_sync",
+        )
+        b.chain("tag_gate", frame_len=p.frame_len, tag_name="frame_sync")
+        b.chain("multiply_const_ff", value=-1.0)
+
+
 class _ConvParams(StageParams):
     scheme: str
     rate_inv: StrictInt = Field(ge=1)
@@ -141,4 +189,9 @@ class Fec(RxStage[CompileContext]):
         return Descriptor(Level.BITS, "b", Carrier.HARD)
 
 
-CODING_STAGES: tuple[type[Stage[CompileContext]], ...] = (Deinterleave, Depuncture, Fec)
+CODING_STAGES: tuple[type[Stage[CompileContext]], ...] = (
+    Deinterleave,
+    Depuncture,
+    Fec,
+    SyncAlign,
+)

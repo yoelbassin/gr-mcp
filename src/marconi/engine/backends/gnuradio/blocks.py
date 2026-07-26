@@ -15,6 +15,7 @@ from marconi.engine.backends.gnuradio.embedded.chirp import (
 )
 from marconi.engine.backends.gnuradio.embedded.cp_sync import make_cp_symbol_sync
 from marconi.engine.backends.gnuradio.embedded.decision import make_peak_decision
+from marconi.engine.backends.gnuradio.embedded.framing import make_tag_gate
 from marconi.engine.backends.gnuradio.embedded.msk import make_msk_demod
 from marconi.engine.backends.gnuradio.embedded.ofdm import make_ofdm_frame_sync
 from marconi.engine.backends.gnuradio.embedded.pilot_lattice import (
@@ -374,6 +375,12 @@ GR_BLOCKS: dict[str, Callable[[_GrCtx, Params], Any]] = {
         _as_float(p["threshold"]),
     ),
     "sym_strip": lambda c, p: make_sym_strip(c.gr, n_pre=_as_int(p["n_pre"])),
+    "correlate_access_code_tag_ff": lambda c, p: c.digital.correlate_access_code_tag_ff(
+        str(p["access_code"]), _as_int(p["threshold"]), str(p["tag_name"])
+    ),
+    "tag_gate": lambda c, p: make_tag_gate(
+        c.gr, frame_len=_as_int(p["frame_len"]), tag_name=str(p["tag_name"])
+    ),
     "chirp_prepend": lambda c, p: c.blocks.vector_insert_c(
         chirp_prefix(
             _as_int(p["sf"]),
