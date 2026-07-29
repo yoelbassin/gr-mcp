@@ -85,6 +85,29 @@ def test_exact_mode_rejects_wide_codes() -> None:
         )
 
 
+def test_nearest_mode_rejects_codes_past_int64_ceiling() -> None:
+    with pytest.raises(Exception, match="63"):
+        _CodebookParams.model_validate(
+            {
+                "code_bits": 64,
+                "data_bits": 2,
+                "table": [0, 1, 2, 3],
+                "decode": "nearest",
+            }
+        )
+
+
+def test_nearest_mode_allows_int64_ceiling() -> None:
+    _CodebookParams.model_validate(
+        {
+            "code_bits": 63,
+            "data_bits": 2,
+            "table": [0, 1, 2, 3],
+            "decode": "nearest",
+        }
+    )
+
+
 def test_decode_param_is_validated() -> None:
     with pytest.raises(Exception, match="exact|nearest"):
         _CodebookParams.model_validate(

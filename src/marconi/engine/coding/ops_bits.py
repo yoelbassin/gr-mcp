@@ -93,6 +93,10 @@ def _codebook_maps(
 def _nearest_values(
     grouped: np.ndarray, table: list[int], code_bits: int
 ) -> np.ndarray:
+    if code_bits > 63:
+        raise ValueError(
+            "nearest decode packs codewords through int64; 63 bits is the " "ceiling"
+        )
     fwd = np.asarray(table, dtype=np.int64)
     if fwd.size and int(fwd.max()) >= (1 << code_bits):
         raise ValueError("codebook symbol exceeds code_bits width")

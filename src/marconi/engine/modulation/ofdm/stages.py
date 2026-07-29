@@ -225,7 +225,11 @@ class _SoftDemapParams(StageParams):
     @model_validator(mode="after")
     def _shaped(self) -> "_SoftDemapParams":
         if self.scheme in ("psk", "qam"):
-            if self.order is None or self.points_i is not None:
+            if (
+                self.order is None
+                or self.points_i is not None
+                or self.points_q is not None
+            ):
                 raise PydanticCustomError(
                     "value_error",
                     "named schemes take order, not points",

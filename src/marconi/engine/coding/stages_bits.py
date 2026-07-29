@@ -58,6 +58,12 @@ class _CodebookParams(StageParams):
                 "exact decode builds a 2^code_bits inverse table; beyond 24 "
                 "bits use decode='nearest', which never builds it",
             )
+        if self.decode == "nearest" and self.code_bits > 63:
+            raise PydanticCustomError(
+                "value_error",
+                "nearest decode packs codewords through int64; 63 bits is "
+                "the ceiling",
+            )
         return self
 
 

@@ -118,6 +118,7 @@ def test_soft_demap_declares_required_order() -> None:
         {"scheme": "explicit", "order": 4},  # explicit without points
         {"scheme": "explicit", "points_i": [1.0, -1.0, 0.0], "points_q": [0.0] * 3},
         {"scheme": "nosuch", "order": 4},
+        {"scheme": "psk", "order": 4, "points_q": [0.0, 1.0]},  # stray points_q
     ],
 )
 def test_soft_demap_rejects_malformed_params(params: dict[str, ParamValue]) -> None:
