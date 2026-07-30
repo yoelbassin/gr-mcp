@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
 from typing import Literal
 
 from pydantic import BaseModel
@@ -28,6 +29,19 @@ class BlockCensus(BaseModel):
     items_out: int | None = None
     windows_in: int | None = None
     windows_out: int | None = None
+
+
+class Diagnostic(BaseModel):
+    block: str
+    key: str
+    count: int | None = None
+    marks: list[int] | None = None
+
+
+def find_diagnostic(
+    rows: Sequence[Diagnostic], block: str, key: str
+) -> Diagnostic | None:
+    return next((d for d in rows if d.block == block and d.key == key), None)
 
 
 class RunResult(BaseModel):
