@@ -11,26 +11,26 @@ import numpy as np
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
 from marconi.engine.compile.compiler import compile_modem
 from marconi.engine.io.bitfile import write_bits
+from marconi.engine.modulation.css.stages import (
+    ChirpSyncStep,
+    CssDemapStep,
+    DechirpStep,
+)
+from marconi.engine.stages.probes import BurstProbeStep
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Descriptor
 from marconi.engine.types.levels import Level
-from marconi.engine.types.models import ModemSpec, ModemStep
-from marconi.engine.types.params import ParamValue
+from marconi.engine.types.models import Modem
+from marconi.engine.types.step import Step
 
 IQ = Descriptor(Level.IQ, "c")
-_P: dict[str, ParamValue] = {
-    "sf": 7,
-    "oversample": 2,
-    "zero_pad": 4,
-    "preamble_len": 8,
-    "sfd_symbols": 2.25,
-    "sync_symbols": 2,
-}
+_SF, _OVERSAMPLE, _ZERO_PAD = 7, 2, 4
+_PREAMBLE_LEN, _SFD_SYMBOLS, _SYNC_SYMBOLS = 8, 2.25, 2
 _SYM = 1.0
-_RATE = 2 * (1 << 7) * _SYM
+_RATE = 2 * (1 << _SF) * _SYM
 
 
-def _compile(m: ModemSpec, direction: str, src: Path, dst: Path):
+def _compile(m: Modem, direction: str, src: Path, dst: Path):
     return compile_modem(
         m,
         stage_registry(),
@@ -42,20 +42,24 @@ def _compile(m: ModemSpec, direction: str, src: Path, dst: Path):
     )
 
 
-def _spec(*, probe: bool, sync: bool) -> ModemSpec:
-    path = []
+def _spec(*, probe: bool, sync: bool) -> Modem:
+    path: list[Step] = []
     if sync:
-        path.append(ModemStep(conv="chirp_sync", params=_P))
-    path.append(
-        ModemStep(
-            conv="dechirp",
-            params={k: _P[k] for k in ("sf", "oversample", "zero_pad")},
+        path.append(
+            ChirpSyncStep(
+                sf=_SF,
+                oversample=_OVERSAMPLE,
+                zero_pad=_ZERO_PAD,
+                preamble_len=_PREAMBLE_LEN,
+                sfd_symbols=_SFD_SYMBOLS,
+                sync_symbols=_SYNC_SYMBOLS,
+            )
         )
-    )
+    path.append(DechirpStep(sf=_SF, oversample=_OVERSAMPLE, zero_pad=_ZERO_PAD))
     if probe:
-        path.append(ModemStep(conv="burst_probe", params={}))
-    path.append(ModemStep(conv="css_demap", params={"sf": _P["sf"]}))
-    return ModemSpec(symbol_rate=_SYM, path=path)
+        path.append(BurstProbeStep())
+    path.append(CssDemapStep(sf=_SF))
+    return Modem(symbol_rate=_SYM, path=path)
 
 
 def _bursts(r) -> list[int] | None:

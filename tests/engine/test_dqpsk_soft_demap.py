@@ -3,10 +3,11 @@ import numpy as np
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
 from marconi.engine.compile.compiler import compile_modem
 from marconi.engine.io.bitfile import read_llrs
+from marconi.engine.modulation.ofdm.stages import DqpskSoftDemapStep
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Carrier, Descriptor
 from marconi.engine.types.levels import Level
-from marconi.engine.types.models import ModemSpec, ModemStep
+from marconi.engine.types.models import Modem
 
 NC, DS = 5, 3  # 5 carriers, PRS + 3 FIC symbols
 
@@ -24,15 +25,10 @@ def test_dqpsk_soft_demap_recovers_bits(tmp_path):
     src = tmp_path / "c.cf32"
     smaj.tofile(src)
     snk = tmp_path / "s.f32"
-    modem = ModemSpec(
+    modem = Modem(
         name="dm",
         symbol_rate=1.0,
-        path=[
-            ModemStep(
-                conv="dqpsk_soft_demap",
-                params={"data_syms": DS, "n_carriers": NC, "scheme": "psk", "order": 4},
-            )
-        ],
+        path=[DqpskSoftDemapStep(data_syms=DS, n_carriers=NC, scheme="psk", order=4)],
     )
     pipe = compile_modem(
         modem,

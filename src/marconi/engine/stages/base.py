@@ -2,24 +2,16 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Mapping, Sequence
-from typing import Any, Generic, Protocol, TypeVar
-
-from pydantic import BaseModel, ValidationError
+from typing import Any, Generic, TypeVar
 
 from marconi.engine.types.descriptor import Amplitude, Carrier, Descriptor
 from marconi.engine.types.levels import Level
 from marconi.engine.types.models import ValidationIssue
-from marconi.engine.types.params import StageParams
+from marconi.engine.types.step import Step
 from marconi.errors import register_error
 
 B = TypeVar("B")
-
-
-class SpecStep(Protocol):
-    @property
-    def conv(self) -> str: ...
-    @property
-    def params(self) -> Mapping[str, object]: ...
+S = TypeVar("S", bound=Step)
 
 
 class SpecValidationError(Exception):
@@ -46,13 +38,13 @@ register_error(SpecValidationError, "invalid_argument")
 register_error(StageDirectionError, "invalid_argument")
 
 
-class Stage(ABC, Generic[B]):
+class Stage(ABC, Generic[B, S]):
     name: str
     from_level: Level
     to_level: Level
     family: str
     directions: frozenset[str] = frozenset({"rx", "tx"})
-    params_model: type[StageParams]
+    step_model: type[S]
 
     # Execution flavor: "gr" emits into the GR graph, "coding" into the numpy
     # coding program. The compiler partitions the path on this, never on names.
@@ -82,14 +74,12 @@ class Stage(ABC, Generic[B]):
     min_input_sps: float | None = None
 
     @abstractmethod
-    def emit_rx(self, b: B, params: Mapping[str, Any]) -> None: ...
+    def emit_rx(self, b: B, step: S) -> None: ...
 
     @abstractmethod
-    def emit_tx(self, b: B, params: Mapping[str, Any]) -> None: ...
+    def emit_tx(self, b: B, step: S) -> None: ...
 
-    def out_descriptor(
-        self, in_desc: Descriptor, params: Mapping[str, Any]
-    ) -> Descriptor:
+    def out_descriptor(self, in_desc: Descriptor, step: S) -> Descriptor:
         amplitude = (
             in_desc.amplitude
             if self.to_level is Level.IQ and not self.alters_amplitude
@@ -103,12 +93,10 @@ class Stage(ABC, Generic[B]):
             in_desc.order if self.to_level is in_desc.level else None,
         )
 
-    def rate_factor(self, params: Mapping[str, Any]) -> float:
+    def rate_factor(self, step: S) -> float:
         return 1.0
 
-    def required_input_rate(
-        self, params: Mapping[str, Any], symbol_rate: float
-    ) -> float | None:
+    def required_input_rate(self, step: S, symbol_rate: float) -> float | None:
         """The input sample rate this stage needs, or None if rate-agnostic. The
         compiler checks it against the rate it computed for this stage's input
         boundary (within a tolerance that admits ppm-scale clock correction), so
@@ -116,58 +104,40 @@ class Stage(ABC, Generic[B]):
         no diagnostics (issue 06)."""
         return None
 
-    def required_input_order(self, params: Mapping[str, Any]) -> int | None:
+    def required_input_order(self, step: S) -> int | None:
         """The symbol-alphabet size this stage decodes, or None if any. The
         compiler compares it with the producer's pinned Descriptor.order when
         both sides declare, so a demod/demap order mismatch fails at compile
         instead of emitting wrong-width garbage bits."""
         return None
 
-    def validate_input(
-        self, in_desc: Descriptor, params: Mapping[str, Any]
-    ) -> str | None:
+    def validate_input(self, in_desc: Descriptor, step: S) -> str | None:
         """A stage-specific input check the declarative attributes cannot
         express; a returned message fails the compile."""
         return None
 
 
-class RxStage(Stage[B]):
+class RxStage(Stage[B, S]):
     directions: frozenset[str] = frozenset({"rx"})
 
-    def emit_tx(self, b: B, params: Mapping[str, Any]) -> None:
+    def emit_tx(self, b: B, step: S) -> None:
         raise StageDirectionError(self.name, "tx", self.directions)
 
 
-class TxStage(Stage[B]):
+class TxStage(Stage[B, S]):
     directions: frozenset[str] = frozenset({"tx"})
 
-    def emit_rx(self, b: B, params: Mapping[str, Any]) -> None:
+    def emit_rx(self, b: B, step: S) -> None:
         raise StageDirectionError(self.name, "rx", self.directions)
 
 
-class DuplexStage(Stage[B]):
+class DuplexStage(Stage[B, S]):
     directions: frozenset[str] = frozenset({"rx", "tx"})
 
 
-def validate_params(
-    block_id: str,
-    params_model: type[BaseModel],
-    supplied: Mapping[str, object],
-    out: list[ValidationIssue],
-) -> None:
-    try:
-        params_model.model_validate(dict(supplied))
-    except ValidationError as exc:
-        for err in exc.errors():
-            field = ".".join(str(p) for p in err["loc"]) or None
-            out.append(
-                ValidationIssue(block_id=block_id, field=field, message=err["msg"])
-            )
-
-
 def validate_path(
-    steps: Sequence[SpecStep],
-    registry: Mapping[str, Stage[Any]],
+    steps: Sequence[Step],
+    registry: Mapping[str, Stage[Any, Any]],
     start_level: Level,
     entity_name: str,
     issues: list[ValidationIssue],
@@ -186,7 +156,6 @@ def validate_path(
                 )
             )
             continue
-        validate_params(sid, conv.params_model, step.params, issues)
         if direction is not None and direction not in conv.directions:
             issues.append(
                 ValidationIssue(

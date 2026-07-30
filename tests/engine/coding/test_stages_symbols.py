@@ -8,8 +8,9 @@ from marconi.engine.coding.carrier import CodingCarrier
 from marconi.engine.coding.ops_symbols import m_slice_rx, normalize_rx, sync_symbols_rx
 from marconi.engine.coding.stages_symbols import (
     MSlice,
+    MSliceStep,
     SymbolMap,
-    _MSliceParams,
+    SymbolMapStep,
 )
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Carrier, Descriptor
@@ -27,14 +28,14 @@ def test_registry_holds_both_flavors() -> None:
 
 def test_m_slice_out_descriptor_hardens() -> None:
     d = Descriptor(Level.SYMBOLS, "f", carrier=Carrier.SOFT)
-    out = MSlice().out_descriptor(d, {"thresholds": [0.0], "levels": [0, 1]})
+    out = MSlice().out_descriptor(d, MSliceStep(thresholds=[0.0], levels=[0, 1]))
     assert out.item_type == "s" and out.carrier is Carrier.HARD
 
 
 def test_symbol_map_out_descriptor_lands_on_hard_bits() -> None:
     d = Descriptor(Level.SYMBOLS, "s", carrier=Carrier.HARD)
     out = SymbolMap().out_descriptor(
-        d, {"code_bits": 1, "data_bits": 1, "table": [0, 1]}
+        d, SymbolMapStep(code_bits=1, data_bits=1, table=[0, 1])
     )
     assert out == Descriptor(Level.BITS, "b", carrier=Carrier.HARD)
 
@@ -242,13 +243,13 @@ def test_m_slice_stage_registered() -> None:
 
 def test_m_slice_params_length_mismatch_raises() -> None:
     with pytest.raises(ValidationError):
-        _MSliceParams.model_validate(
+        MSliceStep.model_validate(
             {"thresholds": [-0.667, 0.0, 0.667], "levels": [3, 2, 0]}
         )
 
 
 def test_m_slice_params_non_ascending_thresholds_raises() -> None:
     with pytest.raises(ValidationError):
-        _MSliceParams.model_validate(
+        MSliceStep.model_validate(
             {"thresholds": [0.0, 0.0, 1.0], "levels": [3, 2, 0, 1]}
         )

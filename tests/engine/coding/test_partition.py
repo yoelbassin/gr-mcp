@@ -1,33 +1,41 @@
-import pytest
+from collections.abc import Callable
 
+import pytest
+from pydantic import ValidationError
+
+from marconi.engine.coding.stages_bits import SyncWordStep
 from marconi.engine.compile.compiler import (
     CompileError,
     compile_modem,
     compile_pipeline,
 )
+from marconi.engine.modulation.fsk.stages import FskStep
+from marconi.engine.stages.conditioning import AgcStep, ChannelizeStep
+from marconi.engine.stages.general import SliceStep
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Carrier, Descriptor
 from marconi.engine.types.levels import Level
-from marconi.engine.types.models import ModemSpec, ModemStep
-from marconi.engine.types.params import ParamValue
+from marconi.engine.types.models import Modem
+from marconi.engine.types.step import Step
 
 IQ = Descriptor(Level.IQ, "c")
 SOFT_BITS = Descriptor(Level.BITS, "b", carrier=Carrier.HARD)
 
+# exact POCSAG GR prefix (tests/bits/test_pocsag_offair.py:89-101) so the
+# rate/amplitude contract checks see a known-good chain
+_BUILDERS: dict[str, Callable[[], Step]] = {
+    "channelize": lambda: ChannelizeStep(
+        decim=4, bandwidth_hz=14000.0, center_hz=-10250.0
+    ),
+    "agc": lambda: AgcStep(window_symbols=64.0),
+    "fsk": lambda: FskStep(deviation=4500.0),
+    "slice": SliceStep,
+    "sync_word": lambda: SyncWordStep(sync="7e"),
+}
 
-def _spec(*convs: str) -> ModemSpec:
-    # exact POCSAG GR prefix (tests/bits/test_pocsag_offair.py:89-101) so the
-    # rate/amplitude contract checks see a known-good chain
-    params: dict[str, dict[str, ParamValue]] = {
-        "channelize": {"decim": 4, "bandwidth_hz": 14000.0, "center_hz": -10250.0},
-        "agc": {"window_symbols": 64.0},
-        "fsk": {"deviation": 4500.0},
-        "sync_word": {"sync": "7e"},
-    }
-    return ModemSpec(
-        symbol_rate=1200.0,
-        path=[ModemStep(conv=c, params=params.get(c, {})) for c in convs],
-    )
+
+def _spec(*convs: str) -> Modem:
+    return Modem(symbol_rate=1200.0, path=[_BUILDERS[c]() for c in convs])
 
 
 def test_mixed_path_partitions_at_first_coding_stage() -> None:
@@ -85,13 +93,10 @@ def test_tx_with_coding_stage_is_a_compile_error() -> None:
         )
 
 
-def test_unknown_stage_aggregates_with_other_spec_issues() -> None:
-    spec = ModemSpec(
+def test_unknown_stage_is_a_compile_error() -> None:
+    spec = Modem(
         symbol_rate=1200.0,
-        path=[
-            ModemStep(conv="totally_bogus_stage", params={}),
-            ModemStep(conv="fsk", params={}),
-        ],
+        path=[Step(conv="totally_bogus_stage"), FskStep(deviation=4500.0)],
     )
     with pytest.raises(CompileError) as e:
         compile_pipeline(
@@ -105,12 +110,22 @@ def test_unknown_stage_aggregates_with_other_spec_issues() -> None:
         )
     msg = str(e.value)
     assert "totally_bogus_stage[0]" in msg and "unknown converter" in msg
-    assert "fsk[1].deviation" in msg
+
+
+def test_missing_required_field_raises_at_construction() -> None:
+    # Step construction validates eagerly now (the compiler never sees an
+    # incomplete step): fsk requires `deviation`, so building one without it
+    # raises while constructing the step, naming the field, not a later
+    # aggregated CompileError (mirrors test_validate_before_compile.py's
+    # test_missing_param_names_the_field).
+    with pytest.raises(ValidationError) as e:
+        FskStep()  # type: ignore[call-arg]
+    assert "deviation" in str(e.value)
 
 
 def test_empty_rx_path_builds_passthrough_gr_pipeline() -> None:
     pipe = compile_modem(
-        ModemSpec(symbol_rate=1200.0, path=[]),
+        Modem(symbol_rate=1200.0, path=[]),
         stage_registry(),
         direction="rx",
         sample_rate=128000.0,

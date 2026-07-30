@@ -19,11 +19,13 @@ from pydantic import ValidationError
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
 from marconi.engine.compile.compiler import compile_modem
 from marconi.engine.io.bitfile import harden, read_bits, read_llrs
+from marconi.engine.modulation.coding.stages import FecStep
+from marconi.engine.modulation.fsk.stages import FskStep, MfskSoftDemapStep
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Carrier, Descriptor
 from marconi.engine.types.levels import Level
-from marconi.engine.types.models import ModemSpec, ModemStep
-from marconi.engine.types.params import ParamValue
+from marconi.engine.types.models import Modem
+from marconi.engine.types.step import Step
 
 SYM_F = Descriptor(Level.SYMBOLS, "f", carrier=Carrier.SOFT)
 IQ = Descriptor(Level.IQ, "c")
@@ -37,14 +39,14 @@ _TAIL_PAD = 8
 
 
 def _run(
-    path: list[ModemStep],
+    path: list[Step],
     src: Path,
     snk: Path,
     start: Descriptor,
     direction: str = "rx",
 ) -> Path:
     pipe = compile_modem(
-        ModemSpec(symbol_rate=_SYM_RATE, path=path),
+        Modem(symbol_rate=_SYM_RATE, path=path),
         stage_registry(),
         direction=direction,
         sample_rate=_SR,
@@ -57,20 +59,18 @@ def _run(
     return snk
 
 
-def _demap(levels: list[float]) -> ModemStep:
-    params: dict[str, ParamValue] = {"levels": list(levels)}
-    return ModemStep(conv="mfsk_soft_demap", params=params)
+def _demap(levels: list[float]) -> MfskSoftDemapStep:
+    return MfskSoftDemapStep(levels=list(levels))
 
 
-def _fec() -> ModemStep:
-    params: dict[str, ParamValue] = {
-        "scheme": "cc",
-        "rate_inv": _D,
-        "polys": list(_POLYS),
-        "frame_bits": _FRAME_BITS,
-        "tail": _TAIL,
-    }
-    return ModemStep(conv="fec", params=params)
+def _fec() -> FecStep:
+    return FecStep(
+        scheme="cc",
+        rate_inv=_D,
+        polys=list(_POLYS),
+        frame_bits=_FRAME_BITS,
+        tail=_TAIL,
+    )
 
 
 def _ccsds_encode(info: np.ndarray) -> np.ndarray:
@@ -115,7 +115,7 @@ def test_soft_demap_hardens_to_the_transmitted_symbols(
 
 def test_levels_must_be_a_distinct_power_of_two_set() -> None:
     reg = stage_registry()
-    model = reg["mfsk_soft_demap"].params_model
+    model = reg["mfsk_soft_demap"].step_model
     for bad in ([1.0, 2.0, 3.0], [1.0, 1.0], [0.0, 0.0], [1.0]):
         with pytest.raises(ValidationError):
             model.model_validate({"levels": bad})
@@ -159,7 +159,7 @@ def test_c4fm_chain_decodes_through_the_real_discriminator(tmp_path: Path) -> No
     )
     src = tmp_path / "lv.f32"
     levels.tofile(src)
-    fsk = ModemStep(conv="fsk", params={"deviation": _DEV})
+    fsk = FskStep(deviation=_DEV)
     iq = _run([fsk], src, tmp_path / "tx.cf32", IQ, direction="tx")
     out = read_bits(_run([fsk, _demap(_C4FM), _fec()], iq, tmp_path / "rx.u8", IQ))
     assert out.size == _FRAME_BITS

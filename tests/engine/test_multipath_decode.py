@@ -25,10 +25,18 @@ from engine._dsp import channel, read_complex, resolved_ser, tx_sym_indices, wri
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
 from marconi.engine.compile.compiler import compile_modem
 from marconi.engine.compile.ir import GrPipeline
+from marconi.engine.modulation.psk.stages import (
+    PskDemapStep,
+    PskDemodStep,
+    SymbolSyncStep,
+)
+from marconi.engine.stages.conditioning import EqualizerStep
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Amplitude, Descriptor
+from marconi.engine.types.enums import PskOrder
 from marconi.engine.types.levels import Level
-from marconi.engine.types.models import ModemSpec, ModemStep
+from marconi.engine.types.models import Modem
+from marconi.engine.types.step import Step
 
 IQ = Descriptor(Level.IQ, "c")
 IQ_RMS = Descriptor(Level.IQ, "c", amplitude=Amplitude.RMS_UNITY)
@@ -46,7 +54,7 @@ def _bpsk_points() -> tuple[np.ndarray, int]:
 
 
 def _compile(
-    modem: ModemSpec, direction: str, start: Descriptor, src: Path, snk: Path
+    modem: Modem, direction: str, start: Descriptor, src: Path, snk: Path
 ) -> GrPipeline:
     return compile_modem(
         modem,
@@ -64,11 +72,11 @@ def _tx_multipath_iq(bits: np.ndarray, tmp_path: Path, seed: int) -> Path:
     be = GnuRadioBackend()
     bp = write_bits(tmp_path / "in.bits", bits)
     clean, imp = tmp_path / "tx.iq", tmp_path / "imp.iq"
-    tx = ModemSpec(
+    tx = Modem(
         symbol_rate=_SYM,
         path=[
-            ModemStep(conv="psk_demod", params={"order": _ORDER}),
-            ModemStep(conv="psk_demap", params={"order": _ORDER}),
+            PskDemodStep(order=PskOrder(_ORDER)),
+            PskDemapStep(order=PskOrder(_ORDER)),
         ],
     )
     assert be.run_pipeline(_compile(tx, "tx", IQ, bp, clean)).status == "ok"
@@ -86,12 +94,10 @@ def _tx_multipath_iq(bits: np.ndarray, tmp_path: Path, seed: int) -> Path:
 
 
 def _rx(src: Path, snk: Path, *, equalize: bool) -> np.ndarray:
-    path = [ModemStep(conv="symbol_sync", params={"sps": _SPS})]
+    path: list[Step] = [SymbolSyncStep(sps=_SPS)]
     if equalize:
-        path.append(
-            ModemStep(conv="equalizer", params={"num_taps": 21, "step_size": 0.01})
-        )
-    modem = ModemSpec(symbol_rate=_SYM, path=path)
+        path.append(EqualizerStep(num_taps=21, step_size=0.01))
+    modem = Modem(symbol_rate=_SYM, path=path)
     pipe = _compile(modem, "rx", IQ_RMS, src, snk)
     assert GnuRadioBackend().run_pipeline(pipe, timeout=120.0).status == "ok"
     return read_complex(snk)

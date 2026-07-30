@@ -1,20 +1,19 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
-from typing import Any
+from typing import Literal
 
 from marconi.engine.compile.compile_context import CompileContext
 from marconi.engine.stages.base import DuplexStage
 from marconi.engine.types.descriptor import Carrier, Descriptor
 from marconi.engine.types.levels import Level
-from marconi.engine.types.params import StageParams
+from marconi.engine.types.step import Step
 
 
-class _SliceParams(StageParams):
-    pass
+class SliceStep(Step):
+    conv: Literal["slice"] = "slice"
 
 
-class Slice(DuplexStage[CompileContext]):
+class Slice(DuplexStage[CompileContext, SliceStep]):
     """Binary symbol<->bit decision. RX: hard-slice soft floats to bits.
     TX: map bits to antipodal +/-1.0 symbols."""
 
@@ -22,20 +21,18 @@ class Slice(DuplexStage[CompileContext]):
     from_level = Level.SYMBOLS
     to_level = Level.BITS
     family = "general"
-    params_model = _SliceParams
+    step_model = SliceStep
     accepts_item_type = "f"
     accepts_carrier = Carrier.SOFT
 
-    def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
+    def emit_rx(self, b: CompileContext, step: SliceStep) -> None:
         b.chain("binary_slicer")
 
-    def emit_tx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
+    def emit_tx(self, b: CompileContext, step: SliceStep) -> None:
         b.chain("chunks_to_symbols", symbols=[-1.0, 1.0])
 
-    def out_descriptor(
-        self, in_desc: Descriptor, params: Mapping[str, Any]
-    ) -> Descriptor:
+    def out_descriptor(self, in_desc: Descriptor, step: SliceStep) -> Descriptor:
         return Descriptor(Level.BITS, "b", Carrier.HARD)
 
 
-GENERAL_STAGES: tuple[type[DuplexStage[CompileContext]], ...] = (Slice,)
+GENERAL_STAGES: tuple[type[DuplexStage[CompileContext, SliceStep]], ...] = (Slice,)

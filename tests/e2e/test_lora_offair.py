@@ -2,7 +2,7 @@
 oracle. The slice holds TWO complete frames; both must decode CRC-valid.
 
 Run 1 is the product phy: resample/chirp_sync/dechirp/burst_probe in one
-ModemSpec — chirp_sync re-arms per preamble and burst_probe surfaces both
+Modem — chirp_sync re-arms per preamble and burst_probe surfaces both
 burst marks in the same run (issue 03's multi-burst requirement), delivered
 on the symbolstream. The header-driven carve is datasheet work and runs
 test-side (helpers/css_explicit.py, demoted from a registered stage 2026-07):
@@ -29,12 +29,16 @@ from helpers import bitops, crc, framing
 from helpers.css_explicit import css_explicit_decode
 
 from marconi.engine.backends.gnuradio.runner import ensure_worker_warm
+from marconi.engine.coding.stages_bits import NibbleSwapStep, SegmentStep
 from marconi.engine.io.bitfile import read_bits, read_symbols, write_bits
+from marconi.engine.modulation.css.stages import ChirpSyncStep, DechirpStep
 from marconi.engine.run import run_rx
+from marconi.engine.stages.conditioning import ResampleStep
+from marconi.engine.stages.probes import BurstProbeStep
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Descriptor
 from marconi.engine.types.levels import Level
-from marconi.engine.types.models import Bitstream, ModemSpec, ModemStep
+from marconi.engine.types.models import Bitstream, Modem
 from marconi.engine.types.params import ParamValue
 
 IQ = Descriptor(Level.IQ, "c")
@@ -99,39 +103,33 @@ _WHITEN = (
 _FRAME_BODY_LEN = 2056  # 255 whitened payload bytes + 2 unwhitened CRC bytes
 
 
-def _phy_modem() -> ModemSpec:
-    return ModemSpec(
+def _phy_modem() -> Modem:
+    return Modem(
         name="lora_sf11_rx",
         symbol_rate=61.03515625,
         path=[
-            ModemStep(conv="resample", params={"interpolation": 2, "decimation": 8}),
-            ModemStep(
-                conv="chirp_sync",
-                params={
-                    "sf": 11,
-                    "oversample": 2,
-                    "zero_pad": 10,
-                    "preamble_len": 8,
-                    "sfd_symbols": 2.25,
-                    "sync_symbols": 2,
-                },
+            ResampleStep(interpolation=2, decimation=8),
+            ChirpSyncStep(
+                sf=11,
+                oversample=2,
+                zero_pad=10,
+                preamble_len=8,
+                sfd_symbols=2.25,
+                sync_symbols=2,
             ),
-            ModemStep(
-                conv="dechirp",
-                params={"sf": 11, "oversample": 2, "zero_pad": 10},
-            ),
-            ModemStep(conv="burst_probe", params={}),
+            DechirpStep(sf=11, oversample=2, zero_pad=10),
+            BurstProbeStep(),
         ],
     )
 
 
-def _codec_modem() -> ModemSpec:
-    return ModemSpec(
+def _codec_modem() -> Modem:
+    return Modem(
         name="lora_sf11_codec",
         symbol_rate=1.0,
         path=[
-            ModemStep(conv="nibble_swap", params={}),
-            ModemStep(conv="segment", params={"frame_body_len": _FRAME_BODY_LEN}),
+            NibbleSwapStep(),
+            SegmentStep(frame_body_len=_FRAME_BODY_LEN),
         ],
     )
 

@@ -1,52 +1,27 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Mapping
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import StrictInt, model_validator
-from pydantic_core import PydanticCustomError
+from pydantic import StrictInt
 
 from marconi.engine.compile.compile_context import CompileContext
 from marconi.engine.stages.base import DuplexStage
 from marconi.engine.types.descriptor import Amplitude, Carrier, Descriptor
+from marconi.engine.types.enums import QamOrder
 from marconi.engine.types.levels import Level
-from marconi.engine.types.params import StageParams
-
-_QAM_ORDERS = (16, 64)
+from marconi.engine.types.step import Step
 
 
-def _check_order(order: int) -> None:
-    if order not in _QAM_ORDERS:
-        raise PydanticCustomError(
-            "value_error",
-            "qam order {o} unsupported (allowed: {allowed})",
-            {"o": order, "allowed": list(_QAM_ORDERS), "field": "order"},
-        )
-
-
-class _QamDemodParams(StageParams):
-    order: StrictInt  # required: an explicit QAM order, no silent default
+class QamDemodStep(Step):
+    conv: Literal["qam_demod"] = "qam_demod"
+    order: QamOrder  # required: an explicit QAM order, no silent default
     alpha: float = 0.35
     loop_bw: float = 0.045  # symbol_sync timing loop
     span: StrictInt = 11
 
-    @model_validator(mode="after")
-    def _ok(self) -> "_QamDemodParams":
-        _check_order(self.order)
-        return self
 
-
-class _QamDemapParams(StageParams):
-    order: StrictInt  # required
-
-    @model_validator(mode="after")
-    def _ok(self) -> "_QamDemapParams":
-        _check_order(self.order)
-        return self
-
-
-class QamDemod(DuplexStage[CompileContext]):
+class QamDemod(DuplexStage[CompileContext, QamDemodStep]):
     """QAM demod, IQ<->SYMBOLS. QAM's multi-radius constellation defeats a
     phase-only costas loop, so carrier recovery uses the constellation-aware,
     decision-directed `constellation_receiver_cb` ("costas for an arbitrary
@@ -68,40 +43,41 @@ class QamDemod(DuplexStage[CompileContext]):
     # unity). A fixed-radius constellation needs the RMS statistic.
     accepts_amplitude = frozenset({Amplitude.RMS_UNITY})
     min_input_sps = 2.0
-    params_model = _QamDemodParams
+    step_model = QamDemodStep
 
-    def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
-        p = _QamDemodParams.model_validate(dict(params))
+    def emit_rx(self, b: CompileContext, step: QamDemodStep) -> None:
         b.chain(
             "rrc_filter_ccf",
             interpolation=1,
             rate=b.rate,
             sps=b.sps,
-            alpha=p.alpha,
-            span=p.span,
+            alpha=step.alpha,
+            span=step.span,
         )
-        b.chain("symbol_sync_cc", sps=b.sps, loop_bw=p.loop_bw)
-        b.chain("constellation_receiver_cb", scheme="qam", order=p.order)
+        b.chain("symbol_sync_cc", sps=b.sps, loop_bw=step.loop_bw)
+        b.chain("constellation_receiver_cb", scheme="qam", order=int(step.order))
 
-    def emit_tx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
-        p = _QamDemodParams.model_validate(dict(params))
-        b.chain("chunks_to_symbols_bc", scheme="qam", order=p.order)
+    def emit_tx(self, b: CompileContext, step: QamDemodStep) -> None:
+        b.chain("chunks_to_symbols_bc", scheme="qam", order=int(step.order))
         b.chain(
             "rrc_filter_ccf",
             interpolation=b.sps_int(),
             rate=b.rate,
             sps=b.sps,
-            alpha=p.alpha,
-            span=p.span,
+            alpha=step.alpha,
+            span=step.span,
         )
 
-    def out_descriptor(
-        self, in_desc: Descriptor, params: Mapping[str, Any]
-    ) -> Descriptor:
-        return Descriptor(Level.SYMBOLS, "b", Carrier.HARD, order=int(params["order"]))
+    def out_descriptor(self, in_desc: Descriptor, step: QamDemodStep) -> Descriptor:
+        return Descriptor(Level.SYMBOLS, "b", Carrier.HARD, order=int(step.order))
 
 
-class QamDemap(DuplexStage[CompileContext]):
+class QamDemapStep(Step):
+    conv: Literal["qam_demap"] = "qam_demap"
+    order: QamOrder  # required
+
+
+class QamDemap(DuplexStage[CompileContext, QamDemapStep]):
     """Symbol-index <-> bits, SYMBOLS<->BITS. The constellation (Gray map) lives
     in the demod (constellation_receiver_cb decides the index on RX;
     chunks_to_symbols maps it back on TX), so the demap is a pure pack/unpack of
@@ -112,23 +88,21 @@ class QamDemap(DuplexStage[CompileContext]):
     from_level = Level.SYMBOLS
     to_level = Level.BITS
     family = "qam"
-    params_model = _QamDemapParams
+    step_model = QamDemapStep
     accepts_item_type = "b"
     accepts_carrier = Carrier.HARD
 
-    def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
-        b.chain("unpack_k_bits_bb", k=int(math.log2(int(params["order"]))))
+    def emit_rx(self, b: CompileContext, step: QamDemapStep) -> None:
+        b.chain("unpack_k_bits_bb", k=int(math.log2(int(step.order))))
 
-    def emit_tx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
-        b.chain("pack_k_bits_bb", k=int(math.log2(int(params["order"]))))
+    def emit_tx(self, b: CompileContext, step: QamDemapStep) -> None:
+        b.chain("pack_k_bits_bb", k=int(math.log2(int(step.order))))
 
-    def out_descriptor(
-        self, in_desc: Descriptor, params: Mapping[str, Any]
-    ) -> Descriptor:
+    def out_descriptor(self, in_desc: Descriptor, step: QamDemapStep) -> Descriptor:
         return Descriptor(Level.BITS, "b", Carrier.HARD)
 
-    def required_input_order(self, params: Mapping[str, Any]) -> int | None:
-        return int(params["order"])
+    def required_input_order(self, step: QamDemapStep) -> int | None:
+        return int(step.order)
 
 
-QAM_STAGES: tuple[type[DuplexStage[CompileContext]], ...] = (QamDemod, QamDemap)
+QAM_STAGES: tuple[type[DuplexStage[CompileContext, Any]], ...] = (QamDemod, QamDemap)

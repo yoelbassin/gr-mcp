@@ -56,13 +56,13 @@ from pydantic import ValidationError
 
 from marconi.engine.coding.carrier import CodingCarrier, Window
 from marconi.engine.coding.ops_bits import permute_rx
-from marconi.engine.coding.stages_bits import Permute
+from marconi.engine.coding.stages_bits import PermuteStep
 from marconi.engine.io.bitfile import read_bits
 from marconi.engine.run import run_rx
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Carrier, Descriptor
 from marconi.engine.types.levels import Level
-from marconi.engine.types.models import Bitstream, ModemSpec, Symbolstream
+from marconi.engine.types.models import Bitstream, Modem, Symbolstream
 
 BITS = Descriptor(Level.BITS, "b")
 SOFT_SYMBOLS = Descriptor(Level.SYMBOLS, "f", carrier=Carrier.SOFT)
@@ -71,13 +71,13 @@ _N = 60_000
 _Decoder = Callable[[np.ndarray, list[int]], int]
 
 
-def _coding_tail(modem: ModemSpec) -> ModemSpec:
+def _coding_tail(modem: Modem) -> Modem:
     """The post-PHY portion of a shipped modem: every step whose stage is
     engine=='coding', in order. This is what "no signal" exercises -- the
     same coding-tail composition the real off-air gate runs, fed synthetic
     bits/symbols instead of a GR front end."""
     reg = stage_registry()
-    return ModemSpec(
+    return Modem(
         symbol_rate=modem.symbol_rate,
         path=[s for s in modem.path if reg[s.conv].engine == "coding"],
     )
@@ -178,7 +178,7 @@ def _decode_rds(bits: np.ndarray, _windows: list[int]) -> int:
     return _rds_decode_groups(bits)[0]
 
 
-def _compositions() -> dict[str, tuple[Callable[[], ModemSpec], Descriptor, _Decoder]]:
+def _compositions() -> dict[str, tuple[Callable[[], Modem], Descriptor, _Decoder]]:
     return {
         "ais": (lambda: _coding_tail(_ais_modem(0.0)), BITS, _decode_ais),
         "ble": (lambda: _coding_tail(_ble_modem()), BITS, _decode_ble),
@@ -275,6 +275,6 @@ def test_unseeded_and_seeded_scopes_agree_on_stride() -> None:
 
 def test_negative_perm_index_is_rejected() -> None:
     with pytest.raises(ValidationError):
-        Permute._Params.model_validate({"perm": [0, -1, 2]})
+        PermuteStep.model_validate({"perm": [0, -1, 2]})
     with pytest.raises(ValidationError):
-        Permute._Params.model_validate({"perm": []})
+        PermuteStep.model_validate({"perm": []})

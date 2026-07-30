@@ -3,10 +3,11 @@ import numpy as np
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
 from marconi.engine.compile.compiler import compile_modem
 from marconi.engine.io.bitfile import read_llrs
+from marconi.engine.modulation.coding.stages import DeinterleaveStep
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Carrier, Descriptor
 from marconi.engine.types.levels import Level
-from marconi.engine.types.models import ModemSpec, ModemStep
+from marconi.engine.types.models import Modem
 
 
 def test_deinterleave_applies_perm(tmp_path):
@@ -16,10 +17,10 @@ def test_deinterleave_applies_perm(tmp_path):
     src = tmp_path / "i.f32"
     data.tofile(src)
     snk = tmp_path / "o.f32"
-    modem = ModemSpec(
+    modem = Modem(
         name="di",
         symbol_rate=1.0,
-        path=[ModemStep(conv="deinterleave", params={"perm": perm})],
+        path=[DeinterleaveStep(perm=perm)],
     )
     pipe = compile_modem(
         modem,

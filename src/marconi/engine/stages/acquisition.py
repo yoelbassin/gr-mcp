@@ -2,8 +2,7 @@ from __future__ import annotations
 
 import cmath
 import math
-from collections.abc import Mapping
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import StrictInt, model_validator
 from pydantic_core import PydanticCustomError
@@ -12,20 +11,21 @@ from marconi.engine.compile.compile_context import CompileContext
 from marconi.engine.stages.base import DuplexStage, RxStage, Stage
 from marconi.engine.types.descriptor import Carrier, Descriptor
 from marconi.engine.types.levels import Level
-from marconi.engine.types.params import StageParams
+from marconi.engine.types.step import Step
 
 _PREAMBLE_MODULUS_RTOL = 1e-3
 _PREAMBLE_GRID_ATOL = 0.05
 
 
-class _PreambleSyncParams(StageParams):
+class PreambleSyncStep(Step):
+    conv: Literal["preamble_sync"] = "preamble_sync"
     preamble_i: list[float]
     preamble_q: list[float]
     pad_symbols: StrictInt = 192
     threshold: float = 0.9
 
     @model_validator(mode="after")
-    def _ok(self) -> "_PreambleSyncParams":
+    def _ok(self) -> "PreambleSyncStep":
         if len(self.preamble_i) != len(self.preamble_q):
             raise PydanticCustomError(
                 "value_error", "preamble_i and preamble_q must have equal length"
@@ -39,7 +39,7 @@ class _PreambleSyncParams(StageParams):
         return self
 
 
-class PreambleSync(DuplexStage[CompileContext]):
+class PreambleSync(DuplexStage[CompileContext, PreambleSyncStep]):
     """Coherent acquisition, SYMBOLS<->SYMBOLS. TX prepends a settle ramp + a
     known sync preamble (a phy training sequence, never seen at BITS). RX
     correlates recovered soft symbols against the preamble to recover timing +
@@ -51,41 +51,36 @@ class PreambleSync(DuplexStage[CompileContext]):
     from_level = Level.SYMBOLS
     to_level = Level.SYMBOLS
     family = "acquisition"
-    params_model = _PreambleSyncParams
+    step_model = PreambleSyncStep
     # corr_est_cc + sym_strip are complex-only: reject real-float symbols (fsk)
     # at compile instead of dying on an itemsize mismatch in the backend.
     accepts_item_type = "c"
     accepts_carrier = Carrier.SOFT
 
-    def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
-        p = _PreambleSyncParams.model_validate(dict(params))
+    def emit_rx(self, b: CompileContext, step: PreambleSyncStep) -> None:
         b.chain(
             "corr_est_cc",
-            preamble_i=p.preamble_i,
-            preamble_q=p.preamble_q,
+            preamble_i=step.preamble_i,
+            preamble_q=step.preamble_q,
             sps=1,
             mark_delay=0,
-            threshold=p.threshold,
+            threshold=step.threshold,
         )
-        b.chain("sym_strip", n_pre=len(p.preamble_i))
+        b.chain("sym_strip", n_pre=len(step.preamble_i))
 
-    def emit_tx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
-        p = _PreambleSyncParams.model_validate(dict(params))
+    def emit_tx(self, b: CompileContext, step: PreambleSyncStep) -> None:
         b.chain(
             "sym_prepend",
-            preamble_i=p.preamble_i,
-            preamble_q=p.preamble_q,
-            pad_symbols=p.pad_symbols,
+            preamble_i=step.preamble_i,
+            preamble_q=step.preamble_q,
+            pad_symbols=step.pad_symbols,
         )
 
-    def validate_input(
-        self, in_desc: Descriptor, params: Mapping[str, Any]
-    ) -> str | None:
+    def validate_input(self, in_desc: Descriptor, step: PreambleSyncStep) -> str | None:
         if in_desc.order is None:
             return None
-        p = _PreambleSyncParams.model_validate(dict(params))
         m = in_desc.order
-        points = [complex(i, q) for i, q in zip(p.preamble_i, p.preamble_q)]
+        points = [complex(i, q) for i, q in zip(step.preamble_i, step.preamble_q)]
         radii = [abs(z) for z in points]
         if min(radii) == 0.0:
             return (
@@ -110,7 +105,8 @@ class PreambleSync(DuplexStage[CompileContext]):
         return None
 
 
-class _FllParams(StageParams):
+class FllStep(Step):
+    conv: Literal["fll"] = "fll"
     # Must match the pulse shaping the transmitter used: the band-edge filters
     # are built from the excess bandwidth, so a wrong rolloff mistunes them.
     rolloff: float = 0.35
@@ -118,7 +114,7 @@ class _FllParams(StageParams):
     loop_bw: float = 0.03
 
     @model_validator(mode="after")
-    def _ok(self) -> "_FllParams":
+    def _ok(self) -> "FllStep":
         if not (0.0 < self.rolloff <= 1.0):
             raise PydanticCustomError("value_error", "rolloff must be in (0, 1]")
         if self.filter_size < 1:
@@ -128,7 +124,7 @@ class _FllParams(StageParams):
         return self
 
 
-class Fll(RxStage[CompileContext]):
+class Fll(RxStage[CompileContext, FllStep]):
     """Coarse carrier-frequency acquisition, IQ->IQ (stock fll_band_edge_cc).
 
     A costas/decision-directed loop only pulls in a fraction of its own loop
@@ -144,17 +140,16 @@ class Fll(RxStage[CompileContext]):
     from_level = Level.IQ
     to_level = Level.IQ
     family = "acquisition"
-    params_model = _FllParams
+    step_model = FllStep
 
-    def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
-        p = _FllParams.model_validate(dict(params))
+    def emit_rx(self, b: CompileContext, step: FllStep) -> None:
         b.chain(
             "fll_band_edge_cc",
             sps=b.sps,
-            rolloff=p.rolloff,
-            filter_size=p.filter_size,
-            loop_bw=p.loop_bw,
+            rolloff=step.rolloff,
+            filter_size=step.filter_size,
+            loop_bw=step.loop_bw,
         )
 
 
-ACQUISITION_STAGES: tuple[type[Stage[CompileContext]], ...] = (PreambleSync, Fll)
+ACQUISITION_STAGES: tuple[type[Stage[CompileContext, Any]], ...] = (PreambleSync, Fll)

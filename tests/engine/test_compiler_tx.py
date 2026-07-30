@@ -1,21 +1,24 @@
-from engine._fixtures import fixture_registry
+from engine._fixtures import (
+    FakeDemapStep,
+    FakeDemodStep,
+    FakeResamplerStep,
+    fixture_registry,
+)
 
 from marconi.engine.compile.compiler import compile_modem
 from marconi.engine.types.descriptor import Descriptor
 from marconi.engine.types.levels import Level
-from marconi.engine.types.models import ModemSpec, ModemStep
+from marconi.engine.types.models import Modem
+from marconi.engine.types.step import Step
 
 IQ = Descriptor(Level.IQ, "c")
 
 
-def _modem(*steps: tuple[str, dict], symbol_rate: float) -> ModemSpec:
-    return ModemSpec(
-        symbol_rate=symbol_rate,
-        path=[ModemStep(conv=conv, params=params) for conv, params in steps],
-    )
+def _modem(*steps: Step, symbol_rate: float) -> Modem:
+    return Modem(symbol_rate=symbol_rate, path=list(steps))
 
 
-def _compile_tx(modem: ModemSpec, sample_rate: float):
+def _compile_tx(modem: Modem, sample_rate: float):
     return compile_modem(
         modem,
         fixture_registry(),
@@ -28,9 +31,7 @@ def _compile_tx(modem: ModemSpec, sample_rate: float):
 
 
 def test_tx_reverses_path_and_swaps_io() -> None:
-    pipe = _compile_tx(
-        _modem(("fake_demod", {}), ("fake_demap", {}), symbol_rate=2.0), 8.0
-    )
+    pipe = _compile_tx(_modem(FakeDemodStep(), FakeDemapStep(), symbol_rate=2.0), 8.0)
     assert [b.kind for b in pipe.blocks] == [
         "bits_file_source",
         "fake_map",
@@ -42,18 +43,14 @@ def test_tx_reverses_path_and_swaps_io() -> None:
 
 
 def test_tx_chain_is_linearly_connected() -> None:
-    pipe = _compile_tx(
-        _modem(("fake_demod", {}), ("fake_demap", {}), symbol_rate=2.0), 8.0
-    )
+    pipe = _compile_tx(_modem(FakeDemodStep(), FakeDemapStep(), symbol_rate=2.0), 8.0)
     ids = pipe.block_ids
     edges = [(c.src_block, c.dst_block) for c in pipe.connections]
     assert edges == list(zip(ids, ids[1:]))
 
 
 def test_tx_modulator_sees_iq_domain_sps() -> None:
-    pipe = _compile_tx(
-        _modem(("fake_demod", {}), ("fake_demap", {}), symbol_rate=2.0), 8.0
-    )
+    pipe = _compile_tx(_modem(FakeDemodStep(), FakeDemapStep(), symbol_rate=2.0), 8.0)
     mod = next(b for b in pipe.blocks if b.kind == "fake_mod")
     assert mod.params["sps"] == 8.0 / 2.0  # 4.0
 
@@ -64,9 +61,9 @@ def test_tx_resampler_round_trips_rate() -> None:
     # index 1) reads its input boundary rates[2]=4, so sps = 4/2 = 2.
     pipe = _compile_tx(
         _modem(
-            ("fake_resampler", {"interp": 2, "decim": 3}),
-            ("fake_demod", {}),
-            ("fake_demap", {}),
+            FakeResamplerStep(interp=2, decim=3),
+            FakeDemodStep(),
+            FakeDemapStep(),
             symbol_rate=2.0,
         ),
         6.0,

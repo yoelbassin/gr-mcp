@@ -19,7 +19,18 @@ from typing import Any
 import numpy as np
 from helpers import bitops, crc
 
-from marconi.engine.types.models import ModemStep
+from marconi.engine.coding.stages_bits import DescrambleStep, SegmentStep
+from marconi.engine.modulation.coding.stages import (
+    DeinterleaveStep,
+    DepunctureStep,
+    FecStep,
+)
+from marconi.engine.modulation.ofdm.stages import (
+    CellSelectStep,
+    OfdmCoherentSyncStep,
+    SoftDemapStep,
+)
+from marconi.engine.types.step import Step
 
 FFT_LEN = 256
 CP_LEN = 64
@@ -386,60 +397,41 @@ def energy_prbs_hex(n_bits: int) -> str:
     return np.packbits(tiled).tobytes().hex()
 
 
-def fac_phy_steps() -> list[ModemStep]:
+def fac_phy_steps() -> list[Step]:
     return [
-        ModemStep(conv="ofdm_coherent_sync", params=sync_params()),
-        ModemStep(
-            conv="cell_select",
-            params={"select_perm": list(fac_select_perm()), "keep": len(FAC_CELLS)},
+        OfdmCoherentSyncStep(**sync_params()),
+        CellSelectStep(select_perm=list(fac_select_perm()), keep=len(FAC_CELLS)),
+        SoftDemapStep(scheme="psk", order=4),
+        DeinterleaveStep(perm=list(fac_deinterleave_perm())),
+        DepunctureStep(keep_mask=list(FAC_PUNCTURE_KEEP)),
+        FecStep(
+            scheme="cc",
+            rate_inv=CONV_RATE_INV,
+            polys=list(CONV_POLYS),
+            frame_bits=FAC_FRAME_BITS,
+            tail=TAIL,
         ),
-        ModemStep(conv="soft_demap", params={"scheme": "psk", "order": 4}),
-        ModemStep(conv="deinterleave", params={"perm": list(fac_deinterleave_perm())}),
-        ModemStep(conv="depuncture", params={"keep_mask": list(FAC_PUNCTURE_KEEP)}),
-        ModemStep(
-            conv="fec",
-            params={
-                "scheme": "cc",
-                "rate_inv": CONV_RATE_INV,
-                "polys": list(CONV_POLYS),
-                "frame_bits": FAC_FRAME_BITS,
-                "tail": TAIL,
-            },
-        ),
-        ModemStep(
-            conv="descramble", params={"sequence": energy_prbs_hex(FAC_FRAME_BITS)}
-        ),
-        ModemStep(conv="segment", params={"frame_body_len": FAC_FRAME_BITS}),
+        DescrambleStep(sequence=energy_prbs_hex(FAC_FRAME_BITS)),
+        SegmentStep(frame_body_len=FAC_FRAME_BITS),
     ]
 
 
-def sdc_phy_steps(phase: int) -> list[ModemStep]:
+def sdc_phy_steps(phase: int) -> list[Step]:
     return [
-        ModemStep(conv="ofdm_coherent_sync", params=sync_params()),
-        ModemStep(
-            conv="cell_select",
-            params={
-                "select_perm": list(sdc_select_perm(phase)),
-                "keep": len(SDC_CELLS),
-            },
+        OfdmCoherentSyncStep(**sync_params()),
+        CellSelectStep(select_perm=list(sdc_select_perm(phase)), keep=len(SDC_CELLS)),
+        SoftDemapStep(scheme="psk", order=4),
+        DeinterleaveStep(perm=list(sdc_deinterleave_perm())),
+        DepunctureStep(keep_mask=list(SDC_PUNCTURE_KEEP)),
+        FecStep(
+            scheme="cc",
+            rate_inv=CONV_RATE_INV,
+            polys=list(CONV_POLYS),
+            frame_bits=SDC_FRAME_BITS,
+            tail=TAIL,
         ),
-        ModemStep(conv="soft_demap", params={"scheme": "psk", "order": 4}),
-        ModemStep(conv="deinterleave", params={"perm": list(sdc_deinterleave_perm())}),
-        ModemStep(conv="depuncture", params={"keep_mask": list(SDC_PUNCTURE_KEEP)}),
-        ModemStep(
-            conv="fec",
-            params={
-                "scheme": "cc",
-                "rate_inv": CONV_RATE_INV,
-                "polys": list(CONV_POLYS),
-                "frame_bits": SDC_FRAME_BITS,
-                "tail": TAIL,
-            },
-        ),
-        ModemStep(
-            conv="descramble", params={"sequence": energy_prbs_hex(SDC_FRAME_BITS)}
-        ),
-        ModemStep(conv="segment", params={"frame_body_len": SDC_FRAME_BITS}),
+        DescrambleStep(sequence=energy_prbs_hex(SDC_FRAME_BITS)),
+        SegmentStep(frame_body_len=SDC_FRAME_BITS),
     ]
 
 

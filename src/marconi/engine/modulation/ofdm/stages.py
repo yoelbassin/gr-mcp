@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
 from dataclasses import replace
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import Field, StrictInt, model_validator
 from pydantic_core import PydanticCustomError
@@ -11,10 +10,11 @@ from marconi.engine.compile.compile_context import CompileContext
 from marconi.engine.stages.base import RxStage, Stage
 from marconi.engine.types.descriptor import Carrier, Descriptor
 from marconi.engine.types.levels import Level
-from marconi.engine.types.params import StageParams
+from marconi.engine.types.step import Step
 
 
-class _SyncParams(StageParams):
+class OfdmFrameSyncProbeStep(Step):
+    conv: Literal["ofdm_frame_sync_probe"] = "ofdm_frame_sync_probe"
     fft_len: StrictInt
     cp_len: StrictInt
     sym_len: StrictInt
@@ -23,28 +23,29 @@ class _SyncParams(StageParams):
     data_syms: StrictInt
 
 
-class OfdmFrameSyncProbe(RxStage[CompileContext]):
+class OfdmFrameSyncProbe(RxStage[CompileContext, OfdmFrameSyncProbeStep]):
     """IQ->IQ: null-sync + CP-strip only (test/diagnostic isolation of the block)."""
 
     name = "ofdm_frame_sync_probe"
     from_level = Level.IQ
     to_level = Level.IQ
     family = "ofdm"
-    params_model = _SyncParams
+    step_model = OfdmFrameSyncProbeStep
 
-    def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
+    def emit_rx(self, b: CompileContext, step: OfdmFrameSyncProbeStep) -> None:
         b.chain(
             "ofdm_frame_sync",
-            fft_len=int(params["fft_len"]),
-            cp_len=int(params["cp_len"]),
-            sym_len=int(params["sym_len"]),
-            null_len=int(params["null_len"]),
-            frame_len=int(params["frame_len"]),
-            data_syms=int(params["data_syms"]),
+            fft_len=step.fft_len,
+            cp_len=step.cp_len,
+            sym_len=step.sym_len,
+            null_len=step.null_len,
+            frame_len=step.frame_len,
+            data_syms=step.data_syms,
         )
 
 
-class _OfdmParams(StageParams):
+class OfdmDemodStep(Step):
+    conv: Literal["ofdm_demod"] = "ofdm_demod"
     fft_len: StrictInt
     cp_len: StrictInt
     sym_len: StrictInt
@@ -56,7 +57,7 @@ class _OfdmParams(StageParams):
     bin_perm: list[int]
 
 
-class OfdmDemod(RxStage[CompileContext]):
+class OfdmDemod(RxStage[CompileContext, OfdmDemodStep]):
     """OFDM demod, IQ->SYMBOLS (RX-only). Custom null-sync + CP-strip, stock FFTW
     fft_vcc, stock carrier permute + select -> symbol-major active carriers. Generic
     over OFDM frames; the carrier permutation is a parameter."""
@@ -65,41 +66,42 @@ class OfdmDemod(RxStage[CompileContext]):
     from_level = Level.IQ
     to_level = Level.SYMBOLS
     family = "ofdm"
-    params_model = _OfdmParams
+    step_model = OfdmDemodStep
 
-    def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
-        fft_len = int(params["fft_len"])
+    def emit_rx(self, b: CompileContext, step: OfdmDemodStep) -> None:
+        fft_len = step.fft_len
         b.chain(
             "ofdm_frame_sync",
             fft_len=fft_len,
-            cp_len=int(params["cp_len"]),
-            sym_len=int(params["sym_len"]),
-            null_len=int(params["null_len"]),
-            frame_len=int(params["frame_len"]),
-            data_syms=int(params["data_syms"]),
+            cp_len=step.cp_len,
+            sym_len=step.sym_len,
+            null_len=step.null_len,
+            frame_len=step.frame_len,
+            data_syms=step.data_syms,
         )
         b.chain("stream_to_vector", vlen=fft_len)
         b.chain("fft_vcc", fft_len=fft_len, forward=True)
         b.chain("vector_to_stream", vlen=fft_len)
         b.chain(
-            "blockinterleaver_cc", perm=[int(x) for x in params["bin_perm"]], mode=True
+            "blockinterleaver_cc",
+            perm=[int(x) for x in step.bin_perm],
+            mode=True,
         )
-        b.chain("keep_m_in_n_c", m=int(params["n_carriers"]), n=fft_len, offset=0)
+        b.chain("keep_m_in_n_c", m=step.n_carriers, n=fft_len, offset=0)
 
-    def out_descriptor(
-        self, in_desc: Descriptor, params: Mapping[str, Any]
-    ) -> Descriptor:
+    def out_descriptor(self, in_desc: Descriptor, step: OfdmDemodStep) -> Descriptor:
         return Descriptor(Level.SYMBOLS, "c", Carrier.SOFT)
 
 
-class _DqpskParams(StageParams):
+class DqpskSoftDemapStep(Step):
+    conv: Literal["dqpsk_soft_demap"] = "dqpsk_soft_demap"
     data_syms: StrictInt
     n_carriers: StrictInt
     scheme: str = "psk"
     order: StrictInt = 4
 
 
-class DqpskSoftDemap(RxStage[CompileContext]):
+class DqpskSoftDemap(RxStage[CompileContext, DqpskSoftDemapStep]):
     """Differential-QPSK soft demap, SYMBOLS->BITS soft, from STOCK GR blocks. The
     per-carrier differential is delay + multiply_conjugate; the PRS reference is
     dropped by keep_m_in_n; the soft decision is constellation_soft_decoder.
@@ -109,14 +111,13 @@ class DqpskSoftDemap(RxStage[CompileContext]):
     from_level = Level.SYMBOLS
     to_level = Level.BITS
     family = "ofdm"
-    params_model = _DqpskParams
+    step_model = DqpskSoftDemapStep
     accepts_item_type = "c"
     accepts_carrier = Carrier.SOFT
 
-    def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
-        p = _DqpskParams.model_validate(dict(params))
-        nc = p.n_carriers
-        ds = p.data_syms
+    def emit_rx(self, b: CompileContext, step: DqpskSoftDemapStep) -> None:
+        nc = step.n_carriers
+        ds = step.data_syms
         src = b.tail  # incoming carrier stream (never None after IO source)
         assert src is not None
         dly = b.chain("delay_cc", samples=nc)  # src -> delay, tail=delay
@@ -125,18 +126,19 @@ class DqpskSoftDemap(RxStage[CompileContext]):
         b.connect(dly, mc, dst_port=1)  # delayed   -> mc.1  (c[i]*conj(c[i-nc]))
         b.set_tail(mc)
         b.chain("keep_m_in_n_c", m=ds * nc, n=(ds + 1) * nc, offset=nc)  # drop PRS diff
-        b.chain("constellation_soft_decoder", scheme=p.scheme, order=p.order)
+        b.chain("constellation_soft_decoder", scheme=step.scheme, order=step.order)
 
     def out_descriptor(
-        self, in_desc: Descriptor, params: Mapping[str, Any]
+        self, in_desc: Descriptor, step: DqpskSoftDemapStep
     ) -> Descriptor:
         return Descriptor(Level.BITS, "f", Carrier.SOFT)
 
-    def required_input_order(self, params: Mapping[str, Any]) -> int | None:
-        return int(_DqpskParams.model_validate(dict(params)).order)
+    def required_input_order(self, step: DqpskSoftDemapStep) -> int | None:
+        return int(step.order)
 
 
-class _CoherentParams(StageParams):
+class OfdmCoherentSyncStep(Step):
+    conv: Literal["ofdm_coherent_sync"] = "ofdm_coherent_sync"
     fft_len: StrictInt
     cp_len: StrictInt
     sym_len: StrictInt
@@ -154,7 +156,7 @@ class _CoherentParams(StageParams):
     fp_q: list[float]
 
     @model_validator(mode="after")
-    def _geometry(self) -> "_CoherentParams":
+    def _geometry(self) -> "OfdmCoherentSyncStep":
         n = sum(self.pilot_lens)
         checks = {
             "sym_len must equal fft_len + cp_len": self.sym_len
@@ -180,7 +182,7 @@ class _CoherentParams(StageParams):
         return self
 
 
-class OfdmCoherentSync(RxStage[CompileContext]):
+class OfdmCoherentSync(RxStage[CompileContext, OfdmCoherentSyncStep]):
     """Coherent scattered-pilot OFDM demod, IQ->SYMBOLS (RX-only). Streaming
     CP-correlation symbol tracker, stock vectorize + FFT, and a scattered-pilot
     lattice equalizer: fine-CFO derotation off the frequency pilots, 2-D
@@ -193,37 +195,35 @@ class OfdmCoherentSync(RxStage[CompileContext]):
     from_level = Level.IQ
     to_level = Level.SYMBOLS
     family = "ofdm"
-    params_model = _CoherentParams
+    step_model = OfdmCoherentSyncStep
 
-    def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
-        p = _CoherentParams.model_validate(dict(params))
+    def emit_rx(self, b: CompileContext, step: OfdmCoherentSyncStep) -> None:
         b.chain(
             "cp_symbol_sync",
-            fft_len=p.fft_len,
-            cp_len=p.cp_len,
-            warmup_syms=p.warmup_syms,
+            fft_len=step.fft_len,
+            cp_len=step.cp_len,
+            warmup_syms=step.warmup_syms,
         )
-        b.chain("stream_to_vector", vlen=p.fft_len)
-        b.chain("fft_vcc", fft_len=p.fft_len, shift=True)
-        eq = p.model_dump()
-        for k in ("cp_len", "sym_len"):
-            del eq[k]
+        b.chain("stream_to_vector", vlen=step.fft_len)
+        b.chain("fft_vcc", fft_len=step.fft_len, shift=True)
+        eq = step.model_dump(exclude={"conv", "cp_len", "sym_len"})
         b.chain("pilot_lattice_equalizer", **eq)
 
     def out_descriptor(
-        self, in_desc: Descriptor, params: Mapping[str, Any]
+        self, in_desc: Descriptor, step: OfdmCoherentSyncStep
     ) -> Descriptor:
         return Descriptor(Level.SYMBOLS, "c", Carrier.SOFT)
 
 
-class _SoftDemapParams(StageParams):
+class SoftDemapStep(Step):
+    conv: Literal["soft_demap"] = "soft_demap"
     scheme: str = "explicit"
     order: StrictInt | None = None
     points_i: list[float] | None = None
     points_q: list[float] | None = None
 
     @model_validator(mode="after")
-    def _shaped(self) -> "_SoftDemapParams":
+    def _shaped(self) -> "SoftDemapStep":
         if self.scheme in ("psk", "qam"):
             if (
                 self.order is None
@@ -266,12 +266,52 @@ class _SoftDemapParams(StageParams):
         return int(self.order) if self.order is not None else len(self.points_i or [])
 
 
-class _CellSelectParams(StageParams):
+class SoftDemap(RxStage[CompileContext, SoftDemapStep]):
+    """Constellation soft demap, SYMBOLS->BITS soft, for any constellation:
+    named psk/qam schemes or explicit caller points (a point's bit pattern is
+    its index, MSB-first; points are power-normalized so input must be unit
+    RMS). Negates constellation_soft_decoder's LLR to this engine's
+    bit-1-negative convention. The generic door from a cell stream into the
+    soft coding lane (deinterleave/depuncture/fec)."""
+
+    name = "soft_demap"
+    from_level = Level.SYMBOLS
+    to_level = Level.BITS
+    family = "ofdm"
+    step_model = SoftDemapStep
+    accepts_item_type = "c"
+    accepts_carrier = Carrier.SOFT
+
+    def emit_rx(self, b: CompileContext, step: SoftDemapStep) -> None:
+        if step.scheme == "explicit":
+            b.chain(
+                "constellation_soft_decoder",
+                scheme=step.scheme,
+                points_i=[float(x) for x in step.points_i or []],
+                points_q=[float(x) for x in step.points_q or []],
+            )
+        else:
+            b.chain(
+                "constellation_soft_decoder", scheme=step.scheme, order=step.alphabet()
+            )
+        b.chain("multiply_const_ff", value=-1.0)
+
+    def out_descriptor(self, in_desc: Descriptor, step: SoftDemapStep) -> Descriptor:
+        k = step.alphabet().bit_length() - 1
+        frame = None if in_desc.frame_len is None else in_desc.frame_len * k
+        return Descriptor(Level.BITS, "f", Carrier.SOFT, frame_len=frame)
+
+    def required_input_order(self, step: SoftDemapStep) -> int | None:
+        return step.alphabet()
+
+
+class CellSelectStep(Step):
+    conv: Literal["cell_select"] = "cell_select"
     select_perm: list[int]
     keep: StrictInt = Field(ge=1)
 
     @model_validator(mode="after")
-    def _shaped(self) -> "_CellSelectParams":
+    def _shaped(self) -> "CellSelectStep":
         if sorted(self.select_perm) != list(range(len(self.select_perm))):
             raise PydanticCustomError(
                 "value_error",
@@ -287,48 +327,7 @@ class _CellSelectParams(StageParams):
         return self
 
 
-class SoftDemap(RxStage[CompileContext]):
-    """Constellation soft demap, SYMBOLS->BITS soft, for any constellation:
-    named psk/qam schemes or explicit caller points (a point's bit pattern is
-    its index, MSB-first; points are power-normalized so input must be unit
-    RMS). Negates constellation_soft_decoder's LLR to this engine's
-    bit-1-negative convention. The generic door from a cell stream into the
-    soft coding lane (deinterleave/depuncture/fec)."""
-
-    name = "soft_demap"
-    from_level = Level.SYMBOLS
-    to_level = Level.BITS
-    family = "ofdm"
-    params_model = _SoftDemapParams
-    accepts_item_type = "c"
-    accepts_carrier = Carrier.SOFT
-
-    def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
-        p = _SoftDemapParams.model_validate(dict(params))
-        if p.scheme == "explicit":
-            b.chain(
-                "constellation_soft_decoder",
-                scheme=p.scheme,
-                points_i=[float(x) for x in p.points_i or []],
-                points_q=[float(x) for x in p.points_q or []],
-            )
-        else:
-            b.chain("constellation_soft_decoder", scheme=p.scheme, order=p.alphabet())
-        b.chain("multiply_const_ff", value=-1.0)
-
-    def out_descriptor(
-        self, in_desc: Descriptor, params: Mapping[str, Any]
-    ) -> Descriptor:
-        p = _SoftDemapParams.model_validate(dict(params))
-        k = p.alphabet().bit_length() - 1
-        frame = None if in_desc.frame_len is None else in_desc.frame_len * k
-        return Descriptor(Level.BITS, "f", Carrier.SOFT, frame_len=frame)
-
-    def required_input_order(self, params: Mapping[str, Any]) -> int | None:
-        return _SoftDemapParams.model_validate(dict(params)).alphabet()
-
-
-class CellSelect(RxStage[CompileContext]):
+class CellSelect(RxStage[CompileContext, CellSelectStep]):
     """SYMBOLS(c)->SYMBOLS(c) cell gather: reorder each fixed-size symbol
     block by a whole-block permutation (stock blockinterleaver_cc) with the
     wanted cells at the front, then keep that front (keep_m_in_n). Which
@@ -339,32 +338,26 @@ class CellSelect(RxStage[CompileContext]):
     from_level = Level.SYMBOLS
     to_level = Level.SYMBOLS
     family = "ofdm"
-    params_model = _CellSelectParams
+    step_model = CellSelectStep
     accepts_item_type = "c"
     accepts_carrier = Carrier.SOFT
 
-    def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
-        p = _CellSelectParams.model_validate(dict(params))
+    def emit_rx(self, b: CompileContext, step: CellSelectStep) -> None:
         b.chain(
             "blockinterleaver_cc",
-            perm=[int(x) for x in p.select_perm],
+            perm=[int(x) for x in step.select_perm],
             mode=True,
         )
-        b.chain("keep_m_in_n_c", m=int(p.keep), n=len(p.select_perm))
+        b.chain("keep_m_in_n_c", m=int(step.keep), n=len(step.select_perm))
 
-    def out_descriptor(
-        self, in_desc: Descriptor, params: Mapping[str, Any]
-    ) -> Descriptor:
-        return replace(in_desc, frame_len=int(params["keep"]))
+    def out_descriptor(self, in_desc: Descriptor, step: CellSelectStep) -> Descriptor:
+        return replace(in_desc, frame_len=int(step.keep))
 
-    def rate_factor(self, params: Mapping[str, Any]) -> float:
-        p = _CellSelectParams.model_validate(dict(params))
-        return p.keep / len(p.select_perm)
+    def rate_factor(self, step: CellSelectStep) -> float:
+        return step.keep / len(step.select_perm)
 
-    def validate_input(
-        self, in_desc: Descriptor, params: Mapping[str, Any]
-    ) -> str | None:
-        span = len(list(params["select_perm"]))
+    def validate_input(self, in_desc: Descriptor, step: CellSelectStep) -> str | None:
+        span = len(step.select_perm)
         if in_desc.frame_len is not None:
             # Accept if either divides the other; reject only if both straddle
             if span % in_desc.frame_len != 0 and in_desc.frame_len % span != 0:
@@ -376,7 +369,7 @@ class CellSelect(RxStage[CompileContext]):
         return None
 
 
-OFDM_STAGES: tuple[type[Stage[CompileContext]], ...] = (
+OFDM_STAGES: tuple[type[Stage[CompileContext, Any]], ...] = (
     OfdmDemod,
     DqpskSoftDemap,
     OfdmFrameSyncProbe,

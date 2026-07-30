@@ -1,4 +1,4 @@
-"""Real off-air POCSAG, one ModemSpec spanning phy through the coding tail,
+"""Real off-air POCSAG, one Modem spanning phy through the coding tail,
 multimon-ng as the independent oracle.
 
 The PHY (channelize/fsk/slice) and the batch/codeword framing now compose
@@ -25,19 +25,29 @@ assembly is a documented follow-up, not asserted here.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import cast
 
 import numpy as np
 import pytest
 from helpers import framing
 
 from marconi.engine.backends.gnuradio.runner import ensure_worker_warm
+from marconi.engine.coding.stages_bits import (
+    BlockCodeStep,
+    PermuteStep,
+    SegmentStep,
+    SyncWordStep,
+)
 from marconi.engine.io.bitfile import read_bits
+from marconi.engine.modulation.coding.stages import HardenStep, SyncAlignStep
+from marconi.engine.modulation.fsk.stages import FskStep, MfskSoftDemapStep
 from marconi.engine.run import run_rx
+from marconi.engine.stages.conditioning import AgcStep, ChannelizeStep
+from marconi.engine.stages.general import SliceStep
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Descriptor
+from marconi.engine.types.enums import EmitMode
 from marconi.engine.types.levels import Level
-from marconi.engine.types.models import ModemSpec, ModemStep
+from marconi.engine.types.models import Modem
 
 IQ = Descriptor(Level.IQ, "c")
 RATE = 128000.0
@@ -83,28 +93,22 @@ def _bch_parity_masks() -> list[int]:
 PARITY_MASKS = _bch_parity_masks()
 
 
-def _pocsag_modem() -> ModemSpec:
-    return ModemSpec(
+def _pocsag_modem() -> Modem:
+    return Modem(
         symbol_rate=1200.0,
         path=[
-            ModemStep(
-                conv="channelize",
-                params={"decim": 4, "bandwidth_hz": 14000.0, "center_hz": -10250.0},
-            ),
-            ModemStep(conv="agc", params={"window_symbols": 64.0}),
-            ModemStep(conv="fsk", params={"deviation": 4500.0}),
-            ModemStep(conv="slice", params={}),
-            ModemStep(conv="sync_word", params={"sync": SC_HEX, "max_errors": 0}),
-            ModemStep(conv="permute", params={"perm": cast("list[float | int]", PERM)}),
-            ModemStep(
-                conv="block_code",
-                params={
-                    "code_bits": CODE_BITS,
-                    "data_bits": DATA_BITS,
-                    "parity_masks": cast("list[float | int]", PARITY_MASKS),
-                    "correct_single": True,
-                    "emit": "data",
-                },
+            ChannelizeStep(decim=4, bandwidth_hz=14000.0, center_hz=-10250.0),
+            AgcStep(window_symbols=64.0),
+            FskStep(deviation=4500.0),
+            SliceStep(),
+            SyncWordStep(sync=SC_HEX, max_errors=0),
+            PermuteStep(perm=list(PERM)),
+            BlockCodeStep(
+                code_bits=CODE_BITS,
+                data_bits=DATA_BITS,
+                parity_masks=list(PARITY_MASKS),
+                correct_single=True,
+                emit=EmitMode.DATA,
             ),
         ],
     )
@@ -114,40 +118,28 @@ BATCH_BITS = BATCH_CODEWORDS * 32  # 512: 16 codewords x 32 bits after each sync
 SC_ACCESS = format(SC, "032b")  # sync codeword as a correlator bit string
 
 
-def _pocsag_sync_align_modem() -> ModemSpec:
+def _pocsag_sync_align_modem() -> Modem:
     """The same decode, but the frame sync codeword is found and gated IN GR by
     sync_align instead of the coding-layer sync_word. The soft path (mfsk_soft_demap
     -> sync_align -> harden) reproduces slice bit-for-bit (verified), then segment
     re-seeds a window per gated 512-bit batch for the seeded permute/block_code."""
-    return ModemSpec(
+    return Modem(
         symbol_rate=1200.0,
         path=[
-            ModemStep(
-                conv="channelize",
-                params={"decim": 4, "bandwidth_hz": 14000.0, "center_hz": -10250.0},
-            ),
-            ModemStep(conv="agc", params={"window_symbols": 64.0}),
-            ModemStep(conv="fsk", params={"deviation": 4500.0}),
-            ModemStep(
-                conv="mfsk_soft_demap",
-                params={"levels": cast("list[float | int]", [-1.0, 1.0])},
-            ),
-            ModemStep(
-                conv="sync_align",
-                params={"access_code": SC_ACCESS, "frame_len": BATCH_BITS},
-            ),
-            ModemStep(conv="harden", params={}),
-            ModemStep(conv="segment", params={"frame_body_len": BATCH_BITS}),
-            ModemStep(conv="permute", params={"perm": cast("list[float | int]", PERM)}),
-            ModemStep(
-                conv="block_code",
-                params={
-                    "code_bits": CODE_BITS,
-                    "data_bits": DATA_BITS,
-                    "parity_masks": cast("list[float | int]", PARITY_MASKS),
-                    "correct_single": True,
-                    "emit": "data",
-                },
+            ChannelizeStep(decim=4, bandwidth_hz=14000.0, center_hz=-10250.0),
+            AgcStep(window_symbols=64.0),
+            FskStep(deviation=4500.0),
+            MfskSoftDemapStep(levels=[-1.0, 1.0]),
+            SyncAlignStep(access_code=SC_ACCESS, frame_len=BATCH_BITS),
+            HardenStep(),
+            SegmentStep(frame_body_len=BATCH_BITS),
+            PermuteStep(perm=list(PERM)),
+            BlockCodeStep(
+                code_bits=CODE_BITS,
+                data_bits=DATA_BITS,
+                parity_masks=list(PARITY_MASKS),
+                correct_single=True,
+                emit=EmitMode.DATA,
             ),
         ],
     )

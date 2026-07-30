@@ -1,4 +1,4 @@
-"""Real off-air AIS, one ModemSpec spanning phy through the coding tail, CRC as
+"""Real off-air AIS, one Modem spanning phy through the coding tail, CRC as
 the oracle.
 
 Burst gating carries this decode. AIS is bursty, and a clock-recovery loop that
@@ -39,12 +39,17 @@ import pytest
 from helpers import crc, framing, parse
 
 from marconi.engine.backends.gnuradio.runner import ensure_worker_warm
+from marconi.engine.coding.stages_bits import DifferentialStep
 from marconi.engine.io.bitfile import read_bits
+from marconi.engine.modulation.fsk.stages import FskStep
 from marconi.engine.run import run_rx
+from marconi.engine.stages.conditioning import AgcStep, ChannelizeStep, SquelchStep
+from marconi.engine.stages.general import SliceStep
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Descriptor
+from marconi.engine.types.enums import AgcMode
 from marconi.engine.types.levels import Level
-from marconi.engine.types.models import ModemSpec, ModemStep
+from marconi.engine.types.models import Modem
 
 IQ = Descriptor(Level.IQ, "c")
 RATE = 250000.0
@@ -96,24 +101,19 @@ _AIS_CRC: dict[str, int | str] = {
 }
 
 
-def _ais_modem(center_hz: float) -> ModemSpec:
-    return ModemSpec(
+def _ais_modem(center_hz: float) -> Modem:
+    return Modem(
         symbol_rate=9600.0,
         path=[
-            ModemStep(
-                conv="channelize",
-                params={"decim": 5, "bandwidth_hz": 14000.0, "center_hz": center_hz},
-            ),
+            ChannelizeStep(decim=5, bandwidth_hz=14000.0, center_hz=center_hz),
             # window_symbols spans many burst gaps on purpose: a short window
             # lifts the inter-burst noise floor to meet the squelch threshold
             # and nothing gets muted (tests/phy/test_squelch.py pins this).
-            ModemStep(conv="agc", params={"mode": "power", "window_symbols": 4096.0}),
-            ModemStep(
-                conv="squelch", params={"threshold_db": -12.0, "alpha_symbols": 2.0}
-            ),
-            ModemStep(conv="fsk", params={"deviation": 2400.0}),
-            ModemStep(conv="slice", params={}),
-            ModemStep(conv="differential", params={"invert": True}),
+            AgcStep(mode=AgcMode.POWER, window_symbols=4096.0),
+            SquelchStep(threshold_db=-12.0, alpha_symbols=2.0),
+            FskStep(deviation=2400.0),
+            SliceStep(),
+            DifferentialStep(invert=True),
         ],
     )
 

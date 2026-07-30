@@ -1,22 +1,26 @@
 import pytest
-from engine._fixtures import fixture_registry
+from engine._fixtures import (
+    FakeDemapStep,
+    FakeDemodStep,
+    FakeResamplerStep,
+    FakeSoftDemapStep,
+    fixture_registry,
+)
 
 from marconi.engine.compile.compiler import CompileError, compile_modem
 from marconi.engine.types.descriptor import Descriptor
 from marconi.engine.types.levels import Level
-from marconi.engine.types.models import ModemSpec, ModemStep
+from marconi.engine.types.models import Modem
+from marconi.engine.types.step import Step
 
 IQ = Descriptor(Level.IQ, "c")
 
 
-def _modem(*steps: tuple[str, dict], symbol_rate: float) -> ModemSpec:
-    return ModemSpec(
-        symbol_rate=symbol_rate,
-        path=[ModemStep(conv=conv, params=params) for conv, params in steps],
-    )
+def _modem(*steps: Step, symbol_rate: float) -> Modem:
+    return Modem(symbol_rate=symbol_rate, path=list(steps))
 
 
-def _compile_rx(modem: ModemSpec, sample_rate: float):
+def _compile_rx(modem: Modem, sample_rate: float):
     return compile_modem(
         modem,
         fixture_registry(),
@@ -30,9 +34,9 @@ def _compile_rx(modem: ModemSpec, sample_rate: float):
 
 def test_rx_chain_blocks_and_connections() -> None:
     modem = _modem(
-        ("fake_resampler", {"interp": 3, "decim": 2}),
-        ("fake_demod", {}),
-        ("fake_demap", {}),
+        FakeResamplerStep(interp=3, decim=2),
+        FakeDemodStep(),
+        FakeDemapStep(),
         symbol_rate=2.0,
     )
     pipe = _compile_rx(modem, 12.0)
@@ -50,24 +54,22 @@ def test_rx_chain_blocks_and_connections() -> None:
 
 def test_rx_source_and_sink_kinds_from_descriptors() -> None:
     pipe = _compile_rx(
-        _modem(("fake_demod", {}), ("fake_soft_demap", {}), symbol_rate=1.0), 4.0
+        _modem(FakeDemodStep(), FakeSoftDemapStep(), symbol_rate=1.0), 4.0
     )
     assert pipe.blocks[0].kind == "iq_file_source"
     assert pipe.blocks[-1].kind == "soft_bits_file_sink"
 
 
 def test_io_params_attach_to_source_and_sink() -> None:
-    pipe = _compile_rx(
-        _modem(("fake_demod", {}), ("fake_demap", {}), symbol_rate=2.0), 8.0
-    )
+    pipe = _compile_rx(_modem(FakeDemodStep(), FakeDemapStep(), symbol_rate=2.0), 8.0)
     assert pipe.blocks[0].params["path"] == "in.iq"
     assert pipe.blocks[-1].params["path"] == "out.bits"
 
 
 def test_rate_folds_through_resampler_into_demod_sps() -> None:
     modem = _modem(
-        ("fake_resampler", {"interp": 3, "decim": 2}),
-        ("fake_demod", {}),
+        FakeResamplerStep(interp=3, decim=2),
+        FakeDemodStep(),
         symbol_rate=2.0,
     )
     pipe = _compile_rx(modem, 12.0)
@@ -76,27 +78,25 @@ def test_rate_folds_through_resampler_into_demod_sps() -> None:
 
 
 def test_fractional_sps_is_allowed() -> None:
-    pipe = _compile_rx(_modem(("fake_demod", {}), symbol_rate=4.0), 10.0)
+    pipe = _compile_rx(_modem(FakeDemodStep(), symbol_rate=4.0), 10.0)
     demod = next(b for b in pipe.blocks if b.kind == "fake_demod")
     assert demod.params["sps"] == 2.5
 
 
 def test_pipeline_sample_rate_metadata() -> None:
-    pipe = _compile_rx(
-        _modem(("fake_demod", {}), ("fake_demap", {}), symbol_rate=2.0), 8.0
-    )
+    pipe = _compile_rx(_modem(FakeDemodStep(), FakeDemapStep(), symbol_rate=2.0), 8.0)
     assert pipe.sample_rate == 8.0
 
 
 def test_unknown_stage_raises_compile_error() -> None:
     with pytest.raises(CompileError):
-        _compile_rx(_modem(("nope", {}), symbol_rate=1.0), 4.0)
+        _compile_rx(_modem(Step(conv="nope"), symbol_rate=1.0), 4.0)
 
 
 def test_bad_direction_raises_compile_error() -> None:
     with pytest.raises(CompileError):
         compile_modem(
-            _modem(("fake_demod", {}), symbol_rate=1.0),
+            _modem(FakeDemodStep(), symbol_rate=1.0),
             fixture_registry(),
             direction="sideways",
             sample_rate=4.0,
@@ -106,8 +106,6 @@ def test_bad_direction_raises_compile_error() -> None:
         )
 
 
-def test_modemstep_satisfies_specstep_protocol() -> None:
-    from marconi.engine.stages.base import SpecStep
-
-    step: SpecStep = ModemStep(conv="fake_demod")
-    assert step.conv == "fake_demod" and dict(step.params) == {}
+def test_step_carries_conv_with_no_extra_params() -> None:
+    step = FakeDemodStep()
+    assert step.conv == "fake_demod" and step.model_dump(exclude={"conv"}) == {}

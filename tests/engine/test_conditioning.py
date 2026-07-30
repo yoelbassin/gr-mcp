@@ -1,19 +1,15 @@
 from __future__ import annotations
 
-from marconi.engine.stages.base import validate_params
+import pytest
+from pydantic import ValidationError
+
+from marconi.engine.stages.conditioning import ClockCorrectStep
 
 
 def test_clock_correct_rejects_pole_ppm() -> None:
-    from marconi.engine.stages.conditioning import ClockCorrect
-
-    bad: list = []
-    validate_params("clock_correct[0]", ClockCorrect().params_model, {"ppm": -1e6}, bad)
-    assert bad, "ppm = -1e6 (pole) should be rejected"
+    with pytest.raises(ValidationError):
+        ClockCorrectStep(ppm=-1e6)
 
 
 def test_clock_correct_accepts_normal_ppm() -> None:
-    from marconi.engine.stages.conditioning import ClockCorrect
-
-    ok: list = []
-    validate_params("clock_correct[0]", ClockCorrect().params_model, {"ppm": 6.0}, ok)
-    assert not ok, "ppm = 6.0 should be accepted"
+    ClockCorrectStep(ppm=6.0)

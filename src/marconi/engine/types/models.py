@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, SerializeAsAny, model_validator
 
-from marconi.engine.types.params import ParamValue
+from marconi.engine.types.step import Step, steps_from_spec
 
 
 class ValidationIssue(BaseModel):
@@ -72,14 +73,26 @@ class Symbolstream(BaseModel):
         return self
 
 
-class ModemStep(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    conv: str
-    params: dict[str, ParamValue] = {}
-
-
-class ModemSpec(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+class Modem(BaseModel):
+    model_config = ConfigDict(extra="forbid", revalidate_instances="never")
     name: str = "modem"
     symbol_rate: float = Field(gt=0)
-    path: list[ModemStep]
+    path: list[SerializeAsAny[Step]]
+
+    def to_spec(self) -> dict[str, object]:
+        return self.model_dump(mode="json")
+
+    @classmethod
+    def from_spec(
+        cls, data: Mapping[str, object], step_models: Mapping[str, type[Step]]
+    ) -> "Modem":
+        raw = data.get("path", [])
+        if not isinstance(raw, Sequence):
+            raise ValueError("modem 'path' must be a list")
+        items = [dict(s) for s in raw]
+        steps = steps_from_spec(items, step_models)  # type: ignore[arg-type]
+        return cls(
+            name=str(data.get("name", "modem")),
+            symbol_rate=float(data["symbol_rate"]),  # type: ignore[arg-type]
+            path=steps,
+        )

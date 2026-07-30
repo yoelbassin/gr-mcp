@@ -5,23 +5,23 @@ from engine._dsp import aligned_ber, channel, read_bits, write_bits
 
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
 from marconi.engine.compile.compiler import compile_modem
+from marconi.engine.modulation.ook.stages import OokEnvelopeStep
+from marconi.engine.stages.conditioning import AgcStep
+from marconi.engine.stages.general import SliceStep
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Descriptor
 from marconi.engine.types.levels import Level
-from marconi.engine.types.models import ModemSpec, ModemStep
+from marconi.engine.types.models import Modem
+from marconi.engine.types.step import Step
 
 IQ = Descriptor(Level.IQ, "c")
 _SR, _SYM = 4.0, 1.0
 
 
-def _modem(direction: str) -> ModemSpec:
-    rx = [
-        ModemStep(conv="agc"),
-        ModemStep(conv="ook_envelope"),
-        ModemStep(conv="slice"),
-    ]
-    tx = [ModemStep(conv="ook_envelope"), ModemStep(conv="slice")]
-    return ModemSpec(symbol_rate=_SYM, path=rx if direction == "rx" else tx)
+def _modem(direction: str) -> Modem:
+    rx: list[Step] = [AgcStep(), OokEnvelopeStep(), SliceStep()]
+    tx: list[Step] = [OokEnvelopeStep(), SliceStep()]
+    return Modem(symbol_rate=_SYM, path=rx if direction == "rx" else tx)
 
 
 def _compile(direction: str, src: Path, snk: Path):

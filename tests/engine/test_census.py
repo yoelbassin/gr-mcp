@@ -17,25 +17,27 @@ from engine._dsp import write_bits
 from marconi.engine.backends.base import RunResult
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
 from marconi.engine.compile.compiler import compile_modem
+from marconi.engine.modulation.psk.stages import PskDemapStep, PskDemodStep
+from marconi.engine.stages.acquisition import PreambleSyncStep
+from marconi.engine.stages.conditioning import ChannelizeStep, ClockCorrectStep
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Amplitude, Descriptor
+from marconi.engine.types.enums import PskOrder
 from marconi.engine.types.levels import Level
-from marconi.engine.types.models import ModemSpec, ModemStep
-from marconi.engine.types.params import ParamValue
+from marconi.engine.types.models import Modem
+from marconi.engine.types.step import Step
 
 IQ = Descriptor(Level.IQ, "c")
 # a clean synthetic transmitter output, so the scale is known without an agc --
 # which would otherwise add blocks to the very census under test
 IQ_NORMALIZED = Descriptor(Level.IQ, "c", amplitude=Amplitude.PEAK_UNITY)
 _SR, _SYM, _NBITS = 8.0, 1.0, 4096
-_QPSK: dict[str, ParamValue] = {"order": 4}
+_QPSK = PskOrder.QPSK
 
 
-def _run(
-    path: list[ModemStep], src: Path, snk: Path, direction: str = "rx"
-) -> RunResult:
+def _run(path: list[Step], src: Path, snk: Path, direction: str = "rx") -> RunResult:
     pipe = compile_modem(
-        ModemSpec(symbol_rate=_SYM, path=path),
+        Modem(symbol_rate=_SYM, path=path),
         stage_registry(),
         direction=direction,
         sample_rate=_SR,
@@ -50,10 +52,7 @@ def _signal(tmp_path: Path) -> Path:
     bits = np.random.default_rng(0).integers(0, 2, _NBITS).astype(np.uint8)
     bp = write_bits(tmp_path / "in.bits", bits)
     iq = tmp_path / "sig.iq"
-    tx = [
-        ModemStep(conv="psk_demod", params=_QPSK),
-        ModemStep(conv="psk_demap", params=_QPSK),
-    ]
+    tx: list[Step] = [PskDemodStep(order=_QPSK), PskDemapStep(order=_QPSK)]
     assert _run(tx, bp, iq, "tx").status == "ok"
     return iq
 
@@ -65,7 +64,7 @@ def _by_kind(res: RunResult, kind: str) -> list[int | None]:
 def test_census_covers_the_whole_pipeline_in_order(tmp_path: Path) -> None:
     ensure_worker_warm()
     res = _run(
-        [ModemStep(conv="psk_demod", params=_QPSK)],
+        [PskDemodStep(order=_QPSK)],
         _signal(tmp_path),
         tmp_path / "out.cf32",
     )
@@ -85,7 +84,7 @@ def test_a_missing_port_reads_as_none_not_zero(tmp_path: Path) -> None:
     'consumed nothing', which is the failure signature."""
     ensure_worker_warm()
     res = _run(
-        [ModemStep(conv="psk_demod", params=_QPSK)],
+        [PskDemodStep(order=_QPSK)],
         _signal(tmp_path),
         tmp_path / "out.cf32",
     )
@@ -99,12 +98,7 @@ def test_census_measures_a_rate_change_exactly(tmp_path: Path) -> None:
     ensure_worker_warm()
     decim = 4
     res = _run(
-        [
-            ModemStep(
-                conv="channelize",
-                params={"decim": decim, "bandwidth_hz": 1.0, "center_hz": 0.0},
-            )
-        ],
+        [ChannelizeStep(decim=decim, bandwidth_hz=1.0, center_hz=0.0)],
         _signal(tmp_path),
         tmp_path / "out.cf32",
     )
@@ -120,15 +114,12 @@ def test_census_names_the_stage_that_produced_nothing(tmp_path: Path) -> None:
     and the sink is empty, but the run is still 'ok'. The census is the only
     thing that says where the data stopped."""
     ensure_worker_warm()
-    path = [
-        ModemStep(conv="psk_demod", params=_QPSK),
-        ModemStep(
-            conv="preamble_sync",
-            params={
-                "preamble_i": [1.0, -1.0] * 16,
-                "preamble_q": [0.0] * 32,
-                "threshold": 0.99,
-            },
+    path: list[Step] = [
+        PskDemodStep(order=_QPSK),
+        PreambleSyncStep(
+            preamble_i=[1.0, -1.0] * 16,
+            preamble_q=[0.0] * 32,
+            threshold=0.99,
         ),
     ]
     res = _run(path, _signal(tmp_path), tmp_path / "out.cf32")
@@ -144,7 +135,7 @@ def test_a_block_without_counters_does_not_fail_the_run(tmp_path: Path) -> None:
     be able to fail a run that otherwise worked -- it reports None instead."""
     ensure_worker_warm()
     res = _run(
-        [ModemStep(conv="clock_correct", params={"ppm": 5.0})],
+        [ClockCorrectStep(ppm=5.0)],
         _signal(tmp_path),
         tmp_path / "out.cf32",
     )
@@ -159,7 +150,7 @@ def test_an_all_stock_chain_is_observable_too(tmp_path: Path) -> None:
     common case, and the one the design prefers -- reported nothing at all."""
     ensure_worker_warm()
     res = _run(
-        [ModemStep(conv="psk_demod", params=_QPSK)],
+        [PskDemodStep(order=_QPSK)],
         _signal(tmp_path),
         tmp_path / "out.cf32",
     )
@@ -173,15 +164,12 @@ def test_empty_sink_is_not_ok_and_names_the_stall(tmp_path: Path) -> None:
     zero, and error carries the human-readable gradient. status must stop lying
     'ok' when no signal was decoded."""
     ensure_worker_warm()
-    path = [
-        ModemStep(conv="psk_demod", params=_QPSK),
-        ModemStep(
-            conv="preamble_sync",
-            params={
-                "preamble_i": [1.0, -1.0] * 16,
-                "preamble_q": [0.0] * 32,
-                "threshold": 0.99,
-            },
+    path: list[Step] = [
+        PskDemodStep(order=_QPSK),
+        PreambleSyncStep(
+            preamble_i=[1.0, -1.0] * 16,
+            preamble_q=[0.0] * 32,
+            threshold=0.99,
         ),
     ]
     res = _run(path, _signal(tmp_path), tmp_path / "out.cf32")
@@ -196,7 +184,7 @@ def test_a_run_that_produces_output_stays_ok(tmp_path: Path) -> None:
     writes items to its sink is 'ok' with no stall."""
     ensure_worker_warm()
     res = _run(
-        [ModemStep(conv="psk_demod", params=_QPSK)],
+        [PskDemodStep(order=_QPSK)],
         _signal(tmp_path),
         tmp_path / "out.cf32",
     )
@@ -208,7 +196,7 @@ def test_a_run_that_produces_output_stays_ok(tmp_path: Path) -> None:
 def test_counts_are_non_negative(kind: str, tmp_path: Path) -> None:
     ensure_worker_warm()
     res = _run(
-        [ModemStep(conv="psk_demod", params=_QPSK)],
+        [PskDemodStep(order=_QPSK)],
         _signal(tmp_path),
         tmp_path / "out.cf32",
     )

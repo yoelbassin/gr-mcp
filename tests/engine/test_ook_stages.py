@@ -1,5 +1,5 @@
 from marconi.engine.compile.compile_context import CompileContext
-from marconi.engine.modulation.ook.stages import OokEnvelope
+from marconi.engine.modulation.ook.stages import OokEnvelope, OokEnvelopeStep
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Carrier, Descriptor
 from marconi.engine.types.levels import Level
@@ -10,13 +10,13 @@ def test_registered_with_ook_family() -> None:
 
 
 def test_descriptor_is_soft_float_symbols() -> None:
-    out = OokEnvelope().out_descriptor(Descriptor(Level.IQ, "c"), {})
+    out = OokEnvelope().out_descriptor(Descriptor(Level.IQ, "c"), OokEnvelopeStep())
     assert out == Descriptor(Level.SYMBOLS, "f", carrier=Carrier.SOFT)
 
 
 def test_rx_is_mag_centre_then_timing() -> None:
     b = CompileContext(Descriptor(Level.IQ, "c"), rate=4.0, symbol_rate=1.0)
-    OokEnvelope().emit_rx(b, {})
+    OokEnvelope().emit_rx(b, OokEnvelopeStep())
     kinds = [x.kind for x in b.build("t", 4.0).blocks]
     assert kinds == [
         "complex_to_mag",
@@ -28,7 +28,7 @@ def test_rx_is_mag_centre_then_timing() -> None:
 
 def test_tx_inverts_centre_upsamples_to_complex() -> None:
     b = CompileContext(Descriptor(Level.IQ, "c"), rate=4.0, symbol_rate=1.0)
-    OokEnvelope().emit_tx(b, {})
+    OokEnvelope().emit_tx(b, OokEnvelopeStep())
     kinds = [x.kind for x in b.build("t", 4.0).blocks]
     assert kinds == [
         "add_const_ff",

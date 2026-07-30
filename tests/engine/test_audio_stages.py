@@ -1,19 +1,30 @@
 from __future__ import annotations
 
 import pytest
+from pydantic import ValidationError
 
 from marconi.engine.compile.compiler import CompileError, compile_modem
 from marconi.engine.compile.ir import GrPipeline
+from marconi.engine.modulation.fsk.stages import FskStep
+from marconi.engine.modulation.psk.stages import PskDemodStep
 from marconi.engine.run import run_rx
+from marconi.engine.stages.conditioning import (
+    AmStep,
+    AnalyticStep,
+    ChannelizeStep,
+    FmDemodStep,
+)
+from marconi.engine.stages.general import SliceStep
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Amplitude, Descriptor
+from marconi.engine.types.enums import PskOrder
 from marconi.engine.types.levels import Level
-from marconi.engine.types.models import ModemSpec, ModemStep
+from marconi.engine.types.models import Modem
 
 IQ = Descriptor(Level.IQ, "c")
 
 
-def _compile(modem: ModemSpec) -> GrPipeline:
+def _compile(modem: Modem) -> GrPipeline:
     return compile_modem(
         modem,
         stage_registry(),
@@ -25,18 +36,15 @@ def _compile(modem: ModemSpec) -> GrPipeline:
     )
 
 
-def _audio_modem() -> ModemSpec:
-    return ModemSpec(
+def _audio_modem() -> Modem:
+    return Modem(
         symbol_rate=2400.0,
         path=[
-            ModemStep(conv="am", params={}),
-            ModemStep(conv="analytic", params={}),
-            ModemStep(
-                conv="channelize",
-                params={"decim": 1, "bandwidth_hz": 2400.0, "center_hz": 1800.0},
-            ),
-            ModemStep(conv="fsk", params={"deviation": 600.0}),
-            ModemStep(conv="slice", params={}),
+            AmStep(),
+            AnalyticStep(),
+            ChannelizeStep(decim=1, bandwidth_hz=2400.0, center_hz=1800.0),
+            FskStep(deviation=600.0),
+            SliceStep(),
         ],
     )
 
@@ -49,18 +57,15 @@ def test_audio_path_compiles_rx() -> None:
     assert "hilbert_fc" in kinds
 
 
-def _fm_modem(deviation: float = 3000.0) -> ModemSpec:
-    return ModemSpec(
+def _fm_modem(deviation: float = 3000.0) -> Modem:
+    return Modem(
         symbol_rate=2400.0,
         path=[
-            ModemStep(conv="fm_demod", params={"deviation": deviation}),
-            ModemStep(conv="analytic", params={}),
-            ModemStep(
-                conv="channelize",
-                params={"decim": 1, "bandwidth_hz": 2400.0, "center_hz": 1800.0},
-            ),
-            ModemStep(conv="fsk", params={"deviation": 600.0}),
-            ModemStep(conv="slice", params={}),
+            FmDemodStep(deviation=deviation),
+            AnalyticStep(),
+            ChannelizeStep(decim=1, bandwidth_hz=2400.0, center_hz=1800.0),
+            FskStep(deviation=600.0),
+            SliceStep(),
         ],
     )
 
@@ -74,14 +79,15 @@ def test_fm_audio_path_compiles_rx() -> None:
 
 
 def test_fm_demod_rejects_nonpositive_deviation() -> None:
-    with pytest.raises(CompileError, match="deviation"):
-        _compile(_fm_modem(deviation=0.0))
+    # Now rejected at Step CONSTRUCTION (pydantic Field(gt=0)), not at compile.
+    with pytest.raises(ValidationError, match="deviation"):
+        _fm_modem(deviation=0.0)
 
 
 def test_run_rx_rejects_audio_final(tmp_path) -> None:
-    modem = ModemSpec(
+    modem = Modem(
         symbol_rate=1200.0,
-        path=[ModemStep(conv="fm_demod", params={"deviation": 3000.0})],
+        path=[FmDemodStep(deviation=3000.0)],
     )
     with pytest.raises(CompileError, match="ends at AUDIO"):
         run_rx(
@@ -95,9 +101,9 @@ def test_run_rx_rejects_audio_final(tmp_path) -> None:
 
 
 def test_run_rx_rejects_complex_symbol_final(tmp_path) -> None:
-    modem = ModemSpec(
+    modem = Modem(
         symbol_rate=1.0,
-        path=[ModemStep(conv="psk_demod", params={"order": 2})],
+        path=[PskDemodStep(order=PskOrder(2))],
     )
     with pytest.raises(CompileError, match="complex soft symbols"):
         run_rx(

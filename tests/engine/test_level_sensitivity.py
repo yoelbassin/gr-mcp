@@ -10,10 +10,15 @@ from engine._dsp import aligned_ber, read_bits, write_bits
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
 from marconi.engine.compile.compiler import CompileError, compile_modem
 from marconi.engine.compile.ir import GrPipeline
+from marconi.engine.modulation.fsk.stages import FskStep
+from marconi.engine.modulation.psk.stages import PskDemapStep, PskDemodStep
+from marconi.engine.stages.general import SliceStep
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Descriptor
+from marconi.engine.types.enums import PskOrder
 from marconi.engine.types.levels import Level
-from marconi.engine.types.models import ModemSpec, ModemStep
+from marconi.engine.types.models import Modem
+from marconi.engine.types.step import Step
 
 # Mirrors RunResult.status in marconi.engine.backends.base; base.py has `from
 # __future__ import annotations`, so its Literal is stored unevaluated (a
@@ -32,21 +37,21 @@ IQ = Descriptor(Level.IQ, "c")
 _SR, _SYM = 8.0, 1.0
 _GAINS = [1e-3, 1e-1, 1.0, 1e1, 1e3]
 
-_CHAINS = {
+_CHAINS: dict[str, list[Step]] = {
     "fsk": [
-        ModemStep(conv="fsk", params={"deviation": 1.0}),
-        ModemStep(conv="slice"),
+        FskStep(deviation=1.0),
+        SliceStep(),
     ],
     "psk": [
-        ModemStep(conv="psk_demod", params={"order": 2}),
-        ModemStep(conv="psk_demap", params={"order": 2}),
+        PskDemodStep(order=PskOrder(2)),
+        PskDemapStep(order=PskOrder(2)),
     ],
 }
 
 
 def _ber_at_gain(tmp_path: Path, name: str, gain: float) -> GainResult:
     be = GnuRadioBackend()
-    spec = ModemSpec(symbol_rate=_SYM, path=_CHAINS[name])
+    spec = Modem(symbol_rate=_SYM, path=_CHAINS[name])
     bits = np.random.default_rng(0).integers(0, 2, 4096).astype(np.uint8)
     bp = write_bits(tmp_path / f"{name}_in.bits", bits)
     iq = tmp_path / f"{name}.iq"
@@ -98,7 +103,7 @@ def test_v2_level_sensitivity(name: str, tmp_path: Path) -> None:
 def test_psk_without_agc_rejected_at_compile() -> None:
     with pytest.raises(CompileError):
         compile_modem(
-            ModemSpec(symbol_rate=_SYM, path=_CHAINS["psk"]),
+            Modem(symbol_rate=_SYM, path=_CHAINS["psk"]),
             stage_registry(),
             direction="rx",
             sample_rate=_SR,

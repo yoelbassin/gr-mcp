@@ -19,17 +19,18 @@ CRC, field layout) live here in the test, never in the ecosystem source.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import cast
 
 import numpy as np
 from helpers import bitops, crc, framing, parse
 
+from marconi.engine.coding.stages_bits import CodebookStep, SyncWordStep
 from marconi.engine.io.bitfile import read_bits, write_bits
 from marconi.engine.run import run_rx
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Descriptor
+from marconi.engine.types.enums import DecodeMode
 from marconi.engine.types.levels import Level
-from marconi.engine.types.models import Bitstream, ModemSpec, ModemStep
+from marconi.engine.types.models import Bitstream, Modem
 
 BITS = Descriptor(Level.BITS, "b")
 
@@ -56,19 +57,12 @@ FIELDS = [
 _MSG = {"length": 9, "c_field": 0x44, "m_field": 0x2D2C, "address": 0x112233445566}
 
 
-def _wmbus_modem() -> ModemSpec:
-    return ModemSpec(
+def _wmbus_modem() -> Modem:
+    return Modem(
         symbol_rate=1.0,
         path=[
-            ModemStep(
-                conv="codebook",
-                params={
-                    "code_bits": 6,
-                    "data_bits": 4,
-                    "table": cast("list[float | int]", THREE_OF_SIX),
-                },
-            ),
-            ModemStep(conv="sync_word", params={"sync": SYNC}),
+            CodebookStep(code_bits=6, data_bits=4, table=THREE_OF_SIX),
+            SyncWordStep(sync=SYNC),
         ],
     )
 
@@ -184,19 +178,16 @@ def test_wmbus_nearest_decode_survives_a_chip_flip(tmp_path: Path) -> None:
     _, num_crc_ok, _ = _decode(decoded_bits, windows, poly=CRC_PARAMS["poly"])
     assert num_crc_ok == 0
 
-    near_modem = ModemSpec(
+    near_modem = Modem(
         symbol_rate=1.0,
         path=[
-            ModemStep(
-                conv="codebook",
-                params={
-                    "code_bits": 6,
-                    "data_bits": 4,
-                    "table": cast("list[float | int]", THREE_OF_SIX),
-                    "decode": "nearest",
-                },
+            CodebookStep(
+                code_bits=6,
+                data_bits=4,
+                table=THREE_OF_SIX,
+                decode=DecodeMode.NEAREST,
             ),
-            ModemStep(conv="sync_word", params={"sync": SYNC}),
+            SyncWordStep(sync=SYNC),
         ],
     )
     p = tmp_path / "near.u8"

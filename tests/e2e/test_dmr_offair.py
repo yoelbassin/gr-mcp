@@ -37,12 +37,22 @@ from e2e import _dmr
 from helpers import framing
 
 from marconi.engine.backends.gnuradio.runner import ensure_worker_warm
+from marconi.engine.coding.stages_bits import MarkFrameStep
+from marconi.engine.coding.stages_symbols import (
+    MSliceStep,
+    NormalizeStep,
+    SymbolMapStep,
+    SyncSymbolsStep,
+)
 from marconi.engine.io.bitfile import read_bits
+from marconi.engine.modulation.fsk.stages import FskStep
 from marconi.engine.run import run_rx
+from marconi.engine.stages.conditioning import ChannelizeStep
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Descriptor
+from marconi.engine.types.enums import DcMode
 from marconi.engine.types.levels import Level
-from marconi.engine.types.models import ModemSpec, ModemStep
+from marconi.engine.types.models import Modem
 
 PAYLOAD_BITS = 96
 
@@ -56,32 +66,17 @@ ORACLE_PAIRS = {(3109836, 2247700), (3109823, 2247700), (3169855, 2247700)}
 SYNC_PATTERN = _dmr.SYNC_SIGNS.astype(int).tolist()
 
 
-def _dmr_modem() -> ModemSpec:
-    return ModemSpec(
+def _dmr_modem() -> Modem:
+    return Modem(
         symbol_rate=4800.0,
         path=[
-            ModemStep(
-                conv="channelize",
-                params={"decim": 1, "bandwidth_hz": 12500.0, "center_hz": 0.0},
-            ),
-            ModemStep(conv="fsk", params={"deviation": 1944.0, "loop_bw": 0.01}),
-            ModemStep(
-                conv="sync_symbols",
-                params={"pattern": SYNC_PATTERN, "max_errors": 3, "pre_symbols": 54},
-            ),
-            ModemStep(
-                conv="normalize",
-                params={"span_symbols": 132, "dc": "median", "gain_percentile": 60.0},
-            ),
-            ModemStep(
-                conv="m_slice",
-                params={"thresholds": [-0.667, 0.0, 0.667], "levels": [3, 2, 0, 1]},
-            ),
-            ModemStep(
-                conv="symbol_map",
-                params={"code_bits": 2, "data_bits": 2, "table": [0, 1, 2, 3]},
-            ),
-            ModemStep(conv="mark_frame", params={"offset_bits": 0}),
+            ChannelizeStep(decim=1, bandwidth_hz=12500.0, center_hz=0.0),
+            FskStep(deviation=1944.0, loop_bw=0.01),
+            SyncSymbolsStep(pattern=SYNC_PATTERN, max_errors=3, pre_symbols=54),
+            NormalizeStep(span_symbols=132, dc=DcMode.MEDIAN, gain_percentile=60.0),
+            MSliceStep(thresholds=[-0.667, 0.0, 0.667], levels=[3, 2, 0, 1]),
+            SymbolMapStep(code_bits=2, data_bits=2, table=[0, 1, 2, 3]),
+            MarkFrameStep(offset_bits=0),
             _dmr.splice_step(),
             *_dmr.bptc_steps(),
         ],

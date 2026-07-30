@@ -1,139 +1,143 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
-from typing import Any
+from typing import Any, Literal
 
 from marconi.engine.backends.stub import BlockArity
 from marconi.engine.compile.compile_context import CompileContext
 from marconi.engine.stages.base import DuplexStage, RxStage, Stage
 from marconi.engine.types.descriptor import Carrier, Descriptor
 from marconi.engine.types.levels import Level
-from marconi.engine.types.params import StageParams
+from marconi.engine.types.step import Step
 
 
-class _ResamplerParams(StageParams):
+class FakeResamplerStep(Step):
+    conv: Literal["fake_resampler"] = "fake_resampler"
     interp: int
     decim: int
 
 
-class _NoParams(StageParams):
-    pass
+class FakeDemodStep(Step):
+    conv: Literal["fake_demod"] = "fake_demod"
 
 
-class FakeResampler(DuplexStage[CompileContext]):
+class FakeDemapStep(Step):
+    conv: Literal["fake_demap"] = "fake_demap"
+
+
+class FakeSoftDemapStep(Step):
+    conv: Literal["fake_soft_demap"] = "fake_soft_demap"
+
+
+class FakeSoftFecStep(Step):
+    conv: Literal["fake_soft_fec"] = "fake_soft_fec"
+
+
+class RxOnlyDemodStep(Step):
+    conv: Literal["rx_only_demod"] = "rx_only_demod"
+
+
+class FakeResampler(DuplexStage[CompileContext, FakeResamplerStep]):
     name = "fake_resampler"
     from_level = Level.IQ
     to_level = Level.IQ
     family = "general"
-    params_model = _ResamplerParams
+    step_model = FakeResamplerStep
 
-    def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
-        b.chain(
-            "fake_resampler", interp=int(params["interp"]), decim=int(params["decim"])
-        )
+    def emit_rx(self, b: CompileContext, step: FakeResamplerStep) -> None:
+        b.chain("fake_resampler", interp=step.interp, decim=step.decim)
 
-    def emit_tx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
-        b.chain(
-            "fake_resampler", interp=int(params["interp"]), decim=int(params["decim"])
-        )
+    def emit_tx(self, b: CompileContext, step: FakeResamplerStep) -> None:
+        b.chain("fake_resampler", interp=step.interp, decim=step.decim)
 
-    def rate_factor(self, params: Mapping[str, Any]) -> float:
-        return int(params["interp"]) / int(params["decim"])
+    def rate_factor(self, step: FakeResamplerStep) -> float:
+        return step.interp / step.decim
 
 
-class FakeDemod(DuplexStage[CompileContext]):
+class FakeDemod(DuplexStage[CompileContext, FakeDemodStep]):
     name = "fake_demod"
     from_level = Level.IQ
     to_level = Level.SYMBOLS
     family = "general"
-    params_model = _NoParams
+    step_model = FakeDemodStep
 
-    def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
+    def emit_rx(self, b: CompileContext, step: FakeDemodStep) -> None:
         b.chain("fake_demod", sps=b.sps)
 
-    def emit_tx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
+    def emit_tx(self, b: CompileContext, step: FakeDemodStep) -> None:
         b.chain("fake_mod", sps=b.sps)
 
-    def out_descriptor(
-        self, in_desc: Descriptor, params: Mapping[str, Any]
-    ) -> Descriptor:
+    def out_descriptor(self, in_desc: Descriptor, step: FakeDemodStep) -> Descriptor:
         return Descriptor(Level.SYMBOLS, "s", in_desc.carrier)
 
 
-class FakeDemap(DuplexStage[CompileContext]):
+class FakeDemap(DuplexStage[CompileContext, FakeDemapStep]):
     name = "fake_demap"
     from_level = Level.SYMBOLS
     to_level = Level.BITS
     family = "general"
-    params_model = _NoParams
+    step_model = FakeDemapStep
 
-    def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
+    def emit_rx(self, b: CompileContext, step: FakeDemapStep) -> None:
         b.chain("fake_demap")
 
-    def emit_tx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
+    def emit_tx(self, b: CompileContext, step: FakeDemapStep) -> None:
         b.chain("fake_map")
 
-    def out_descriptor(
-        self, in_desc: Descriptor, params: Mapping[str, Any]
-    ) -> Descriptor:
+    def out_descriptor(self, in_desc: Descriptor, step: FakeDemapStep) -> Descriptor:
         return Descriptor(Level.BITS, "b", Carrier.HARD)
 
 
-class FakeSoftDemap(DuplexStage[CompileContext]):
+class FakeSoftDemap(DuplexStage[CompileContext, FakeSoftDemapStep]):
     name = "fake_soft_demap"
     from_level = Level.SYMBOLS
     to_level = Level.BITS
     family = "general"
-    params_model = _NoParams
+    step_model = FakeSoftDemapStep
 
-    def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
+    def emit_rx(self, b: CompileContext, step: FakeSoftDemapStep) -> None:
         b.chain("fake_soft_demap")
 
-    def emit_tx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
+    def emit_tx(self, b: CompileContext, step: FakeSoftDemapStep) -> None:
         b.chain("fake_soft_map")
 
     def out_descriptor(
-        self, in_desc: Descriptor, params: Mapping[str, Any]
+        self, in_desc: Descriptor, step: FakeSoftDemapStep
     ) -> Descriptor:
         return Descriptor(Level.BITS, "f", Carrier.SOFT)
 
 
-class FakeSoftFec(RxStage[CompileContext]):
+class FakeSoftFec(RxStage[CompileContext, FakeSoftFecStep]):
     name = "fake_soft_fec"
     from_level = Level.BITS
     to_level = Level.BITS
     family = "general"
-    params_model = _NoParams
+    step_model = FakeSoftFecStep
     accepts_item_type = "f"
     accepts_carrier = Carrier.SOFT
 
-    def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
+    def emit_rx(self, b: CompileContext, step: FakeSoftFecStep) -> None:
         b.chain("fake_soft_fec")
 
-    def out_descriptor(
-        self, in_desc: Descriptor, params: Mapping[str, Any]
-    ) -> Descriptor:
+    def out_descriptor(self, in_desc: Descriptor, step: FakeSoftFecStep) -> Descriptor:
         return Descriptor(Level.BITS, "b", Carrier.HARD)
 
 
-class RxOnlyDemod(RxStage[CompileContext]):
+class RxOnlyDemod(RxStage[CompileContext, RxOnlyDemodStep]):
     name = "rx_only_demod"
     from_level = Level.IQ
     to_level = Level.SYMBOLS
     family = "general"
-    params_model = _NoParams
+    step_model = RxOnlyDemodStep
 
-    def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
+    def emit_rx(self, b: CompileContext, step: RxOnlyDemodStep) -> None:
         b.chain("fake_demod", sps=b.sps)
 
-    def out_descriptor(
-        self, in_desc: Descriptor, params: Mapping[str, Any]
-    ) -> Descriptor:
+    def out_descriptor(self, in_desc: Descriptor, step: RxOnlyDemodStep) -> Descriptor:
         return Descriptor(Level.SYMBOLS, "s", in_desc.carrier)
 
 
-def fixture_registry() -> dict[str, Stage[CompileContext]]:
-    stages: list[Stage[CompileContext]] = [
+def fixture_registry() -> dict[str, Stage[CompileContext, Any]]:
+    stages: list[Stage[CompileContext, Any]] = [
         FakeResampler(),
         FakeDemod(),
         FakeDemap(),

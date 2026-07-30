@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
-from typing import Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import Field, StrictInt, model_validator
 from pydantic_core import PydanticCustomError
@@ -11,16 +10,21 @@ from marconi.engine.coding.builder import CodingBuilder
 from marconi.engine.coding.primitives import can_correct, syndrome_table
 from marconi.engine.stages.base import RxStage, Stage
 from marconi.engine.types.descriptor import Carrier
+from marconi.engine.types.enums import DecodeMode, EmitMode
 from marconi.engine.types.levels import Level
-from marconi.engine.types.params import StageParams
+from marconi.engine.types.step import Step
+
+if TYPE_CHECKING:
+    from marconi.engine.coding.stages_symbols import SymbolMapStep
 
 
-class _SyncParams(StageParams):
+class SyncWordStep(Step):
+    conv: Literal["sync_word"] = "sync_word"
     sync: str
     max_errors: StrictInt = Field(default=0, ge=0)
 
     @model_validator(mode="after")
-    def _hex(self) -> "_SyncParams":
+    def _hex(self) -> "SyncWordStep":
         try:
             if not bytes.fromhex(self.sync):
                 raise ValueError
@@ -31,14 +35,15 @@ class _SyncParams(StageParams):
         return self
 
 
-class _CodebookParams(StageParams):
+class CodebookStep(Step):
+    conv: Literal["codebook"] = "codebook"
     code_bits: StrictInt = Field(ge=1)
     data_bits: StrictInt = Field(ge=1)
     table: list[int]
-    decode: str = "exact"
+    decode: DecodeMode = DecodeMode.EXACT
 
     @model_validator(mode="after")
-    def _sized(self) -> "_CodebookParams":
+    def _sized(self) -> "CodebookStep":
         if len(self.table) != (1 << self.data_bits):
             raise PydanticCustomError(
                 "value_error",
@@ -50,15 +55,13 @@ class _CodebookParams(StageParams):
                     "have": len(self.table),
                 },
             )
-        if self.decode not in ("exact", "nearest"):
-            raise PydanticCustomError("value_error", "decode must be exact|nearest")
-        if self.decode == "exact" and self.code_bits > 24:
+        if self.decode == DecodeMode.EXACT and self.code_bits > 24:
             raise PydanticCustomError(
                 "value_error",
                 "exact decode builds a 2^code_bits inverse table; beyond 24 "
                 "bits use decode='nearest', which never builds it",
             )
-        if self.decode == "nearest" and self.code_bits > 63:
+        if self.decode == DecodeMode.NEAREST and self.code_bits > 63:
             raise PydanticCustomError(
                 "value_error",
                 "nearest decode packs codewords through int64; 63 bits is "
@@ -67,23 +70,24 @@ class _CodebookParams(StageParams):
         return self
 
 
-def _codebook_kw(params: Mapping[str, Any]) -> dict[str, Any]:
+def _codebook_kw(step: "CodebookStep | SymbolMapStep") -> dict[str, Any]:
     return {
-        "code_bits": int(params["code_bits"]),
-        "data_bits": int(params["data_bits"]),
-        "table": [int(x) for x in params["table"]],
-        "decode": str(params.get("decode", "exact")),
+        "code_bits": int(step.code_bits),
+        "data_bits": int(step.data_bits),
+        "table": [int(x) for x in step.table],
+        "decode": step.decode,
     }
 
 
-class _DescrambleParams(StageParams):
+class DescrambleStep(Step):
+    conv: Literal["descramble"] = "descramble"
     sequence: str = ""
     lfsr_mask: StrictInt | None = None
     lfsr_seed: StrictInt | None = None
     lfsr_len: StrictInt | None = Field(default=None, ge=2, le=64)
 
     @model_validator(mode="after")
-    def _one_mode(self) -> "_DescrambleParams":
+    def _one_mode(self) -> "DescrambleStep":
         triple = (self.lfsr_mask, self.lfsr_seed, self.lfsr_len)
         has_lfsr = any(v is not None for v in triple)
         if has_lfsr and None in triple:
@@ -115,7 +119,7 @@ class _DescrambleParams(StageParams):
         return self
 
 
-class SyncWord(RxStage[CodingBuilder]):
+class SyncWord(RxStage[CodingBuilder, SyncWordStep]):
     name = "sync_word"
     engine = "coding"
     from_level = Level.BITS
@@ -124,15 +128,18 @@ class SyncWord(RxStage[CodingBuilder]):
     family = "acquisition"
     accepts_item_type = "b"
     accepts_carrier = Carrier.HARD
+    step_model = SyncWordStep
 
-    params_model = _SyncParams
-
-    def emit_rx(self, b: CodingBuilder, params: Mapping[str, Any]) -> None:
-        p = _SyncParams.model_validate(dict(params))
-        b.add(ops_bits.sync_word_rx, sync=p.sync, max_errors=p.max_errors)
+    def emit_rx(self, b: CodingBuilder, step: SyncWordStep) -> None:
+        b.add(ops_bits.sync_word_rx, sync=step.sync, max_errors=step.max_errors)
 
 
-class MarkFrame(RxStage[CodingBuilder]):
+class MarkFrameStep(Step):
+    conv: Literal["mark_frame"] = "mark_frame"
+    offset_bits: StrictInt = Field(default=0, ge=0)
+
+
+class MarkFrame(RxStage[CodingBuilder, MarkFrameStep]):
     name = "mark_frame"
     engine = "coding"
     from_level = Level.BITS
@@ -141,17 +148,18 @@ class MarkFrame(RxStage[CodingBuilder]):
     family = "acquisition"
     accepts_item_type = "b"
     accepts_carrier = Carrier.HARD
+    step_model = MarkFrameStep
 
-    class _Params(StageParams):
-        offset_bits: StrictInt = Field(default=0, ge=0)
-
-    params_model = _Params
-
-    def emit_rx(self, b: CodingBuilder, params: Mapping[str, Any]) -> None:
-        b.add(ops_bits.mark_frame_rx, offset_bits=int(params.get("offset_bits", 0)))
+    def emit_rx(self, b: CodingBuilder, step: MarkFrameStep) -> None:
+        b.add(ops_bits.mark_frame_rx, offset_bits=int(step.offset_bits))
 
 
-class Segment(RxStage[CodingBuilder]):
+class SegmentStep(Step):
+    conv: Literal["segment"] = "segment"
+    frame_body_len: StrictInt = Field(ge=1)
+
+
+class Segment(RxStage[CodingBuilder, SegmentStep]):
     name = "segment"
     engine = "coding"
     from_level = Level.BITS
@@ -160,17 +168,13 @@ class Segment(RxStage[CodingBuilder]):
     family = "acquisition"
     accepts_item_type = "b"
     accepts_carrier = Carrier.HARD
+    step_model = SegmentStep
 
-    class _Params(StageParams):
-        frame_body_len: StrictInt = Field(ge=1)
-
-    params_model = _Params
-
-    def emit_rx(self, b: CodingBuilder, params: Mapping[str, Any]) -> None:
-        b.add(ops_bits.segment_rx, frame_body_len=int(params["frame_body_len"]))
+    def emit_rx(self, b: CodingBuilder, step: SegmentStep) -> None:
+        b.add(ops_bits.segment_rx, frame_body_len=int(step.frame_body_len))
 
 
-class Codebook(RxStage[CodingBuilder]):
+class Codebook(RxStage[CodingBuilder, CodebookStep]):
     name = "codebook"
     engine = "coding"
     from_level = Level.BITS
@@ -178,14 +182,77 @@ class Codebook(RxStage[CodingBuilder]):
     family = "coding"
     accepts_item_type = "b"
     accepts_carrier = Carrier.HARD
+    step_model = CodebookStep
 
-    params_model = _CodebookParams
-
-    def emit_rx(self, b: CodingBuilder, params: Mapping[str, Any]) -> None:
-        b.add(ops_bits.codebook_rx, **_codebook_kw(params))
+    def emit_rx(self, b: CodingBuilder, step: CodebookStep) -> None:
+        b.add(ops_bits.codebook_rx, **_codebook_kw(step))
 
 
-class BlockCode(RxStage[CodingBuilder]):
+class BlockCodeStep(Step):
+    conv: Literal["block_code"] = "block_code"
+    code_bits: StrictInt = Field(ge=2)
+    data_bits: StrictInt = Field(ge=1)
+    parity_masks: list[int]
+    correct_single: bool | None = None
+    correct: StrictInt | None = Field(default=None, ge=0, le=3)
+    emit: EmitMode = EmitMode.DATA
+
+    @model_validator(mode="after")
+    def _shaped(self) -> "BlockCodeStep":
+        if self.data_bits >= self.code_bits:
+            raise PydanticCustomError("value_error", "data_bits must be < code_bits")
+        if len(self.parity_masks) != self.code_bits - self.data_bits:
+            raise PydanticCustomError(
+                "value_error",
+                "need {want} parity masks for ({n},{k}), got {have}",
+                {
+                    "want": self.code_bits - self.data_bits,
+                    "n": self.code_bits,
+                    "k": self.data_bits,
+                    "have": len(self.parity_masks),
+                },
+            )
+        if self.correct is not None and self.correct_single is not None:
+            raise PydanticCustomError(
+                "value_error", "set correct or correct_single, not both"
+            )
+        if self.correct is not None and self.correct >= 2:
+            try:
+                syndrome_table(
+                    [int(m) for m in self.parity_masks],
+                    self.code_bits,
+                    self.data_bits,
+                    self.correct,
+                )
+            except ValueError as e:
+                raise PydanticCustomError(
+                    "value_error", "{msg}", {"msg": str(e)}
+                ) from None
+        single_check = (
+            self.correct == 1
+            if self.correct is not None
+            else (
+                can_correct(self.code_bits - self.data_bits, self.data_bits)
+                if self.correct_single is None
+                else self.correct_single
+            )
+        )
+        if single_check:
+            cols = [
+                tuple((mask >> j) & 1 for mask in self.parity_masks)
+                for j in range(self.data_bits)
+            ]
+            if any(sum(col) < 2 for col in cols) or len(set(cols)) != len(cols):
+                raise PydanticCustomError(
+                    "value_error",
+                    "correct_single needs pairwise-distinct parity-check "
+                    "columns of weight >= 2 - single-error syndromes must "
+                    "be unique across data and parity positions",
+                )
+        return self
+
+
+class BlockCode(RxStage[CodingBuilder, BlockCodeStep]):
     name = "block_code"
     engine = "coding"
     from_level = Level.BITS
@@ -193,89 +260,36 @@ class BlockCode(RxStage[CodingBuilder]):
     family = "coding"
     accepts_item_type = "b"
     accepts_carrier = Carrier.HARD
+    step_model = BlockCodeStep
 
-    class _Params(StageParams):
-        code_bits: StrictInt = Field(ge=2)
-        data_bits: StrictInt = Field(ge=1)
-        parity_masks: list[int]
-        correct_single: bool | None = None
-        correct: StrictInt | None = Field(default=None, ge=0, le=3)
-        emit: str = "data"
-
-        @model_validator(mode="after")
-        def _shaped(self) -> "BlockCode._Params":
-            if self.data_bits >= self.code_bits:
-                raise PydanticCustomError(
-                    "value_error", "data_bits must be < code_bits"
-                )
-            if len(self.parity_masks) != self.code_bits - self.data_bits:
-                raise PydanticCustomError(
-                    "value_error",
-                    "need {want} parity masks for ({n},{k}), got {have}",
-                    {
-                        "want": self.code_bits - self.data_bits,
-                        "n": self.code_bits,
-                        "k": self.data_bits,
-                        "have": len(self.parity_masks),
-                    },
-                )
-            if self.emit not in ("data", "codeword"):
-                raise PydanticCustomError("value_error", "emit must be data|codeword")
-            if self.correct is not None and self.correct_single is not None:
-                raise PydanticCustomError(
-                    "value_error", "set correct or correct_single, not both"
-                )
-            if self.correct is not None and self.correct >= 2:
-                try:
-                    syndrome_table(
-                        [int(m) for m in self.parity_masks],
-                        self.code_bits,
-                        self.data_bits,
-                        self.correct,
-                    )
-                except ValueError as e:
-                    raise PydanticCustomError(
-                        "value_error", "{msg}", {"msg": str(e)}
-                    ) from None
-            single_check = (
-                self.correct == 1
-                if self.correct is not None
-                else (
-                    can_correct(self.code_bits - self.data_bits, self.data_bits)
-                    if self.correct_single is None
-                    else self.correct_single
-                )
-            )
-            if single_check:
-                cols = [
-                    tuple((mask >> j) & 1 for mask in self.parity_masks)
-                    for j in range(self.data_bits)
-                ]
-                if any(sum(col) < 2 for col in cols) or len(set(cols)) != len(cols):
-                    raise PydanticCustomError(
-                        "value_error",
-                        "correct_single needs pairwise-distinct parity-check "
-                        "columns of weight >= 2 - single-error syndromes must "
-                        "be unique across data and parity positions",
-                    )
-            return self
-
-    params_model = _Params
-
-    def emit_rx(self, b: CodingBuilder, params: Mapping[str, Any]) -> None:
-        p = self._Params.model_validate(dict(params))
+    def emit_rx(self, b: CodingBuilder, step: BlockCodeStep) -> None:
         b.add(
             ops_bits.block_code_rx,
-            code_bits=p.code_bits,
-            data_bits=p.data_bits,
-            parity_masks=[int(x) for x in p.parity_masks],
-            correct_single=p.correct_single,
-            correct=p.correct,
-            emit=p.emit,
+            code_bits=step.code_bits,
+            data_bits=step.data_bits,
+            parity_masks=[int(x) for x in step.parity_masks],
+            correct_single=step.correct_single,
+            correct=step.correct,
+            emit=step.emit,
         )
 
 
-class Permute(RxStage[CodingBuilder]):
+class PermuteStep(Step):
+    conv: Literal["permute"] = "permute"
+    perm: list[int] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _non_negative(self) -> "PermuteStep":
+        if any(i < 0 for i in self.perm):
+            raise PydanticCustomError(
+                "value_error",
+                "perm indices must be >= 0; a negative index would wrap and "
+                "understate the input stride",
+            )
+        return self
+
+
+class Permute(RxStage[CodingBuilder, PermuteStep]):
     name = "permute"
     engine = "coding"
     from_level = Level.BITS
@@ -283,28 +297,18 @@ class Permute(RxStage[CodingBuilder]):
     family = "coding"
     accepts_item_type = "b"
     accepts_carrier = Carrier.HARD
+    step_model = PermuteStep
 
-    class _Params(StageParams):
-        perm: list[int] = Field(min_length=1)
-
-        @model_validator(mode="after")
-        def _non_negative(self) -> "Permute._Params":
-            if any(i < 0 for i in self.perm):
-                raise PydanticCustomError(
-                    "value_error",
-                    "perm indices must be >= 0; a negative index would wrap and "
-                    "understate the input stride",
-                )
-            return self
-
-    params_model = _Params
-
-    def emit_rx(self, b: CodingBuilder, params: Mapping[str, Any]) -> None:
-        p = self._Params.model_validate(dict(params))
-        b.add(ops_bits.permute_rx, perm=[int(x) for x in p.perm])
+    def emit_rx(self, b: CodingBuilder, step: PermuteStep) -> None:
+        b.add(ops_bits.permute_rx, perm=[int(x) for x in step.perm])
 
 
-class Realign(RxStage[CodingBuilder]):
+class RealignStep(Step):
+    conv: Literal["realign"] = "realign"
+    bit_offset: StrictInt = Field(ge=0)
+
+
+class Realign(RxStage[CodingBuilder, RealignStep]):
     name = "realign"
     engine = "coding"
     from_level = Level.BITS
@@ -312,17 +316,18 @@ class Realign(RxStage[CodingBuilder]):
     family = "coding"
     accepts_item_type = "b"
     accepts_carrier = Carrier.HARD
+    step_model = RealignStep
 
-    class _Params(StageParams):
-        bit_offset: StrictInt = Field(ge=0)
-
-    params_model = _Params
-
-    def emit_rx(self, b: CodingBuilder, params: Mapping[str, Any]) -> None:
-        b.add(ops_bits.realign_rx, bit_offset=int(params["bit_offset"]))
+    def emit_rx(self, b: CodingBuilder, step: RealignStep) -> None:
+        b.add(ops_bits.realign_rx, bit_offset=int(step.bit_offset))
 
 
-class Differential(RxStage[CodingBuilder]):
+class DifferentialStep(Step):
+    conv: Literal["differential"] = "differential"
+    invert: bool = False
+
+
+class Differential(RxStage[CodingBuilder, DifferentialStep]):
     name = "differential"
     engine = "coding"
     from_level = Level.BITS
@@ -330,18 +335,17 @@ class Differential(RxStage[CodingBuilder]):
     family = "coding"
     accepts_item_type = "b"
     accepts_carrier = Carrier.HARD
+    step_model = DifferentialStep
 
-    class _Params(StageParams):
-        invert: bool = False
-
-    params_model = _Params
-
-    def emit_rx(self, b: CodingBuilder, params: Mapping[str, Any]) -> None:
-        p = self._Params.model_validate(dict(params))
-        b.add(ops_bits.differential_rx, invert=p.invert)
+    def emit_rx(self, b: CodingBuilder, step: DifferentialStep) -> None:
+        b.add(ops_bits.differential_rx, invert=step.invert)
 
 
-class NibbleSwap(RxStage[CodingBuilder]):
+class NibbleSwapStep(Step):
+    conv: Literal["nibble_swap"] = "nibble_swap"
+
+
+class NibbleSwap(RxStage[CodingBuilder, NibbleSwapStep]):
     name = "nibble_swap"
     engine = "coding"
     from_level = Level.BITS
@@ -349,17 +353,36 @@ class NibbleSwap(RxStage[CodingBuilder]):
     family = "coding"
     accepts_item_type = "b"
     accepts_carrier = Carrier.HARD
+    step_model = NibbleSwapStep
 
-    class _Params(StageParams):
-        pass
-
-    params_model = _Params
-
-    def emit_rx(self, b: CodingBuilder, params: Mapping[str, Any]) -> None:
+    def emit_rx(self, b: CodingBuilder, step: NibbleSwapStep) -> None:
         b.add(ops_bits.nibble_swap_rx)
 
 
-class RsCode(RxStage[CodingBuilder]):
+class RsCodeStep(Step):
+    conv: Literal["rs_code"] = "rs_code"
+    symbol_bits: StrictInt = Field(ge=3, le=16)
+    n: StrictInt = Field(ge=3)
+    k: StrictInt = Field(ge=1)
+    prim_poly: StrictInt
+    fcr: StrictInt = Field(default=0, ge=0)
+    generator: StrictInt = Field(default=2, ge=1)
+    emit: EmitMode = EmitMode.DATA
+
+    @model_validator(mode="after")
+    def _shaped(self) -> "RsCodeStep":
+        if self.k >= self.n:
+            raise PydanticCustomError("value_error", "k must be < n")
+        if self.n > (1 << self.symbol_bits) - 1:
+            raise PydanticCustomError("value_error", "n must be <= 2^symbol_bits - 1")
+        if self.prim_poly.bit_length() != self.symbol_bits + 1:
+            raise PydanticCustomError(
+                "value_error", "prim_poly must have degree symbol_bits"
+            )
+        return self
+
+
+class RsCode(RxStage[CodingBuilder, RsCodeStep]):
     name = "rs_code"
     engine = "coding"
     from_level = Level.BITS
@@ -367,49 +390,22 @@ class RsCode(RxStage[CodingBuilder]):
     family = "coding"
     accepts_item_type = "b"
     accepts_carrier = Carrier.HARD
+    step_model = RsCodeStep
 
-    class _Params(StageParams):
-        symbol_bits: StrictInt = Field(ge=3, le=16)
-        n: StrictInt = Field(ge=3)
-        k: StrictInt = Field(ge=1)
-        prim_poly: StrictInt
-        fcr: StrictInt = Field(default=0, ge=0)
-        generator: StrictInt = Field(default=2, ge=1)
-        emit: str = "data"
-
-        @model_validator(mode="after")
-        def _shaped(self) -> "RsCode._Params":
-            if self.k >= self.n:
-                raise PydanticCustomError("value_error", "k must be < n")
-            if self.n > (1 << self.symbol_bits) - 1:
-                raise PydanticCustomError(
-                    "value_error", "n must be <= 2^symbol_bits - 1"
-                )
-            if self.prim_poly.bit_length() != self.symbol_bits + 1:
-                raise PydanticCustomError(
-                    "value_error", "prim_poly must have degree symbol_bits"
-                )
-            if self.emit not in ("data", "codeword"):
-                raise PydanticCustomError("value_error", "emit must be data|codeword")
-            return self
-
-    params_model = _Params
-
-    def emit_rx(self, b: CodingBuilder, params: Mapping[str, Any]) -> None:
-        p = self._Params.model_validate(dict(params))
+    def emit_rx(self, b: CodingBuilder, step: RsCodeStep) -> None:
         b.add(
             ops_bits.rs_code_rx,
-            symbol_bits=p.symbol_bits,
-            n=p.n,
-            k=p.k,
-            prim_poly=p.prim_poly,
-            fcr=p.fcr,
-            generator=p.generator,
-            emit=p.emit,
+            symbol_bits=step.symbol_bits,
+            n=step.n,
+            k=step.k,
+            prim_poly=step.prim_poly,
+            fcr=step.fcr,
+            generator=step.generator,
+            emit=step.emit,
         )
 
 
-class Descramble(RxStage[CodingBuilder]):
+class Descramble(RxStage[CodingBuilder, DescrambleStep]):
     name = "descramble"
     engine = "coding"
     from_level = Level.BITS
@@ -417,21 +413,19 @@ class Descramble(RxStage[CodingBuilder]):
     family = "coding"
     accepts_item_type = "b"
     accepts_carrier = Carrier.HARD
+    step_model = DescrambleStep
 
-    params_model = _DescrambleParams
-
-    def emit_rx(self, b: CodingBuilder, params: Mapping[str, Any]) -> None:
-        p = _DescrambleParams.model_validate(dict(params))
+    def emit_rx(self, b: CodingBuilder, step: DescrambleStep) -> None:
         b.add(
             ops_bits.descramble_rx,
-            sequence=p.sequence,
-            lfsr_mask=p.lfsr_mask,
-            lfsr_seed=p.lfsr_seed,
-            lfsr_len=p.lfsr_len,
+            sequence=step.sequence,
+            lfsr_mask=step.lfsr_mask,
+            lfsr_seed=step.lfsr_seed,
+            lfsr_len=step.lfsr_len,
         )
 
 
-CODING_BITS_STAGES: tuple[type[Stage[CodingBuilder]], ...] = (
+CODING_BITS_STAGES: tuple[type[Stage[CodingBuilder, Any]], ...] = (
     BlockCode,
     Codebook,
     Descramble,

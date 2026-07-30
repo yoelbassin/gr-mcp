@@ -13,12 +13,14 @@ from pathlib import Path
 import numpy as np
 from helpers import bitops, crc
 
+from marconi.engine.coding.stages_bits import DescrambleStep, SyncWordStep
 from marconi.engine.io.bitfile import read_bits, write_bits
 from marconi.engine.run import run_rx
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Descriptor
 from marconi.engine.types.levels import Level
-from marconi.engine.types.models import Bitstream, ModemSpec, ModemStep
+from marconi.engine.types.models import Bitstream, Modem
+from marconi.engine.types.step import Step
 
 BITS = Descriptor(Level.BITS, "b")
 SYNC = "5c3b"
@@ -59,12 +61,12 @@ def _wire() -> np.ndarray:
     )
 
 
-def _run(tmp_path: Path, steps: list[ModemStep]) -> list[bytes]:
+def _run(tmp_path: Path, steps: list[Step]) -> list[bytes]:
     wire = _wire()
     p = tmp_path / "wire.u8"
     write_bits(p, wire)
     res = run_rx(
-        ModemSpec(symbol_rate=1.0, path=steps),
+        Modem(symbol_rate=1.0, path=steps),
         stage_registry(),
         sample_rate=1.0,
         start=BITS,
@@ -86,12 +88,9 @@ def _run(tmp_path: Path, steps: list[ModemStep]) -> list[bytes]:
 
 
 def test_seeded_whitening_decodes_both_frames(tmp_path: Path) -> None:
-    steps = [
-        ModemStep(conv="sync_word", params={"sync": SYNC}),
-        ModemStep(
-            conv="descramble",
-            params={"lfsr_mask": MASK, "lfsr_seed": SEED, "lfsr_len": LEN},
-        ),
+    steps: list[Step] = [
+        SyncWordStep(sync=SYNC),
+        DescrambleStep(lfsr_mask=MASK, lfsr_seed=SEED, lfsr_len=LEN),
     ]
     assert _run(tmp_path, steps) == _PAYLOADS
 
@@ -105,9 +104,9 @@ def test_fixed_sequence_cannot_fake_per_window_reset(tmp_path: Path) -> None:
     # FRAME_BODY_BYTES forces a byte-tile wrap inside the CRC-checked span,
     # where the true LFSR (aperiodic well past this span) has moved on.
     seq_hex = np.packbits(_lfsr(4 * 8)).tobytes().hex()
-    steps = [
-        ModemStep(conv="sync_word", params={"sync": SYNC}),
-        ModemStep(conv="descramble", params={"sequence": seq_hex}),
+    steps: list[Step] = [
+        SyncWordStep(sync=SYNC),
+        DescrambleStep(sequence=seq_hex),
     ]
     got = _run(tmp_path, steps)
     assert got != _PAYLOADS

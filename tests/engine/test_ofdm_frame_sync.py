@@ -2,10 +2,11 @@ import numpy as np
 
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
 from marconi.engine.compile.compiler import compile_modem
+from marconi.engine.modulation.ofdm.stages import OfdmFrameSyncProbeStep
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Descriptor
 from marconi.engine.types.levels import Level
-from marconi.engine.types.models import ModemSpec, ModemStep
+from marconi.engine.types.models import Modem
 
 FFT, CP, SYM, NULL, DS = 16, 4, 20, 24, 3
 FRAME = NULL + 4 * SYM
@@ -24,20 +25,17 @@ def test_frame_sync_strips_cp(tmp_path):
     src = tmp_path / "i.cf32"
     sig.tofile(src)
     snk = tmp_path / "o.cf32"
-    modem = ModemSpec(
+    modem = Modem(
         name="fs",
         symbol_rate=float(2_048_000 / SYM),
         path=[
-            ModemStep(
-                conv="ofdm_frame_sync_probe",
-                params={
-                    "fft_len": FFT,
-                    "cp_len": CP,
-                    "sym_len": SYM,
-                    "null_len": NULL,
-                    "frame_len": FRAME,
-                    "data_syms": DS,
-                },
+            OfdmFrameSyncProbeStep(
+                fft_len=FFT,
+                cp_len=CP,
+                sym_len=SYM,
+                null_len=NULL,
+                frame_len=FRAME,
+                data_syms=DS,
             )
         ],
     )
@@ -82,20 +80,17 @@ def test_frame_sync_resyncs_under_drift(tmp_path):
     src = tmp_path / "i.cf32"
     sig.tofile(src)
     snk = tmp_path / "o.cf32"
-    modem = ModemSpec(
+    modem = Modem(
         name="fs",
         symbol_rate=float(2_048_000 / SYM),
         path=[
-            ModemStep(
-                conv="ofdm_frame_sync_probe",
-                params={
-                    "fft_len": FFT,
-                    "cp_len": CP,
-                    "sym_len": SYM,
-                    "null_len": NULL,
-                    "frame_len": FRAME,
-                    "data_syms": DS,
-                },
+            OfdmFrameSyncProbeStep(
+                fft_len=FFT,
+                cp_len=CP,
+                sym_len=SYM,
+                null_len=NULL,
+                frame_len=FRAME,
+                data_syms=DS,
             )
         ],
     )

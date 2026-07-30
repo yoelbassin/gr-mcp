@@ -7,10 +7,11 @@ import pytest
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
 from marconi.engine.compile.compiler import compile_modem
 from marconi.engine.modulation.ofdm.primitives import qpsk_lock
+from marconi.engine.modulation.ofdm.stages import OfdmDemodStep
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Descriptor
 from marconi.engine.types.levels import Level
-from marconi.engine.types.models import ModemSpec, ModemStep
+from marconi.engine.types.models import Modem
 
 _SLICE = (
     Path(__file__).resolve().parents[1]
@@ -41,23 +42,20 @@ def _bin_perm():
 def test_dab_carriers_lock(tmp_path):
     ensure_worker_warm()
     snk = tmp_path / "car.cf32"
-    modem = ModemSpec(
+    modem = Modem(
         name="dab",
         symbol_rate=float(2_048_000 / 2552),
         path=[
-            ModemStep(
-                conv="ofdm_demod",
-                params={
-                    "fft_len": _FFT,
-                    "cp_len": 504,
-                    "sym_len": 2552,
-                    "null_len": 2656,
-                    "frame_len": 196608,
-                    "n_frame_syms": 76,
-                    "data_syms": _DS,
-                    "n_carriers": _NC,
-                    "bin_perm": _bin_perm(),
-                },
+            OfdmDemodStep(
+                fft_len=_FFT,
+                cp_len=504,
+                sym_len=2552,
+                null_len=2656,
+                frame_len=196608,
+                n_frame_syms=76,
+                data_syms=_DS,
+                n_carriers=_NC,
+                bin_perm=_bin_perm(),
             )
         ],
     )

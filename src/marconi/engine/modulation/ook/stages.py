@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
-from typing import Any
+from typing import Literal
 
 from pydantic import Field
 
@@ -9,14 +8,15 @@ from marconi.engine.compile.compile_context import CompileContext
 from marconi.engine.stages.base import DuplexStage
 from marconi.engine.types.descriptor import Amplitude, Carrier, Descriptor
 from marconi.engine.types.levels import Level
-from marconi.engine.types.params import StageParams
+from marconi.engine.types.step import Step
 
 
-class _OokParams(StageParams):
+class OokEnvelopeStep(Step):
+    conv: Literal["ook_envelope"] = "ook_envelope"
     loop_bw: float = Field(default=0.045, ge=0)
 
 
-class OokEnvelope(DuplexStage[CompileContext]):
+class OokEnvelope(DuplexStage[CompileContext, OokEnvelopeStep]):
     """Non-coherent OOK envelope, IQ<->SYMBOLS. RX: magnitude -> centre to +/-1
     -> Gardner symbol timing (one soft float per symbol; CFO-immune by
     construction). TX: invert the centring, upsample, embed as the real part.
@@ -31,25 +31,24 @@ class OokEnvelope(DuplexStage[CompileContext]):
     # (0.51/0.00/1.00), whose duty cycle sets the mean.
     accepts_amplitude = frozenset({Amplitude.PEAK_UNITY, Amplitude.RMS_UNITY})
     min_input_sps = 2.0
-    params_model = _OokParams
+    step_model = OokEnvelopeStep
 
-    def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
-        p = _OokParams.model_validate(dict(params))
+    def emit_rx(self, b: CompileContext, step: OokEnvelopeStep) -> None:
         b.chain("complex_to_mag")
         b.chain("multiply_const_ff", value=2.0)
         b.chain("add_const_ff", value=-1.0)
-        b.chain("symbol_sync_ff", sps=b.sps, loop_bw=p.loop_bw)
+        b.chain("symbol_sync_ff", sps=b.sps, loop_bw=step.loop_bw)
 
-    def emit_tx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
+    def emit_tx(self, b: CompileContext, step: OokEnvelopeStep) -> None:
         b.chain("add_const_ff", value=1.0)
         b.chain("multiply_const_ff", value=0.5)
         b.chain("repeat_f", interp=b.sps_int())
         b.chain("float_to_complex")
 
-    def out_descriptor(
-        self, in_desc: Descriptor, params: Mapping[str, Any]
-    ) -> Descriptor:
+    def out_descriptor(self, in_desc: Descriptor, step: OokEnvelopeStep) -> Descriptor:
         return Descriptor(Level.SYMBOLS, "f", Carrier.SOFT)
 
 
-OOK_STAGES: tuple[type[DuplexStage[CompileContext]], ...] = (OokEnvelope,)
+OOK_STAGES: tuple[type[DuplexStage[CompileContext, OokEnvelopeStep]], ...] = (
+    OokEnvelope,
+)

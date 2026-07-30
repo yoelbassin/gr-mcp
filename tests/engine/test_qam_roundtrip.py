@@ -13,9 +13,12 @@ from engine._dsp import (
 
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
 from marconi.engine.compile.compiler import compile_modem
+from marconi.engine.modulation.qam.stages import QamDemapStep, QamDemodStep
+from marconi.engine.stages.conditioning import AgcStep
 from marconi.engine.types.descriptor import Carrier, Descriptor
+from marconi.engine.types.enums import AgcMode, QamOrder
 from marconi.engine.types.levels import Level
-from marconi.engine.types.models import ModemSpec, ModemStep
+from marconi.engine.types.models import Modem
 
 IQ = Descriptor(Level.IQ, "c")
 SYM_B = Descriptor(Level.SYMBOLS, "b", carrier=Carrier.HARD)
@@ -41,27 +44,27 @@ def _const_points(order: int):
     return np.asarray(c.points()), c.bits_per_symbol()
 
 
-def _full(order: int) -> ModemSpec:
-    return ModemSpec(
+def _full(order: int) -> Modem:
+    return Modem(
         symbol_rate=_SYM,
         path=[
-            ModemStep(conv="qam_demod", params={"order": order}),
-            ModemStep(conv="qam_demap", params={"order": order}),
+            QamDemodStep(order=QamOrder(order)),
+            QamDemapStep(order=QamOrder(order)),
         ],
     )
 
 
-def _demod(order: int) -> ModemSpec:
+def _demod(order: int) -> Modem:
     # window_symbols=128: empirically SER-0 for orders 16/64 under this test's
     # impairments (fine-grained sweep, both n_bits x1 and x4). NOT a robust band:
     # rms_cf zero-inits its running estimate, so its startup transient (shaped by
     # alpha=1/(window*sps)) perturbs constellation_receiver_cb's lock chaotically
     # and non-monotonically in window -- see review-fix report for the sweep.
-    return ModemSpec(
+    return Modem(
         symbol_rate=_SYM,
         path=[
-            ModemStep(conv="agc", params={"mode": "power", "window_symbols": 128.0}),
-            ModemStep(conv="qam_demod", params={"order": order}),
+            AgcStep(mode=AgcMode("power"), window_symbols=128.0),
+            QamDemodStep(order=QamOrder(order)),
         ],
     )
 
@@ -117,9 +120,7 @@ def test_qam_demap_clean_identity(order: int, tmp_path: Path) -> None:
     bits = np.random.default_rng(0).integers(0, 2, n_bits).astype(np.uint8)
     bp = write_bits(tmp_path / "in.bits", bits)
     sym, op = tmp_path / "s.u8", tmp_path / "out.bits"
-    modem = ModemSpec(
-        symbol_rate=_SYM, path=[ModemStep(conv="qam_demap", params={"order": order})]
-    )
+    modem = Modem(symbol_rate=_SYM, path=[QamDemapStep(order=QamOrder(order))])
     assert be.run_pipeline(_compile(modem, "tx", SYM_B, bp, sym)).status == "ok"
     assert be.run_pipeline(_compile(modem, "rx", SYM_B, sym, op)).status == "ok"
     out = read_bits(op)

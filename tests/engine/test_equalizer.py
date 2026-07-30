@@ -18,10 +18,11 @@ from pydantic import ValidationError
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
 from marconi.engine.compile.compile_context import CompileContext
 from marconi.engine.compile.compiler import compile_modem
+from marconi.engine.stages.conditioning import EqualizerStep
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Amplitude, Descriptor
 from marconi.engine.types.levels import Level
-from marconi.engine.types.models import ModemSpec, ModemStep
+from marconi.engine.types.models import Modem
 
 IQ = Descriptor(Level.IQ, "c")
 _SR, _SYM = 1.0, 1.0  # the equalizer runs symbol-spaced, on a 1-sps stream
@@ -34,14 +35,9 @@ _CHANNEL = np.array([1.0, 0.55, 0.30, 0.15], np.complex64)
 
 def _equalize(src: Path, snk: Path, *, num_taps: int, step_size: float) -> np.ndarray:
     pipe = compile_modem(
-        ModemSpec(
+        Modem(
             symbol_rate=_SYM,
-            path=[
-                ModemStep(
-                    conv="equalizer",
-                    params={"num_taps": num_taps, "step_size": step_size},
-                )
-            ],
+            path=[EqualizerStep(num_taps=num_taps, step_size=step_size)],
         ),
         stage_registry(),
         direction="rx",
@@ -95,9 +91,9 @@ def test_equalizer_reopens_an_isi_closed_eye(tmp_path: Path) -> None:
 
 def test_equalizer_is_rate_preserving_and_clears_amplitude() -> None:
     stage = stage_registry()["equalizer"]
-    assert stage.rate_factor({}) == 1.0
+    assert stage.rate_factor(EqualizerStep()) == 1.0
     normalized = Descriptor(Level.IQ, "c", amplitude=Amplitude.RMS_UNITY)
-    out = stage.out_descriptor(normalized, {})
+    out = stage.out_descriptor(normalized, EqualizerStep())
     assert out.level is Level.IQ
     # CMA drives the amplitude to a constant modulus, but its steady state is
     # approximate and phase-ambiguous: a consumer needing a known scale re-agc's.
@@ -107,7 +103,7 @@ def test_equalizer_is_rate_preserving_and_clears_amplitude() -> None:
 def test_equalizer_builds_a_single_cma_block() -> None:
     ctx = CompileContext(Descriptor(Level.IQ, "c"), _SR, _SYM)
     stage_registry()["equalizer"].emit_rx(
-        ctx, {"num_taps": 15, "step_size": 0.01, "modulus": 1.0}
+        ctx, EqualizerStep(num_taps=15, step_size=0.01, modulus=1.0)
     )
     blocks = ctx.build("t", _SR).blocks
     assert [b.kind for b in blocks] == ["cma_equalizer"]
@@ -115,7 +111,7 @@ def test_equalizer_builds_a_single_cma_block() -> None:
 
 
 def test_equalizer_rejects_invalid_params() -> None:
-    model = stage_registry()["equalizer"].params_model
+    model = stage_registry()["equalizer"].step_model
     for bad in (
         {"num_taps": 0},
         {"step_size": 0.0},

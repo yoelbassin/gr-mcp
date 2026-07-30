@@ -84,13 +84,13 @@ def test_aligned_ber_best_returns_the_locking_candidate() -> None:
 def test_fsk_and_ook_accept_open_loop_reject_negative() -> None:
     from pydantic import ValidationError
 
-    from marconi.engine.modulation.fsk.stages import _FskParams
-    from marconi.engine.modulation.ook.stages import _OokParams
+    from marconi.engine.modulation.fsk.stages import FskStep
+    from marconi.engine.modulation.ook.stages import OokEnvelopeStep
     from marconi.engine.types.params import OPEN_LOOP
 
-    assert _FskParams(deviation=2400.0, loop_bw=OPEN_LOOP).loop_bw == 0.0
-    assert _OokParams(loop_bw=OPEN_LOOP).loop_bw == 0.0
+    assert FskStep(deviation=2400.0, loop_bw=OPEN_LOOP).loop_bw == 0.0
+    assert OokEnvelopeStep(loop_bw=OPEN_LOOP).loop_bw == 0.0
     with pytest.raises(ValidationError):
-        _FskParams(deviation=2400.0, loop_bw=-0.01)
+        FskStep(deviation=2400.0, loop_bw=-0.01)
     with pytest.raises(ValidationError):
-        _OokParams(loop_bw=-0.01)
+        OokEnvelopeStep(loop_bw=-0.01)

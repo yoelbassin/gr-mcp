@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Mapping
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import Field, StrictInt, model_validator
 from pydantic_core import PydanticCustomError
@@ -10,50 +9,20 @@ from pydantic_core import PydanticCustomError
 from marconi.engine.compile.compile_context import CompileContext
 from marconi.engine.stages.base import DuplexStage, RxStage, Stage
 from marconi.engine.types.descriptor import Amplitude, Carrier, Descriptor
+from marconi.engine.types.enums import PskOrder
 from marconi.engine.types.levels import Level
-from marconi.engine.types.params import StageParams
-
-_PSK_ORDERS = (2, 4, 8)
+from marconi.engine.types.step import Step
 
 
-def _check_order(order: int) -> None:
-    if order not in _PSK_ORDERS:
-        raise PydanticCustomError(
-            "value_error",
-            "psk order {o} unsupported (allowed: {allowed})",
-            {"o": order, "allowed": list(_PSK_ORDERS), "field": "order"},
-        )
-
-
-class _PskDemodParams(StageParams):
-    order: StrictInt  # required: an explicit PSK order, no silent default modulation
-    alpha: float = 0.35
-    loop_bw: float = 0.045
-    span: StrictInt = 11
-
-    @model_validator(mode="after")
-    def _ok(self) -> "_PskDemodParams":
-        _check_order(self.order)
-        return self
-
-
-class _PskDemapParams(StageParams):
-    order: StrictInt  # required
-
-    @model_validator(mode="after")
-    def _ok(self) -> "_PskDemapParams":
-        _check_order(self.order)
-        return self
-
-
-class _SymbolSyncParams(StageParams):
+class SymbolSyncStep(Step):
+    conv: Literal["symbol_sync"] = "symbol_sync"
     sps: StrictInt  # explicit: rate_factor (1/sps) must be params-derivable
     alpha: float = 0.35
     loop_bw: float = 0.045
     span: StrictInt = 11
 
     @model_validator(mode="after")
-    def _ok(self) -> "_SymbolSyncParams":
+    def _ok(self) -> "SymbolSyncStep":
         if self.sps < 2:
             raise PydanticCustomError(
                 "value_error", "sps must be >= 2 to recover symbol timing"
@@ -67,7 +36,7 @@ class _SymbolSyncParams(StageParams):
         return self
 
 
-class SymbolSync(RxStage[CompileContext]):
+class SymbolSync(RxStage[CompileContext, SymbolSyncStep]):
     """Symbol-timing recovery, IQ->IQ: RRC matched filter + Gardner symbol_sync,
     decimating an oversampled stream to one sample per symbol. This is
     psk_demod's timing half split out, so a 1-sps seam opens where an equalizer
@@ -85,30 +54,33 @@ class SymbolSync(RxStage[CompileContext]):
         {Amplitude.PEAK_UNITY, Amplitude.MEAN_MAG_UNITY, Amplitude.RMS_UNITY}
     )
     alters_amplitude = True
-    params_model = _SymbolSyncParams
+    step_model = SymbolSyncStep
 
-    def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
-        p = _SymbolSyncParams.model_validate(dict(params))
+    def emit_rx(self, b: CompileContext, step: SymbolSyncStep) -> None:
         b.chain(
             "rrc_filter_ccf",
             interpolation=1,
             rate=b.rate,
-            sps=p.sps,
-            alpha=p.alpha,
-            span=p.span,
+            sps=step.sps,
+            alpha=step.alpha,
+            span=step.span,
         )
-        b.chain("symbol_sync_cc", sps=p.sps, loop_bw=p.loop_bw)
+        b.chain("symbol_sync_cc", sps=step.sps, loop_bw=step.loop_bw)
 
-    def rate_factor(self, params: Mapping[str, Any]) -> float:
-        return 1.0 / int(params["sps"])
+    def rate_factor(self, step: SymbolSyncStep) -> float:
+        return 1.0 / int(step.sps)
 
     def required_input_rate(
-        self, params: Mapping[str, Any], symbol_rate: float
+        self, step: SymbolSyncStep, symbol_rate: float
     ) -> float | None:
-        return int(params["sps"]) * symbol_rate
+        return int(step.sps) * symbol_rate
 
 
-class SampleSymbols(RxStage[CompileContext]):
+class SampleSymbolsStep(Step):
+    conv: Literal["sample_symbols"] = "sample_symbols"
+
+
+class SampleSymbols(RxStage[CompileContext, SampleSymbolsStep]):
     """IQ->SYMBOLS at 1 sps with no carrier loop: the timing-only rung.
     Emits no blocks - the level move is the whole stage - so an externally
     recovered or differentially absorbed carrier can reach the symbol seam."""
@@ -117,32 +89,29 @@ class SampleSymbols(RxStage[CompileContext]):
     from_level = Level.IQ
     to_level = Level.SYMBOLS
     family = "psk"
+    step_model = SampleSymbolsStep
 
-    class _Params(StageParams):
-        pass
-
-    params_model = _Params
-
-    def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
+    def emit_rx(self, b: CompileContext, step: SampleSymbolsStep) -> None:
         pass
 
     def out_descriptor(
-        self, in_desc: Descriptor, params: Mapping[str, Any]
+        self, in_desc: Descriptor, step: SampleSymbolsStep
     ) -> Descriptor:
         return Descriptor(Level.SYMBOLS, "c", Carrier.SOFT)
 
     def required_input_rate(
-        self, params: Mapping[str, Any], symbol_rate: float
+        self, step: SampleSymbolsStep, symbol_rate: float
     ) -> float | None:
         return symbol_rate
 
 
-class _DifferentialDemodParams(StageParams):
+class DifferentialDemodStep(Step):
+    conv: Literal["differential_demod"] = "differential_demod"
     delay: StrictInt = Field(default=1, ge=1)
     rotate: float = 0.0
 
 
-class DifferentialDemod(RxStage[CompileContext]):
+class DifferentialDemod(RxStage[CompileContext, DifferentialDemodStep]):
     """SYMBOLS->SYMBOLS continuous differential: z[i] = x[i] * conj(x[i-delay]),
     optionally rotated by exp(j*rotate). With rotate=-pi/4 this lands pi/4-DQPSK
     on the plain QPSK constellation; delay > 1 serves symbol-interleaved
@@ -152,28 +121,35 @@ class DifferentialDemod(RxStage[CompileContext]):
     from_level = Level.SYMBOLS
     to_level = Level.SYMBOLS
     family = "psk"
-    params_model = _DifferentialDemodParams
+    step_model = DifferentialDemodStep
     accepts_item_type = "c"
     accepts_carrier = Carrier.SOFT
 
-    def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
-        p = _DifferentialDemodParams.model_validate(dict(params))
+    def emit_rx(self, b: CompileContext, step: DifferentialDemodStep) -> None:
         src = b.tail
         assert src is not None
-        dly = b.chain("delay_cc", samples=p.delay)
+        dly = b.chain("delay_cc", samples=step.delay)
         mc = b.add("multiply_conjugate_cc")
         b.connect(src, mc, dst_port=0)
         b.connect(dly, mc, dst_port=1)
         b.set_tail(mc)
-        if p.rotate:
+        if step.rotate:
             b.chain(
                 "multiply_const_cc",
-                re=math.cos(p.rotate),
-                im=math.sin(p.rotate),
+                re=math.cos(step.rotate),
+                im=math.sin(step.rotate),
             )
 
 
-class PskDemod(DuplexStage[CompileContext]):
+class PskDemodStep(Step):
+    conv: Literal["psk_demod"] = "psk_demod"
+    order: PskOrder  # required: an explicit PSK order, no silent default modulation
+    alpha: float = 0.35
+    loop_bw: float = 0.045
+    span: StrictInt = 11
+
+
+class PskDemod(DuplexStage[CompileContext, PskDemodStep]):
     """Coherent linear demod, IQ<->SYMBOLS. RX: RRC matched filter + Gardner
     symbol timing + costas carrier recovery -> soft complex symbols. TX: RRC
     pulse-shape/upsample. rate_factor stays 1.0 (symbol decimation is internal
@@ -190,39 +166,40 @@ class PskDemod(DuplexStage[CompileContext]):
         {Amplitude.PEAK_UNITY, Amplitude.MEAN_MAG_UNITY, Amplitude.RMS_UNITY}
     )
     min_input_sps = 2.0
-    params_model = _PskDemodParams
+    step_model = PskDemodStep
 
-    def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
-        p = _PskDemodParams.model_validate(dict(params))
+    def emit_rx(self, b: CompileContext, step: PskDemodStep) -> None:
         b.chain(
             "rrc_filter_ccf",
             interpolation=1,
             rate=b.rate,
             sps=b.sps,
-            alpha=p.alpha,
-            span=p.span,
+            alpha=step.alpha,
+            span=step.span,
         )
-        b.chain("symbol_sync_cc", sps=b.sps, loop_bw=p.loop_bw)
-        b.chain("costas_loop_cc", order=p.order, loop_bw=p.loop_bw)
+        b.chain("symbol_sync_cc", sps=b.sps, loop_bw=step.loop_bw)
+        b.chain("costas_loop_cc", order=int(step.order), loop_bw=step.loop_bw)
 
-    def emit_tx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
-        p = _PskDemodParams.model_validate(dict(params))
+    def emit_tx(self, b: CompileContext, step: PskDemodStep) -> None:
         b.chain(
             "rrc_filter_ccf",
             interpolation=b.sps_int(),
             rate=b.rate,
             sps=b.sps,
-            alpha=p.alpha,
-            span=p.span,
+            alpha=step.alpha,
+            span=step.span,
         )
 
-    def out_descriptor(
-        self, in_desc: Descriptor, params: Mapping[str, Any]
-    ) -> Descriptor:
-        return Descriptor(Level.SYMBOLS, "c", Carrier.SOFT, order=int(params["order"]))
+    def out_descriptor(self, in_desc: Descriptor, step: PskDemodStep) -> Descriptor:
+        return Descriptor(Level.SYMBOLS, "c", Carrier.SOFT, order=int(step.order))
 
 
-class PskDemap(DuplexStage[CompileContext]):
+class PskDemapStep(Step):
+    conv: Literal["psk_demap"] = "psk_demap"
+    order: PskOrder  # required
+
+
+class PskDemap(DuplexStage[CompileContext, PskDemapStep]):
     """Constellation map/demap, SYMBOLS<->BITS. RX: hard min-distance decode +
     unpack to bits. TX: pack bits into symbol indices + map to constellation
     points. Hard bits at the seam (mirrors the general Slice)."""
@@ -231,30 +208,33 @@ class PskDemap(DuplexStage[CompileContext]):
     from_level = Level.SYMBOLS
     to_level = Level.BITS
     family = "psk"
-    params_model = _PskDemapParams
+    step_model = PskDemapStep
     accepts_item_type = "c"
     accepts_carrier = Carrier.SOFT
 
-    def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
-        order = int(params["order"])
+    def emit_rx(self, b: CompileContext, step: PskDemapStep) -> None:
+        order = int(step.order)
         b.chain("constellation_decoder_cb", scheme="psk", order=order)
         b.chain("unpack_k_bits_bb", k=int(math.log2(order)))
 
-    def emit_tx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
-        order = int(params["order"])
+    def emit_tx(self, b: CompileContext, step: PskDemapStep) -> None:
+        order = int(step.order)
         b.chain("pack_k_bits_bb", k=int(math.log2(order)))
         b.chain("chunks_to_symbols_bc", scheme="psk", order=order)
 
-    def out_descriptor(
-        self, in_desc: Descriptor, params: Mapping[str, Any]
-    ) -> Descriptor:
+    def out_descriptor(self, in_desc: Descriptor, step: PskDemapStep) -> Descriptor:
         return Descriptor(Level.BITS, "b", Carrier.HARD)
 
-    def required_input_order(self, params: Mapping[str, Any]) -> int | None:
-        return int(params["order"])
+    def required_input_order(self, step: PskDemapStep) -> int | None:
+        return int(step.order)
 
 
-class PskSoftDemap(RxStage[CompileContext]):
+class PskSoftDemapStep(Step):
+    conv: Literal["psk_soft_demap"] = "psk_soft_demap"
+    order: PskOrder
+
+
+class PskSoftDemap(RxStage[CompileContext, PskSoftDemapStep]):
     """Constellation soft demap, SYMBOLS->BITS soft. RX-only: stock
     constellation_soft_decoder, one LLR per bit. The soft counterpart of
     psk_demap, and the single-carrier entry point to the soft coding lane
@@ -271,25 +251,22 @@ class PskSoftDemap(RxStage[CompileContext]):
     from_level = Level.SYMBOLS
     to_level = Level.BITS
     family = "psk"
-    params_model = _PskDemapParams
+    step_model = PskSoftDemapStep
     accepts_item_type = "c"
     accepts_carrier = Carrier.SOFT
 
-    def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
-        p = _PskDemapParams.model_validate(dict(params))
-        b.chain("constellation_soft_decoder", scheme="psk", order=p.order)
+    def emit_rx(self, b: CompileContext, step: PskSoftDemapStep) -> None:
+        b.chain("constellation_soft_decoder", scheme="psk", order=step.order)
         b.chain("multiply_const_ff", value=-1.0)
 
-    def out_descriptor(
-        self, in_desc: Descriptor, params: Mapping[str, Any]
-    ) -> Descriptor:
+    def out_descriptor(self, in_desc: Descriptor, step: PskSoftDemapStep) -> Descriptor:
         return Descriptor(Level.BITS, "f", Carrier.SOFT)
 
-    def required_input_order(self, params: Mapping[str, Any]) -> int | None:
-        return int(params["order"])
+    def required_input_order(self, step: PskSoftDemapStep) -> int | None:
+        return int(step.order)
 
 
-PSK_STAGES: tuple[type[Stage[CompileContext]], ...] = (
+PSK_STAGES: tuple[type[Stage[CompileContext, Any]], ...] = (
     SymbolSync,
     SampleSymbols,
     DifferentialDemod,

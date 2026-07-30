@@ -21,10 +21,17 @@ from pydantic import ValidationError
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
 from marconi.engine.compile.compile_context import CompileContext
 from marconi.engine.compile.compiler import CompileError, compile_modem
+from marconi.engine.modulation.psk.stages import (
+    PskDemapStep,
+    PskDemodStep,
+    SymbolSyncStep,
+)
+from marconi.engine.stages.conditioning import AgcStep
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Amplitude, Carrier, Descriptor
+from marconi.engine.types.enums import AgcMode, PskOrder
 from marconi.engine.types.levels import Level
-from marconi.engine.types.models import ModemSpec, ModemStep
+from marconi.engine.types.models import Modem
 
 IQ = Descriptor(Level.IQ, "c")
 _SR, _SYM, _SPS = 4.0, 1.0, 4
@@ -40,11 +47,11 @@ def _const_points(order: int) -> tuple[np.ndarray, int]:
 def _tx_iq(order: int, bits: np.ndarray, tmp_path: Path) -> Path:
     bp = write_bits(tmp_path / "in.bits", bits)
     clean = tmp_path / "tx.iq"
-    modem = ModemSpec(
+    modem = Modem(
         symbol_rate=_SYM,
         path=[
-            ModemStep(conv="psk_demod", params={"order": order}),
-            ModemStep(conv="psk_demap", params={"order": order}),
+            PskDemodStep(order=PskOrder(order)),
+            PskDemapStep(order=PskOrder(order)),
         ],
     )
     pipe = compile_modem(
@@ -61,12 +68,12 @@ def _tx_iq(order: int, bits: np.ndarray, tmp_path: Path) -> Path:
 
 
 def _recover(src: Path, snk: Path) -> np.ndarray:
-    modem = ModemSpec(
+    modem = Modem(
         symbol_rate=_SYM,
         path=[
-            ModemStep(conv="agc", params={"mode": "power", "window_symbols": 32.0}),
-            ModemStep(conv="symbol_sync", params={"sps": _SPS}),
-            ModemStep(conv="agc", params={"mode": "power"}),
+            AgcStep(mode=AgcMode.POWER, window_symbols=32.0),
+            SymbolSyncStep(sps=_SPS),
+            AgcStep(mode=AgcMode.POWER),
         ],
     )
     pipe = compile_modem(
@@ -100,16 +107,17 @@ def test_symbol_sync_recovers_timing_ser0(tmp_path: Path) -> None:
 
 def test_symbol_sync_decimates_by_sps() -> None:
     stage = stage_registry()["symbol_sync"]
-    assert stage.rate_factor({"sps": _SPS}) == 1.0 / _SPS
-    assert stage.required_input_rate({"sps": _SPS}, _SYM) == _SPS * _SYM
-    out = stage.out_descriptor(Descriptor(Level.IQ, "c"), {"sps": _SPS})
+    step = SymbolSyncStep(sps=_SPS)
+    assert stage.rate_factor(step) == 1.0 / _SPS
+    assert stage.required_input_rate(step, _SYM) == _SPS * _SYM
+    out = stage.out_descriptor(Descriptor(Level.IQ, "c"), step)
     assert out.level is Level.IQ
     assert out.amplitude is Amplitude.UNKNOWN
 
 
 def test_symbol_sync_builds_matched_filter_then_gardner() -> None:
     ctx = CompileContext(Descriptor(Level.IQ, "c"), _SR, _SYM)
-    stage_registry()["symbol_sync"].emit_rx(ctx, {"sps": _SPS})
+    stage_registry()["symbol_sync"].emit_rx(ctx, SymbolSyncStep(sps=_SPS))
     kinds = [b.kind for b in ctx.build("t", _SR).blocks]
     assert kinds == ["rrc_filter_ccf", "symbol_sync_cc"]
 
@@ -117,10 +125,10 @@ def test_symbol_sync_builds_matched_filter_then_gardner() -> None:
 def test_symbol_sync_rejects_a_rate_that_does_not_deliver_sps(tmp_path: Path) -> None:
     """The explicit sps must match the rate the pipeline actually delivers, or
     the matched filter and decimation disagree with the compiler's rate model."""
-    modem = ModemSpec(
+    modem = Modem(
         symbol_rate=_SYM,
         # start at 4 sps but claim 8: the required-input-rate guard must fire.
-        path=[ModemStep(conv="symbol_sync", params={"sps": 8})],
+        path=[SymbolSyncStep(sps=8)],
     )
     with pytest.raises(CompileError, match="input sample rate"):
         compile_modem(
@@ -141,9 +149,9 @@ def test_symbol_sync_requires_a_known_scale() -> None:
     )
     with pytest.raises(CompileError):
         compile_modem(
-            ModemSpec(
+            Modem(
                 symbol_rate=_SYM,
-                path=[ModemStep(conv="symbol_sync", params={"sps": _SPS})],
+                path=[SymbolSyncStep(sps=_SPS)],
             ),
             stage_registry(),
             direction="rx",
@@ -155,7 +163,7 @@ def test_symbol_sync_requires_a_known_scale() -> None:
 
 
 def test_symbol_sync_rejects_invalid_params() -> None:
-    model = stage_registry()["symbol_sync"].params_model
+    model = stage_registry()["symbol_sync"].step_model
     for bad in ({"sps": 1}, {"sps": 4, "alpha": 0.0}, {"sps": 4, "loop_bw": 0.0}):
         with pytest.raises(ValidationError):
             model.model_validate(bad)
@@ -164,6 +172,6 @@ def test_symbol_sync_rejects_invalid_params() -> None:
 def test_symbol_sync_output_carries_soft_iq() -> None:
     stage = stage_registry()["symbol_sync"]
     out = stage.out_descriptor(
-        Descriptor(Level.IQ, "c", carrier=Carrier.HARD), {"sps": _SPS}
+        Descriptor(Level.IQ, "c", carrier=Carrier.HARD), SymbolSyncStep(sps=_SPS)
     )
     assert out.item_type == "c"

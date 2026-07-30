@@ -8,10 +8,13 @@ from engine._dsp import aligned_ber_best
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
 from marconi.engine.compile.compiler import compile_modem
 from marconi.engine.io.bitfile import read_bits
+from marconi.engine.modulation.fsk.stages import FskStep
+from marconi.engine.stages.conditioning import AmStep, AnalyticStep, ChannelizeStep
+from marconi.engine.stages.general import SliceStep
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Descriptor
 from marconi.engine.types.levels import Level
-from marconi.engine.types.models import ModemSpec, ModemStep
+from marconi.engine.types.models import Modem
 
 IQ = Descriptor(Level.IQ, "c")
 RATE = 48000.0
@@ -42,17 +45,14 @@ def test_am_afsk_decodes_ber0(tmp_path: Path) -> None:
     src = tmp_path / "am.cf32"
     iq.tofile(src)
     snk = tmp_path / "bits.u8"
-    modem = ModemSpec(
+    modem = Modem(
         symbol_rate=BAUD,
         path=[
-            ModemStep(conv="am", params={"dc_block_len": DC_BLOCK_LEN}),
-            ModemStep(conv="analytic", params={}),
-            ModemStep(
-                conv="channelize",
-                params={"decim": 1, "bandwidth_hz": 2400.0, "center_hz": 1800.0},
-            ),
-            ModemStep(conv="fsk", params={"deviation": 600.0}),
-            ModemStep(conv="slice", params={}),
+            AmStep(dc_block_len=DC_BLOCK_LEN),
+            AnalyticStep(),
+            ChannelizeStep(decim=1, bandwidth_hz=2400.0, center_hz=1800.0),
+            FskStep(deviation=600.0),
+            SliceStep(),
         ],
     )
     pipe = compile_modem(

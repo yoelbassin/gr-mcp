@@ -6,9 +6,12 @@ from engine._dsp import aligned_ber, read_bits, read_complex, write_bits
 
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
 from marconi.engine.compile.compiler import compile_modem
+from marconi.engine.modulation.fsk.stages import FskStep
+from marconi.engine.stages.conditioning import ResampleStep
+from marconi.engine.stages.general import SliceStep
 from marconi.engine.types.descriptor import Descriptor
 from marconi.engine.types.levels import Level
-from marconi.engine.types.models import ModemSpec, ModemStep
+from marconi.engine.types.models import Modem
 
 IQ = Descriptor(Level.IQ, "c")
 _DEV, _SYM = 0.75, 1.0
@@ -28,26 +31,21 @@ def _compile(modem, direction, sample_rate, src, snk):
     )
 
 
-def _fsk_modem() -> ModemSpec:
-    return ModemSpec(
+def _fsk_modem() -> Modem:
+    return Modem(
         symbol_rate=_SYM,
-        path=[
-            ModemStep(conv="fsk", params={"deviation": _DEV}),
-            ModemStep(conv="slice", params={}),
-        ],
+        path=[FskStep(deviation=_DEV), SliceStep()],
     )
 
 
-def _resample_rx(cap_rate: int) -> ModemSpec:
+def _resample_rx(cap_rate: int) -> Modem:
     # RX resamples the captured rate back to 8 (the fsk sps rate): rate=8/cap_rate.
-    return ModemSpec(
+    return Modem(
         symbol_rate=_SYM,
         path=[
-            ModemStep(
-                conv="resample", params={"interpolation": 8, "decimation": cap_rate}
-            ),
-            ModemStep(conv="fsk", params={"deviation": _DEV}),
-            ModemStep(conv="slice", params={}),
+            ResampleStep(interpolation=8, decimation=cap_rate),
+            FskStep(deviation=_DEV),
+            SliceStep(),
         ],
     )
 

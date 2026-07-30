@@ -12,13 +12,17 @@ from marconi.engine.coding.primitives import can_correct
 from marconi.engine.coding.stages_bits import (
     CODING_BITS_STAGES,
     BlockCode,
+    BlockCodeStep,
     Codebook,
     MarkFrame,
     Permute,
+    PermuteStep,
     Realign,
+    RealignStep,
     SyncWord,
 )
 from marconi.engine.stages.base import StageDirectionError
+from marconi.engine.types.enums import EmitMode
 
 
 def test_sync_word_seeds_window_past_each_match() -> None:
@@ -96,7 +100,7 @@ def test_sync_word_stage_declares_seeder_and_validates_hex() -> None:
     stage = SyncWord()
     assert stage.seeds_windows is True
     with pytest.raises(Exception):
-        stage.params_model.model_validate({"sync": "zz"})  # not hex
+        stage.step_model.model_validate({"sync": "zz"})  # not hex
 
 
 def test_mark_frame_seeds_one_window_per_mark() -> None:
@@ -187,9 +191,9 @@ def test_unknown_code_symbol_maps_to_zero() -> None:
 
 def test_codebook_stage_validates_table_size() -> None:
     stage = Codebook()
-    stage.params_model.model_validate({"code_bits": 6, "data_bits": 4, "table": _3OF6})
+    stage.step_model.model_validate({"code_bits": 6, "data_bits": 4, "table": _3OF6})
     with pytest.raises(Exception):  # 3 entries != 2^4
-        stage.params_model.model_validate(
+        stage.step_model.model_validate(
             {"code_bits": 6, "data_bits": 4, "table": [1, 2, 3]}
         )
 
@@ -387,13 +391,13 @@ def test_block_code_stage_emits_full_codeword() -> None:
     b = CodingBuilder()
     BlockCode().emit_rx(
         b,
-        {
-            "code_bits": 7,
-            "data_bits": 4,
-            "parity_masks": [0b1011, 0b1101, 0b1110],
-            "correct_single": True,
-            "emit": "codeword",
-        },
+        BlockCodeStep(
+            code_bits=7,
+            data_bits=4,
+            parity_masks=[0b1011, 0b1101, 0b1110],
+            correct_single=True,
+            emit=EmitMode.CODEWORD,
+        ),
     )
     src = CodingCarrier(bits=np.array([1, 0, 1, 1, 0, 1, 0], np.uint8))
     out = b.steps[0].call(src).bits
@@ -402,7 +406,7 @@ def test_block_code_stage_emits_full_codeword() -> None:
 
 def test_block_code_emit_validator_rejects_unknown() -> None:
     with pytest.raises(ValidationError):
-        BlockCode().params_model.model_validate(
+        BlockCode().step_model.model_validate(
             {
                 "code_bits": 7,
                 "data_bits": 4,
@@ -448,7 +452,7 @@ def test_permute_seeded_gathers_relative_to_cursor_and_can_drop_bits() -> None:
 
 def test_permute_stage_wired() -> None:
     b = CodingBuilder()
-    Permute().emit_rx(b, {"perm": [2, 0, 3, 1]})
+    Permute().emit_rx(b, PermuteStep(perm=[2, 0, 3, 1]))
     out = b.steps[0].call(CodingCarrier(bits=np.array([1, 0, 0, 1], np.uint8))).bits
     assert list(out) == [0, 1, 1, 0]  # in[2], in[0], in[3], in[1]
 
@@ -468,7 +472,7 @@ def test_realign_seeded_advances_cursor() -> None:
 
 def test_realign_emit_tx_raises() -> None:
     with pytest.raises(StageDirectionError):
-        Realign().emit_tx(CodingBuilder(), {"bit_offset": 3})
+        Realign().emit_tx(CodingBuilder(), RealignStep(bit_offset=3))
 
 
 def _differential_encode(bits: np.ndarray, invert: bool) -> np.ndarray:
@@ -533,7 +537,7 @@ def test_descramble_restarts_sequence_at_each_window_cursor() -> None:
 
 def test_correct_single_rejects_ambiguous_syndromes() -> None:
     with pytest.raises(ValidationError, match="single-error"):
-        BlockCode._Params(
+        BlockCodeStep(
             code_bits=4,
             data_bits=2,
             parity_masks=[0b0011, 0b0011],
@@ -554,7 +558,7 @@ def test_correct_single_accepts_bch_31_21() -> None:
         0x0D5E4A,
         0x1ABC94,
     ]
-    p = BlockCode._Params(
+    p = BlockCodeStep(
         code_bits=31, data_bits=21, parity_masks=masks, correct_single=True
     )
     assert p.correct_single is True
@@ -562,7 +566,7 @@ def test_correct_single_accepts_bch_31_21() -> None:
 
 def test_correct_single_rejects_weight_one_parity_column() -> None:
     with pytest.raises(ValidationError, match="weight"):
-        BlockCode._Params(
+        BlockCodeStep(
             code_bits=4,
             data_bits=2,
             parity_masks=[0b01, 0b11],
@@ -572,7 +576,7 @@ def test_correct_single_rejects_weight_one_parity_column() -> None:
 
 def test_correct_single_rejects_zero_parity_column() -> None:
     with pytest.raises(ValidationError, match="weight"):
-        BlockCode._Params(
+        BlockCodeStep(
             code_bits=6,
             data_bits=3,
             parity_masks=[0b110, 0b100, 0b010],
@@ -582,7 +586,7 @@ def test_correct_single_rejects_zero_parity_column() -> None:
 
 def test_block_code_auto_correct_rejects_degenerate_columns() -> None:
     with pytest.raises(ValidationError, match="pairwise-distinct"):
-        BlockCode._Params.model_validate(
+        BlockCodeStep.model_validate(
             {
                 "code_bits": 7,
                 "data_bits": 4,
@@ -592,7 +596,7 @@ def test_block_code_auto_correct_rejects_degenerate_columns() -> None:
 
 
 def test_block_code_detect_only_still_accepts_degenerate_columns() -> None:
-    p = BlockCode._Params.model_validate(
+    p = BlockCodeStep.model_validate(
         {
             "code_bits": 7,
             "data_bits": 4,

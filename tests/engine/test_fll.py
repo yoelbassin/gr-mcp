@@ -33,10 +33,15 @@ from engine._dsp import (
 
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
 from marconi.engine.compile.compiler import compile_modem
+from marconi.engine.modulation.psk.stages import PskDemapStep, PskDemodStep
+from marconi.engine.stages.acquisition import FllStep
+from marconi.engine.stages.conditioning import AgcStep
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Descriptor
+from marconi.engine.types.enums import AgcMode, PskOrder
 from marconi.engine.types.levels import Level
-from marconi.engine.types.models import ModemSpec, ModemStep
+from marconi.engine.types.models import Modem
+from marconi.engine.types.step import Step
 
 IQ = Descriptor(Level.IQ, "c")
 _SR, _SYM, _ORDER, _NBITS = 8.0, 1.0, 4, 8192
@@ -50,9 +55,9 @@ def _points() -> tuple[np.ndarray, int]:
     return np.asarray(c.points()), int(c.bits_per_symbol())
 
 
-def _compile(path: list[ModemStep], direction: str, src: Path, snk: Path):
+def _compile(path: list[Step], direction: str, src: Path, snk: Path):
     return compile_modem(
-        ModemSpec(symbol_rate=_SYM, path=path),
+        Modem(symbol_rate=_SYM, path=path),
         stage_registry(),
         direction=direction,
         sample_rate=_SR,
@@ -68,9 +73,9 @@ def _ser_at(tmp_path: Path, cfo_frac: float, with_fll: bool) -> float:
     bits = np.random.default_rng(4).integers(0, 2, _NBITS).astype(np.uint8)
     bp = write_bits(tmp_path / "in.bits", bits)
     clean = tmp_path / "clean.iq"
-    tx = [
-        ModemStep(conv="psk_demod", params={"order": _ORDER}),
-        ModemStep(conv="psk_demap", params={"order": _ORDER}),
+    tx: list[Step] = [
+        PskDemodStep(order=PskOrder(_ORDER)),
+        PskDemapStep(order=PskOrder(_ORDER)),
     ]
     assert be.run_pipeline(_compile(tx, "tx", bp, clean)).status == "ok"
 
@@ -84,10 +89,10 @@ def _ser_at(tmp_path: Path, cfo_frac: float, with_fll: bool) -> float:
         sample_rate=_SR,
         seed=1,
     )
-    path = [ModemStep(conv="agc", params={"mode": "feedback"})]
+    path: list[Step] = [AgcStep(mode=AgcMode.FEEDBACK)]
     if with_fll:
-        path.append(ModemStep(conv="fll", params={"rolloff": 0.35}))
-    path.append(ModemStep(conv="psk_demod", params={"order": _ORDER}))
+        path.append(FllStep(rolloff=0.35))
+    path.append(PskDemodStep(order=PskOrder(_ORDER)))
     snk = tmp_path / f"sym_{cfo_frac}_{with_fll}.cf32"
     assert be.run_pipeline(_compile(path, "rx", imp, snk), timeout=180.0).status == "ok"
     return resolved_ser(
@@ -121,14 +126,15 @@ def test_fll_preserves_the_amplitude_claim() -> None:
 
     stage = stage_registry()["fll"]
     normalized = Descriptor(Level.IQ, "c", amplitude=Amplitude.RMS_UNITY)
-    assert stage.out_descriptor(normalized, {}).amplitude is Amplitude.RMS_UNITY
-    assert stage.rate_factor({}) == 1.0
+    step = FllStep()
+    assert stage.out_descriptor(normalized, step).amplitude is Amplitude.RMS_UNITY
+    assert stage.rate_factor(step) == 1.0
 
 
 def test_fll_rejects_out_of_range_shaping() -> None:
     from pydantic import ValidationError
 
-    model = stage_registry()["fll"].params_model
+    model = stage_registry()["fll"].step_model
     for bad in (
         {"rolloff": 0.0},
         {"rolloff": 1.5},

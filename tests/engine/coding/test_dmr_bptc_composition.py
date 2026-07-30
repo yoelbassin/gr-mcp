@@ -1,5 +1,5 @@
 """DMR BPTC(196,96) as caller data for the composition proof (Task 4), now
-driven through the product coding engine (a coding-only ModemSpec over
+driven through the product coding engine (a coding-only Modem over
 run_rx) instead of calling the plain-function bptc_generic in _dmr.py
 directly. Every DMR value here -- deinterleave/transpose/extract perms,
 Hamming-derived parity masks, CRC xorouts, field offsets -- is caller data
@@ -15,12 +15,13 @@ from pathlib import Path
 import numpy as np
 from e2e import _dmr
 
+from marconi.engine.coding.stages_bits import SegmentStep
 from marconi.engine.io.bitfile import read_bits, write_bits
 from marconi.engine.run import run_rx
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Descriptor
 from marconi.engine.types.levels import Level
-from marconi.engine.types.models import Bitstream, ModemSpec, ModemStep
+from marconi.engine.types.models import Bitstream, Modem
 
 BITS = Descriptor(Level.BITS, "b")
 
@@ -44,8 +45,8 @@ def _dibits(s: str) -> np.ndarray:
     return np.array([int(ch) for ch in s], np.uint8)
 
 
-def _bptc_modem() -> ModemSpec:
-    return ModemSpec(symbol_rate=1.0, path=_dmr.bptc_steps())
+def _bptc_modem() -> Modem:
+    return Modem(symbol_rate=1.0, path=_dmr.bptc_steps())
 
 
 def _decode_payload(dibits: np.ndarray, tmp_path: Path) -> dict[str, int | str] | None:
@@ -77,14 +78,14 @@ def test_bptc_composes_from_generic_stages_on_golden_vectors(tmp_path: Path) -> 
         assert r["source"] == src and r["target"] == tgt, (name, r)
 
 
-def _spliced_bptc_modem() -> ModemSpec:
+def _spliced_bptc_modem() -> Modem:
     """Full burst -> payload in one windowed pipeline: segment seeds a window
     per 264-bit burst, the interior splice gathers the info bits around the
     mid-burst sync, then the BPTC decode runs per window."""
-    return ModemSpec(
+    return Modem(
         symbol_rate=1.0,
         path=[
-            ModemStep(conv="segment", params={"frame_body_len": 264}),
+            SegmentStep(frame_body_len=264),
             _dmr.splice_step(),
             *_dmr.bptc_steps(),
         ],

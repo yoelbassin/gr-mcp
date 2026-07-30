@@ -10,17 +10,17 @@ items reports status "empty" (mirroring the GR half's empty-sink flag), never
 from __future__ import annotations
 
 from pathlib import Path
-from typing import cast
 
 import numpy as np
 
 from marconi.engine.coding import ops_bits
 from marconi.engine.coding.carrier import CodingCarrier
+from marconi.engine.coding.stages_bits import BlockCodeStep, SyncWordStep
 from marconi.engine.run import run_rx
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Descriptor
 from marconi.engine.types.levels import Level
-from marconi.engine.types.models import Bitstream, ModemSpec, ModemStep
+from marconi.engine.types.models import Bitstream, Modem
 
 BITS = Descriptor(Level.BITS, "b")
 HAMMING74 = [0b1011, 0b1101, 0b0111]
@@ -71,18 +71,11 @@ def test_failed_acquisition_reports_empty_not_fabricated_bits(tmp_path: Path) ->
     bits = _alternating(700)
     p = tmp_path / "in.u8"
     bits.tofile(p)
-    modem = ModemSpec(
+    modem = Modem(
         symbol_rate=1.0,
         path=[
-            ModemStep(conv="sync_word", params={"sync": "deadbeef"}),
-            ModemStep(
-                conv="block_code",
-                params={
-                    "code_bits": 7,
-                    "data_bits": 4,
-                    "parity_masks": cast("list[float | int]", HAMMING74),
-                },
-            ),
+            SyncWordStep(sync="deadbeef"),
+            BlockCodeStep(code_bits=7, data_bits=4, parity_masks=HAMMING74),
         ],
     )
     res = run_rx(

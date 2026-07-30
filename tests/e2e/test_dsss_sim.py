@@ -12,17 +12,18 @@ rides the capture-hunt plan."""
 from __future__ import annotations
 
 from pathlib import Path
-from typing import cast
 
 import numpy as np
 from helpers import bitops, crc
 
+from marconi.engine.coding.stages_bits import CodebookStep, SyncWordStep
 from marconi.engine.io.bitfile import read_bits, write_bits
 from marconi.engine.run import run_rx
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Descriptor
+from marconi.engine.types.enums import DecodeMode
 from marconi.engine.types.levels import Level
-from marconi.engine.types.models import Bitstream, ModemSpec, ModemStep
+from marconi.engine.types.models import Bitstream, Modem
 
 BITS = Descriptor(Level.BITS, "b")
 
@@ -82,19 +83,16 @@ def _wire(chip_errors_per_symbol: int, seed: int) -> np.ndarray:
 
 
 def _decode(tmp_path: Path, wire: np.ndarray) -> list[bytes]:
-    modem = ModemSpec(
+    modem = Modem(
         symbol_rate=1.0,
         path=[
-            ModemStep(
-                conv="codebook",
-                params={
-                    "code_bits": 32,
-                    "data_bits": 4,
-                    "table": cast("list[float | int]", CHIPS),
-                    "decode": "nearest",
-                },
+            CodebookStep(
+                code_bits=32,
+                data_bits=4,
+                table=CHIPS,
+                decode=DecodeMode.NEAREST,
             ),
-            ModemStep(conv="sync_word", params={"sync": SYNC}),
+            SyncWordStep(sync=SYNC),
         ],
     )
     p = tmp_path / "dsss.u8"

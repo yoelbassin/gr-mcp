@@ -16,10 +16,11 @@ from marconi.engine.stages.base import Stage
 from marconi.engine.stages.conditioning import CONDITIONING_STAGES
 from marconi.engine.stages.general import GENERAL_STAGES
 from marconi.engine.stages.probes import PROBE_STAGES
+from marconi.engine.types.step import Step
 
 # Each entry is a tuple of stage CLASSES; the registry instantiates fresh per call
 # (no module-level mutable shared state). Family verticals append here.
-_GROUPS: tuple[tuple[type[Stage[Any]], ...], ...] = (
+_GROUPS: tuple[tuple[type[Stage[Any, Any]], ...], ...] = (
     GENERAL_STAGES,
     CONDITIONING_STAGES,
     ACQUISITION_STAGES,
@@ -36,6 +37,10 @@ _GROUPS: tuple[tuple[type[Stage[Any]], ...], ...] = (
 )
 
 
-def stage_registry() -> dict[str, Stage[Any]]:
+def stage_registry() -> dict[str, Stage[Any, Any]]:
     stages = (cls() for group in _GROUPS for cls in group)
     return {s.name: s for s in stages}
+
+
+def step_models() -> dict[str, type[Step]]:
+    return {conv: st.step_model for conv, st in stage_registry().items()}

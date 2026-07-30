@@ -1,5 +1,10 @@
 import pytest
-from engine._fixtures import fixture_registry, stub_factories
+from engine._fixtures import (
+    FakeDemapStep,
+    FakeDemodStep,
+    fixture_registry,
+    stub_factories,
+)
 
 from marconi.engine.backends.base import BackendError
 from marconi.engine.backends.stub import StubBackend
@@ -7,15 +12,15 @@ from marconi.engine.compile.compiler import compile_modem
 from marconi.engine.compile.ir import GrBlock, GrConnection, GrPipeline
 from marconi.engine.types.descriptor import Descriptor
 from marconi.engine.types.levels import Level
-from marconi.engine.types.models import ModemSpec, ModemStep
+from marconi.engine.types.models import Modem
 
 IQ = Descriptor(Level.IQ, "c")
 
 
 def test_instantiate_resolves_a_compiled_pipeline() -> None:
-    modem = ModemSpec(
+    modem = Modem(
         symbol_rate=2.0,
-        path=[ModemStep(conv="fake_demod"), ModemStep(conv="fake_demap")],
+        path=[FakeDemodStep(), FakeDemapStep()],
     )
     pipe = compile_modem(
         modem,

@@ -1,7 +1,7 @@
 import sys
 from collections.abc import Callable
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import numpy as np
 import pytest
@@ -25,19 +25,42 @@ from marconi.engine.backends.gnuradio.runner import (  # noqa: E402
     ensure_worker_warm,
 )
 from marconi.engine.compile.compiler import CompileError, compile_modem  # noqa: E402
+from marconi.engine.modulation.css.stages import (  # noqa: E402
+    ChirpSyncStep,
+    CssDemapStep,
+    DechirpStep,
+)
+from marconi.engine.modulation.fsk.stages import FskStep, MskStep  # noqa: E402
+from marconi.engine.modulation.ofdm.stages import (  # noqa: E402
+    OfdmCoherentSyncStep,
+    OfdmDemodStep,
+)
+from marconi.engine.modulation.ook.stages import OokEnvelopeStep  # noqa: E402
+from marconi.engine.modulation.psk.stages import (  # noqa: E402
+    PskDemapStep,
+    PskDemodStep,
+    SampleSymbolsStep,
+)
+from marconi.engine.modulation.qam.stages import (  # noqa: E402
+    QamDemapStep,
+    QamDemodStep,
+)
+from marconi.engine.stages.conditioning import AgcStep  # noqa: E402
+from marconi.engine.stages.general import SliceStep  # noqa: E402
 from marconi.engine.stages.registry import stage_registry  # noqa: E402
 from marconi.engine.types.descriptor import Amplitude, Carrier, Descriptor  # noqa: E402
+from marconi.engine.types.enums import AgcMode, PskOrder, QamOrder  # noqa: E402
 from marconi.engine.types.levels import Level  # noqa: E402
-from marconi.engine.types.models import ModemSpec, ModemStep  # noqa: E402
-from marconi.engine.types.params import ParamValue  # noqa: E402
+from marconi.engine.types.models import Modem  # noqa: E402
+from marconi.engine.types.step import Step  # noqa: E402
 
 IQ = Descriptor(Level.IQ, "c")
 SYM_C = Descriptor(Level.SYMBOLS, "c", carrier=Carrier.SOFT)
 _SR, _SYM = 8.0, 1.0
 
 
-def _agc(mode: str = "feedforward", **params: float) -> ModemStep:
-    return ModemStep(conv="agc", params={"mode": mode, **params})
+def _agc(mode: str = "feedforward", **params: float) -> AgcStep:
+    return AgcStep.model_validate({"mode": mode, **params})
 
 
 # CSS operates at its own sample-per-symbol scale (oversample*2^sf), not the
@@ -46,7 +69,7 @@ def _agc(mode: str = "feedforward", **params: float) -> ModemStep:
 _CSS_SF, _CSS_OSR = 7, 2
 _CSS_RATE = _CSS_OSR * (1 << _CSS_SF) * _SYM
 _CSS_N_BITS = _CSS_SF * 40
-_CSS_PARAMS: dict[str, ParamValue] = {
+_CSS_PARAMS: dict[str, Any] = {
     "sf": _CSS_SF,
     "oversample": _CSS_OSR,
     "zero_pad": 4,
@@ -59,14 +82,13 @@ _CSS_PARAMS: dict[str, ParamValue] = {
 # synthesized directly (IFFT+CP), geometry from tests/phy/test_ofdm_demod_stage.py.
 _OFDM_FFT, _OFDM_CP, _OFDM_SYM, _OFDM_NULL, _OFDM_NC = 16, 4, 20, 24, 4
 _OFDM_ACTIVE = [1, 2, 14, 15]
-_OFDM_BIN_PERM = cast(
-    "list[float | int]",
-    _OFDM_ACTIVE + [b for b in range(_OFDM_FFT) if b not in _OFDM_ACTIVE],
-)
+_OFDM_BIN_PERM: list[int] = _OFDM_ACTIVE + [
+    b for b in range(_OFDM_FFT) if b not in _OFDM_ACTIVE
+]
 _OFDM_FRAME_SYMS = 4
 _OFDM_N_FRAMES = 4  # >=5 back-to-back frames trip an unrelated resync issue:
 # artifacts/superpowers/issues/28-ofdm-demod-multiframe-resync.md
-_OFDM_PARAMS: dict[str, ParamValue] = {
+_OFDM_PARAMS: dict[str, Any] = {
     "fft_len": _OFDM_FFT,
     "cp_len": _OFDM_CP,
     "sym_len": _OFDM_SYM,
@@ -86,7 +108,7 @@ _QPSK_CORNERS = np.array([1 + 1j, 1 - 1j, -1 + 1j, -1 - 1j]) / np.sqrt(2)
 _RECIPES: dict[str, dict[str, object]] = {
     "ook_envelope": {
         "agc": _agc(),
-        "path": [ModemStep(conv="ook_envelope"), ModemStep(conv="slice")],
+        "path": [OokEnvelopeStep(), SliceStep()],
     },
     "qam_demod": {
         # order 16: the matrix's claim is GAIN-invariance, which order 16 shows
@@ -101,8 +123,8 @@ _RECIPES: dict[str, dict[str, object]] = {
         # new one; the chaotic-in-window lock band moved with it.
         "agc": _agc("power", window_symbols=8.0),
         "path": [
-            ModemStep(conv="qam_demod", params={"order": 16}),
-            ModemStep(conv="qam_demap", params={"order": 16}),
+            QamDemodStep(order=QamOrder(16)),
+            QamDemapStep(order=QamOrder(16)),
         ],
     },
     "psk_demod": {
@@ -112,18 +134,15 @@ _RECIPES: dict[str, dict[str, object]] = {
         # cycle; 16/16 symbols is a verified stable plateau (14-24 all clean).
         "agc": _agc("feedback", attack_symbols=16.0, decay_symbols=16.0),
         "path": [
-            ModemStep(conv="psk_demod", params={"order": 2}),
-            ModemStep(conv="psk_demap", params={"order": 2}),
+            PskDemodStep(order=PskOrder(2)),
+            PskDemapStep(order=PskOrder(2)),
         ],
         "settle": 1536,
         "max_shift": 1856,
     },
     "fsk": {
         "agc": _agc(),
-        "path": [
-            ModemStep(conv="fsk", params={"deviation": 1.0}),
-            ModemStep(conv="slice"),
-        ],
+        "path": [FskStep(deviation=1.0), SliceStep()],
     },
     "dechirp": {
         # window_symbols=1.0 (not the agc default of 16): a CSS "symbol" is
@@ -131,12 +150,11 @@ _RECIPES: dict[str, dict[str, object]] = {
         # whole preamble and corrupts the very edge chirp_sync locks onto.
         "agc": _agc(window_symbols=1.0),
         "path": [
-            ModemStep(conv="chirp_sync", params=_CSS_PARAMS),
-            ModemStep(
-                conv="dechirp",
-                params={k: _CSS_PARAMS[k] for k in ("sf", "oversample", "zero_pad")},
+            ChirpSyncStep(**_CSS_PARAMS),
+            DechirpStep(
+                **{k: _CSS_PARAMS[k] for k in ("sf", "oversample", "zero_pad")}
             ),
-            ModemStep(conv="css_demap", params={"sf": _CSS_PARAMS["sf"]}),
+            CssDemapStep(sf=_CSS_PARAMS["sf"]),
         ],
         "sample_rate": _CSS_RATE,
         "n_bits": _CSS_N_BITS,
@@ -144,43 +162,37 @@ _RECIPES: dict[str, dict[str, object]] = {
     },
     "msk": {
         "agc": _agc(),
-        "path": [ModemStep(conv="msk"), ModemStep(conv="slice")],
+        "path": [MskStep(), SliceStep()],
         # msk is RX-only; TX is the fsk stage at h=0.5 (deviation=symbol_rate/4),
         # matching tests/phy/test_msk_roundtrip.py.
-        "tx_path": [
-            ModemStep(conv="fsk", params={"deviation": _SYM / 4.0}),
-            ModemStep(conv="slice"),
-        ],
+        "tx_path": [FskStep(deviation=_SYM / 4.0), SliceStep()],
         "sample_rate": 20.0,  # the ACARS operating point (test_msk_roundtrip.py)
         "n_bits": 2048,
     },
     "ofdm_demod": {
         "agc": _agc(),
         "path": [
-            ModemStep(conv="ofdm_demod", params=_OFDM_PARAMS),
-            ModemStep(conv="psk_demap", params={"order": 4}),
+            OfdmDemodStep(**_OFDM_PARAMS),
+            PskDemapStep(order=PskOrder(4)),
         ],
     },
     "ofdm_coherent_sync": {
         "agc": _agc(),
-        "path": [ModemStep(conv="ofdm_coherent_sync", params=_lattice.sync_params())],
+        "path": [OfdmCoherentSyncStep(**_lattice.sync_params())],
     },
     "sample_symbols": {
         # 1-sps BPSK, min-distance demap: decisions are sign() on a positive
         # real gain, so the rung is scale-invariant with or without agc --
         # which is what accepts_amplitude=None claims.
         "agc": _agc(),
-        "path": [
-            ModemStep(conv="sample_symbols"),
-            ModemStep(conv="psk_demap", params={"order": 2}),
-        ],
+        "path": [SampleSymbolsStep(), PskDemapStep(order=PskOrder(2))],
         "sample_rate": 1.0,
     },
 }
 
 
-def _recipe_path(name: str) -> list[ModemStep]:
-    return list(cast("list[ModemStep]", _RECIPES[name]["path"]))
+def _recipe_path(name: str) -> list[Step]:
+    return list(cast("list[Step]", _RECIPES[name]["path"]))
 
 
 def _demod_stage_names() -> set[str]:
@@ -202,9 +214,9 @@ def test_every_demod_stage_has_an_amplitude_recipe() -> None:
 _GAINS = [1e-3, 1.0, 1e3]
 
 
-def _tx_path(name: str) -> list[ModemStep]:
+def _tx_path(name: str) -> list[Step]:
     raw = _RECIPES[name].get("tx_path", _RECIPES[name]["path"])
-    return list(cast("list[ModemStep]", raw))
+    return list(cast("list[Step]", raw))
 
 
 def _sample_rate(name: str) -> float:
@@ -223,10 +235,10 @@ def _settle(name: str) -> int:
     return int(cast(int, _RECIPES[name].get("settle", 0)))
 
 
-def _agc_for(name: str, agc_override: ModemStep | None) -> ModemStep:
+def _agc_for(name: str, agc_override: Step | None) -> Step:
     if agc_override is not None:
         return agc_override
-    return cast(ModemStep, _RECIPES[name]["agc"])
+    return cast(Step, _RECIPES[name]["agc"])
 
 
 def _apply(z: np.ndarray, gain: float, condition: str) -> np.ndarray:
@@ -243,7 +255,7 @@ def _apply(z: np.ndarray, gain: float, condition: str) -> np.ndarray:
 
 def _compile_pipeline(
     direction: str,
-    path: list[ModemStep],
+    path: list[Step],
     sample_rate: float,
     symbol_rate: float,
     start: Descriptor,
@@ -251,7 +263,7 @@ def _compile_pipeline(
     snk: Path,
 ):
     return compile_modem(
-        ModemSpec(symbol_rate=symbol_rate, path=path),
+        Modem(symbol_rate=symbol_rate, path=path),
         stage_registry(),
         direction=direction,
         sample_rate=sample_rate,
@@ -262,13 +274,13 @@ def _compile_pipeline(
 
 
 def _paths(
-    name: str, with_agc: bool, agc_override: ModemStep | None = None
-) -> tuple[list[ModemStep], list[ModemStep]]:
+    name: str, with_agc: bool, agc_override: Step | None = None
+) -> tuple[list[Step], list[Step]]:
     rx = _recipe_path(name)
     tx = _tx_path(name)
     if not with_agc:
         return rx, tx
-    return [_agc_for(name, agc_override)] + rx, tx
+    return [_agc_for(name, agc_override), *rx], tx
 
 
 def _roundtrip_ber(
@@ -277,7 +289,7 @@ def _roundtrip_ber(
     gain: float,
     with_agc: bool,
     condition: str,
-    agc_override: ModemStep | None = None,
+    agc_override: Step | None = None,
 ) -> float:
     be = GnuRadioBackend()
     rx_path, tx_path = _paths(name, with_agc, agc_override)
@@ -332,7 +344,7 @@ def _qam_ser(
     gain: float,
     with_agc: bool,
     condition: str,
-    agc_override: ModemStep | None,
+    agc_override: Step | None,
     order: int = _QAM_ORDER,
 ) -> float:
     be = GnuRadioBackend()
@@ -340,9 +352,9 @@ def _qam_ser(
     bits = np.random.default_rng(0).integers(0, 2, _QAM_N_BITS).astype(np.uint8)
     bp = write_bits(tmp_path / "qam_in.bits", bits)
     clean = tmp_path / "qam_clean.iq"
-    tx_path = [
-        ModemStep(conv="qam_demod", params={"order": order}),
-        ModemStep(conv="qam_demap", params={"order": order}),
+    tx_path: list[Step] = [
+        QamDemodStep(order=QamOrder(order)),
+        QamDemapStep(order=QamOrder(order)),
     ]
     tx_pipe = _compile_pipeline("tx", tx_path, rate, _SYM, IQ, bp, clean)
     assert be.run_pipeline(tx_pipe).status == "ok"
@@ -358,9 +370,9 @@ def _qam_ser(
     scaled = tmp_path / f"qam_scaled_{gain}_{with_agc}_{condition}.iq"
     z.astype(np.complex64).tofile(scaled)
 
-    rx_path = [ModemStep(conv="qam_demod", params={"order": order})]
+    rx_path: list[Step] = [QamDemodStep(order=QamOrder(order))]
     if with_agc:
-        rx_path = [_agc_for("qam_demod", agc_override)] + rx_path
+        rx_path = [_agc_for("qam_demod", agc_override), *rx_path]
     out = tmp_path / f"qam_out_{gain}_{with_agc}_{condition}.u8"
     rx_pipe = _compile_pipeline("rx", rx_path, rate, _SYM, IQ, scaled, out)
     assert be.run_pipeline(rx_pipe).status == "ok"
@@ -382,7 +394,7 @@ def _msk_ber(
     gain: float,
     with_agc: bool,
     condition: str,
-    agc_override: ModemStep | None,
+    agc_override: Step | None,
 ) -> float:
     be = GnuRadioBackend()
     rate = _sample_rate("msk")
@@ -398,7 +410,7 @@ def _msk_ber(
 
     rx_path = _recipe_path("msk")
     if with_agc:
-        rx_path = [_agc_for("msk", agc_override)] + rx_path
+        rx_path = [_agc_for("msk", agc_override), *rx_path]
     out = tmp_path / f"msk_out_{gain}_{with_agc}_{condition}.bits"
     rx_pipe = _compile_pipeline("rx", rx_path, rate, _SYM, IQ, scaled, out)
     assert be.run_pipeline(rx_pipe).status == "ok"
@@ -411,7 +423,7 @@ def _ofdm_demod_points(tmp_path: Path, bits: np.ndarray) -> np.ndarray:
     sym = tmp_path / "ofdm_demod_points.cf32"
     pipe = _compile_pipeline(
         "tx",
-        [ModemStep(conv="psk_demap", params={"order": 4})],
+        [PskDemapStep(order=PskOrder(4))],
         1.0,
         1.0,
         SYM_C,
@@ -442,7 +454,7 @@ def _ofdm_demod_ber(
     gain: float,
     with_agc: bool,
     condition: str,
-    agc_override: ModemStep | None,
+    agc_override: Step | None,
 ) -> float:
     be = GnuRadioBackend()
     n_bits = _OFDM_N_FRAMES * _OFDM_FRAME_SYMS * _OFDM_NC * 2
@@ -455,7 +467,7 @@ def _ofdm_demod_ber(
 
     rx_path = _recipe_path("ofdm_demod")
     if with_agc:
-        rx_path = [_agc_for("ofdm_demod", agc_override)] + rx_path
+        rx_path = [_agc_for("ofdm_demod", agc_override), *rx_path]
     out = tmp_path / f"ofdm_demod_out_{gain}_{with_agc}_{condition}.bits"
     pipe = _compile_pipeline("rx", rx_path, 1.0, 1.0, IQ, scaled, out)
     assert be.run_pipeline(pipe).status == "ok"
@@ -487,7 +499,7 @@ def _ofdm_coherent_ser(
     gain: float,
     with_agc: bool,
     condition: str,
-    agc_override: ModemStep | None,
+    agc_override: Step | None,
 ) -> float:
     be = GnuRadioBackend()
     z = _lattice.make_iq(_OFDMC_N_SYMS, snr_db=30.0, seed=_OFDMC_SEED)
@@ -497,7 +509,7 @@ def _ofdm_coherent_ser(
 
     rx_path = _recipe_path("ofdm_coherent_sync")
     if with_agc:
-        rx_path = [_agc_for("ofdm_coherent_sync", agc_override)] + rx_path
+        rx_path = [_agc_for("ofdm_coherent_sync", agc_override), *rx_path]
     out = tmp_path / f"ofdm_coh_out_{gain}_{with_agc}_{condition}.cf32"
     pipe = _compile_pipeline(
         "rx", rx_path, _lattice.RATE, _lattice.RATE / _lattice.SYM_LEN, IQ, scaled, out
@@ -513,7 +525,7 @@ def _sample_symbols_ber(
     gain: float,
     with_agc: bool,
     condition: str,
-    agc_override: ModemStep | None,
+    agc_override: Step | None,
 ) -> float:
     from gnuradio import digital  # in-process GR for oracle ground truth (allowed)
 
@@ -525,14 +537,14 @@ def _sample_symbols_ber(
     z.astype(np.complex64).tofile(scaled)
     rx_path = _recipe_path("sample_symbols")
     if with_agc:
-        rx_path = [_agc_for("sample_symbols", agc_override)] + rx_path
+        rx_path = [_agc_for("sample_symbols", agc_override), *rx_path]
     out = tmp_path / f"ss_out_{gain}_{with_agc}_{condition}.bits"
     pipe = _compile_pipeline("rx", rx_path, 1.0, _SYM, IQ, scaled, out)
     assert be.run_pipeline(pipe).status == "ok"
     return aligned_ber(read_bits(out), bits, max_shift=64)
 
 
-_Measure = Callable[[Path, float, bool, str, ModemStep | None], float]
+_Measure = Callable[[Path, float, bool, str, Step | None], float]
 _BESPOKE: dict[str, _Measure] = {
     "qam_demod": _qam_ser,
     "msk": _msk_ber,
@@ -548,7 +560,7 @@ def _measure(
     gain: float,
     with_agc: bool,
     condition: str,
-    agc_override: ModemStep | None = None,
+    agc_override: Step | None = None,
 ) -> float:
     bespoke = _BESPOKE.get(name)
     if bespoke is not None:
@@ -595,7 +607,7 @@ _BURST_RECIPE = "ook_envelope"
 
 
 def _burst_ber(tmp_path: Path, mode: str) -> float:
-    override = ModemStep(conv="agc", params={"mode": mode})
+    override = AgcStep(mode=AgcMode(mode))
     return _roundtrip_ber(
         tmp_path,
         _BURST_RECIPE,
@@ -630,7 +642,7 @@ _STATISTIC_MODE = {
 
 
 def _compiles_with(name: str, mode: str) -> bool:
-    path = [ModemStep(conv="agc", params={"mode": mode})] + _recipe_path(name)
+    path: list[Step] = [AgcStep(mode=AgcMode(mode)), *_recipe_path(name)]
     try:
         _compile_pipeline(
             "rx",
@@ -670,8 +682,7 @@ def test_wrong_statistic_for_qam_is_a_compile_error_naming_the_requirement() -> 
         with pytest.raises(CompileError, match="rms_unity"):
             _compile_pipeline(
                 "rx",
-                [ModemStep(conv="agc", params={"mode": mode})]
-                + _recipe_path("qam_demod"),
+                [AgcStep(mode=AgcMode(mode)), *_recipe_path("qam_demod")],
                 _sample_rate("qam_demod"),
                 _SYM,
                 IQ,

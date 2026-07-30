@@ -24,22 +24,22 @@ def _is_allowed_default(value: ast.expr | None) -> bool:
     return False
 
 
-def _stage_params_classes(tree: ast.Module) -> list[ast.ClassDef]:
+def _step_classes(tree: ast.Module) -> list[ast.ClassDef]:
     return [
         n
         for n in ast.walk(tree)
         if isinstance(n, ast.ClassDef)
-        and any(isinstance(b, ast.Name) and b.id == "StageParams" for b in n.bases)
+        and any(isinstance(b, ast.Name) and b.id == "Step" for b in n.bases)
     ]
 
 
-def test_stageparams_tables_are_never_populated_defaults() -> None:
+def test_step_tables_are_never_populated_defaults() -> None:
     offenders: list[str] = []
     files = [p for p in _SRC.rglob("*.py") if "__pycache__" not in p.parts]
     assert files, f"no source under {_SRC}"
     for path in files:
         tree = ast.parse(path.read_text())
-        for cls in _stage_params_classes(tree):
+        for cls in _step_classes(tree):
             for field in cls.body:
                 if not isinstance(field, ast.AnnAssign):
                     continue

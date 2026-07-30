@@ -1,4 +1,4 @@
-"""Protocol #5: real off-air ACARS decodes end-to-end through one ModemSpec
+"""Protocol #5: real off-air ACARS decodes end-to-end through one Modem
 spanning phy through the coding tail, matched against an external decoder's
 golden (issues 22/23).
 
@@ -62,12 +62,23 @@ import pytest
 from helpers import bitops, crc, framing, parse
 
 from marconi.engine.backends.gnuradio.runner import ensure_worker_warm
+from marconi.engine.coding.stages_bits import DescrambleStep, SyncWordStep
 from marconi.engine.io.bitfile import read_bits
+from marconi.engine.modulation.fsk.stages import MskStep
 from marconi.engine.run import run_rx
+from marconi.engine.stages.conditioning import (
+    AgcStep,
+    AmStep,
+    AnalyticStep,
+    ChannelizeStep,
+    ResampleStep,
+)
+from marconi.engine.stages.general import SliceStep
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Descriptor
 from marconi.engine.types.levels import Level
-from marconi.engine.types.models import ModemSpec, ModemStep
+from marconi.engine.types.models import Modem
+from marconi.engine.types.step import Step
 
 IQ = Descriptor(Level.IQ, "c")
 RATE = 2_000_000.0
@@ -125,27 +136,21 @@ _ACARS_CRC: dict[str, int | str] = {
 }
 
 
-def _acars_modem(offset_hz: float, invert: bool) -> ModemSpec:
-    path = [
-        ModemStep(
-            conv="channelize",
-            params={"decim": 40, "bandwidth_hz": 24000.0, "center_hz": offset_hz},
-        ),
-        ModemStep(conv="resample", params={"interpolation": 24, "decimation": 25}),
-        ModemStep(conv="am", params={}),
-        ModemStep(conv="analytic", params={}),
-        ModemStep(
-            conv="channelize",
-            params={"decim": 1, "bandwidth_hz": 2400.0, "center_hz": 1800.0},
-        ),
-        ModemStep(conv="agc", params={"window_symbols": 64.0}),
-        ModemStep(conv="msk", params={}),
-        ModemStep(conv="slice", params={}),
+def _acars_modem(offset_hz: float, invert: bool) -> Modem:
+    path: list[Step] = [
+        ChannelizeStep(decim=40, bandwidth_hz=24000.0, center_hz=offset_hz),
+        ResampleStep(interpolation=24, decimation=25),
+        AmStep(),
+        AnalyticStep(),
+        ChannelizeStep(decim=1, bandwidth_hz=2400.0, center_hz=1800.0),
+        AgcStep(window_symbols=64.0),
+        MskStep(),
+        SliceStep(),
     ]
     if invert:
-        path.append(ModemStep(conv="descramble", params={"sequence": "ff"}))
-    path.append(ModemStep(conv="sync_word", params={"sync": "686880", "max_errors": 0}))
-    return ModemSpec(symbol_rate=2400.0, path=path)
+        path.append(DescrambleStep(sequence="ff"))
+    path.append(SyncWordStep(sync="686880", max_errors=0))
+    return Modem(symbol_rate=2400.0, path=path)
 
 
 def _strip_parity(body: bytes) -> bytes:

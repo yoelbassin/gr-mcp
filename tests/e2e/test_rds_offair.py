@@ -28,12 +28,26 @@ import numpy as np
 import pytest
 
 from marconi.engine.backends.gnuradio.runner import ensure_worker_warm
+from marconi.engine.coding.stages_bits import (
+    CodebookStep,
+    DifferentialStep,
+    RealignStep,
+)
 from marconi.engine.io.bitfile import read_bits
+from marconi.engine.modulation.psk.stages import PskDemapStep, PskDemodStep
 from marconi.engine.run import run_rx
+from marconi.engine.stages.conditioning import (
+    AgcStep,
+    AnalyticStep,
+    ChannelizeStep,
+    FmDemodStep,
+    ResampleStep,
+)
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Descriptor
+from marconi.engine.types.enums import AgcMode, PskOrder
 from marconi.engine.types.levels import Level
-from marconi.engine.types.models import Bitstream, ModemSpec, ModemStep
+from marconi.engine.types.models import Bitstream, Modem
 
 IQ = Descriptor(Level.IQ, "c")
 BITS = Descriptor(Level.BITS, "b")
@@ -56,36 +70,30 @@ MIN_VALID_BLOCKS = 120  # measured 180; margin for scheduler nondeterminism
 STATION_PS = "Upliftin"
 
 
-def _phy_modem() -> ModemSpec:
-    return ModemSpec(
+def _phy_modem() -> Modem:
+    return Modem(
         name="rds_rx",
         symbol_rate=SYMBOL_RATE,
         path=[
-            ModemStep(conv="fm_demod", params={"deviation": 75_000.0}),
-            ModemStep(conv="analytic", params={}),
-            ModemStep(
-                conv="channelize",
-                params={"decim": 5, "bandwidth_hz": 4800.0, "center_hz": 57_000.0},
-            ),
-            ModemStep(conv="resample", params={"interpolation": 19, "decimation": 50}),
-            ModemStep(conv="agc", params={"mode": "power"}),
-            ModemStep(conv="psk_demod", params={"order": 2, "alpha": 1.0}),
-            ModemStep(conv="psk_demap", params={"order": 2}),
+            FmDemodStep(deviation=75_000.0),
+            AnalyticStep(),
+            ChannelizeStep(decim=5, bandwidth_hz=4800.0, center_hz=57_000.0),
+            ResampleStep(interpolation=19, decimation=50),
+            AgcStep(mode=AgcMode.POWER),
+            PskDemodStep(order=PskOrder.BPSK, alpha=1.0),
+            PskDemapStep(order=PskOrder.BPSK),
         ],
     )
 
 
-def _codec_modem(bit_offset: int) -> ModemSpec:
-    return ModemSpec(
+def _codec_modem(bit_offset: int) -> Modem:
+    return Modem(
         name="rds_codec",
         symbol_rate=1.0,
         path=[
-            ModemStep(conv="realign", params={"bit_offset": bit_offset}),
-            ModemStep(
-                conv="codebook",
-                params={"code_bits": 2, "data_bits": 1, "table": [1, 2]},
-            ),
-            ModemStep(conv="differential", params={}),
+            RealignStep(bit_offset=bit_offset),
+            CodebookStep(code_bits=2, data_bits=1, table=[1, 2]),
+            DifferentialStep(),
         ],
     )
 

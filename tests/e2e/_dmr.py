@@ -5,15 +5,15 @@ DMR-specific code enters src/. Tables verified vs OK-DMRlib + dsd-neo."""
 
 from __future__ import annotations
 
-from typing import cast
-
 import numpy as np
 from helpers.bitops import bits_to_bytes
 from helpers.crc import crc_value
 
 from marconi.engine.coding.carrier import CodingCarrier
 from marconi.engine.coding.ops_bits import block_code_rx, permute_rx
-from marconi.engine.types.models import ModemStep
+from marconi.engine.coding.stages_bits import BlockCodeStep, PermuteStep
+from marconi.engine.types.enums import EmitMode
+from marconi.engine.types.step import Step
 
 # fmt: off
 DEINTERLEAVE = [
@@ -99,37 +99,31 @@ def _block_code(
     ).bits
 
 
-def _perm_step(perm: list[int]) -> ModemStep:
-    return ModemStep(
-        conv="permute",
-        params={"perm": cast("list[float | int]", [int(x) for x in perm])},
+def _perm_step(perm: list[int]) -> PermuteStep:
+    return PermuteStep(perm=[int(x) for x in perm])
+
+
+def _block_step(code_bits: int, data_bits: int, masks: list[int]) -> BlockCodeStep:
+    return BlockCodeStep(
+        code_bits=code_bits,
+        data_bits=data_bits,
+        parity_masks=[int(x) for x in masks],
+        correct_single=True,
+        emit=EmitMode.CODEWORD,
     )
 
 
-def _block_step(code_bits: int, data_bits: int, masks: list[int]) -> ModemStep:
-    return ModemStep(
-        conv="block_code",
-        params={
-            "code_bits": code_bits,
-            "data_bits": data_bits,
-            "parity_masks": cast("list[float | int]", masks),
-            "correct_single": True,
-            "emit": "codeword",
-        },
-    )
-
-
-def splice_step() -> ModemStep:
+def splice_step() -> PermuteStep:
     """The interior splice as a windowed gather: info bits around the sync."""
     return _perm_step(INFO_SPLICE)
 
 
-def bptc_steps() -> list[ModemStep]:
+def bptc_steps() -> list[Step]:
     """info196 -> 96-bit payload through the generic vocabulary: scatter
     deinterleave, drop the reserved bit 0, two row/column Hamming passes with a
     transpose between, then extract the message bits. Runs blind (one 196-bit
     block) or windowed (one per seeded burst) — the ops handle both scopes."""
-    round_trip = [
+    round_trip: list[Step] = [
         _block_step(15, 11, ROW_MASKS),
         _perm_step(TRANSPOSE),
         _block_step(13, 9, COL_MASKS),

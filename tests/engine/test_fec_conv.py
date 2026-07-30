@@ -1,14 +1,17 @@
+from typing import Any
+
 import numpy as np
+import pytest
+from pydantic import ValidationError
 
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
 from marconi.engine.compile.compiler import compile_modem
 from marconi.engine.io.bitfile import read_bits
-from marconi.engine.modulation.coding.stages import Fec
-from marconi.engine.stages.base import validate_params
+from marconi.engine.modulation.coding.stages import Fec, FecStep
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Carrier, Descriptor
 from marconi.engine.types.levels import Level
-from marconi.engine.types.models import ModemSpec, ModemStep
+from marconi.engine.types.models import Modem
 
 
 def _roundtrip(tmp_path, *, rate_inv, polys, frame_bits, seed):
@@ -41,19 +44,16 @@ def _roundtrip(tmp_path, *, rate_inv, polys, frame_bits, seed):
     src = tmp_path / f"s{seed}.f32"
     soft.tofile(src)
     snk = tmp_path / f"b{seed}.u8"
-    modem = ModemSpec(
+    modem = Modem(
         name="fec",
         symbol_rate=1.0,
         path=[
-            ModemStep(
-                conv="fec",
-                params={
-                    "scheme": "cc",
-                    "rate_inv": rate_inv,
-                    "polys": list(polys),
-                    "frame_bits": frame_bits,
-                    "tail": tail,
-                },
+            FecStep(
+                scheme="cc",
+                rate_inv=rate_inv,
+                polys=list(polys),
+                frame_bits=frame_bits,
+                tail=tail,
             )
         ],
     )
@@ -85,7 +85,7 @@ def test_fec_conv_generic_rate_half(tmp_path):
     assert np.array_equal(out, info)
 
 
-_CC_PARAMS = {
+_CC_PARAMS: dict[str, Any] = {
     "scheme": "cc",
     "rate_inv": 2,
     "polys": [0o171, 0o133],
@@ -95,26 +95,19 @@ _CC_PARAMS = {
 
 
 def test_fec_params_reject_unknown_scheme():
-    issues: list = []
-    validate_params(
-        "fec[0]", Fec().params_model, {**_CC_PARAMS, "scheme": "turbo"}, issues
-    )
-    assert issues, "unknown scheme must fail at validation, not KeyError at emit"
+    with pytest.raises(ValidationError):
+        Fec().step_model.model_validate({**_CC_PARAMS, "scheme": "turbo"})
 
 
 def test_fec_params_reject_nonpositive_and_empty():
     for override in ({"rate_inv": 0}, {"frame_bits": 0}, {"polys": []}, {"tail": -1}):
-        issues: list = []
-        validate_params(
-            "fec[0]", Fec().params_model, {**_CC_PARAMS, **override}, issues
-        )
-        assert issues, f"{override} must be rejected"
+        with pytest.raises(ValidationError):
+            Fec().step_model.model_validate({**_CC_PARAMS, **override})
 
 
 def test_fec_params_accept_cc():
-    ok: list = []
-    validate_params("fec[0]", Fec().params_model, _CC_PARAMS, ok)
-    assert not ok, ok
+    step = Fec().step_model.model_validate(_CC_PARAMS)
+    assert step.scheme == "cc"
 
 
 def test_fec_conv_unterminated_frame_tail_bits_correct(tmp_path):
@@ -148,19 +141,16 @@ def test_fec_conv_unterminated_frame_tail_bits_correct(tmp_path):
     src = tmp_path / "unterm.f32"
     soft.tofile(src)
     snk = tmp_path / "unterm.u8"
-    modem = ModemSpec(
+    modem = Modem(
         name="fec",
         symbol_rate=1.0,
         path=[
-            ModemStep(
-                conv="fec",
-                params={
-                    "scheme": "cc",
-                    "rate_inv": rate_inv,
-                    "polys": polys,
-                    "frame_bits": frame_bits,
-                    "tail": 0,
-                },
+            FecStep(
+                scheme="cc",
+                rate_inv=rate_inv,
+                polys=polys,
+                frame_bits=frame_bits,
+                tail=0,
             )
         ],
     )
@@ -211,20 +201,17 @@ def test_fec_conv_rate_two_thirds_k2(tmp_path):
     src = tmp_path / "k2.f32"
     soft.tofile(src)
     snk = tmp_path / "k2.u8"
-    modem = ModemSpec(
+    modem = Modem(
         name="fec",
         symbol_rate=1.0,
         path=[
-            ModemStep(
-                conv="fec",
-                params={
-                    "scheme": "cc",
-                    "k": k,
-                    "rate_inv": rate_inv,
-                    "polys": polys,
-                    "frame_bits": frame_bits,
-                    "tail": tail,
-                },
+            FecStep(
+                scheme="cc",
+                k=k,
+                rate_inv=rate_inv,
+                polys=polys,
+                frame_bits=frame_bits,
+                tail=tail,
             )
         ],
     )

@@ -13,9 +13,14 @@ from engine._dsp import (
 
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
 from marconi.engine.compile.compiler import compile_modem
+from marconi.engine.modulation.psk.stages import PskDemapStep, PskDemodStep
+from marconi.engine.stages.acquisition import PreambleSyncStep
+from marconi.engine.stages.conditioning import AgcStep
 from marconi.engine.types.descriptor import Descriptor
+from marconi.engine.types.enums import AgcMode, PskOrder
 from marconi.engine.types.levels import Level
-from marconi.engine.types.models import ModemSpec, ModemStep
+from marconi.engine.types.models import Modem
+from marconi.engine.types.step import Step
 
 IQ = Descriptor(Level.IQ, "c")
 _SR, _SYM = 4.0, 1.0
@@ -34,30 +39,25 @@ def _const_points(order: int) -> np.ndarray:
     return np.asarray(c.points())
 
 
-def _modem(order: int, direction: str) -> ModemSpec:
+def _modem(order: int, direction: str) -> Modem:
     pi, pq = make_preamble(_const_points(order))
-    demod = [ModemStep(conv="psk_demod", params={"order": order})]
+    demod: list[Step] = [PskDemodStep(order=PskOrder(order))]
     if direction == "rx":
         # window_symbols=320: empirically measured; BER-0 across a real ~80-wide
         # robust band (272-352) under this test's impairments (see review-fix
         # report's sweep).
-        demod = [
-            ModemStep(conv="agc", params={"mode": "power", "window_symbols": 320.0})
-        ] + demod
-    return ModemSpec(
+        demod = [AgcStep(mode=AgcMode.POWER, window_symbols=320.0)] + demod
+    return Modem(
         symbol_rate=_SYM,
         path=demod
         + [
-            ModemStep(
-                conv="preamble_sync",
-                params={"preamble_i": pi, "preamble_q": pq, "pad_symbols": 192},
-            ),
-            ModemStep(conv="psk_demap", params={"order": order}),
+            PreambleSyncStep(preamble_i=pi, preamble_q=pq, pad_symbols=192),
+            PskDemapStep(order=PskOrder(order)),
         ],
     )
 
 
-def _compile(modem: ModemSpec, direction: str, src: Path, snk: Path):
+def _compile(modem: Modem, direction: str, src: Path, snk: Path):
     from marconi.engine.stages.registry import stage_registry
 
     return compile_modem(

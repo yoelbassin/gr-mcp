@@ -1,10 +1,13 @@
+from typing import Literal
+
 import pytest
 from pydantic import StrictInt, ValidationError
 
-from marconi.engine.types.params import StageParams
+from marconi.engine.types.step import Step
 
 
-class _Demo(StageParams):
+class _Demo(Step):
+    conv: Literal["demo"] = "demo"
     sf: StrictInt
     gray: bool = True
 

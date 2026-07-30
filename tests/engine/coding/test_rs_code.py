@@ -12,7 +12,7 @@ from pydantic import ValidationError
 
 from marconi.engine.coding.carrier import CodingCarrier, Window
 from marconi.engine.coding.ops_bits import rs_code_rx
-from marconi.engine.coding.stages_bits import RsCode
+from marconi.engine.coding.stages_bits import RsCodeStep
 from marconi.engine.stages.registry import stage_registry
 
 RS15: dict[str, int] = {
@@ -133,7 +133,7 @@ def test_rs_code_shortened_gf64_code_corrects() -> None:
 def test_rs_code_stage_is_registered_and_validates_shape() -> None:
     assert "rs_code" in stage_registry()
     ok = dict(RS15)
-    RsCode._Params.model_validate(ok)
+    RsCodeStep.model_validate(ok)
     for bad in [
         {**ok, "k": 15},
         {**ok, "n": 16},
@@ -141,4 +141,4 @@ def test_rs_code_stage_is_registered_and_validates_shape() -> None:
         {**ok, "emit": "junk"},
     ]:
         with pytest.raises(ValidationError):
-            RsCode._Params.model_validate(bad)
+            RsCodeStep.model_validate(bad)

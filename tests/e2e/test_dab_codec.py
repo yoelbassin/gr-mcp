@@ -13,12 +13,13 @@ import numpy as np
 import pytest
 from helpers import bitops, crc, framing
 
+from marconi.engine.coding.stages_bits import DescrambleStep, SegmentStep
 from marconi.engine.io.bitfile import read_bits, write_bits
 from marconi.engine.run import run_rx
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Descriptor
 from marconi.engine.types.levels import Level
-from marconi.engine.types.models import Bitstream, ModemSpec, ModemStep
+from marconi.engine.types.models import Bitstream, Modem
 
 BITS = Descriptor(Level.BITS, "b")
 _FRAME_BODY_LEN = 256
@@ -35,12 +36,12 @@ def _prbs_hex() -> str:
     return np.packbits(np.array(prbs, np.uint8)).tobytes().hex()
 
 
-def _golden_modem() -> ModemSpec:
-    return ModemSpec(
+def _golden_modem() -> Modem:
+    return Modem(
         symbol_rate=1.0,
         path=[
-            ModemStep(conv="descramble", params={"sequence": _prbs_hex()}),
-            ModemStep(conv="segment", params={"frame_body_len": _FRAME_BODY_LEN}),
+            DescrambleStep(sequence=_prbs_hex()),
+            SegmentStep(frame_body_len=_FRAME_BODY_LEN),
         ],
     )
 

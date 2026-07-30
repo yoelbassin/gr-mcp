@@ -5,10 +5,12 @@ from engine._dsp import aligned_ber, channel, read_bits, write_bits
 
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
 from marconi.engine.compile.compiler import compile_modem
+from marconi.engine.modulation.fsk.stages import FskStep
+from marconi.engine.stages.general import SliceStep
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Descriptor
 from marconi.engine.types.levels import Level
-from marconi.engine.types.models import ModemSpec, ModemStep
+from marconi.engine.types.models import Modem
 
 IQ = Descriptor(Level.IQ, "c")
 _SR = 4.0  # sample_rate; OSR = 4 over symbol_rate = 1.0
@@ -16,13 +18,10 @@ _SYM = 1.0
 _DEV = 1.0
 
 
-def _modem() -> ModemSpec:
-    return ModemSpec(
+def _modem() -> Modem:
+    return Modem(
         symbol_rate=_SYM,
-        path=[
-            ModemStep(conv="fsk", params={"deviation": _DEV}),
-            ModemStep(conv="slice"),
-        ],
+        path=[FskStep(deviation=_DEV), SliceStep()],
     )
 
 

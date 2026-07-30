@@ -6,8 +6,9 @@ import pytest
 from marconi.engine.coding import ops_bits
 from marconi.engine.coding.builder import CodingBuilder
 from marconi.engine.coding.carrier import CodingCarrier, Window
-from marconi.engine.coding.stages_bits import _CodebookParams
-from marconi.engine.coding.stages_symbols import SymbolMap
+from marconi.engine.coding.stages_bits import CodebookStep
+from marconi.engine.coding.stages_symbols import SymbolMap, SymbolMapStep
+from marconi.engine.types.enums import DecodeMode
 
 THREE_OF_SIX = [
     0x16, 0x0D, 0x0E, 0x0B, 0x1C, 0x19, 0x1A, 0x13,
@@ -80,14 +81,14 @@ def test_nearest_tie_breaks_to_lowest_index() -> None:
 
 def test_exact_mode_rejects_wide_codes() -> None:
     with pytest.raises(Exception, match="nearest"):
-        _CodebookParams.model_validate(
+        CodebookStep.model_validate(
             {"code_bits": 32, "data_bits": 2, "table": [0, 1, 2, 3]}
         )
 
 
 def test_nearest_mode_rejects_codes_past_int64_ceiling() -> None:
     with pytest.raises(Exception, match="63"):
-        _CodebookParams.model_validate(
+        CodebookStep.model_validate(
             {
                 "code_bits": 64,
                 "data_bits": 2,
@@ -98,7 +99,7 @@ def test_nearest_mode_rejects_codes_past_int64_ceiling() -> None:
 
 
 def test_nearest_mode_allows_int64_ceiling() -> None:
-    _CodebookParams.model_validate(
+    CodebookStep.model_validate(
         {
             "code_bits": 63,
             "data_bits": 2,
@@ -110,7 +111,7 @@ def test_nearest_mode_allows_int64_ceiling() -> None:
 
 def test_decode_param_is_validated() -> None:
     with pytest.raises(Exception, match="exact|nearest"):
-        _CodebookParams.model_validate(
+        CodebookStep.model_validate(
             {"code_bits": 6, "data_bits": 4, "table": THREE_OF_SIX, "decode": "fuzzy"}
         )
 
@@ -172,12 +173,12 @@ def test_symbol_map_stage_forwards_decode_to_nearest() -> None:
     b = CodingBuilder()
     SymbolMap().emit_rx(
         b,
-        {
-            "code_bits": 6,
-            "data_bits": 2,
-            "table": table,
-            "decode": "nearest",
-        },
+        SymbolMapStep(
+            code_bits=6,
+            data_bits=2,
+            table=table,
+            decode=DecodeMode.NEAREST,
+        ),
     )
     src = CodingCarrier(
         bits=np.zeros(0, np.uint8), symbols=np.array([off_table], np.int64)

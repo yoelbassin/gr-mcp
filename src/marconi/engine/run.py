@@ -25,7 +25,7 @@ from marconi.engine.io.bitfile import (
 from marconi.engine.stages.base import Stage
 from marconi.engine.types.descriptor import Descriptor
 from marconi.engine.types.levels import Level
-from marconi.engine.types.models import Bitstream, ModemSpec, Symbolstream
+from marconi.engine.types.models import Bitstream, Modem, Symbolstream
 from marconi.engine.types.params import ParamValue
 
 
@@ -202,8 +202,8 @@ def _flag_empty_coding(result: PipelineResult) -> PipelineResult:
 
 
 def run_rx(
-    modem: ModemSpec,
-    registry: Mapping[str, Stage[Any]],
+    modem: Modem,
+    registry: Mapping[str, Stage[Any, Any]],
     *,
     sample_rate: float,
     start: Descriptor,

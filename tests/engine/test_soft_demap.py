@@ -8,10 +8,14 @@ import pytest
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
 from marconi.engine.compile.compiler import compile_modem
 from marconi.engine.io.bitfile import read_bits
+from marconi.engine.modulation.coding.stages import HardenStep
+from marconi.engine.modulation.ofdm.stages import SoftDemapStep
+from marconi.engine.modulation.psk.stages import PskSoftDemapStep
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Carrier, Descriptor
+from marconi.engine.types.enums import PskOrder
 from marconi.engine.types.levels import Level
-from marconi.engine.types.models import ModemSpec, ModemStep
+from marconi.engine.types.models import Modem
 from marconi.engine.types.params import ParamValue
 
 SYM_C = Descriptor(Level.SYMBOLS, "c", Carrier.SOFT)
@@ -24,12 +28,9 @@ def _run_bits(
     src = tmp_path / "in.cf32"
     syms.astype(np.complex64).tofile(src)
     snk = tmp_path / "out.u8"
-    modem = ModemSpec(
+    modem = Modem(
         symbol_rate=1.0,
-        path=[
-            ModemStep(conv="soft_demap", params=params),
-            ModemStep(conv="harden", params={}),
-        ],
+        path=[SoftDemapStep.model_validate(params), HardenStep()],
     )
     pipe = compile_modem(
         modem,
@@ -69,12 +70,9 @@ def test_soft_demap_psk_matches_psk_soft_demap(tmp_path: Path) -> None:
     src = tmp_path / "ref.cf32"
     qpsk.tofile(src)
     snk = tmp_path / "ref.u8"
-    modem = ModemSpec(
+    modem = Modem(
         symbol_rate=1.0,
-        path=[
-            ModemStep(conv="psk_soft_demap", params={"order": 4}),
-            ModemStep(conv="harden", params={}),
-        ],
+        path=[PskSoftDemapStep(order=PskOrder(4)), HardenStep()],
     )
     pipe = compile_modem(
         modem,
@@ -93,7 +91,7 @@ def test_soft_demap_psk_matches_psk_soft_demap(tmp_path: Path) -> None:
 def test_soft_demap_scales_frame_len_by_bits_per_symbol() -> None:
     framed = Descriptor(Level.SYMBOLS, "c", Carrier.SOFT, frame_len=65)
     out = stage_registry()["soft_demap"].out_descriptor(
-        framed, {"scheme": "psk", "order": 4}
+        framed, SoftDemapStep(scheme="psk", order=4)
     )
     assert out.frame_len == 130
     assert out.level is Level.BITS and out.item_type == "f"
@@ -102,10 +100,10 @@ def test_soft_demap_scales_frame_len_by_bits_per_symbol() -> None:
 
 def test_soft_demap_declares_required_order() -> None:
     stage = stage_registry()["soft_demap"]
-    assert stage.required_input_order({"scheme": "qam", "order": 16}) == 16
+    assert stage.required_input_order(SoftDemapStep(scheme="qam", order=16)) == 16
     assert (
         stage.required_input_order(
-            {"scheme": "explicit", "points_i": [-1.0, 1.0], "points_q": [0.0, 0.0]}
+            SoftDemapStep(scheme="explicit", points_i=[-1.0, 1.0], points_q=[0.0, 0.0])
         )
         == 2
     )
@@ -123,7 +121,7 @@ def test_soft_demap_declares_required_order() -> None:
 )
 def test_soft_demap_rejects_malformed_params(params: dict[str, ParamValue]) -> None:
     with pytest.raises(Exception):
-        stage_registry()["soft_demap"].params_model.model_validate(params)
+        stage_registry()["soft_demap"].step_model.model_validate(params)
 
 
 def test_soft_demap_qam16_decodes_every_point_to_its_index(tmp_path: Path) -> None:
@@ -150,6 +148,6 @@ def test_soft_demap_qam16_decodes_every_point_to_its_index(tmp_path: Path) -> No
 
 def test_soft_demap_qam64_is_rejected() -> None:
     with pytest.raises(Exception, match="order 16 only"):
-        stage_registry()["soft_demap"].params_model.model_validate(
+        stage_registry()["soft_demap"].step_model.model_validate(
             {"scheme": "qam", "order": 64}
         )

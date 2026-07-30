@@ -9,7 +9,7 @@ from helpers.golay import golay_codeword, golay_masks
 from marconi.engine.coding import ops_bits
 from marconi.engine.coding.carrier import CodingCarrier
 from marconi.engine.coding.primitives import syndrome_table
-from marconi.engine.coding.stages_bits import BlockCode
+from marconi.engine.coding.stages_bits import BlockCodeStep
 
 
 def _decode(bits: np.ndarray, correct: int) -> np.ndarray:
@@ -64,7 +64,7 @@ def test_correct_beyond_capability_is_rejected() -> None:
     # Hamming(7,4) corrects 1; t=2 syndromes must collide.
     hamming_masks = [0b1011, 0b1101, 0b1110]
     with pytest.raises(Exception, match="collide|correct"):
-        BlockCode._Params.model_validate(
+        BlockCodeStep.model_validate(
             {
                 "code_bits": 7,
                 "data_bits": 4,
@@ -76,7 +76,7 @@ def test_correct_beyond_capability_is_rejected() -> None:
 
 def test_correct_and_correct_single_are_exclusive() -> None:
     with pytest.raises(Exception, match="correct"):
-        BlockCode._Params.model_validate(
+        BlockCodeStep.model_validate(
             {
                 "code_bits": 7,
                 "data_bits": 4,

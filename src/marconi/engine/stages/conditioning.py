@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from typing import Any, Literal
 
 from pydantic import Field, StrictInt, model_validator
@@ -10,11 +10,13 @@ from pydantic_core import PydanticCustomError
 from marconi.engine.compile.compile_context import CompileContext
 from marconi.engine.stages.base import RxStage
 from marconi.engine.types.descriptor import Amplitude, Descriptor
+from marconi.engine.types.enums import AgcMode
 from marconi.engine.types.levels import Level
-from marconi.engine.types.params import StageParams
+from marconi.engine.types.step import Step
 
 
-class _ChannelizeParams(StageParams):
+class ChannelizeStep(Step):
+    conv: Literal["channelize"] = "channelize"
     decim: (
         StrictInt  # required & explicit: rate_factor (1/decim) must be params-derivable
     )
@@ -22,7 +24,7 @@ class _ChannelizeParams(StageParams):
     center_hz: float = 0.0  # offset of the sub-band from the capture centre
 
     @model_validator(mode="after")
-    def _ok(self) -> "_ChannelizeParams":
+    def _ok(self) -> "ChannelizeStep":
         if self.decim < 1:
             raise PydanticCustomError("value_error", "decim must be >= 1")
         if self.bandwidth_hz <= 0:
@@ -30,11 +32,11 @@ class _ChannelizeParams(StageParams):
         return self
 
 
-class _InvertParams(StageParams):
-    pass
+class InvertStep(Step):
+    conv: Literal["invert"] = "invert"
 
 
-class Channelize(RxStage[CompileContext]):
+class Channelize(RxStage[CompileContext, ChannelizeStep]):
     """Extract a sub-band: frequency-shift center_hz to baseband, low-pass, and
     decimate by `decim` (one freq_xlating_fir_filter). RX-only conditioning. The
     cutoff/transition are derived from bandwidth_hz; `decim` is explicit because
@@ -52,25 +54,24 @@ class Channelize(RxStage[CompileContext]):
     from_level = Level.IQ
     to_level = Level.IQ
     family = "conditioning"
-    params_model = _ChannelizeParams
+    step_model = ChannelizeStep
     alters_amplitude = True
 
-    def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
-        p = _ChannelizeParams.model_validate(dict(params))
+    def emit_rx(self, b: CompileContext, step: ChannelizeStep) -> None:
         b.chain(
             "freq_xlating_fir_filter_ccf",
-            decim=p.decim,
-            center=p.center_hz,
-            cutoff=p.bandwidth_hz / 2.0,
-            transition=p.bandwidth_hz / 2.0,
+            decim=step.decim,
+            center=step.center_hz,
+            cutoff=step.bandwidth_hz / 2.0,
+            transition=step.bandwidth_hz / 2.0,
             rate=b.rate,
         )
 
-    def rate_factor(self, params: Mapping[str, Any]) -> float:
-        return 1.0 / int(params["decim"])
+    def rate_factor(self, step: ChannelizeStep) -> float:
+        return 1.0 / int(step.decim)
 
 
-class Invert(RxStage[CompileContext]):
+class Invert(RxStage[CompileContext, InvertStep]):
     """Spectral conjugate (un-mirror a flipped capture, e.g. SDR# .wav). RX-only,
     IQ->IQ, rate unchanged."""
 
@@ -78,18 +79,19 @@ class Invert(RxStage[CompileContext]):
     from_level = Level.IQ
     to_level = Level.IQ
     family = "conditioning"
-    params_model = _InvertParams
+    step_model = InvertStep
 
-    def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
+    def emit_rx(self, b: CompileContext, step: InvertStep) -> None:
         b.chain("conjugate_cc")
 
 
-class _ResampleParams(StageParams):
+class ResampleStep(Step):
+    conv: Literal["resample"] = "resample"
     interpolation: StrictInt
     decimation: StrictInt
 
     @model_validator(mode="after")
-    def _ok(self) -> "_ResampleParams":
+    def _ok(self) -> "ResampleStep":
         if self.interpolation < 1:
             raise PydanticCustomError("value_error", "interpolation must be >= 1")
         if self.decimation < 1:
@@ -97,7 +99,7 @@ class _ResampleParams(StageParams):
         return self
 
 
-class Resample(RxStage[CompileContext]):
+class Resample(RxStage[CompileContext, ResampleStep]):
     """Rational resample by interpolation/decimation via rational_resampler_ccf
     (integer ratio, auto-designed anti-imaging taps). The first non-unity
     rate_factor that is not 1/decim: lands an arbitrary capture rate exactly on a
@@ -107,31 +109,32 @@ class Resample(RxStage[CompileContext]):
     from_level = Level.IQ
     to_level = Level.IQ
     family = "conditioning"
-    params_model = _ResampleParams
+    step_model = ResampleStep
     alters_amplitude = True
 
-    def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
+    def emit_rx(self, b: CompileContext, step: ResampleStep) -> None:
         b.chain(
             "rational_resampler_ccf",
-            interpolation=int(params["interpolation"]),
-            decimation=int(params["decimation"]),
+            interpolation=int(step.interpolation),
+            decimation=int(step.decimation),
         )
 
-    def rate_factor(self, params: Mapping[str, Any]) -> float:
-        return int(params["interpolation"]) / int(params["decimation"])
+    def rate_factor(self, step: ResampleStep) -> float:
+        return int(step.interpolation) / int(step.decimation)
 
 
-class _ClockCorrectParams(StageParams):
+class ClockCorrectStep(Step):
+    conv: Literal["clock_correct"] = "clock_correct"
     ppm: float  # transmitter clock offset in parts-per-million (signed)
 
     @model_validator(mode="after")
-    def _ok(self) -> "_ClockCorrectParams":
+    def _ok(self) -> "ClockCorrectStep":
         if self.ppm <= -1e6:
             raise PydanticCustomError("value_error", "ppm must be > -1e6")
         return self
 
 
-class ClockCorrect(RxStage[CompileContext]):
+class ClockCorrect(RxStage[CompileContext, ClockCorrectStep]):
     """Cancel sampling-frequency offset (transmitter clock drift) by resampling
     by 1/(1 + ppm*1e-6) via the polyphase arbitrary resampler. RX-only. SFO is a
     silent no-op below ~1 chip of cumulative drift (ppm * n_samples), so it only
@@ -141,18 +144,19 @@ class ClockCorrect(RxStage[CompileContext]):
     from_level = Level.IQ
     to_level = Level.IQ
     family = "conditioning"
-    params_model = _ClockCorrectParams
+    step_model = ClockCorrectStep
     alters_amplitude = True
 
-    def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
-        b.chain("pfb_arb_resampler_ccf", rate=1.0 / (1.0 + float(params["ppm"]) * 1e-6))
+    def emit_rx(self, b: CompileContext, step: ClockCorrectStep) -> None:
+        b.chain("pfb_arb_resampler_ccf", rate=1.0 / (1.0 + float(step.ppm) * 1e-6))
 
-    def rate_factor(self, params: Mapping[str, Any]) -> float:
-        return 1.0 / (1.0 + float(params["ppm"]) * 1e-6)
+    def rate_factor(self, step: ClockCorrectStep) -> float:
+        return 1.0 / (1.0 + float(step.ppm) * 1e-6)
 
 
-class _AgcParams(StageParams):
-    mode: Literal["feedforward", "feedback", "power"] = "feedforward"
+class AgcStep(Step):
+    conv: Literal["agc"] = "agc"
+    mode: AgcMode = AgcMode.FEEDFORWARD
     reference: float = 1.0
     window_symbols: float = 16.0
     attack_symbols: float = 1.0
@@ -160,7 +164,7 @@ class _AgcParams(StageParams):
     max_gain: float = 0.0
 
     @model_validator(mode="after")
-    def _ok(self) -> "_AgcParams":
+    def _ok(self) -> "AgcStep":
         if self.reference <= 0.0:
             raise PydanticCustomError("value_error", "reference must be > 0")
         if self.window_symbols <= 0.0:
@@ -189,7 +193,7 @@ _MODE_FIELDS: dict[str, set[str]] = {
 }
 
 
-def _agc_feedforward(b: CompileContext, p: _AgcParams) -> None:
+def _agc_feedforward(b: CompileContext, p: AgcStep) -> None:
     b.chain(
         "feedforward_agc_cc",
         nsamples=max(1, round(p.window_symbols * b.sps)),
@@ -197,7 +201,7 @@ def _agc_feedforward(b: CompileContext, p: _AgcParams) -> None:
     )
 
 
-def _agc_feedback(b: CompileContext, p: _AgcParams) -> None:
+def _agc_feedback(b: CompileContext, p: AgcStep) -> None:
     b.chain(
         "agc2_cc",
         attack_rate=1.0 / (p.attack_symbols * b.sps),
@@ -207,7 +211,7 @@ def _agc_feedback(b: CompileContext, p: _AgcParams) -> None:
     )
 
 
-def _agc_power(b: CompileContext, p: _AgcParams) -> None:
+def _agc_power(b: CompileContext, p: AgcStep) -> None:
     src = b.tail
     assert src is not None
     alpha = 1.0 / (p.window_symbols * b.sps)
@@ -227,7 +231,7 @@ def _agc_power(b: CompileContext, p: _AgcParams) -> None:
     b.set_tail(f2c)
 
 
-_AGC_MODES: dict[str, Callable[[CompileContext, _AgcParams], None]] = {
+_AGC_MODES: dict[str, Callable[[CompileContext, AgcStep], None]] = {
     "feedforward": _agc_feedforward,
     "feedback": _agc_feedback,
     "power": _agc_power,
@@ -243,7 +247,7 @@ _MODE_AMPLITUDE: dict[str, Amplitude] = {
 }
 
 
-class Agc(RxStage[CompileContext]):
+class Agc(RxStage[CompileContext, AgcStep]):
     """Normalize IQ amplitude. `mode` selects WHICH statistic is driven to
     `reference`, and that choice is part of the output contract:
     feedforward -> peak_unity, feedback -> mean_mag_unity, power -> rms_unity."""
@@ -252,31 +256,28 @@ class Agc(RxStage[CompileContext]):
     from_level = Level.IQ
     to_level = Level.IQ
     family = "conditioning"
-    params_model = _AgcParams
+    step_model = AgcStep
 
-    def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
-        p = _AgcParams.model_validate(dict(params))
-        _AGC_MODES[p.mode](b, p)
+    def emit_rx(self, b: CompileContext, step: AgcStep) -> None:
+        _AGC_MODES[step.mode](b, step)
 
-    def out_descriptor(
-        self, in_desc: Descriptor, params: Mapping[str, Any]
-    ) -> Descriptor:
-        p = _AgcParams.model_validate(dict(params))
+    def out_descriptor(self, in_desc: Descriptor, step: AgcStep) -> Descriptor:
         return Descriptor(
             Level.IQ,
             in_desc.item_type,
             in_desc.carrier,
-            _MODE_AMPLITUDE[p.mode],
+            _MODE_AMPLITUDE[step.mode],
         )
 
 
-class _SquelchParams(StageParams):
+class SquelchStep(Step):
+    conv: Literal["squelch"] = "squelch"
     threshold_db: float
     alpha_symbols: float = 1.0  # power-estimate time constant
     ramp_symbols: float = 0.0  # cosine edge, suppresses the switching transient
 
     @model_validator(mode="after")
-    def _ok(self) -> "_SquelchParams":
+    def _ok(self) -> "SquelchStep":
         if self.alpha_symbols <= 0.0:
             raise PydanticCustomError("value_error", "alpha_symbols must be > 0")
         if self.ramp_symbols < 0.0:
@@ -284,7 +285,7 @@ class _SquelchParams(StageParams):
         return self
 
 
-class Squelch(RxStage[CompileContext]):
+class Squelch(RxStage[CompileContext, SquelchStep]):
     """Mute the stream below a power threshold, IQ->IQ (stock pwr_squelch_cc).
 
     A clock-recovery loop that free-runs through the gaps between bursts
@@ -307,26 +308,26 @@ class Squelch(RxStage[CompileContext]):
     to_level = Level.IQ
     family = "conditioning"
     accepts_amplitude = frozenset({Amplitude.RMS_UNITY})
-    params_model = _SquelchParams
+    step_model = SquelchStep
 
-    def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
-        p = _SquelchParams.model_validate(dict(params))
+    def emit_rx(self, b: CompileContext, step: SquelchStep) -> None:
         b.chain(
             "pwr_squelch_cc",
-            threshold_db=p.threshold_db,
-            alpha=1.0 / (p.alpha_symbols * b.sps),
-            ramp=round(p.ramp_symbols * b.sps),
+            threshold_db=step.threshold_db,
+            alpha=1.0 / (step.alpha_symbols * b.sps),
+            ramp=round(step.ramp_symbols * b.sps),
             gate=False,
         )
 
 
-class _EqualizerParams(StageParams):
+class EqualizerStep(Step):
+    conv: Literal["equalizer"] = "equalizer"
     num_taps: StrictInt = 15  # FIR length; must span the channel's delay spread
     step_size: float = 0.01  # CMA adaptation rate (mu)
     modulus: float = 1.0  # target constant modulus the taps drive |y| toward
 
     @model_validator(mode="after")
-    def _ok(self) -> "_EqualizerParams":
+    def _ok(self) -> "EqualizerStep":
         if self.num_taps < 1:
             raise PydanticCustomError("value_error", "num_taps must be >= 1")
         if self.step_size <= 0.0:
@@ -336,7 +337,7 @@ class _EqualizerParams(StageParams):
         return self
 
 
-class Equalizer(RxStage[CompileContext]):
+class Equalizer(RxStage[CompileContext, EqualizerStep]):
     """Blind adaptive channel equalizer: a symbol-spaced FIR whose taps adapt by
     the Constant Modulus Algorithm (stock linear_equalizer at sps=1 +
     adaptive_algorithm_cma). It inverts the inter-symbol interference a
@@ -352,30 +353,30 @@ class Equalizer(RxStage[CompileContext]):
     from_level = Level.IQ
     to_level = Level.IQ
     family = "conditioning"
-    params_model = _EqualizerParams
+    step_model = EqualizerStep
     alters_amplitude = True
 
-    def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
-        p = _EqualizerParams.model_validate(dict(params))
+    def emit_rx(self, b: CompileContext, step: EqualizerStep) -> None:
         b.chain(
             "cma_equalizer",
-            num_taps=p.num_taps,
-            step_size=p.step_size,
-            modulus=p.modulus,
+            num_taps=step.num_taps,
+            step_size=step.step_size,
+            modulus=step.modulus,
         )
 
 
-class _AmParams(StageParams):
+class AmStep(Step):
+    conv: Literal["am"] = "am"
     dc_block_len: StrictInt = 1024
 
     @model_validator(mode="after")
-    def _ok(self) -> "_AmParams":
+    def _ok(self) -> "AmStep":
         if self.dc_block_len < 2:
             raise PydanticCustomError("value_error", "dc_block_len must be >= 2")
         return self
 
 
-class Am(RxStage[CompileContext]):
+class Am(RxStage[CompileContext, AmStep]):
     """AM envelope to audio: stock complex_to_mag + dc_blocker. RX-only, IQ->AUDIO,
     rate unchanged."""
 
@@ -383,31 +384,29 @@ class Am(RxStage[CompileContext]):
     from_level = Level.IQ
     to_level = Level.AUDIO
     family = "conditioning"
-    params_model = _AmParams
+    step_model = AmStep
 
-    def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
-        p = _AmParams.model_validate(dict(params))
+    def emit_rx(self, b: CompileContext, step: AmStep) -> None:
         b.chain("complex_to_mag")
-        b.chain("dc_blocker_ff", d=p.dc_block_len)
+        b.chain("dc_blocker_ff", d=step.dc_block_len)
 
-    def out_descriptor(
-        self, in_desc: Descriptor, params: Mapping[str, Any]
-    ) -> Descriptor:
+    def out_descriptor(self, in_desc: Descriptor, step: AmStep) -> Descriptor:
         return Descriptor(Level.AUDIO, "f", in_desc.carrier)
 
 
-class _FmParams(StageParams):
+class FmDemodStep(Step):
+    conv: Literal["fm_demod"] = "fm_demod"
     deviation: float = Field(gt=0)
     dc_block_len: StrictInt = 1024
 
     @model_validator(mode="after")
-    def _ok(self) -> "_FmParams":
+    def _ok(self) -> "FmDemodStep":
         if self.dc_block_len < 2:
             raise PydanticCustomError("value_error", "dc_block_len must be >= 2")
         return self
 
 
-class FmDemod(RxStage[CompileContext]):
+class FmDemod(RxStage[CompileContext, FmDemodStep]):
     """FM discriminator to audio: stock quadrature_demod scaled so +-deviation
     maps to +-1.0, then dc_blocker (carrier frequency error rides the
     discriminator output as DC). RX-only, IQ->AUDIO, rate unchanged."""
@@ -416,30 +415,28 @@ class FmDemod(RxStage[CompileContext]):
     from_level = Level.IQ
     to_level = Level.AUDIO
     family = "conditioning"
-    params_model = _FmParams
+    step_model = FmDemodStep
 
-    def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
-        p = _FmParams.model_validate(dict(params))
-        b.chain("quadrature_demod", gain=b.rate / (2.0 * math.pi * p.deviation))
-        b.chain("dc_blocker_ff", d=p.dc_block_len)
+    def emit_rx(self, b: CompileContext, step: FmDemodStep) -> None:
+        b.chain("quadrature_demod", gain=b.rate / (2.0 * math.pi * step.deviation))
+        b.chain("dc_blocker_ff", d=step.dc_block_len)
 
-    def out_descriptor(
-        self, in_desc: Descriptor, params: Mapping[str, Any]
-    ) -> Descriptor:
+    def out_descriptor(self, in_desc: Descriptor, step: FmDemodStep) -> Descriptor:
         return Descriptor(Level.AUDIO, "f", in_desc.carrier)
 
 
-class _AnalyticParams(StageParams):
+class AnalyticStep(Step):
+    conv: Literal["analytic"] = "analytic"
     ntaps: StrictInt = 65
 
     @model_validator(mode="after")
-    def _ok(self) -> "_AnalyticParams":
+    def _ok(self) -> "AnalyticStep":
         if self.ntaps < 3 or self.ntaps % 2 == 0:
             raise PydanticCustomError("value_error", "ntaps must be odd and >= 3")
         return self
 
 
-class Analytic(RxStage[CompileContext]):
+class Analytic(RxStage[CompileContext, AnalyticStep]):
     """Real audio to its analytic signal (stock hilbert_fc) so IQ demods compose
     downstream. RX-only, AUDIO->IQ, rate unchanged."""
 
@@ -447,19 +444,16 @@ class Analytic(RxStage[CompileContext]):
     from_level = Level.AUDIO
     to_level = Level.IQ
     family = "conditioning"
-    params_model = _AnalyticParams
+    step_model = AnalyticStep
 
-    def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
-        p = _AnalyticParams.model_validate(dict(params))
-        b.chain("hilbert_fc", ntaps=p.ntaps)
+    def emit_rx(self, b: CompileContext, step: AnalyticStep) -> None:
+        b.chain("hilbert_fc", ntaps=step.ntaps)
 
-    def out_descriptor(
-        self, in_desc: Descriptor, params: Mapping[str, Any]
-    ) -> Descriptor:
+    def out_descriptor(self, in_desc: Descriptor, step: AnalyticStep) -> Descriptor:
         return Descriptor(Level.IQ, "c", in_desc.carrier)
 
 
-CONDITIONING_STAGES: tuple[type[RxStage[CompileContext]], ...] = (
+CONDITIONING_STAGES: tuple[type[RxStage[CompileContext, Any]], ...] = (
     Channelize,
     Invert,
     Resample,

@@ -1,52 +1,56 @@
-from collections.abc import Mapping
-from typing import Any
+from typing import Literal
 
 import pytest
 
 from marconi.engine.compile.compile_context import CompileContext
 from marconi.engine.compile.compiler import CompileError, compile_modem
+from marconi.engine.modulation.ook.stages import OokEnvelopeStep
 from marconi.engine.stages.base import DuplexStage, RxStage
+from marconi.engine.stages.conditioning import AgcStep, ChannelizeStep
+from marconi.engine.stages.general import SliceStep
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Amplitude, Descriptor
 from marconi.engine.types.levels import Level
-from marconi.engine.types.models import ModemSpec, ModemStep
-from marconi.engine.types.params import StageParams
+from marconi.engine.types.models import Modem
+from marconi.engine.types.step import Step
 
 IQ = Descriptor(Level.IQ, "c")
 
 
-class _NoParams(StageParams):
-    pass
+class _NeedsNormalizedStep(Step):
+    conv: Literal["needs_normalized"] = "needs_normalized"
 
 
-class _NeedsNormalized(DuplexStage[CompileContext]):
+class _EstablishesStep(Step):
+    conv: Literal["establishes"] = "establishes"
+
+
+class _NeedsNormalized(DuplexStage[CompileContext, _NeedsNormalizedStep]):
     name = "needs_normalized"
     from_level = Level.IQ
     to_level = Level.SYMBOLS
     family = "test"
     accepts_amplitude = frozenset({Amplitude.RMS_UNITY})
-    params_model = _NoParams
+    step_model = _NeedsNormalizedStep
 
-    def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
+    def emit_rx(self, b: CompileContext, step: _NeedsNormalizedStep) -> None:
         b.chain("complex_to_mag")
 
-    def emit_tx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
+    def emit_tx(self, b: CompileContext, step: _NeedsNormalizedStep) -> None:
         b.chain("float_to_complex")
 
 
-class _Establishes(RxStage[CompileContext]):
+class _Establishes(RxStage[CompileContext, _EstablishesStep]):
     name = "establishes"
     from_level = Level.IQ
     to_level = Level.IQ
     family = "test"
-    params_model = _NoParams
+    step_model = _EstablishesStep
 
-    def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
+    def emit_rx(self, b: CompileContext, step: _EstablishesStep) -> None:
         b.chain("multiply_const_cc", value=1.0)
 
-    def out_descriptor(
-        self, in_desc: Descriptor, params: Mapping[str, Any]
-    ) -> Descriptor:
+    def out_descriptor(self, in_desc: Descriptor, step: _EstablishesStep) -> Descriptor:
         return Descriptor(
             Level.IQ,
             in_desc.item_type,
@@ -62,9 +66,9 @@ def _registry() -> dict:
     return reg
 
 
-def _compile(path: list[ModemStep], direction: str = "rx"):
+def _compile(path: list[Step], direction: str = "rx"):
     return compile_modem(
-        ModemSpec(symbol_rate=1.0, path=path),
+        Modem(symbol_rate=1.0, path=path),
         _registry(),
         direction=direction,
         sample_rate=4.0,
@@ -76,18 +80,18 @@ def _compile(path: list[ModemStep], direction: str = "rx"):
 
 def test_missing_amplitude_establishment_fails_at_compile() -> None:
     with pytest.raises(CompileError) as exc:
-        _compile([ModemStep(conv="needs_normalized")])
+        _compile([_NeedsNormalizedStep()])
     assert "needs_normalized" in str(exc.value)
     assert "normalized" in str(exc.value)
     assert "unknown" in str(exc.value)
 
 
 def test_established_amplitude_satisfies_the_requirement() -> None:
-    _compile([ModemStep(conv="establishes"), ModemStep(conv="needs_normalized")])
+    _compile([_EstablishesStep(), _NeedsNormalizedStep()])
 
 
 def test_amplitude_check_does_not_apply_to_tx() -> None:
-    _compile([ModemStep(conv="needs_normalized")], direction="tx")
+    _compile([_NeedsNormalizedStep()], direction="tx")
 
 
 def test_amplitude_requiring_stages_declare_measured_statistics() -> None:
@@ -112,13 +116,13 @@ def test_fsk_does_not_require_amplitude() -> None:
 
 def test_agc_after_channelize_satisfies_a_requiring_stage() -> None:
     compile_modem(
-        ModemSpec(
+        Modem(
             symbol_rate=1.0,
             path=[
-                ModemStep(conv="channelize", params={"decim": 1, "bandwidth_hz": 1.0}),
-                ModemStep(conv="agc"),
-                ModemStep(conv="ook_envelope"),
-                ModemStep(conv="slice"),
+                ChannelizeStep(decim=1, bandwidth_hz=1.0),
+                AgcStep(),
+                OokEnvelopeStep(),
+                SliceStep(),
             ],
         ),
         stage_registry(),
@@ -133,15 +137,13 @@ def test_agc_after_channelize_satisfies_a_requiring_stage() -> None:
 def test_agc_before_channelize_is_rejected() -> None:
     with pytest.raises(CompileError) as exc:
         compile_modem(
-            ModemSpec(
+            Modem(
                 symbol_rate=1.0,
                 path=[
-                    ModemStep(conv="agc"),
-                    ModemStep(
-                        conv="channelize", params={"decim": 1, "bandwidth_hz": 1.0}
-                    ),
-                    ModemStep(conv="ook_envelope"),
-                    ModemStep(conv="slice"),
+                    AgcStep(),
+                    ChannelizeStep(decim=1, bandwidth_hz=1.0),
+                    OokEnvelopeStep(),
+                    SliceStep(),
                 ],
             ),
             stage_registry(),

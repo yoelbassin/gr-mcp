@@ -13,8 +13,14 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
+import pytest
+from pydantic import ValidationError
 
-from marconi.engine.stages.base import validate_params
+from marconi.engine.modulation.css.stages import (
+    ChirpSyncStep,
+    CssDemapStep,
+    DechirpStep,
+)
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Carrier, Descriptor
 from marconi.engine.types.levels import Level
@@ -22,8 +28,6 @@ from marconi.engine.types.levels import Level
 IQ = Descriptor(Level.IQ, "c")
 SYMBOLS_HARD = Descriptor(Level.SYMBOLS, "s", carrier=Carrier.HARD)
 BITS_HARD = Descriptor(Level.BITS, "b", carrier=Carrier.HARD)
-
-_SF7_PARAMS = {"sf": 7}
 
 
 # ─── Registry ────────────────────────────────────────────────────────────────
@@ -42,7 +46,10 @@ def test_css_stages_registered() -> None:
 def test_chirp_sync_is_iq_to_iq_default_out_descriptor() -> None:
     from marconi.engine.modulation.css.stages import ChirpSync
 
-    out = ChirpSync().out_descriptor(IQ, _SF7_PARAMS)
+    step = ChirpSyncStep(
+        sf=7, oversample=2, zero_pad=4, preamble_len=8, sfd_symbols=2.25, sync_symbols=2
+    )
+    out = ChirpSync().out_descriptor(IQ, step)
     # IQ→IQ: level, item_type, carrier all unchanged from base default
     assert out == IQ
 
@@ -50,14 +57,14 @@ def test_chirp_sync_is_iq_to_iq_default_out_descriptor() -> None:
 def test_dechirp_out_descriptor_is_symbols_hard() -> None:
     from marconi.engine.modulation.css.stages import Dechirp
 
-    out = Dechirp().out_descriptor(IQ, _SF7_PARAMS)
+    out = Dechirp().out_descriptor(IQ, DechirpStep(sf=7, oversample=2, zero_pad=4))
     assert out == Descriptor(Level.SYMBOLS, "s", carrier=Carrier.HARD, order=128)
 
 
 def test_css_demap_out_descriptor_is_bits_hard() -> None:
     from marconi.engine.modulation.css.stages import CssDemap
 
-    out = CssDemap().out_descriptor(SYMBOLS_HARD, _SF7_PARAMS)
+    out = CssDemap().out_descriptor(SYMBOLS_HARD, CssDemapStep(sf=7))
     assert out == BITS_HARD
 
 
@@ -65,44 +72,31 @@ def test_css_demap_out_descriptor_is_bits_hard() -> None:
 
 
 def test_css_params_reject_sf_4() -> None:
-    from marconi.engine.modulation.css.stages import ChirpSync
-
-    bad: list = []
-    complete = {
-        "sf": 4,
-        "oversample": 2,
-        "zero_pad": 4,
-        "preamble_len": 8,
-        "sfd_symbols": 2.25,
-        "sync_symbols": 2,
-    }
-    validate_params("chirp_sync[0]", ChirpSync().params_model, complete, bad)
-    assert bad, "sf=4 should be rejected"
+    with pytest.raises(ValidationError):
+        ChirpSyncStep(
+            sf=4,
+            oversample=2,
+            zero_pad=4,
+            preamble_len=8,
+            sfd_symbols=2.25,
+            sync_symbols=2,
+        )
 
 
 def test_css_params_reject_sf_15() -> None:
-    from marconi.engine.modulation.css.stages import Dechirp
-
-    bad: list = []
-    complete = {"sf": 15, "oversample": 2, "zero_pad": 4}
-    validate_params("dechirp[0]", Dechirp().params_model, complete, bad)
-    assert bad, "sf=15 should be rejected"
+    with pytest.raises(ValidationError):
+        DechirpStep(sf=15, oversample=2, zero_pad=4)
 
 
 def test_css_params_accept_sf_11() -> None:
-    from marconi.engine.modulation.css.stages import CssDemap
-
-    ok: list = []
-    validate_params("css_demap[0]", CssDemap().params_model, {"sf": 11}, ok)
-    assert not ok, "sf=11 should be accepted"
+    CssDemapStep(sf=11)
 
 
 def test_css_params_require_sf() -> None:
-    from marconi.engine.modulation.css.stages import ChirpSync
-
-    issues: list = []
-    validate_params("chirp_sync[0]", ChirpSync().params_model, {}, issues)
-    assert {i.field for i in issues} >= {
+    with pytest.raises(ValidationError) as exc:
+        ChirpSyncStep()  # type: ignore[call-arg]
+    fields = {err["loc"][0] for err in exc.value.errors()}
+    assert fields >= {
         "sf",
         "oversample",
         "zero_pad",
@@ -113,13 +107,12 @@ def test_css_params_require_sf() -> None:
 
 
 def test_css_params_bound_oversample() -> None:
-    from marconi.engine.modulation.css.stages import Dechirp
-
     for osr, expect_ok in ((0, False), (1, True), (8, True), (9, False)):
-        issues: list = []
-        complete = {"sf": 7, "oversample": osr, "zero_pad": 4}
-        validate_params("dechirp[0]", Dechirp().params_model, complete, issues)
-        assert (not issues) is expect_ok, f"oversample={osr}: {issues}"
+        if expect_ok:
+            DechirpStep(sf=7, oversample=osr, zero_pad=4)
+        else:
+            with pytest.raises(ValidationError):
+                DechirpStep(sf=7, oversample=osr, zero_pad=4)
 
 
 # ─── Direction support ────────────────────────────────────────────────────────
@@ -170,8 +163,7 @@ def test_symbols_terminal_routing_smoke(tmp_path: Path) -> None:
     )
     from marconi.engine.compile.compiler import compile_modem
     from marconi.engine.stages.registry import stage_registry
-    from marconi.engine.types.models import ModemSpec, ModemStep
-    from marconi.engine.types.params import ParamValue
+    from marconi.engine.types.models import Modem
 
     SF, OS = 7, 2
     N_SYMS = 40
@@ -184,28 +176,19 @@ def test_symbols_terminal_routing_smoke(tmp_path: Path) -> None:
     iq_path = tmp_path / "frame.iq"
     sym_path = tmp_path / "out.sym"
 
-    css_params: dict[str, ParamValue] = {
-        "sf": SF,
-        "oversample": OS,
-        "zero_pad": 4,
-        "preamble_len": 8,
-        "sfd_symbols": 2.25,
-        "sync_symbols": 2,
-    }
-    dechirp_params: dict[str, ParamValue] = {
-        k: css_params[k] for k in ("sf", "oversample", "zero_pad")
-    }
-    demap_params: dict[str, ParamValue] = {"sf": css_params["sf"]}
+    chirp_sync = ChirpSyncStep(
+        sf=SF,
+        oversample=OS,
+        zero_pad=4,
+        preamble_len=8,
+        sfd_symbols=2.25,
+        sync_symbols=2,
+    )
+    dechirp = DechirpStep(sf=SF, oversample=OS, zero_pad=4)
+    demap = CssDemapStep(sf=SF)
 
     # --- TX: bits → IQ frame (via [chirp_sync, dechirp, css_demap]) ---
-    tx_modem = ModemSpec(
-        symbol_rate=SYMBOL_RATE,
-        path=[
-            ModemStep(conv="chirp_sync", params=css_params),
-            ModemStep(conv="dechirp", params=dechirp_params),
-            ModemStep(conv="css_demap", params=demap_params),
-        ],
-    )
+    tx_modem = Modem(symbol_rate=SYMBOL_RATE, path=[chirp_sync, dechirp, demap])
     tx_pipe = compile_modem(
         tx_modem,
         reg,
@@ -217,13 +200,7 @@ def test_symbols_terminal_routing_smoke(tmp_path: Path) -> None:
     )
 
     # --- RX: IQ → SYMBOLS sink (int16) via [chirp_sync, dechirp] ---
-    rx_modem = ModemSpec(
-        symbol_rate=SYMBOL_RATE,
-        path=[
-            ModemStep(conv="chirp_sync", params=css_params),
-            ModemStep(conv="dechirp", params=dechirp_params),
-        ],
-    )
+    rx_modem = Modem(symbol_rate=SYMBOL_RATE, path=[chirp_sync, dechirp])
     rx_pipe = compile_modem(
         rx_modem,
         reg,
@@ -255,80 +232,57 @@ def test_symbols_terminal_routing_smoke(tmp_path: Path) -> None:
 
 
 def test_css_params_reject_preamble_len_below_5() -> None:
-    from marconi.engine.modulation.css.stages import ChirpSync
-
     for bad in (3, 4):  # 3 = IndexError in _DetectScan.step, 4 = single-peak mislock
-        issues: list = []
         # sync_symbols=1 (not baseline's 2): the _ok cross-field rule requires
         # sync_symbols < preamble_len - 2, so isolate the preamble-floor error.
-        complete = {
-            "sf": 7,
-            "oversample": 2,
-            "zero_pad": 4,
-            "preamble_len": bad,
-            "sfd_symbols": 2.25,
-            "sync_symbols": 1,
-        }
-        validate_params(
-            "chirp_sync[0]",
-            ChirpSync().params_model,
-            complete,
-            issues,
-        )
-        assert issues, f"preamble_len={bad} should be rejected"
+        with pytest.raises(ValidationError):
+            ChirpSyncStep(
+                sf=7,
+                oversample=2,
+                zero_pad=4,
+                preamble_len=bad,
+                sfd_symbols=2.25,
+                sync_symbols=1,
+            )
 
 
 def test_css_params_accept_preamble_len_5() -> None:
-    from marconi.engine.modulation.css.stages import ChirpSync
-
-    ok: list = []
-    complete = {
-        "sf": 7,
-        "oversample": 2,
-        "zero_pad": 4,
-        "preamble_len": 5,
-        "sfd_symbols": 2.25,
-        "sync_symbols": 2,
-    }
-    validate_params("chirp_sync[0]", ChirpSync().params_model, complete, ok)
-    assert not ok, ok
+    ChirpSyncStep(
+        sf=7,
+        oversample=2,
+        zero_pad=4,
+        preamble_len=5,
+        sfd_symbols=2.25,
+        sync_symbols=2,
+    )
 
 
 def test_css_params_accept_no_sfd_no_sync() -> None:
     # sfd_symbols=0 (no SFD) + sync_symbols=0 (no gap) is the minimal CSS
     # anatomy: a bare preamble run straight into payload. Anything less
     # parametric is LoRa's frame layout masquerading as the CSS family.
-    from marconi.engine.modulation.css.stages import ChirpSync
-
-    ok: list = []
-    complete = {
-        "sf": 7,
-        "oversample": 2,
-        "zero_pad": 4,
-        "preamble_len": 8,
-        "sfd_symbols": 0.0,
-        "sync_symbols": 0,
-    }
-    validate_params("chirp_sync[0]", ChirpSync().params_model, complete, ok)
-    assert not ok, ok
+    ChirpSyncStep(
+        sf=7,
+        oversample=2,
+        zero_pad=4,
+        preamble_len=8,
+        sfd_symbols=0.0,
+        sync_symbols=0,
+    )
 
 
 def test_css_params_reject_sub_symbol_sfd() -> None:
     # (0, 1) is neither "no SFD" nor a detectable one: a window holding a
     # fraction of a down-chirp never dominates its up-chirp energy.
-    from marconi.engine.modulation.css.stages import ChirpSync
-
-    issues: list = []
-    complete = {
-        "sf": 7,
-        "oversample": 2,
-        "zero_pad": 4,
-        "preamble_len": 8,
-        "sfd_symbols": 0.5,
-        "sync_symbols": 0,
-    }
-    validate_params("chirp_sync[0]", ChirpSync().params_model, complete, issues)
-    assert issues, "sfd_symbols=0.5 should be rejected"
+    with pytest.raises(ValidationError):
+        ChirpSyncStep(
+            sf=7,
+            oversample=2,
+            zero_pad=4,
+            preamble_len=8,
+            sfd_symbols=0.5,
+            sync_symbols=0,
+        )
 
 
 def test_detect_scan_chunked_equals_oneshot() -> None:

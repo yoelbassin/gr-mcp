@@ -17,11 +17,14 @@ import pytest
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
 from marconi.engine.compile.compiler import CompileError, compile_modem
 from marconi.engine.io.bitfile import harden, read_bits, read_llrs
+from marconi.engine.modulation.coding.stages import DeinterleaveStep, FecStep
+from marconi.engine.modulation.psk.stages import PskDemapStep, PskSoftDemapStep
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Carrier, Descriptor
+from marconi.engine.types.enums import PskOrder
 from marconi.engine.types.levels import Level
-from marconi.engine.types.models import ModemSpec, ModemStep
-from marconi.engine.types.params import ParamValue
+from marconi.engine.types.models import Modem
+from marconi.engine.types.step import Step
 
 SYM_C = Descriptor(Level.SYMBOLS, "c", carrier=Carrier.SOFT)
 _POLYS = [0o171, 0o133]
@@ -30,12 +33,12 @@ _TAIL = 6
 _FRAME_BITS = 512
 
 
-def _run(path: list[ModemStep], sym: np.ndarray, tmp: Path, tag: str, ext: str) -> Path:
+def _run(path: list[Step], sym: np.ndarray, tmp: Path, tag: str, ext: str) -> Path:
     src = tmp / f"in_{tag}.cf32"
     np.asarray(sym, np.complex64).tofile(src)
     snk = tmp / f"out_{tag}.{ext}"
     pipe = compile_modem(
-        ModemSpec(symbol_rate=1.0, path=path),
+        Modem(symbol_rate=1.0, path=path),
         stage_registry(),
         direction="rx",
         sample_rate=1.0,
@@ -77,15 +80,14 @@ def _ccsds_encode(info: np.ndarray) -> np.ndarray:
     )
 
 
-def _fec_step() -> ModemStep:
-    params: dict[str, ParamValue] = {
-        "scheme": "cc",
-        "rate_inv": _D,
-        "polys": list(_POLYS),
-        "frame_bits": _FRAME_BITS,
-        "tail": _TAIL,
-    }
-    return ModemStep(conv="fec", params=params)
+def _fec_step() -> FecStep:
+    return FecStep(
+        scheme="cc",
+        rate_inv=_D,
+        polys=list(_POLYS),
+        frame_bits=_FRAME_BITS,
+        tail=_TAIL,
+    )
 
 
 @pytest.mark.parametrize("order", [2, 4, 8])
@@ -102,7 +104,7 @@ def test_soft_demap_hardens_to_the_hard_demap(order: int, tmp_path: Path) -> Non
     sym = pts[idx]
     hard = read_bits(
         _run(
-            [ModemStep(conv="psk_demap", params={"order": order})],
+            [PskDemapStep(order=PskOrder(order))],
             sym,
             tmp_path,
             f"h{order}",
@@ -112,7 +114,7 @@ def test_soft_demap_hardens_to_the_hard_demap(order: int, tmp_path: Path) -> Non
     soft = harden(
         read_llrs(
             _run(
-                [ModemStep(conv="psk_soft_demap", params={"order": order})],
+                [PskSoftDemapStep(order=PskOrder(order))],
                 sym,
                 tmp_path,
                 f"s{order}",
@@ -126,12 +128,16 @@ def test_soft_demap_hardens_to_the_hard_demap(order: int, tmp_path: Path) -> Non
 
 def test_hard_demap_cannot_reach_the_coding_lane() -> None:
     """Why this stage exists: the coding lane is soft-only by contract."""
+    demap_steps: dict[str, Step] = {
+        "psk_demap": PskDemapStep(order=PskOrder(4)),
+        "psk_soft_demap": PskSoftDemapStep(order=PskOrder(4)),
+    }
     for demap, expect_ok in (("psk_demap", False), ("psk_soft_demap", True)):
-        path = [
-            ModemStep(conv=demap, params={"order": 4}),
-            ModemStep(conv="deinterleave", params={"perm": [0, 2, 1, 3]}),
+        path: list[Step] = [
+            demap_steps[demap],
+            DeinterleaveStep(perm=[0, 2, 1, 3]),
         ]
-        spec = ModemSpec(symbol_rate=1.0, path=path)
+        spec = Modem(symbol_rate=1.0, path=path)
         if expect_ok:
             compile_modem(
                 spec,
@@ -165,7 +171,7 @@ def test_soft_lane_recovers_ccsds_coded_bits_exactly(tmp_path: Path) -> None:
     sym = pts[pairs[:, 0] * 2 + pairs[:, 1]]
     out = read_bits(
         _run(
-            [ModemStep(conv="psk_soft_demap", params={"order": 4}), _fec_step()],
+            [PskSoftDemapStep(order=PskOrder(4)), _fec_step()],
             sym,
             tmp_path,
             "clean",
@@ -204,7 +210,7 @@ def test_soft_viterbi_corrects_errors_the_uncoded_link_makes(tmp_path: Path) -> 
 
     out = read_bits(
         _run(
-            [ModemStep(conv="psk_soft_demap", params={"order": 4}), _fec_step()],
+            [PskSoftDemapStep(order=PskOrder(4)), _fec_step()],
             noisy,
             tmp_path,
             "noisy",

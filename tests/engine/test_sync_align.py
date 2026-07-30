@@ -3,10 +3,11 @@ import numpy as np
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
 from marconi.engine.compile.compiler import compile_modem
 from marconi.engine.io.bitfile import read_bits
+from marconi.engine.modulation.coding.stages import FecStep, SyncAlignStep
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Carrier, Descriptor
 from marconi.engine.types.levels import Level
-from marconi.engine.types.models import ModemSpec, ModemStep
+from marconi.engine.types.models import Modem
 
 SYNC = "10110100011100101101001110001011"  # 32-bit access code
 
@@ -44,7 +45,6 @@ def test_sync_align_then_fec_decodes_bursts(tmp_path) -> None:
     ensure_worker_warm()
     frame_bits, tail, rate_inv = 96, 6, 2
     polys = [0o7, 0o5]
-    polys_param: list[float | int] = list(polys)
     frame_len = (frame_bits + tail) * rate_inv
     sync_soft = _soft_bits(np.array([int(c) for c in SYNC], np.uint8))
 
@@ -64,23 +64,17 @@ def test_sync_align_then_fec_decodes_bursts(tmp_path) -> None:
     src = tmp_path / "in.f32"
     stream.tofile(src)
     snk = tmp_path / "out.u8"
-    modem = ModemSpec(
+    modem = Modem(
         name="sync_fec",
         symbol_rate=1.0,
         path=[
-            ModemStep(
-                conv="sync_align",
-                params={"access_code": SYNC, "frame_len": frame_len, "threshold": 2},
-            ),
-            ModemStep(
-                conv="fec",
-                params={
-                    "scheme": "cc",
-                    "rate_inv": rate_inv,
-                    "polys": polys_param,
-                    "frame_bits": frame_bits,
-                    "tail": tail,
-                },
+            SyncAlignStep(access_code=SYNC, frame_len=frame_len, threshold=2),
+            FecStep(
+                scheme="cc",
+                rate_inv=rate_inv,
+                polys=polys,
+                frame_bits=frame_bits,
+                tail=tail,
             ),
         ],
     )

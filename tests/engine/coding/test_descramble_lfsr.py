@@ -75,4 +75,4 @@ def test_sequence_mode_is_unchanged() -> None:
 )
 def test_descramble_param_modes_are_exclusive(params: dict[str, object]) -> None:
     with pytest.raises(Exception):
-        stage_registry()["descramble"].params_model.model_validate(params)
+        stage_registry()["descramble"].step_model.model_validate(params)

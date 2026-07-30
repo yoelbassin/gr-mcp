@@ -11,16 +11,23 @@ import pytest
 
 from marconi.engine.coding import ops_bits
 from marconi.engine.coding.carrier import CodingCarrier, Window
+from marconi.engine.coding.stages_bits import MarkFrameStep
+from marconi.engine.coding.stages_symbols import SymbolMapStep
 from marconi.engine.compile.compiler import CompileError, compile_pipeline
+from marconi.engine.modulation.css.stages import CssDemapStep, DechirpStep
+from marconi.engine.stages.probes import BurstProbeStep
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Descriptor
 from marconi.engine.types.levels import Level
-from marconi.engine.types.models import ModemSpec, ModemStep
-from marconi.engine.types.params import ParamValue
+from marconi.engine.types.models import Modem
 
 MARKS = (3, 9)
 IQ = Descriptor(Level.IQ, "c")
-_DECHIRP: dict[str, ParamValue] = {"sf": 11, "oversample": 2, "zero_pad": 4}
+_SF = 11
+
+
+def _dechirp_step() -> DechirpStep:
+    return DechirpStep(sf=_SF, oversample=2, zero_pad=4)
 
 
 def _marked(windows: list[Window] | None = None) -> CodingCarrier:
@@ -64,13 +71,13 @@ def test_index_destroying_ops_drop_marks() -> None:
 
 
 def test_probe_marks_cannot_cross_a_rate_changing_gr_stage() -> None:
-    modem = ModemSpec(
+    modem = Modem(
         symbol_rate=1.0,
         path=[
-            ModemStep(conv="dechirp", params=_DECHIRP),
-            ModemStep(conv="burst_probe", params={}),
-            ModemStep(conv="css_demap", params={"sf": _DECHIRP["sf"]}),
-            ModemStep(conv="mark_frame", params={}),
+            _dechirp_step(),
+            BurstProbeStep(),
+            CssDemapStep(sf=_SF),
+            MarkFrameStep(),
         ],
     )
     with pytest.raises(CompileError, match="burst_probe"):
@@ -86,18 +93,15 @@ def test_probe_marks_cannot_cross_a_rate_changing_gr_stage() -> None:
 
 
 def test_probe_at_the_end_of_the_gr_segment_compiles() -> None:
-    modem = ModemSpec(
+    modem = Modem(
         symbol_rate=1.0,
         path=[
-            ModemStep(conv="dechirp", params=_DECHIRP),
-            ModemStep(conv="burst_probe", params={}),
-            ModemStep(
-                conv="symbol_map",
-                params={
-                    "code_bits": 11,
-                    "data_bits": 11,
-                    "table": list(range(1 << 11)),
-                },
+            _dechirp_step(),
+            BurstProbeStep(),
+            SymbolMapStep(
+                code_bits=11,
+                data_bits=11,
+                table=list(range(1 << 11)),
             ),
         ],
     )

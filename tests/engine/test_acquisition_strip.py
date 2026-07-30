@@ -4,10 +4,11 @@ import numpy as np
 
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
 from marconi.engine.compile.compiler import compile_modem
+from marconi.engine.stages.acquisition import PreambleSyncStep
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Carrier, Descriptor
 from marconi.engine.types.levels import Level
-from marconi.engine.types.models import ModemSpec, ModemStep
+from marconi.engine.types.models import Modem
 
 SYM_C = Descriptor(Level.SYMBOLS, "c", carrier=Carrier.SOFT)
 
@@ -32,16 +33,13 @@ def _run_rx(pre: np.ndarray, stream: np.ndarray, tmp_path: Path) -> np.ndarray:
     ensure_worker_warm()
     src, snk = tmp_path / "in.cf32", tmp_path / "out.cf32"
     stream.astype(np.complex64).tofile(src)
-    modem = ModemSpec(
+    modem = Modem(
         symbol_rate=1.0,
         path=[
-            ModemStep(
-                conv="preamble_sync",
-                params={
-                    "preamble_i": pre.real.tolist(),
-                    "preamble_q": pre.imag.tolist(),
-                    "pad_symbols": 192,
-                },
+            PreambleSyncStep(
+                preamble_i=pre.real.tolist(),
+                preamble_q=pre.imag.tolist(),
+                pad_symbols=192,
             )
         ],
     )

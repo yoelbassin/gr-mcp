@@ -19,11 +19,13 @@ from pathlib import Path
 
 import pytest
 
+from marconi.engine.coding.stages_bits import SyncWordStep
+from marconi.engine.coding.stages_symbols import SymbolMapStep
 from marconi.engine.compile.compiler import CompileError, compile_pipeline
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Carrier, Descriptor
 from marconi.engine.types.levels import Level
-from marconi.engine.types.models import ModemSpec, ModemStep
+from marconi.engine.types.models import Modem
 
 _CODING_SRC = (
     Path(__file__).resolve().parents[3] / "src" / "marconi" / "engine" / "coding"
@@ -102,9 +104,9 @@ def test_bits_entry_coding_stages_declare_hard_bit_input() -> None:
 
 
 def test_soft_bits_into_sync_word_is_a_compile_error() -> None:
-    spec = ModemSpec(
+    spec = Modem(
         symbol_rate=1.0,
-        path=[ModemStep(conv="sync_word", params={"sync": "7e"})],
+        path=[SyncWordStep(sync="7e")],
     )
     with pytest.raises(CompileError, match="item_type"):
         compile_pipeline(
@@ -119,14 +121,9 @@ def test_soft_bits_into_sync_word_is_a_compile_error() -> None:
 
 
 def test_soft_symbols_into_a_hard_symbol_stage_is_a_compile_error() -> None:
-    spec = ModemSpec(
+    spec = Modem(
         symbol_rate=1.0,
-        path=[
-            ModemStep(
-                conv="symbol_map",
-                params={"code_bits": 1, "data_bits": 1, "table": [0, 1]},
-            )
-        ],
+        path=[SymbolMapStep(code_bits=1, data_bits=1, table=[0, 1])],
     )
     with pytest.raises(CompileError, match="item_type"):
         compile_pipeline(

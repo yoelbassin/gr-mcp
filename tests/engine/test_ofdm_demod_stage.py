@@ -2,10 +2,11 @@ import numpy as np
 
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
 from marconi.engine.compile.compiler import compile_modem
+from marconi.engine.modulation.ofdm.stages import OfdmDemodStep
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Descriptor
 from marconi.engine.types.levels import Level
-from marconi.engine.types.models import ModemSpec, ModemStep
+from marconi.engine.types.models import Modem
 
 FFT, CP, SYM, NULL, NC = 16, 4, 20, 24, 4
 ACTIVE = [1, 2, 14, 15]
@@ -33,23 +34,20 @@ def test_ofdm_demod_symbol_major(tmp_path):
     src = tmp_path / "in.cf32"
     sig.astype(np.complex64).tofile(src)
     snk = tmp_path / "car.cf32"
-    modem = ModemSpec(
+    modem = Modem(
         name="od",
         symbol_rate=float(2_048_000 / SYM),
         path=[
-            ModemStep(
-                conv="ofdm_demod",
-                params={
-                    "fft_len": FFT,
-                    "cp_len": CP,
-                    "sym_len": SYM,
-                    "null_len": NULL,
-                    "frame_len": FRAME,
-                    "n_frame_syms": 4,
-                    "data_syms": 3,
-                    "n_carriers": NC,
-                    "bin_perm": BIN_PERM,
-                },
+            OfdmDemodStep(
+                fft_len=FFT,
+                cp_len=CP,
+                sym_len=SYM,
+                null_len=NULL,
+                frame_len=FRAME,
+                n_frame_syms=4,
+                data_syms=3,
+                n_carriers=NC,
+                bin_perm=BIN_PERM,
             )
         ],
     )

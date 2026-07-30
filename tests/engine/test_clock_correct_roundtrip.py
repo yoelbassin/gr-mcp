@@ -6,33 +6,33 @@ from engine._dsp import aligned_ber, channel, read_bits, write_bits
 
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
 from marconi.engine.compile.compiler import compile_modem
+from marconi.engine.modulation.css.stages import (
+    ChirpSyncStep,
+    CssDemapStep,
+    DechirpStep,
+)
+from marconi.engine.stages.conditioning import ClockCorrectStep
 from marconi.engine.types.descriptor import Descriptor
 from marconi.engine.types.levels import Level
-from marconi.engine.types.models import ModemSpec, ModemStep
-from marconi.engine.types.params import ParamValue
+from marconi.engine.types.models import Modem
+from marconi.engine.types.step import Step
 
 IQ = Descriptor(Level.IQ, "c")
 _SF, _OS, _ZP, _SYM = 9, 2, 4, 1.0
 
 
-def _p() -> dict[str, ParamValue]:
-    return {
-        "sf": _SF,
-        "oversample": _OS,
-        "zero_pad": _ZP,
-        "preamble_len": 8,
-        "sfd_symbols": 2.25,
-        "sync_symbols": 2,
-    }
-
-
-def _css_steps() -> list[ModemStep]:
+def _css_steps() -> list[Step]:
     return [
-        ModemStep(conv="chirp_sync", params=_p()),
-        ModemStep(
-            conv="dechirp", params={"sf": _SF, "oversample": _OS, "zero_pad": _ZP}
+        ChirpSyncStep(
+            sf=_SF,
+            oversample=_OS,
+            zero_pad=_ZP,
+            preamble_len=8,
+            sfd_symbols=2.25,
+            sync_symbols=2,
         ),
-        ModemStep(conv="css_demap", params={"sf": _SF}),
+        DechirpStep(sf=_SF, oversample=_OS, zero_pad=_ZP),
+        CssDemapStep(sf=_SF),
     ]
 
 
@@ -40,7 +40,7 @@ def _compile(path, direction, rate, src, snk):
     from marconi.engine.stages.registry import stage_registry
 
     return compile_modem(
-        ModemSpec(symbol_rate=_SYM, path=path),
+        Modem(symbol_rate=_SYM, path=path),
         stage_registry(),
         direction=direction,
         sample_rate=rate,
@@ -85,6 +85,6 @@ def test_clock_correct_removes_sfo(ppm: float, tmp_path: Path) -> None:
         aligned_ber(read_bits(op_no), bits, max_shift=8 * _SF) > 0.0
     ), "SFO must break the tail"
 
-    rx_cc = [ModemStep(conv="clock_correct", params={"ppm": ppm})] + rx_no
+    rx_cc: list[Step] = [ClockCorrectStep(ppm=ppm)] + rx_no
     assert be.run_pipeline(_compile(rx_cc, "rx", rate, imp, op_cc)).status == "ok"
     assert aligned_ber(read_bits(op_cc), bits, max_shift=8 * _SF) == 0.0

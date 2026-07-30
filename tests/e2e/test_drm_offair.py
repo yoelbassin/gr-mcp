@@ -1,5 +1,5 @@
 """Real off-air DRM (Deutsche Welle, Mode B, spectrum occupancy 3), one
-ModemSpec spanning phy through the coding tail, CRC-8 as the FAC oracle plus
+Modem spanning phy through the coding tail, CRC-8 as the FAC oracle plus
 the FAC channel-parameter invariants. Known-good on this slice: 109/109 CRC-8
 -valid FAC blocks, every one occupancy 0011, identities cycling 01/10/11
 across the super-frame. The gate is 109 minus margin — enough for
@@ -7,7 +7,7 @@ cross-machine float drift, far above any partial-decode regression.
 
 The PHY (ofdm_coherent_sync/cell_select/soft_demap/deinterleave/depuncture/fec)
 and the energy-dispersal descramble + frame segmentation compose in a single
-ModemSpec (_drm.fac_phy_steps/_drm.sdc_phy_steps) — descramble/segment are
+Modem (_drm.fac_phy_steps/_drm.sdc_phy_steps) — descramble/segment are
 product coding stages, the same GR-chain-then-coding-tail composition as the
 DAB gate. CRC checking and field parsing are test-side helpers
 (_drm.fac_check/_drm.sdc_check/_drm.parse_fac/_drm.parse_sdc_label) over
@@ -28,7 +28,7 @@ from marconi.engine.run import run_rx
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Descriptor
 from marconi.engine.types.levels import Level
-from marconi.engine.types.models import ModemSpec
+from marconi.engine.types.models import Modem
 
 IQ = Descriptor(Level.IQ, "c")
 _SLICE = (
@@ -45,7 +45,7 @@ _SLICE = (
 )
 def test_drm_fac(tmp_path: Path) -> None:
     ensure_worker_warm()
-    modem = ModemSpec(
+    modem = Modem(
         name="drm_fac",
         symbol_rate=_drm.RATE / _drm.SYM_LEN,
         path=_drm.fac_phy_steps(),
@@ -92,7 +92,7 @@ def test_drm_sdc(tmp_path: Path) -> None:
     for phase in range(3):
         workdir = tmp_path / f"phase{phase}"
         workdir.mkdir()
-        modem = ModemSpec(
+        modem = Modem(
             name="drm_sdc",
             symbol_rate=_drm.RATE / _drm.SYM_LEN,
             path=_drm.sdc_phy_steps(phase),

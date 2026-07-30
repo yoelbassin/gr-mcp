@@ -7,11 +7,19 @@ from engine._dsp import aligned_ber, channel
 
 from marconi.engine.backends.gnuradio.runner import ensure_worker_warm
 from marconi.engine.io.bitfile import read_bits
+from marconi.engine.modulation.psk.stages import (
+    DifferentialDemodStep,
+    PskDemapStep,
+    SampleSymbolsStep,
+    SymbolSyncStep,
+)
 from marconi.engine.run import run_rx
+from marconi.engine.stages.conditioning import AgcStep
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Descriptor
+from marconi.engine.types.enums import AgcMode, PskOrder
 from marconi.engine.types.levels import Level
-from marconi.engine.types.models import ModemSpec, ModemStep
+from marconi.engine.types.models import Modem
 
 _SPS = 4
 _SETTLE_BITS = 384
@@ -40,24 +48,19 @@ def _pi4_dqpsk_iq(bits: np.ndarray, phase0: float) -> np.ndarray:
     return np.convolve(up, taps, mode="same").astype(np.complex64)
 
 
-def _modem() -> ModemSpec:
-    return ModemSpec(
+def _modem() -> Modem:
+    return Modem(
         symbol_rate=1.0,
         path=[
-            ModemStep(
-                conv="agc",
-                params={
-                    "mode": "feedback",
-                    "attack_symbols": 16.0,
-                    "decay_symbols": 16.0,
-                },
+            AgcStep(
+                mode=AgcMode("feedback"),
+                attack_symbols=16.0,
+                decay_symbols=16.0,
             ),
-            ModemStep(conv="symbol_sync", params={"sps": _SPS}),
-            ModemStep(conv="sample_symbols", params={}),
-            ModemStep(
-                conv="differential_demod", params={"delay": 1, "rotate": -pi / 4}
-            ),
-            ModemStep(conv="psk_demap", params={"order": 4}),
+            SymbolSyncStep(sps=_SPS),
+            SampleSymbolsStep(),
+            DifferentialDemodStep(delay=1, rotate=-pi / 4),
+            PskDemapStep(order=PskOrder(4)),
         ],
     )
 

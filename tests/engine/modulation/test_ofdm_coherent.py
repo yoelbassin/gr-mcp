@@ -9,10 +9,11 @@ from e2e import _drm
 
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
 from marconi.engine.compile.compiler import compile_modem
+from marconi.engine.modulation.ofdm.stages import OfdmCoherentSyncStep
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Descriptor
 from marconi.engine.types.levels import Level
-from marconi.engine.types.models import ModemSpec, ModemStep
+from marconi.engine.types.models import Modem
 
 _SLICE = (
     Path(__file__).resolve().parents[2]
@@ -29,10 +30,10 @@ _SLICE = (
 def test_ofdm_coherent_equalizes_to_clean_qpsk(tmp_path: Path) -> None:
     ensure_worker_warm()
     snk = tmp_path / "carr.cf32"
-    modem = ModemSpec(
+    modem = Modem(
         name="drm_sync",
         symbol_rate=_drm.RATE / _drm.SYM_LEN,
-        path=[ModemStep(conv="ofdm_coherent_sync", params=_drm.sync_params())],
+        path=[OfdmCoherentSyncStep(**_drm.sync_params())],
     )
     pipe = compile_modem(
         modem,
@@ -60,10 +61,10 @@ def test_synthetic_lattice_full_chain_equalizes(tmp_path: Path) -> None:
     src = tmp_path / "lat.cf32"
     iq.tofile(src)
     snk = tmp_path / "eq.cf32"
-    modem = ModemSpec(
+    modem = Modem(
         name="lattice_sync",
         symbol_rate=_lattice.RATE / _lattice.SYM_LEN,
-        path=[ModemStep(conv="ofdm_coherent_sync", params=_lattice.sync_params())],
+        path=[OfdmCoherentSyncStep(**_lattice.sync_params())],
     )
     pipe = compile_modem(
         modem,
@@ -102,10 +103,10 @@ def test_synthetic_dropout_relocks_through_real_chain(tmp_path: Path) -> None:
     src = tmp_path / "lat_dropout.cf32"
     iq.tofile(src)
     snk = tmp_path / "eq_dropout.cf32"
-    modem = ModemSpec(
+    modem = Modem(
         name="lattice_sync",
         symbol_rate=_lattice.RATE / _lattice.SYM_LEN,
-        path=[ModemStep(conv="ofdm_coherent_sync", params=_lattice.sync_params())],
+        path=[OfdmCoherentSyncStep(**_lattice.sync_params())],
     )
     pipe = compile_modem(
         modem,

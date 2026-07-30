@@ -1,13 +1,15 @@
 import numpy as np
 import pytest
+from pydantic import ValidationError
 
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
-from marconi.engine.compile.compiler import CompileError, compile_modem
+from marconi.engine.compile.compiler import compile_modem
 from marconi.engine.io.bitfile import read_llrs
+from marconi.engine.modulation.coding.stages import DepunctureStep
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Carrier, Descriptor
 from marconi.engine.types.levels import Level
-from marconi.engine.types.models import ModemSpec, ModemStep
+from marconi.engine.types.models import Modem
 
 
 def test_depuncture_scatters_per_mask(tmp_path):
@@ -19,10 +21,10 @@ def test_depuncture_scatters_per_mask(tmp_path):
     src = tmp_path / "in.f32"
     data.tofile(src)
     snk = tmp_path / "out.f32"
-    modem = ModemSpec(
+    modem = Modem(
         name="dp",
         symbol_rate=1.0,
-        path=[ModemStep(conv="depuncture", params={"keep_mask": mask})],
+        path=[DepunctureStep(keep_mask=mask)],
     )
     pipe = compile_modem(
         modem,
@@ -44,18 +46,5 @@ def test_depuncture_scatters_per_mask(tmp_path):
 def test_all_erasure_mask_rejected_at_compile() -> None:
     """A mask keeping nothing consumes no input while emitting zeros forever —
     the flowgraph never terminates. Reject at spec validation."""
-    modem = ModemSpec(
-        name="dp0",
-        symbol_rate=1.0,
-        path=[ModemStep(conv="depuncture", params={"keep_mask": [0, 0, 0, 0]})],
-    )
-    with pytest.raises(CompileError, match="keep_mask"):
-        compile_modem(
-            modem,
-            stage_registry(),
-            direction="rx",
-            sample_rate=1.0,
-            start=Descriptor(Level.BITS, "f", carrier=Carrier.SOFT),
-            source_io={"path": "a"},
-            sink_io={"path": "b"},
-        )
+    with pytest.raises(ValidationError, match="keep_mask"):
+        DepunctureStep(keep_mask=[0, 0, 0, 0])

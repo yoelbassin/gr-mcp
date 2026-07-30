@@ -3,10 +3,11 @@ import numpy as np
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
 from marconi.engine.compile.compiler import CompileError, compile_modem
 from marconi.engine.io.bitfile import read_bits
+from marconi.engine.modulation.coding.stages import HardenStep
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Carrier, Descriptor
 from marconi.engine.types.levels import Level
-from marconi.engine.types.models import ModemSpec, ModemStep
+from marconi.engine.types.models import Modem
 
 
 def test_harden_matches_bitfile_convention(tmp_path) -> None:
@@ -17,7 +18,7 @@ def test_harden_matches_bitfile_convention(tmp_path) -> None:
     src = tmp_path / "in.f32"
     llrs.tofile(src)
     snk = tmp_path / "out.u8"
-    modem = ModemSpec(symbol_rate=1.0, path=[ModemStep(conv="harden", params={})])
+    modem = Modem(symbol_rate=1.0, path=[HardenStep()])
     pipe = compile_modem(
         modem,
         stage_registry(),
@@ -35,9 +36,9 @@ def test_harden_matches_bitfile_convention(tmp_path) -> None:
 
 def test_harden_rejects_hard_input() -> None:
     """harden consumes soft LLRs; a hard-bit input is a seam error at compile."""
-    modem = ModemSpec(
+    modem = Modem(
         symbol_rate=1.0,
-        path=[ModemStep(conv="harden", params={}), ModemStep(conv="harden", params={})],
+        path=[HardenStep(), HardenStep()],
     )
     try:
         compile_modem(

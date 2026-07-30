@@ -20,10 +20,17 @@ import pytest
 
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
 from marconi.engine.compile.compiler import compile_modem
+from marconi.engine.modulation.css.stages import ChirpSyncStep, DechirpStep
+from marconi.engine.stages.conditioning import (
+    ChannelizeStep,
+    ClockCorrectStep,
+    InvertStep,
+    ResampleStep,
+)
 from marconi.engine.types.descriptor import Descriptor
 from marconi.engine.types.levels import Level
-from marconi.engine.types.models import ModemSpec, ModemStep
-from marconi.engine.types.params import ParamValue
+from marconi.engine.types.models import Modem
+from marconi.engine.types.step import Step
 
 IQ = Descriptor(Level.IQ, "c")
 
@@ -141,7 +148,7 @@ _IQ12_ORACLE = [
 ]  # fmt: skip
 
 
-def _compile(modem: ModemSpec, rate: float, src: Path, snk: Path):
+def _compile(modem: Modem, rate: float, src: Path, snk: Path):
     from marconi.engine.stages.registry import stage_registry
 
     return compile_modem(
@@ -171,32 +178,22 @@ def test_css_offair_flinders_sf11_downchirp(tmp_path: Path) -> None:
     x.tofile(src)
 
     sf, os_, zp, pl = 11, 2, 4, 8
-    p: dict[str, ParamValue] = {
-        "sf": sf,
-        "oversample": os_,
-        "zero_pad": zp,
-        "preamble_len": pl,
-        "sfd_symbols": 2.25,
-        "sync_symbols": 2,
-    }
-    chan_p: dict[str, ParamValue] = {
-        "decim": 4,
-        "bandwidth_hz": 250_000.0,
-        "center_hz": 302_000.0,
-    }
-    rs_p: dict[str, ParamValue] = {"interpolation": 125, "decimation": 256}
 
-    modem = ModemSpec(
+    modem = Modem(
         symbol_rate=125_000.0 / (1 << sf),
         path=[
-            ModemStep(conv="invert", params={}),
-            ModemStep(conv="channelize", params=chan_p),
-            ModemStep(conv="resample", params=rs_p),
-            ModemStep(conv="chirp_sync", params=p),
-            ModemStep(
-                conv="dechirp",
-                params={k: p[k] for k in ("sf", "oversample", "zero_pad")},
+            InvertStep(),
+            ChannelizeStep(decim=4, bandwidth_hz=250_000.0, center_hz=302_000.0),
+            ResampleStep(interpolation=125, decimation=256),
+            ChirpSyncStep(
+                sf=sf,
+                oversample=os_,
+                zero_pad=zp,
+                preamble_len=pl,
+                sfd_symbols=2.25,
+                sync_symbols=2,
             ),
+            DechirpStep(sf=sf, oversample=os_, zero_pad=zp),
         ],
     )
     snk = tmp_path / "flinders_syms.s16"
@@ -234,29 +231,20 @@ def test_css_offair_lora_sf7_upchirp(tmp_path: Path) -> None:
     x.tofile(src)
 
     sf, os_, zp, pl = 7, 2, 4, 8
-    p: dict[str, ParamValue] = {
-        "sf": sf,
-        "oversample": os_,
-        "zero_pad": zp,
-        "preamble_len": pl,
-        "sfd_symbols": 2.25,
-        "sync_symbols": 2,
-    }
-    chan_p: dict[str, ParamValue] = {
-        "decim": 4,
-        "bandwidth_hz": 200_000.0,
-        "center_hz": 0.0,
-    }
 
-    modem = ModemSpec(
+    modem = Modem(
         symbol_rate=125_000.0 / (1 << sf),
         path=[
-            ModemStep(conv="channelize", params=chan_p),
-            ModemStep(conv="chirp_sync", params=p),
-            ModemStep(
-                conv="dechirp",
-                params={k: p[k] for k in ("sf", "oversample", "zero_pad")},
+            ChannelizeStep(decim=4, bandwidth_hz=200_000.0, center_hz=0.0),
+            ChirpSyncStep(
+                sf=sf,
+                oversample=os_,
+                zero_pad=zp,
+                preamble_len=pl,
+                sfd_symbols=2.25,
+                sync_symbols=2,
             ),
+            DechirpStep(sf=sf, oversample=os_, zero_pad=zp),
         ],
     )
     snk = tmp_path / "lora_sf7_syms.s16"
@@ -281,23 +269,19 @@ def test_css_offair_iq2_sf11(tmp_path: Path) -> None:
     x = np.fromfile(_IQ2_BIN, dtype=np.complex64, count=int(rate * 11))
     src = tmp_path / "iq2.cf32"
     x.tofile(src)
-    p: dict[str, ParamValue] = {
-        "sf": 11,
-        "oversample": 2,
-        "zero_pad": 10,
-        "preamble_len": 8,
-        "sfd_symbols": 2.25,
-        "sync_symbols": 2,
-    }
-    modem = ModemSpec(
+    modem = Modem(
         symbol_rate=125_000.0 / 2048,
         path=[
-            ModemStep(conv="resample", params={"interpolation": 2, "decimation": 8}),
-            ModemStep(conv="chirp_sync", params=p),
-            ModemStep(
-                conv="dechirp",
-                params={k: p[k] for k in ("sf", "oversample", "zero_pad")},
+            ResampleStep(interpolation=2, decimation=8),
+            ChirpSyncStep(
+                sf=11,
+                oversample=2,
+                zero_pad=10,
+                preamble_len=8,
+                sfd_symbols=2.25,
+                sync_symbols=2,
             ),
+            DechirpStep(sf=11, oversample=2, zero_pad=10),
         ],
     )
     snk = tmp_path / "iq2.s16"
@@ -320,34 +304,26 @@ def test_css_offair_iq12_sf11_sfo(tmp_path: Path) -> None:
     )
     src = tmp_path / "iq12.cf32"
     x.tofile(src)
-    p: dict[str, ParamValue] = {
-        "sf": 11,
-        "oversample": 2,
-        "zero_pad": 10,
-        "preamble_len": 8,
-        "sfd_symbols": 2.25,
-        "sync_symbols": 2,
-    }
 
     def run(ppm: float, name: str) -> np.ndarray:
-        path = [
-            ModemStep(conv="resample", params={"interpolation": 2, "decimation": 8})
-        ]
+        path: list[Step] = [ResampleStep(interpolation=2, decimation=8)]
         if ppm:
-            path.append(ModemStep(conv="clock_correct", params={"ppm": ppm}))
+            path.append(ClockCorrectStep(ppm=ppm))
         path += [
-            ModemStep(conv="chirp_sync", params=p),
-            ModemStep(
-                conv="dechirp",
-                params={k: p[k] for k in ("sf", "oversample", "zero_pad")},
+            ChirpSyncStep(
+                sf=11,
+                oversample=2,
+                zero_pad=10,
+                preamble_len=8,
+                sfd_symbols=2.25,
+                sync_symbols=2,
             ),
+            DechirpStep(sf=11, oversample=2, zero_pad=10),
         ]
         snk = tmp_path / name
         assert (
             be.run_pipeline(
-                _compile(
-                    ModemSpec(symbol_rate=125_000.0 / 2048, path=path), rate, src, snk
-                )
+                _compile(Modem(symbol_rate=125_000.0 / 2048, path=path), rate, src, snk)
             ).status
             == "ok"
         )

@@ -14,9 +14,12 @@ from engine._dsp import (
 
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
 from marconi.engine.compile.compiler import compile_modem
+from marconi.engine.modulation.psk.stages import PskDemapStep, PskDemodStep
+from marconi.engine.stages.conditioning import AgcStep
 from marconi.engine.types.descriptor import Carrier, Descriptor
+from marconi.engine.types.enums import AgcMode, PskOrder
 from marconi.engine.types.levels import Level
-from marconi.engine.types.models import ModemSpec, ModemStep
+from marconi.engine.types.models import Modem
 
 IQ = Descriptor(Level.IQ, "c")
 SYM_C = Descriptor(Level.SYMBOLS, "c", carrier=Carrier.SOFT)
@@ -37,31 +40,28 @@ def _const_points(order: int):
     return np.asarray(c.points()), c.bits_per_symbol()
 
 
-def _full(order: int) -> ModemSpec:
-    return ModemSpec(
+def _full(order: int) -> Modem:
+    return Modem(
         symbol_rate=_SYM,
         path=[
-            ModemStep(conv="psk_demod", params={"order": order}),
-            ModemStep(conv="psk_demap", params={"order": order}),
+            PskDemodStep(order=PskOrder(order)),
+            PskDemapStep(order=PskOrder(order)),
         ],
     )
 
 
-def _demod(order: int) -> ModemSpec:
-    return ModemSpec(
+def _demod(order: int) -> Modem:
+    return Modem(
         symbol_rate=_SYM,
         path=[
-            ModemStep(
-                conv="agc",
-                params={
-                    "mode": "feedback",
-                    # 16/16: agc2_cc limit-cycles at faster rates on a large
-                    # gain step (see issue).
-                    "attack_symbols": 16.0,
-                    "decay_symbols": 16.0,
-                },
+            AgcStep(
+                mode=AgcMode("feedback"),
+                # 16/16: agc2_cc limit-cycles at faster rates on a large
+                # gain step (see issue).
+                attack_symbols=16.0,
+                decay_symbols=16.0,
             ),
-            ModemStep(conv="psk_demod", params={"order": order}),
+            PskDemodStep(order=PskOrder(order)),
         ],
     )
 
@@ -121,9 +121,7 @@ def test_psk_demap_clean_ber0(order: int, tmp_path: Path) -> None:
     bits = np.random.default_rng(0).integers(0, 2, n_bits).astype(np.uint8)
     bp = write_bits(tmp_path / "in.bits", bits)
     sym, op = tmp_path / "s.cf32", tmp_path / "out.bits"
-    modem = ModemSpec(
-        symbol_rate=_SYM, path=[ModemStep(conv="psk_demap", params={"order": order})]
-    )
+    modem = Modem(symbol_rate=_SYM, path=[PskDemapStep(order=PskOrder(order))])
     assert be.run_pipeline(_compile(modem, "tx", SYM_C, bp, sym)).status == "ok"
     assert be.run_pipeline(_compile(modem, "rx", SYM_C, sym, op)).status == "ok"
     out = read_bits(op)

@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from marconi.engine.modulation.ofdm.stages import _CoherentParams
+from marconi.engine.modulation.ofdm.stages import OfdmCoherentSyncStep
 
 
 def _good() -> dict:
@@ -27,7 +27,7 @@ def _good() -> dict:
 
 
 def test_valid_params_pass() -> None:
-    assert _CoherentParams.model_validate(_good()).fft_len == 64
+    assert OfdmCoherentSyncStep.model_validate(_good()).fft_len == 64
 
 
 @pytest.mark.parametrize(
@@ -46,4 +46,4 @@ def test_valid_params_pass() -> None:
 )
 def test_inconsistent_geometry_rejected(patch: dict) -> None:
     with pytest.raises(ValidationError):
-        _CoherentParams.model_validate({**_good(), **patch})
+        OfdmCoherentSyncStep.model_validate({**_good(), **patch})

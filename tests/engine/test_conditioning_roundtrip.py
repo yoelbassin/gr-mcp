@@ -12,9 +12,12 @@ from engine._dsp import (
 
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
 from marconi.engine.compile.compiler import compile_modem
+from marconi.engine.modulation.fsk.stages import FskStep
+from marconi.engine.stages.conditioning import ChannelizeStep, InvertStep
+from marconi.engine.stages.general import SliceStep
 from marconi.engine.types.descriptor import Descriptor
 from marconi.engine.types.levels import Level
-from marconi.engine.types.models import ModemSpec, ModemStep
+from marconi.engine.types.models import Modem
 
 IQ = Descriptor(Level.IQ, "c")
 _DEV, _SYM = 0.75, 1.0
@@ -35,38 +38,28 @@ def _compile(modem, direction, sample_rate, src, snk):
     )
 
 
-def _fsk_modem() -> ModemSpec:
-    return ModemSpec(
+def _fsk_modem() -> Modem:
+    return Modem(
+        symbol_rate=_SYM,
+        path=[FskStep(deviation=_DEV), SliceStep()],
+    )
+
+
+def _chan_rx(center: float) -> Modem:
+    return Modem(
         symbol_rate=_SYM,
         path=[
-            ModemStep(conv="fsk", params={"deviation": _DEV}),
-            ModemStep(conv="slice", params={}),
+            ChannelizeStep(decim=2, bandwidth_hz=4.0, center_hz=center),
+            FskStep(deviation=_DEV),
+            SliceStep(),
         ],
     )
 
 
-def _chan_rx(center: float) -> ModemSpec:
-    return ModemSpec(
+def _invert_rx() -> Modem:
+    return Modem(
         symbol_rate=_SYM,
-        path=[
-            ModemStep(
-                conv="channelize",
-                params={"decim": 2, "bandwidth_hz": 4.0, "center_hz": center},
-            ),
-            ModemStep(conv="fsk", params={"deviation": _DEV}),
-            ModemStep(conv="slice", params={}),
-        ],
-    )
-
-
-def _invert_rx() -> ModemSpec:
-    return ModemSpec(
-        symbol_rate=_SYM,
-        path=[
-            ModemStep(conv="invert", params={}),
-            ModemStep(conv="fsk", params={"deviation": _DEV}),
-            ModemStep(conv="slice", params={}),
-        ],
+        path=[InvertStep(), FskStep(deviation=_DEV), SliceStep()],
     )
 
 

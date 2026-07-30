@@ -1,18 +1,23 @@
-from collections.abc import Mapping
-from typing import Any
+from typing import Literal
 
 from marconi.engine.stages.base import RxStage
 from marconi.engine.types.descriptor import Amplitude, Carrier, Descriptor
 from marconi.engine.types.levels import Level
+from marconi.engine.types.step import Step
 
 
-class _PassThrough(RxStage[object]):
+class _PassThroughStep(Step):
+    conv: Literal["passthrough"] = "passthrough"
+
+
+class _PassThrough(RxStage[object, _PassThroughStep]):
     name = "passthrough"
     from_level = Level.IQ
     to_level = Level.IQ
     family = "test"
+    step_model = _PassThroughStep
 
-    def emit_rx(self, b: object, params: Mapping[str, Any]) -> None:
+    def emit_rx(self, b: object, step: _PassThroughStep) -> None:
         return None
 
 
@@ -34,17 +39,17 @@ def test_descriptor_defaults_to_unknown_amplitude() -> None:
 
 
 def test_iq_stage_passes_amplitude_through() -> None:
-    out = _PassThrough().out_descriptor(_NORMALIZED, {})
+    out = _PassThrough().out_descriptor(_NORMALIZED, _PassThroughStep())
     assert out.amplitude is Amplitude.RMS_UNITY
 
 
 def test_altering_stage_invalidates_amplitude() -> None:
-    out = _Alters().out_descriptor(_NORMALIZED, {})
+    out = _Alters().out_descriptor(_NORMALIZED, _PassThroughStep())
     assert out.amplitude is Amplitude.UNKNOWN
 
 
 def test_non_iq_output_invalidates_amplitude() -> None:
-    out = _Demod().out_descriptor(_NORMALIZED, {})
+    out = _Demod().out_descriptor(_NORMALIZED, _PassThroughStep())
     assert out.amplitude is Amplitude.UNKNOWN
 
 

@@ -10,12 +10,14 @@ import numpy as np
 from helpers import bitops
 from helpers.golay import golay_codeword, golay_masks
 
+from marconi.engine.coding.stages_bits import BlockCodeStep, SyncWordStep
 from marconi.engine.io.bitfile import read_bits, write_bits
 from marconi.engine.run import run_rx
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Descriptor
+from marconi.engine.types.enums import EmitMode
 from marconi.engine.types.levels import Level
-from marconi.engine.types.models import Bitstream, ModemSpec, ModemStep
+from marconi.engine.types.models import Bitstream, Modem
 
 BITS = Descriptor(Level.BITS, "b")
 SYNC = "b433"
@@ -42,19 +44,16 @@ def test_golay_frames_survive_three_errors_each(tmp_path: Path) -> None:
             np.zeros(7, np.uint8),
         ]
     ).astype(np.uint8)
-    modem = ModemSpec(
+    modem = Modem(
         symbol_rate=1.0,
         path=[
-            ModemStep(conv="sync_word", params={"sync": SYNC}),
-            ModemStep(
-                conv="block_code",
-                params={
-                    "code_bits": 23,
-                    "data_bits": 12,
-                    "parity_masks": golay_masks(),
-                    "correct": 3,
-                    "emit": "data",
-                },
+            SyncWordStep(sync=SYNC),
+            BlockCodeStep(
+                code_bits=23,
+                data_bits=12,
+                parity_masks=golay_masks(),
+                correct=3,
+                emit=EmitMode.DATA,
             ),
         ],
     )

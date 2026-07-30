@@ -8,10 +8,17 @@ import pytest
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
 from marconi.engine.compile.compiler import compile_modem
 from marconi.engine.io.bitfile import read_bits
+from marconi.engine.modulation.coding.stages import (
+    DeinterleaveStep,
+    DepunctureStep,
+    FecStep,
+)
+from marconi.engine.modulation.ofdm.stages import DqpskSoftDemapStep, OfdmDemodStep
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Descriptor
 from marconi.engine.types.levels import Level
-from marconi.engine.types.models import ModemSpec, ModemStep
+from marconi.engine.types.models import Modem
+from marconi.engine.types.step import Step
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from test_dab_ofdm_offair import _bin_perm  # noqa: E402
@@ -74,37 +81,28 @@ def _fib_crc_ok(fib32):
     return crc == ((int(fib32[30]) << 8) | int(fib32[31]))
 
 
-def _dab_phy_steps():
+def _dab_phy_steps() -> list[Step]:
     return [
-        ModemStep(
-            conv="ofdm_demod",
-            params={
-                "fft_len": 2048,
-                "cp_len": 504,
-                "sym_len": 2552,
-                "null_len": 2656,
-                "frame_len": 196608,
-                "n_frame_syms": 76,
-                "data_syms": _DS,
-                "n_carriers": _NC,
-                "bin_perm": _bin_perm(),
-            },
+        OfdmDemodStep(
+            fft_len=2048,
+            cp_len=504,
+            sym_len=2552,
+            null_len=2656,
+            frame_len=196608,
+            n_frame_syms=76,
+            data_syms=_DS,
+            n_carriers=_NC,
+            bin_perm=_bin_perm(),
         ),
-        ModemStep(
-            conv="dqpsk_soft_demap",
-            params={"data_syms": _DS, "n_carriers": _NC, "scheme": "psk", "order": 4},
-        ),
-        ModemStep(conv="deinterleave", params={"perm": _regroup()}),
-        ModemStep(conv="depuncture", params={"keep_mask": _keep_mask()}),
-        ModemStep(
-            conv="fec",
-            params={
-                "scheme": "cc",
-                "rate_inv": 4,
-                "polys": [0o133, 0o171, 0o145, 0o133],
-                "frame_bits": 768,
-                "tail": 6,
-            },
+        DqpskSoftDemapStep(data_syms=_DS, n_carriers=_NC, scheme="psk", order=4),
+        DeinterleaveStep(perm=_regroup()),
+        DepunctureStep(keep_mask=_keep_mask()),
+        FecStep(
+            scheme="cc",
+            rate_inv=4,
+            polys=[0o133, 0o171, 0o145, 0o133],
+            frame_bits=768,
+            tail=6,
         ),
     ]
 
@@ -115,7 +113,7 @@ def _dab_phy_steps():
 def test_dab_phy_decodes_crc_valid_fibs(tmp_path):
     ensure_worker_warm()
     snk = tmp_path / "fic.u8"
-    modem = ModemSpec(
+    modem = Modem(
         name="dab_fec", symbol_rate=float(2_048_000 / 2552), path=_dab_phy_steps()
     )
     pipe = compile_modem(

@@ -5,14 +5,19 @@ import pytest
 
 from marconi.engine.backends.base import Backend, BlockCensus, RunResult
 from marconi.engine.backends.gnuradio.runner import ensure_worker_warm
+from marconi.engine.coding.stages_bits import SyncWordStep
+from marconi.engine.coding.stages_symbols import SymbolMapStep, SyncSymbolsStep
 from marconi.engine.compile.compiler import CompileError
 from marconi.engine.compile.ir import GrPipeline
 from marconi.engine.io.bitfile import read_bits, write_bits
+from marconi.engine.modulation.fsk.stages import FskStep
 from marconi.engine.run import run_rx
+from marconi.engine.stages.conditioning import InvertStep
+from marconi.engine.stages.general import SliceStep
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Carrier, Descriptor
 from marconi.engine.types.levels import Level
-from marconi.engine.types.models import Bitstream, ModemSpec, ModemStep, Symbolstream
+from marconi.engine.types.models import Bitstream, Modem, Symbolstream
 
 BITS = Descriptor(Level.BITS, "b")
 SOFT_SYMBOLS = Descriptor(Level.SYMBOLS, "f", carrier=Carrier.SOFT)
@@ -40,39 +45,34 @@ def _flag_soft_symbols(tmp_path: Path) -> Path:
     return p
 
 
-def _sync_word_modem() -> ModemSpec:
-    return ModemSpec(
+def _sync_word_modem() -> Modem:
+    return Modem(
         symbol_rate=1.0,
-        path=[ModemStep(conv="sync_word", params={"sync": "7e"})],
+        path=[SyncWordStep(sync="7e")],
     )
 
 
-def _gr_modem() -> ModemSpec:
-    return ModemSpec(
+def _gr_modem() -> Modem:
+    return Modem(
         symbol_rate=1.0,
         path=[
-            ModemStep(conv="slice"),
-            ModemStep(conv="sync_word", params={"sync": "7e"}),
+            SliceStep(),
+            SyncWordStep(sync="7e"),
         ],
     )
 
 
-def _sync_symbols_modem() -> ModemSpec:
-    return ModemSpec(
+def _sync_symbols_modem() -> Modem:
+    return Modem(
         symbol_rate=1.0,
-        path=[ModemStep(conv="sync_symbols", params={"pattern": [1, -1]})],
+        path=[SyncSymbolsStep(pattern=[1, -1])],
     )
 
 
-def _symbol_map_modem() -> ModemSpec:
-    return ModemSpec(
+def _symbol_map_modem() -> Modem:
+    return Modem(
         symbol_rate=1.0,
-        path=[
-            ModemStep(
-                conv="symbol_map",
-                params={"code_bits": 1, "data_bits": 1, "table": [0, 1]},
-            )
-        ],
+        path=[SymbolMapStep(code_bits=1, data_bits=1, table=[0, 1])],
     )
 
 
@@ -191,7 +191,7 @@ def test_marks_split_acquisition_harvest_from_coding_state(tmp_path: Path) -> No
 def test_iq_terminal_pipeline_is_rejected_before_running(tmp_path: Path) -> None:
     iq = tmp_path / "in.cf32"
     np.zeros(8, np.complex64).tofile(iq)
-    modem = ModemSpec(symbol_rate=1.0, path=[ModemStep(conv="invert")])
+    modem = Modem(symbol_rate=1.0, path=[InvertStep()])
     with pytest.raises(CompileError, match="IQ"):
         run_rx(
             modem,
@@ -208,11 +208,11 @@ def test_nonfinite_iq_source_is_an_error_before_the_gr_run(tmp_path: Path) -> No
     iq[3] = np.nan + 0j
     p = tmp_path / "in.cf32"
     iq.tofile(p)
-    modem = ModemSpec(
+    modem = Modem(
         symbol_rate=2400.0,
         path=[
-            ModemStep(conv="fsk", params={"deviation": 600.0}),
-            ModemStep(conv="slice"),
+            FskStep(deviation=600.0),
+            SliceStep(),
         ],
     )
     res = run_rx(

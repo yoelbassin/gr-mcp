@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Mapping
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import Field, model_validator
 from pydantic_core import PydanticCustomError
@@ -11,15 +10,16 @@ from marconi.engine.compile.compile_context import CompileContext
 from marconi.engine.stages.base import DuplexStage, RxStage, Stage
 from marconi.engine.types.descriptor import Carrier, Descriptor
 from marconi.engine.types.levels import Level
-from marconi.engine.types.params import StageParams
+from marconi.engine.types.step import Step
 
 
-class _FskParams(StageParams):
+class FskStep(Step):
+    conv: Literal["fsk"] = "fsk"
     deviation: float
     loop_bw: float = Field(default=0.045, ge=0)
 
 
-class Fsk(DuplexStage[CompileContext]):
+class Fsk(DuplexStage[CompileContext, FskStep]):
     """Binary FSK carrier stage. RX: FM discriminator + Gardner symbol timing ->
     one soft float per symbol. TX: upsample + FM modulate. The symbol-rate
     decimation is internal (driven by ctx.sps); rate_factor stays 1.0 so the
@@ -30,33 +30,30 @@ class Fsk(DuplexStage[CompileContext]):
     to_level = Level.SYMBOLS
     family = "fsk"
     min_input_sps = 2.0
-    params_model = _FskParams
+    step_model = FskStep
 
-    def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
-        p = _FskParams.model_validate(dict(params))
-        gain = b.rate / (2.0 * math.pi * p.deviation)
+    def emit_rx(self, b: CompileContext, step: FskStep) -> None:
+        gain = b.rate / (2.0 * math.pi * step.deviation)
         b.chain("quadrature_demod", gain=gain)
-        b.chain("symbol_sync_ff", sps=b.sps, loop_bw=p.loop_bw)
+        b.chain("symbol_sync_ff", sps=b.sps, loop_bw=step.loop_bw)
 
-    def emit_tx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
-        p = _FskParams.model_validate(dict(params))
+    def emit_tx(self, b: CompileContext, step: FskStep) -> None:
         b.chain("repeat_f", interp=b.sps_int())
         b.chain(
             "frequency_modulator",
-            sensitivity=2.0 * math.pi * p.deviation / b.rate,
+            sensitivity=2.0 * math.pi * step.deviation / b.rate,
         )
 
-    def out_descriptor(
-        self, in_desc: Descriptor, params: Mapping[str, Any]
-    ) -> Descriptor:
+    def out_descriptor(self, in_desc: Descriptor, step: FskStep) -> Descriptor:
         return Descriptor(Level.SYMBOLS, "f", Carrier.SOFT)
 
 
-class _MskParams(StageParams):
+class MskStep(Step):
+    conv: Literal["msk"] = "msk"
     loop_bw: float = 0.0038  # pinned: GR_BLOCKS["msk_demod"]'s registered default
 
 
-class Msk(RxStage[CompileContext]):
+class Msk(RxStage[CompileContext, MskStep]):
     """Coherent MSK (h=0.5 CPFSK) demod -> one soft float per symbol. RX-only:
     an MSK transmitter is the fsk stage at deviation = symbol_rate/4 (h=0.5),
     so TX needs no new vocabulary. Several dB more sensitive than the
@@ -68,23 +65,21 @@ class Msk(RxStage[CompileContext]):
     to_level = Level.SYMBOLS
     family = "fsk"
     min_input_sps = 2.0
-    params_model = _MskParams
+    step_model = MskStep
 
-    def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
-        p = _MskParams.model_validate(dict(params))
-        b.chain("msk_demod", sps=b.sps, loop_bw=p.loop_bw)
+    def emit_rx(self, b: CompileContext, step: MskStep) -> None:
+        b.chain("msk_demod", sps=b.sps, loop_bw=step.loop_bw)
 
-    def out_descriptor(
-        self, in_desc: Descriptor, params: Mapping[str, Any]
-    ) -> Descriptor:
+    def out_descriptor(self, in_desc: Descriptor, step: MskStep) -> Descriptor:
         return Descriptor(Level.SYMBOLS, "f", Carrier.SOFT)
 
 
-class _MfskSoftDemapParams(StageParams):
+class MfskSoftDemapStep(Step):
+    conv: Literal["mfsk_soft_demap"] = "mfsk_soft_demap"
     levels: list[float]
 
     @model_validator(mode="after")
-    def _ok(self) -> "_MfskSoftDemapParams":
+    def _ok(self) -> "MfskSoftDemapStep":
         m = len(self.levels)
         if m < 2 or m & (m - 1):
             raise PydanticCustomError(
@@ -103,7 +98,7 @@ class _MfskSoftDemapParams(StageParams):
         return math.sqrt(sum(x * x for x in self.levels) / len(self.levels))
 
 
-class MfskSoftDemap(RxStage[CompileContext]):
+class MfskSoftDemap(RxStage[CompileContext, MfskSoftDemapStep]):
     """M-ary soft demap, SYMBOLS->BITS soft. Turns the one-soft-float-per-symbol
     stream an fsk/msk discriminator emits into log2(M) LLRs per symbol, which is
     what the coding lane (deinterleave/depuncture/fec) consumes. Before this the
@@ -125,29 +120,28 @@ class MfskSoftDemap(RxStage[CompileContext]):
     from_level = Level.SYMBOLS
     to_level = Level.BITS
     family = "fsk"
-    params_model = _MfskSoftDemapParams
+    step_model = MfskSoftDemapStep
     accepts_item_type = "f"
     accepts_carrier = Carrier.SOFT
 
-    def emit_rx(self, b: CompileContext, params: Mapping[str, Any]) -> None:
-        p = _MfskSoftDemapParams.model_validate(dict(params))
-        b.chain("multiply_const_ff", value=1.0 / p.rms)
+    def emit_rx(self, b: CompileContext, step: MfskSoftDemapStep) -> None:
+        b.chain("multiply_const_ff", value=1.0 / step.rms)
         b.chain("float_to_complex")
         b.chain(
             "constellation_soft_decoder",
             scheme="explicit",
-            points_i=list(p.levels),
-            points_q=[0.0] * len(p.levels),
+            points_i=list(step.levels),
+            points_q=[0.0] * len(step.levels),
         )
         b.chain("multiply_const_ff", value=-1.0)
 
     def out_descriptor(
-        self, in_desc: Descriptor, params: Mapping[str, Any]
+        self, in_desc: Descriptor, step: MfskSoftDemapStep
     ) -> Descriptor:
         return Descriptor(Level.BITS, "f", Carrier.SOFT)
 
-    def required_input_order(self, params: Mapping[str, Any]) -> int | None:
-        return len(list(params["levels"]))
+    def required_input_order(self, step: MfskSoftDemapStep) -> int | None:
+        return len(step.levels)
 
 
-FSK_STAGES: tuple[type[Stage[CompileContext]], ...] = (Fsk, Msk, MfskSoftDemap)
+FSK_STAGES: tuple[type[Stage[CompileContext, Any]], ...] = (Fsk, Msk, MfskSoftDemap)

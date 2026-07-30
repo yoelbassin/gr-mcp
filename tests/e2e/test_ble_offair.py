@@ -1,4 +1,4 @@
-"""Real off-air Bluetooth LE advertising, one ModemSpec spanning phy through the
+"""Real off-air Bluetooth LE advertising, one Modem spanning phy through the
 link-layer framing — the proof that a length-under-scrambling protocol fits the
 generic framing vocabulary end to end, without a separate codec stage.
 
@@ -26,12 +26,16 @@ import pytest
 from helpers import bitops, crc, framing
 
 from marconi.engine.backends.gnuradio.runner import ensure_worker_warm
+from marconi.engine.coding.stages_bits import SyncWordStep
 from marconi.engine.io.bitfile import read_bits
+from marconi.engine.modulation.fsk.stages import FskStep
 from marconi.engine.run import run_rx
+from marconi.engine.stages.conditioning import ChannelizeStep
+from marconi.engine.stages.general import SliceStep
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Descriptor
 from marconi.engine.types.levels import Level
-from marconi.engine.types.models import ModemSpec, ModemStep
+from marconi.engine.types.models import Modem
 from marconi.engine.types.params import OPEN_LOOP
 
 IQ = Descriptor(Level.IQ, "c")
@@ -83,23 +87,14 @@ def _ble_whitening(nbytes: int) -> bytes:
 WHITEN = _ble_whitening(MAX_PDU_BYTES)
 
 
-def _ble_modem() -> ModemSpec:
-    return ModemSpec(
+def _ble_modem() -> Modem:
+    return Modem(
         symbol_rate=1_000_000.0,
         path=[
-            ModemStep(
-                conv="channelize",
-                params={
-                    "decim": 1,
-                    "bandwidth_hz": 2_000_000.0,
-                    "center_hz": -1_000_000.0,
-                },
-            ),
-            ModemStep(
-                conv="fsk", params={"deviation": 250_000.0, "loop_bw": OPEN_LOOP}
-            ),
-            ModemStep(conv="slice", params={}),
-            ModemStep(conv="sync_word", params={"sync": AA_HEX, "max_errors": 0}),
+            ChannelizeStep(decim=1, bandwidth_hz=2_000_000.0, center_hz=-1_000_000.0),
+            FskStep(deviation=250_000.0, loop_bw=OPEN_LOOP),
+            SliceStep(),
+            SyncWordStep(sync=AA_HEX, max_errors=0),
         ],
     )
 

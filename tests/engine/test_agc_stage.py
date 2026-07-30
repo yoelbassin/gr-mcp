@@ -8,41 +8,20 @@ import pytest
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
 from marconi.engine.compile.compile_context import CompileContext
 from marconi.engine.compile.compiler import compile_modem
+from marconi.engine.stages.conditioning import AgcStep
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Amplitude, Carrier, Descriptor
+from marconi.engine.types.enums import AgcMode
 from marconi.engine.types.levels import Level
-from marconi.engine.types.models import ModemSpec, ModemStep
+from marconi.engine.types.models import Modem
 
 _NORMALIZED = Descriptor(Level.IQ, "c", Carrier.HARD, Amplitude.RMS_UNITY)
-
-_PARAMS: dict[str, dict[str, Any]] = {
-    "channelize": {"decim": 1, "bandwidth_hz": 1.0},
-    "resample": {"interpolation": 1, "decimation": 1},
-    "clock_correct": {"ppm": 1.0},
-}
-
-
-@pytest.mark.parametrize("name", sorted(_PARAMS))
-def test_scale_changing_stages_invalidate_amplitude(name: str) -> None:
-    stage = stage_registry()[name]
-    out = stage.out_descriptor(_NORMALIZED, _PARAMS[name])
-    assert out.amplitude is Amplitude.UNKNOWN
-
-
-def test_invert_preserves_amplitude() -> None:
-    out = stage_registry()["invert"].out_descriptor(_NORMALIZED, {})
-    assert out.amplitude is Amplitude.RMS_UNITY
-
-
-def test_analytic_yields_unknown_amplitude() -> None:
-    audio = Descriptor(Level.AUDIO, "f", Carrier.HARD)
-    out = stage_registry()["analytic"].out_descriptor(audio, {})
-    assert out.amplitude is Amplitude.UNKNOWN
 
 
 def _emit(params: Mapping[str, Any], rate: float = 8.0, symbol_rate: float = 1.0):
     ctx = CompileContext(Descriptor(Level.IQ, "c"), rate, symbol_rate)
-    stage_registry()["agc"].emit_rx(ctx, params)
+    step = AgcStep(**params)
+    stage_registry()["agc"].emit_rx(ctx, step)
     return ctx.build("t", rate).blocks
 
 
@@ -50,7 +29,7 @@ def test_agc_is_registered_as_conditioning() -> None:
     stage = stage_registry()["agc"]
     assert stage.family == "conditioning"
     assert (stage.from_level, stage.to_level) == (Level.IQ, Level.IQ)
-    assert stage.rate_factor({}) == 1.0
+    assert stage.rate_factor(AgcStep()) == 1.0
 
 
 @pytest.mark.parametrize(
@@ -65,7 +44,7 @@ def test_agc_mode_selects_the_amplitude_statistic(
     mode: str, statistic: Amplitude
 ) -> None:
     unknown = Descriptor(Level.IQ, "c")
-    out = stage_registry()["agc"].out_descriptor(unknown, {"mode": mode})
+    out = stage_registry()["agc"].out_descriptor(unknown, AgcStep(mode=AgcMode(mode)))
     assert out.amplitude is statistic
 
 
@@ -115,9 +94,7 @@ def _compile_agc(
     params: Mapping[str, Any], rate: float = 8.0, symbol_rate: float = 1.0
 ):
     return compile_modem(
-        ModemSpec(
-            symbol_rate=symbol_rate, path=[ModemStep(conv="agc", params=dict(params))]
-        ),
+        Modem(symbol_rate=symbol_rate, path=[AgcStep(**params)]),
         stage_registry(),
         direction="rx",
         sample_rate=rate,
@@ -193,7 +170,7 @@ def test_agc_runs_and_normalizes_a_scaled_stream(mode: str, tmp_path: Path) -> N
     if mode == "feedback":
         params.update({"attack_symbols": 1.0, "decay_symbols": 4.0})
     pipe = compile_modem(
-        ModemSpec(symbol_rate=1.0, path=[ModemStep(conv="agc", params=params)]),
+        Modem(symbol_rate=1.0, path=[AgcStep(**params)]),
         stage_registry(),
         direction="rx",
         sample_rate=8.0,

@@ -1,21 +1,20 @@
 import math
 
 from marconi.engine.compile.compiler import compile_modem
+from marconi.engine.modulation.fsk.stages import FskStep
+from marconi.engine.stages.general import SliceStep
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Carrier, Descriptor
 from marconi.engine.types.levels import Level
-from marconi.engine.types.models import ModemSpec, ModemStep
+from marconi.engine.types.models import Modem
 
 IQ = Descriptor(Level.IQ, "c")
 
 
-def _modem() -> ModemSpec:
-    return ModemSpec(
+def _modem() -> Modem:
+    return Modem(
         symbol_rate=1.0,
-        path=[
-            ModemStep(conv="fsk", params={"deviation": 1.0}),
-            ModemStep(conv="slice"),
-        ],
+        path=[FskStep(deviation=1.0), SliceStep()],
     )
 
 
@@ -93,12 +92,9 @@ def test_tx_compiles_to_reversed_chain() -> None:
 def test_formulas_use_iq_rate_not_sps() -> None:
     # sample_rate=8, symbol_rate=2 -> b.rate=8 but b.sps=4 (distinct), so these
     # assertions fail if any formula swaps b.rate <-> b.sps (rate-model invariant).
-    modem = ModemSpec(
+    modem = Modem(
         symbol_rate=2.0,
-        path=[
-            ModemStep(conv="fsk", params={"deviation": 1.0}),
-            ModemStep(conv="slice"),
-        ],
+        path=[FskStep(deviation=1.0), SliceStep()],
     )
     rx = compile_modem(
         modem,

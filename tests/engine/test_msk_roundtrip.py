@@ -7,10 +7,12 @@ from engine._dsp import aligned_ber_best, channel, read_bits, write_bits
 
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
 from marconi.engine.compile.compiler import compile_modem
+from marconi.engine.modulation.fsk.stages import FskStep, MskStep
+from marconi.engine.stages.general import SliceStep
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Descriptor
 from marconi.engine.types.levels import Level
-from marconi.engine.types.models import ModemSpec, ModemStep
+from marconi.engine.types.models import Modem
 
 IQ = Descriptor(Level.IQ, "c")
 _SR, _SYM = 20.0, 1.0  # sps 20 = the ACARS operating point
@@ -21,24 +23,21 @@ _SR, _SYM = 20.0, 1.0  # sps 20 = the ACARS operating point
 _CFO_HZ_PINNED = 2.5 / 48000.0 * _SR
 
 
-def _tx_modem() -> ModemSpec:
-    return ModemSpec(
+def _tx_modem() -> Modem:
+    return Modem(
         symbol_rate=_SYM,
-        path=[
-            ModemStep(conv="fsk", params={"deviation": _SYM / 4.0}),
-            ModemStep(conv="slice", params={}),
-        ],
+        path=[FskStep(deviation=_SYM / 4.0), SliceStep()],
     )
 
 
-def _rx_modem() -> ModemSpec:
-    return ModemSpec(
+def _rx_modem() -> Modem:
+    return Modem(
         symbol_rate=_SYM,
-        path=[ModemStep(conv="msk", params={}), ModemStep(conv="slice", params={})],
+        path=[MskStep(), SliceStep()],
     )
 
 
-def _run(direction: str, modem: ModemSpec, src: Path, snk: Path) -> None:
+def _run(direction: str, modem: Modem, src: Path, snk: Path) -> None:
     pipe = compile_modem(
         modem,
         stage_registry(),

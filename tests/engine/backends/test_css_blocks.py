@@ -24,7 +24,7 @@ from engine._dsp import aligned_ber, read_bits, write_bits
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
 from marconi.engine.compile.compile_context import CompileContext
 from marconi.engine.compile.ir import GrBlock, GrConnection, GrPipeline
-from marconi.engine.modulation.css.stages import Dechirp
+from marconi.engine.modulation.css.stages import Dechirp, DechirpStep
 from marconi.engine.types.descriptor import Descriptor
 from marconi.engine.types.levels import Level
 
@@ -48,7 +48,7 @@ def _bits_to_bits_pipeline(
     ctx.chain("bits_file_source", path=str(bits_in))
     ctx.chain("css_map", sf=sf)
     ctx.chain("chirp_mod", sf=sf, oversample=os)
-    Dechirp().emit_rx(ctx, {"sf": sf, "oversample": os, "zero_pad": zp})
+    Dechirp().emit_rx(ctx, DechirpStep(sf=sf, oversample=os, zero_pad=zp))
     ctx.chain("css_demap", sf=sf)
     ctx.chain("bits_file_sink", path=str(bits_out))
     return ctx.build("css_roundtrip", rate)
@@ -173,7 +173,7 @@ def _full_chain_pipeline(
         sfd_symbols=2.25,
         sync_symbols=2,
     )
-    Dechirp().emit_rx(ctx, {"sf": sf, "oversample": os, "zero_pad": zp})
+    Dechirp().emit_rx(ctx, DechirpStep(sf=sf, oversample=os, zero_pad=zp))
     ctx.chain("css_demap", sf=sf)
     ctx.chain("bits_file_sink", path=str(bits_out))
     return ctx.build("css_full_chain", rate)

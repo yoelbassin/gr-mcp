@@ -1,4 +1,4 @@
-"""Real off-air DAB Mode I, one ModemSpec spanning phy through the coding tail,
+"""Real off-air DAB Mode I, one Modem spanning phy through the coding tail,
 CRC as the oracle, plus the readable ensemble label. Known-good on this slice:
 192 CRC-valid FIBs, measured 10x with byte-identical sink output (variance 0;
 issue 05). The gate is known-good minus 2 — margin only for cross-machine float
@@ -7,7 +7,7 @@ drift, tight enough that the observed regression classes (issue 18's trim
 
 The PHY (ofdm_demod/dqpsk_soft_demap/deinterleave/depuncture/fec) and the
 energy-dispersal descramble + 256-bit FIB segmentation compose in a single
-ModemSpec — descramble/segment are now product coding stages (family=coding),
+Modem — descramble/segment are now product coding stages (family=coding),
 the same GR-chain-then-coding-tail composition as the POCSAG/LoRa/BLE gates.
 CRC-16 and the FIG-1/0 ensemble-label parse are test-side helpers
 (helpers.crc.crc_check, _parse_ensemble) over run_rx's per-window carve.
@@ -16,19 +16,25 @@ CRC-16 and the FIG-1/0 ensemble-label parse are test-side helpers
 from __future__ import annotations
 
 from pathlib import Path
-from typing import cast
 
 import numpy as np
 import pytest
 from helpers import bitops, crc, framing
 
 from marconi.engine.backends.gnuradio.runner import ensure_worker_warm
+from marconi.engine.coding.stages_bits import DescrambleStep, SegmentStep
 from marconi.engine.io.bitfile import read_bits
+from marconi.engine.modulation.coding.stages import (
+    DeinterleaveStep,
+    DepunctureStep,
+    FecStep,
+)
+from marconi.engine.modulation.ofdm.stages import DqpskSoftDemapStep, OfdmDemodStep
 from marconi.engine.run import run_rx
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Descriptor
 from marconi.engine.types.levels import Level
-from marconi.engine.types.models import ModemSpec, ModemStep
+from marconi.engine.types.models import Modem
 
 IQ = Descriptor(Level.IQ, "c")
 RATE = 2_048_000.0
@@ -98,54 +104,39 @@ def _prbs_hex() -> str:
     return np.packbits(np.array(prbs, np.uint8)).tobytes().hex()
 
 
-def _dab_modem() -> ModemSpec:
-    return ModemSpec(
+def _dab_modem() -> Modem:
+    return Modem(
         name="dab_rx",
         symbol_rate=float(2_048_000 / 2552),
         path=[
-            ModemStep(
-                conv="ofdm_demod",
-                params={
-                    "fft_len": _FFT,
-                    "cp_len": 504,
-                    "sym_len": 2552,
-                    "null_len": 2656,
-                    "frame_len": 196608,
-                    "n_frame_syms": 76,
-                    "data_syms": _DS,
-                    "n_carriers": _NC,
-                    "bin_perm": cast("list[float | int]", _bin_perm()),
-                },
+            OfdmDemodStep(
+                fft_len=_FFT,
+                cp_len=504,
+                sym_len=2552,
+                null_len=2656,
+                frame_len=196608,
+                n_frame_syms=76,
+                data_syms=_DS,
+                n_carriers=_NC,
+                bin_perm=_bin_perm(),
             ),
-            ModemStep(
-                conv="dqpsk_soft_demap",
-                params={
-                    "data_syms": _DS,
-                    "n_carriers": _NC,
-                    "scheme": "psk",
-                    "order": 4,
-                },
+            DqpskSoftDemapStep(
+                data_syms=_DS,
+                n_carriers=_NC,
+                scheme="psk",
+                order=4,
             ),
-            ModemStep(
-                conv="deinterleave",
-                params={"perm": cast("list[float | int]", _regroup())},
+            DeinterleaveStep(perm=_regroup()),
+            DepunctureStep(keep_mask=_keep_mask()),
+            FecStep(
+                scheme="cc",
+                rate_inv=4,
+                polys=[0o133, 0o171, 0o145, 0o133],
+                frame_bits=768,
+                tail=6,
             ),
-            ModemStep(
-                conv="depuncture",
-                params={"keep_mask": cast("list[float | int]", _keep_mask())},
-            ),
-            ModemStep(
-                conv="fec",
-                params={
-                    "scheme": "cc",
-                    "rate_inv": 4,
-                    "polys": [0o133, 0o171, 0o145, 0o133],
-                    "frame_bits": 768,
-                    "tail": 6,
-                },
-            ),
-            ModemStep(conv="descramble", params={"sequence": _prbs_hex()}),
-            ModemStep(conv="segment", params={"frame_body_len": _FRAME_BODY_LEN}),
+            DescrambleStep(sequence=_prbs_hex()),
+            SegmentStep(frame_body_len=_FRAME_BODY_LEN),
         ],
     )
 

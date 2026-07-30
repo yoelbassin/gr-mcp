@@ -8,10 +8,11 @@ from marconi.engine.coding.builder import CodingBuilder
 from marconi.engine.coding.program import CodingProgram
 from marconi.engine.compile.compile_context import CompileContext
 from marconi.engine.compile.ir import GrPipeline
-from marconi.engine.stages.base import SpecStep, Stage, validate_path
+from marconi.engine.stages.base import Stage, validate_path
 from marconi.engine.types.descriptor import Amplitude, Descriptor
-from marconi.engine.types.models import ModemSpec, ValidationIssue
+from marconi.engine.types.models import Modem, ValidationIssue
 from marconi.engine.types.params import ParamValue
+from marconi.engine.types.step import Step
 from marconi.errors import register_error
 
 
@@ -50,7 +51,7 @@ def _sink_kind(desc: Descriptor) -> str:
     return _io_kinds(desc)[1]
 
 
-def _resolve(step: SpecStep, registry: Mapping[str, Stage[Any]]) -> Stage[Any]:
+def _resolve(step: Step, registry: Mapping[str, Stage[Any, Any]]) -> Stage[Any, Any]:
     stage = registry.get(step.conv)
     if stage is None:
         raise CompileError(f"unknown stage '{step.conv}'; known: {sorted(registry)}")
@@ -58,8 +59,8 @@ def _resolve(step: SpecStep, registry: Mapping[str, Stage[Any]]) -> Stage[Any]:
 
 
 def _forward_pass(
-    steps: Sequence[SpecStep],
-    registry: Mapping[str, Stage[Any]],
+    steps: Sequence[Step],
+    registry: Mapping[str, Stage[Any, Any]],
     start: Descriptor,
     sample_rate: float,
 ) -> tuple[list[Descriptor], list[float]]:
@@ -67,8 +68,8 @@ def _forward_pass(
     rates = [sample_rate]
     for step in steps:
         stage = _resolve(step, registry)
-        boundaries.append(stage.out_descriptor(boundaries[-1], step.params))
-        rates.append(rates[-1] * stage.rate_factor(step.params))
+        boundaries.append(stage.out_descriptor(boundaries[-1], step))
+        rates.append(rates[-1] * stage.rate_factor(step))
     return boundaries, rates
 
 
@@ -80,8 +81,8 @@ _RATE_TOL = 0.02
 
 
 def _validate_descriptors(
-    steps: Sequence[SpecStep],
-    registry: Mapping[str, Stage[Any]],
+    steps: Sequence[Step],
+    registry: Mapping[str, Stage[Any, Any]],
     boundaries: Sequence[Descriptor],
     rates: Sequence[float],
     symbol_rate: float,
@@ -124,7 +125,7 @@ def _validate_descriptors(
                 f"{wanted} but '{producer}' produces {in_desc.amplitude.value}; "
                 f"{fix} (the agc stage's `mode` selects the statistic)"
             )
-        required_order = stage.required_input_order(step.params)
+        required_order = stage.required_input_order(step)
         if (
             required_order is not None
             and in_desc.order is not None
@@ -135,7 +136,7 @@ def _validate_descriptors(
                 f"alphabet but '{producer}' produces order-{in_desc.order} "
                 f"symbols; align the two stages' order/sf params"
             )
-        required = stage.required_input_rate(step.params, symbol_rate)
+        required = stage.required_input_rate(step, symbol_rate)
         if required is not None and required > 0:
             if abs(rates[i] - required) > _RATE_TOL * required:
                 raise CompileError(
@@ -152,14 +153,14 @@ def _validate_descriptors(
                     f"pipeline delivers {sps:g} ({rates[i]:g} into symbol_rate "
                     f"{symbol_rate:g}); resample the input or fix symbol_rate"
                 )
-        problem = stage.validate_input(in_desc, step.params)
+        problem = stage.validate_input(in_desc, step)
         if problem is not None:
             raise CompileError(f"stage '{step.conv}': {problem}")
 
 
 def _validate_probe_marks(
-    steps: Sequence[SpecStep],
-    registry: Mapping[str, Stage[Any]],
+    steps: Sequence[Step],
+    registry: Mapping[str, Stage[Any, Any]],
     boundaries: Sequence[Descriptor],
     rates: Sequence[float],
     k: int,
@@ -186,8 +187,8 @@ def _validate_probe_marks(
 
 
 def _validate(
-    modem: ModemSpec,
-    registry: Mapping[str, Stage[Any]],
+    modem: Modem,
+    registry: Mapping[str, Stage[Any, Any]],
     start: Descriptor,
     direction: str,
 ) -> None:
@@ -207,8 +208,8 @@ def _validate(
 
 
 def _emit_gr_segment(
-    steps: Sequence[SpecStep],
-    registry: Mapping[str, Stage[Any]],
+    steps: Sequence[Step],
+    registry: Mapping[str, Stage[Any, Any]],
     boundaries: Sequence[Descriptor],
     rates: Sequence[float],
     symbol_rate: float,
@@ -228,7 +229,7 @@ def _emit_gr_segment(
             stage = _resolve(step, registry)
             ctx.descriptor = boundaries[i]
             ctx.rate = rates[i]
-            stage.emit_rx(ctx, step.params)
+            stage.emit_rx(ctx, step)
         ctx.descriptor = boundaries[n]
         ctx.rate = rates[n]
         ctx.chain(_sink_kind(boundaries[n]), **dict(sink_io))
@@ -239,7 +240,7 @@ def _emit_gr_segment(
             stage = _resolve(step, registry)
             ctx.descriptor = boundaries[i + 1]
             ctx.rate = rates[i + 1]
-            stage.emit_tx(ctx, step.params)
+            stage.emit_tx(ctx, step)
         ctx.descriptor = boundaries[0]
         ctx.rate = rates[0]
         ctx.chain(_sink_kind(boundaries[0]), **dict(sink_io))
@@ -247,13 +248,13 @@ def _emit_gr_segment(
     return ctx.build(name, sample_rate)
 
 
-def _known_engine(step: SpecStep, registry: Mapping[str, Stage[Any]]) -> str | None:
+def _known_engine(step: Step, registry: Mapping[str, Stage[Any, Any]]) -> str | None:
     stage = registry.get(step.conv)
     return stage.engine if stage is not None else None
 
 
 def _split_index(
-    steps: Sequence[SpecStep], registry: Mapping[str, Stage[Any]], direction: str
+    steps: Sequence[Step], registry: Mapping[str, Stage[Any, Any]], direction: str
 ) -> int:
     # Unknown names map to None so _validate stays the sole (aggregating)
     # reporter of unknown-stage issues; they neither start the coding segment
@@ -282,8 +283,8 @@ class CompiledPipeline:
 
 
 def compile_pipeline(
-    modem: ModemSpec,
-    registry: Mapping[str, Stage[Any]],
+    modem: Modem,
+    registry: Mapping[str, Stage[Any, Any]],
     *,
     direction: str,
     sample_rate: float,
@@ -324,7 +325,7 @@ def compile_pipeline(
             stage = _resolve(steps[i], registry)
             b.label = f"{steps[i].conv}[{i}]"
             b.kind = steps[i].conv
-            stage.emit_rx(b, steps[i].params)
+            stage.emit_rx(b, steps[i])
         coding = CodingProgram(
             steps=b.steps,
             entry_level=boundaries[k].level,
@@ -336,8 +337,8 @@ def compile_pipeline(
 
 
 def compile_modem(
-    modem: ModemSpec,
-    registry: Mapping[str, Stage[Any]],
+    modem: Modem,
+    registry: Mapping[str, Stage[Any, Any]],
     *,
     direction: str,
     sample_rate: float,

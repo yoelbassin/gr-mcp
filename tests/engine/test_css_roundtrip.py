@@ -6,43 +6,39 @@ from engine._dsp import aligned_ber, channel, read_bits, write_bits
 
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
 from marconi.engine.compile.compiler import CompileError, compile_modem
+from marconi.engine.modulation.css.stages import (
+    ChirpSyncStep,
+    CssDemapStep,
+    DechirpStep,
+)
+from marconi.engine.stages.conditioning import ClockCorrectStep
 from marconi.engine.types.descriptor import Descriptor
 from marconi.engine.types.levels import Level
-from marconi.engine.types.models import ModemSpec, ModemStep
-from marconi.engine.types.params import ParamValue
+from marconi.engine.types.models import Modem
 
 IQ = Descriptor(Level.IQ, "c")
 _OS, _ZP, _SYM = 2, 4, 1.0
 
 
-def _dechirp_of(p: dict[str, ParamValue]) -> dict[str, ParamValue]:
-    return {k: p[k] for k in ("sf", "oversample", "zero_pad")}
-
-
-def _demap_of(p: dict[str, ParamValue]) -> dict[str, ParamValue]:
-    return {"sf": p["sf"]}
-
-
-def _modem(sf: int, oversample: int = _OS) -> ModemSpec:
-    p: dict[str, ParamValue] = {
-        "sf": sf,
-        "oversample": oversample,
-        "zero_pad": _ZP,
-        "preamble_len": 8,
-        "sfd_symbols": 2.25,
-        "sync_symbols": 2,
-    }
-    return ModemSpec(
+def _modem(sf: int, oversample: int = _OS) -> Modem:
+    return Modem(
         symbol_rate=_SYM,
         path=[
-            ModemStep(conv="chirp_sync", params=p),
-            ModemStep(conv="dechirp", params=_dechirp_of(p)),
-            ModemStep(conv="css_demap", params=_demap_of(p)),
+            ChirpSyncStep(
+                sf=sf,
+                oversample=oversample,
+                zero_pad=_ZP,
+                preamble_len=8,
+                sfd_symbols=2.25,
+                sync_symbols=2,
+            ),
+            DechirpStep(sf=sf, oversample=oversample, zero_pad=_ZP),
+            CssDemapStep(sf=sf),
         ],
     )
 
 
-def _compile(modem: ModemSpec, direction: str, rate: float, src: Path, snk: Path):
+def _compile(modem: Modem, direction: str, rate: float, src: Path, snk: Path):
     from marconi.engine.stages.registry import stage_registry
 
     return compile_modem(
@@ -111,21 +107,20 @@ def test_dechirp_accepts_matching_input_rate(tmp_path: Path) -> None:
 def test_dechirp_rate_check_tolerates_clock_correct_ppm(tmp_path: Path) -> None:
     # clock_correct resamples by 1/(1+ppm) — a legitimate sub-percent rate shift
     # (0.005% at 50 ppm) the tolerance must admit, not reject (issue 06).
-    p: dict[str, ParamValue] = {
-        "sf": 7,
-        "oversample": 2,
-        "zero_pad": _ZP,
-        "preamble_len": 8,
-        "sfd_symbols": 2.25,
-        "sync_symbols": 2,
-    }
-    m = ModemSpec(
+    m = Modem(
         symbol_rate=_SYM,
         path=[
-            ModemStep(conv="clock_correct", params={"ppm": 50.0}),
-            ModemStep(conv="chirp_sync", params=p),
-            ModemStep(conv="dechirp", params=_dechirp_of(p)),
-            ModemStep(conv="css_demap", params=_demap_of(p)),
+            ClockCorrectStep(ppm=50.0),
+            ChirpSyncStep(
+                sf=7,
+                oversample=2,
+                zero_pad=_ZP,
+                preamble_len=8,
+                sfd_symbols=2.25,
+                sync_symbols=2,
+            ),
+            DechirpStep(sf=7, oversample=2, zero_pad=_ZP),
+            CssDemapStep(sf=7),
         ],
     )
     _compile(m, "rx", 256.0, tmp_path / "i", tmp_path / "o")  # within tolerance
@@ -181,21 +176,20 @@ def test_css_two_burst_capture_decodes_both(tmp_path: Path) -> None:
 
 def _anatomy_modem(
     sf: int, osr: int, sfd_symbols: float, sync_symbols: int, preamble_len: int = 8
-) -> ModemSpec:
-    p: dict[str, ParamValue] = {
-        "sf": sf,
-        "oversample": osr,
-        "zero_pad": _ZP,
-        "preamble_len": preamble_len,
-        "sfd_symbols": sfd_symbols,
-        "sync_symbols": sync_symbols,
-    }
-    return ModemSpec(
+) -> Modem:
+    return Modem(
         symbol_rate=_SYM,
         path=[
-            ModemStep(conv="chirp_sync", params=p),
-            ModemStep(conv="dechirp", params=_dechirp_of(p)),
-            ModemStep(conv="css_demap", params=_demap_of(p)),
+            ChirpSyncStep(
+                sf=sf,
+                oversample=osr,
+                zero_pad=_ZP,
+                preamble_len=preamble_len,
+                sfd_symbols=sfd_symbols,
+                sync_symbols=sync_symbols,
+            ),
+            DechirpStep(sf=sf, oversample=osr, zero_pad=_ZP),
+            CssDemapStep(sf=sf),
         ],
     )
 
@@ -305,19 +299,18 @@ def test_css_long_sync_gap_locks(tmp_path) -> None:
     cap_p, imp = tmp_path / "cap.iq", tmp_path / "imp.iq"
     frame.tofile(cap_p)
     channel(cap_p, imp, snr_db=20.0, cfo_hz=0.02 * bw, sample_rate=rate, seed=11)
-    p: dict[str, ParamValue] = {
-        "sf": sf,
-        "oversample": osr,
-        "zero_pad": _ZP,
-        "preamble_len": pl,
-        "sfd_symbols": 2.25,
-        "sync_symbols": sync,
-    }
-    m = ModemSpec(
+    m = Modem(
         symbol_rate=_SYM,
         path=[
-            ModemStep(conv="chirp_sync", params=p),
-            ModemStep(conv="dechirp", params=_dechirp_of(p)),
+            ChirpSyncStep(
+                sf=sf,
+                oversample=osr,
+                zero_pad=_ZP,
+                preamble_len=pl,
+                sfd_symbols=2.25,
+                sync_symbols=sync,
+            ),
+            DechirpStep(sf=sf, oversample=osr, zero_pad=_ZP),
         ],
     )
     snk = tmp_path / "syms.s16"
