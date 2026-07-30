@@ -63,10 +63,9 @@ def _spec(*, probe: bool, sync: bool) -> Modem:
 
 
 def _bursts(r) -> list[int] | None:
-    for d in r.diagnostics.values():
-        b = d.get("bursts")
-        if isinstance(b, list):
-            return [int(m) for m in b]
+    for d in r.diagnostics:
+        if d.key == "bursts" and d.marks is not None:
+            return [int(m) for m in d.marks]
     return None
 
 

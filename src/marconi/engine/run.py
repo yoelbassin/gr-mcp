@@ -1,13 +1,18 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any, Literal, cast
 
 import numpy as np
 from pydantic import BaseModel
 
-from marconi.engine.backends.base import Backend, BlockCensus
+from marconi.engine.backends.base import (
+    Backend,
+    BlockCensus,
+    Diagnostic,
+    find_diagnostic,
+)
 from marconi.engine.coding.carrier import CodingCarrier
 from marconi.engine.coding.program import run_coding
 from marconi.engine.compile.compiler import (
@@ -36,17 +41,19 @@ class PipelineResult(BaseModel):
     windows: list[int] = []
     marks: list[int] = []
     census: list[BlockCensus] = []
-    diagnostics: dict[str, dict[str, int | list[int]]] = {}
+    diagnostics: list[Diagnostic] = []
     stalled_at: str | None = None
     error: str | None = None
 
+    def diagnostic(self, block: str, key: str) -> Diagnostic | None:
+        return find_diagnostic(self.diagnostics, block, key)
 
-def _harvest_marks(diagnostics: Mapping[str, Mapping[str, Any]]) -> list[int]:
+
+def _harvest_marks(diagnostics: Sequence[Diagnostic]) -> list[int]:
     marks: list[int] = []
-    for d in diagnostics.values():
-        b = d.get("bursts")
-        if isinstance(b, list):
-            marks = [int(m) for m in b]
+    for d in diagnostics:
+        if d.key == "bursts" and d.marks is not None:
+            marks = [int(m) for m in d.marks]
     return marks
 
 
@@ -66,7 +73,7 @@ def _wrap_gr_only(
     seam: Path,
     marks: list[int],
     census: list[BlockCensus],
-    diagnostics: dict[str, dict[str, int | list[int]]],
+    diagnostics: list[Diagnostic],
 ) -> PipelineResult:
     if cp.final.item_type == "b":
         bitstream = Bitstream(path=seam, num_bits=int(read_bits(seam).size))
@@ -97,7 +104,7 @@ def _wrap_result(
     workdir: Path,
     marks: list[int],
     census: list[BlockCensus],
-    diagnostics: dict[str, dict[str, int | list[int]]],
+    diagnostics: list[Diagnostic],
 ) -> PipelineResult:
     windows = [w.start for w in carrier.windows or []]
     if final.level is Level.BITS:
@@ -280,7 +287,7 @@ def run_rx(
             if flagged is not None:
                 return flagged
     census: list[BlockCensus] = []
-    diagnostics: dict[str, dict[str, int | list[int]]] = {}
+    diagnostics: list[Diagnostic] = []
     marks: list[int] = []
     entry_path = seam
     if cp.gr is not None:
@@ -289,7 +296,7 @@ def run_rx(
 
             backend = GnuRadioBackend()
         r = backend.run_pipeline(cp.gr, timeout=timeout)
-        census, diagnostics = list(r.census), dict(r.diagnostics)
+        census, diagnostics = list(r.census), list(r.diagnostics)
         if r.status != "ok":
             return PipelineResult(
                 status=r.status,

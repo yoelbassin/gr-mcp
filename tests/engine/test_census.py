@@ -154,7 +154,7 @@ def test_an_all_stock_chain_is_observable_too(tmp_path: Path) -> None:
         _signal(tmp_path),
         tmp_path / "out.cf32",
     )
-    assert res.diagnostics == {}
+    assert res.diagnostics == []
     assert len(res.census) == 5
 
 

@@ -9,7 +9,7 @@ from typing import Any
 import numpy as np
 import pytest
 
-from marconi.engine.backends.base import RunResult
+from marconi.engine.backends.base import Diagnostic, RunResult, find_diagnostic
 from marconi.engine.backends.gnuradio import worker as worker_mod
 from marconi.engine.backends.gnuradio.runner import (
     GnuRadioBackend,
@@ -268,7 +268,9 @@ def test_abnormal_worker_exit_is_error_with_cause() -> None:
 
 def _bulky_result_worker(payload_json: str, conn: Any, capture_path: str) -> None:
     marks = list(range(60_000))
-    result = RunResult(status="ok", diagnostics={"probe": {"marks": marks}})
+    result = RunResult(
+        status="ok", diagnostics=[Diagnostic(block="probe", key="marks", marks=marks)]
+    )
     conn.send(result.model_dump_json())
     conn.close()
 
@@ -283,7 +285,8 @@ def test_result_larger_than_pipe_buffer_is_not_a_timeout() -> None:
     res = _run_in_subprocess("{}", timeout=15.0, target=_bulky_result_worker)
     elapsed = time.monotonic() - t0
     assert res.status == "ok"
-    assert res.diagnostics["probe"]["marks"] == list(range(60_000))
+    row = find_diagnostic(res.diagnostics, "probe", "marks")
+    assert row is not None and row.marks == list(range(60_000))
     assert elapsed < 10.0, f"large result waited out the deadline ({elapsed:.1f}s)"
 
 

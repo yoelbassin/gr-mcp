@@ -53,10 +53,11 @@ class RunResult(BaseModel):
     # the block id where the signal died on an "empty" run (first stage whose
     # items_out fell to zero), or None. The machine anchor for the census gradient.
     stalled_at: str | None = None
-    # per-block counters/marks (keyed by block id) harvested after the run,
-    # e.g. {"b4": {"locks": 2}} or {"b7": {"bursts": [0, 512]}} — lets a caller
+    # per-block counters/marks harvested after the run, e.g.
+    # Diagnostic(block="b4", key="locks", count=2) or
+    # Diagnostic(block="b7", key="bursts", marks=[0, 512]) — lets a caller
     # tell "no signal found" from silence, or recover per-burst symbol offsets
-    diagnostics: dict[str, dict[str, int | list[int]]] = {}
+    diagnostics: list[Diagnostic] = []
     # in pipeline order, so the row where items_out falls to zero is the stage
     # that consumed the signal — the gradient a parameter search needs
     census: list[BlockCensus] = []

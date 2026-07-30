@@ -7,6 +7,7 @@ import numpy as np
 import pytest
 from e2e import _drm
 
+from marconi.engine.backends.base import find_diagnostic
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
 from marconi.engine.compile.compiler import compile_modem
 from marconi.engine.modulation.ofdm.stages import OfdmCoherentSyncStep
@@ -86,9 +87,14 @@ def test_synthetic_lattice_full_chain_equalizes(tmp_path: Path) -> None:
     corners = np.array([1 + 1j, 1 - 1j, -1 + 1j, -1 - 1j]) / np.sqrt(2)
     evm = np.mean(np.min(np.abs(cells[:, None] - corners[None, :]), axis=1) ** 2)
     assert evm < 0.10, f"synthetic full-chain EVM {evm:.3f}"
-    diags = [d for d in result.diagnostics.values() if "frames_emitted" in d]
-    locks = diags[0]["locks"] if diags else 0
-    assert diags and isinstance(locks, int) and locks >= 1
+    frames_row = next(
+        (d for d in result.diagnostics if d.key == "frames_emitted"), None
+    )
+    assert frames_row is not None
+    locks_row = find_diagnostic(result.diagnostics, frames_row.block, "locks")
+    assert (
+        locks_row is not None and locks_row.count is not None and locks_row.count >= 1
+    )
 
 
 def test_synthetic_dropout_relocks_through_real_chain(tmp_path: Path) -> None:
@@ -134,13 +140,25 @@ def test_synthetic_dropout_relocks_through_real_chain(tmp_path: Path) -> None:
     corners = np.array([1 + 1j, 1 - 1j, -1 + 1j, -1 - 1j]) / np.sqrt(2)
     evm = np.mean(np.min(np.abs(cells[:, None] - corners[None, :]), axis=1) ** 2)
     assert evm < 0.10, f"synthetic dropout-relock EVM {evm:.3f}"
-    eq_diags = [d for d in result.diagnostics.values() if "frames_emitted" in d]
-    relocks = eq_diags[0]["relocks"] if eq_diags else 0
-    assert eq_diags and isinstance(relocks, int) and relocks >= 1
-    trk_diags = [
-        d
-        for d in result.diagnostics.values()
-        if "locks" in d and "frames_emitted" not in d
-    ]
-    locks = trk_diags[0]["locks"] if trk_diags else 0
-    assert trk_diags and isinstance(locks, int) and locks >= 2
+    eq_block = next(
+        (d.block for d in result.diagnostics if d.key == "frames_emitted"), None
+    )
+    assert eq_block is not None
+    relocks_row = find_diagnostic(result.diagnostics, eq_block, "relocks")
+    assert (
+        relocks_row is not None
+        and relocks_row.count is not None
+        and relocks_row.count >= 1
+    )
+    frames_emitted_blocks = {
+        d.block for d in result.diagnostics if d.key == "frames_emitted"
+    }
+    trk_row = next(
+        (
+            d
+            for d in result.diagnostics
+            if d.key == "locks" and d.block not in frames_emitted_blocks
+        ),
+        None,
+    )
+    assert trk_row is not None and trk_row.count is not None and trk_row.count >= 2

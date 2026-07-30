@@ -10,7 +10,12 @@ from multiprocessing.connection import Connection
 from pathlib import Path
 from typing import Any
 
-from marconi.engine.backends.base import BackendError, BlockCensus, RunResult
+from marconi.engine.backends.base import (
+    BackendError,
+    BlockCensus,
+    Diagnostic,
+    RunResult,
+)
 from marconi.engine.compile.ir import GrPipeline
 
 _SINK_KINDS = {
@@ -75,16 +80,21 @@ def _arm_crash_trampoline(tb: Any, crashes: list[str]) -> None:
             blk.forecast = _trampolined_forecast(blk.forecast, tb, crashes)
 
 
-def _harvest_diagnostics(tb: Any) -> dict[str, dict[str, int | list[int]]]:
-    out: dict[str, dict[str, int | list[int]]] = {}
+def _harvest_diagnostics(tb: Any) -> list[Diagnostic]:
+    rows: list[Diagnostic] = []
     for bid, blk in getattr(tb, "_py_instances", {}).items():
         diag = getattr(blk, "diagnostics", None)
         if isinstance(diag, dict) and diag:
-            out[str(bid)] = {
-                str(k): [int(m) for m in v] if isinstance(v, list) else int(v)
-                for k, v in diag.items()
-            }
-    return out
+            for k, v in diag.items():
+                if isinstance(v, list):
+                    rows.append(
+                        Diagnostic(
+                            block=str(bid), key=str(k), marks=[int(m) for m in v]
+                        )
+                    )
+                else:
+                    rows.append(Diagnostic(block=str(bid), key=str(k), count=int(v)))
+    return rows
 
 
 def _port_count(blk: Any, counter: str) -> int | None:

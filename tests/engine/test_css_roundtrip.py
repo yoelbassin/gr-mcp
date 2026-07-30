@@ -167,7 +167,7 @@ def test_css_two_burst_capture_decodes_both(tmp_path: Path) -> None:
     channel(cap_p, imp, snr_db=20.0, sample_rate=rate, seed=3)
     r = be.run_pipeline(_compile(m, "rx", rate, imp, op))
     assert r.status == "ok"
-    assert any(d.get("locks") == 2 for d in r.diagnostics.values()), r.diagnostics
+    assert any(d.key == "locks" and d.count == 2 for d in r.diagnostics), r.diagnostics
     out = read_bits(op)
     assert len(out) > len(bits1) + len(bits2)  # both payloads (plus gap junk)
     assert aligned_ber(out[: len(bits1) + 8 * sf], bits1, max_shift=8 * sf) == 0.0
