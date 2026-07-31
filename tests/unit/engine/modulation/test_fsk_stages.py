@@ -19,10 +19,6 @@ def _modem() -> Modem:
     )
 
 
-def test_registry_exposes_fsk_and_slice() -> None:
-    assert {"fsk", "slice"} <= set(stage_registry())
-
-
 def test_fsk_descriptors_and_levels() -> None:
     reg = stage_registry()
     fsk, sl = reg["fsk"], reg["slice"]
