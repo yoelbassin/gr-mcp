@@ -1,6 +1,7 @@
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 import numpy as np
 import pytest
@@ -22,6 +23,7 @@ from marconi.engine.backends.gnuradio.runner import (  # noqa: E402
     ensure_worker_warm,
 )
 from marconi.engine.compile.compiler import CompileError, compile_modem  # noqa: E402
+from marconi.engine.compile.ir import GrPipeline  # noqa: E402
 from marconi.engine.modulation.css.stages import (  # noqa: E402
     ChirpSyncStep,
     CssDemapStep,
@@ -673,21 +675,98 @@ def test_amplitude_acceptance_matches_the_declared_set(name: str) -> None:
     if accepts is None:
         pytest.skip(f"{name} is scale-invariant")
     for statistic, mode in _STATISTIC_MODE.items():
-        assert _compiles_with(name, mode) is (statistic in accepts), (
+        compiles = statistic in accepts
+        if name == "qam_demod" and not compiles:
+            with pytest.raises(CompileError, match="rms_unity"):
+                _compile_pipeline(
+                    "rx",
+                    [AgcStep(mode=AgcMode(mode)), *_recipe_path(name)],
+                    _sample_rate(name),
+                    _SYM,
+                    IQ,
+                    Path("in.cf32"),
+                    Path("out.bin"),
+                )
+            continue
+        assert _compiles_with(name, mode) is compiles, (
             f"{name} with agc mode {mode!r} ({statistic.value}): "
-            f"compiles={_compiles_with(name, mode)}, declared={statistic in accepts}"
+            f"compiles={_compiles_with(name, mode)}, declared={compiles}"
         )
 
 
-def test_wrong_statistic_for_qam_is_a_compile_error_naming_the_requirement() -> None:
-    for mode in ("feedforward", "feedback"):
-        with pytest.raises(CompileError, match="rms_unity"):
-            _compile_pipeline(
-                "rx",
-                [AgcStep(mode=AgcMode(mode)), *_recipe_path("qam_demod")],
-                _sample_rate("qam_demod"),
-                _SYM,
-                IQ,
-                Path("in.cf32"),
-                Path("out.bin"),
-            )
+# Mirrors RunResult.status in marconi.engine.backends.base; base.py has `from
+# __future__ import annotations`, so its Literal is stored unevaluated (a
+# string) and isn't reachable as a reusable static alias without a source
+# change -- this duplication is intentional and test-side only.
+_Status = Literal["ok", "error", "timeout", "empty"]
+
+
+@dataclass(frozen=True)
+class GainResult:
+    status: _Status
+    ber: float
+
+
+_V2_GAINS = [1e-3, 1e-1, 1.0, 1e1, 1e3]
+
+_CHAINS: dict[str, list[Step]] = {
+    "fsk": [
+        FskStep(deviation=1.0),
+        SliceStep(),
+    ],
+    "psk": [
+        PskDemodStep(order=PskOrder(2)),
+        PskDemapStep(order=PskOrder(2)),
+    ],
+}
+
+
+def _ber_at_gain(tmp_path: Path, name: str, gain: float) -> GainResult:
+    be = GnuRadioBackend()
+    spec = Modem(symbol_rate=_SYM, path=_CHAINS[name])
+    bits = np.random.default_rng(0).integers(0, 2, 4096).astype(np.uint8)
+    bp = write_bits(tmp_path / f"{name}_in.bits", bits)
+    iq = tmp_path / f"{name}.iq"
+    scaled = tmp_path / f"{name}_{gain}.iq"
+    out = tmp_path / f"{name}_{gain}.bits"
+
+    def _compile(direction: str, src: Path, snk: Path) -> GrPipeline:
+        return compile_modem(
+            spec,
+            stage_registry(),
+            direction=direction,
+            sample_rate=_SR,
+            start=IQ,
+            source_io={"path": str(src)},
+            sink_io={"path": str(snk)},
+        )
+
+    assert be.run_pipeline(_compile("tx", bp, iq)).status == "ok"
+    (np.fromfile(iq, dtype=np.complex64) * np.complex64(gain)).tofile(scaled)
+    rx = be.run_pipeline(_compile("rx", scaled, out))
+    # A non-ok RX run (e.g. a hung loop) never decodes anything: worst-case BER,
+    # but the status itself is kept so a crash is never mistaken for a decode.
+    if rx.status != "ok":
+        return GainResult(status=rx.status, ber=1.0)
+    return GainResult(status="ok", ber=aligned_ber(read_bits(out), bits))
+
+
+def _assert_level_invariant(name: str, table: dict[float, GainResult]) -> None:
+    for gain, result in table.items():
+        assert result.status == "ok", f"{name}@{gain} status {result.status}: {table}"
+    assert all(
+        r.ber == 0.0 for r in table.values()
+    ), f"{name} is level-sensitive: {table}"
+
+
+_EXPECT: dict[str, Callable[[str, dict[float, GainResult]], None]] = {
+    "fsk": _assert_level_invariant,
+}
+
+
+@pytest.mark.parametrize("name", sorted(_EXPECT))
+def test_v2_level_sensitivity(name: str, tmp_path: Path) -> None:
+    ensure_worker_warm()
+    table = {g: _ber_at_gain(tmp_path, name, g) for g in _V2_GAINS}
+    print(f"\nV2 {name} BER vs gain -> {table}")
+    _EXPECT[name](name, table)
