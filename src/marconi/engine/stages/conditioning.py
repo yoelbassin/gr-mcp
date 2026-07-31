@@ -177,11 +177,14 @@ class AgcStep(Step):
             raise PydanticCustomError("value_error", "max_gain must be >= 0")
         allowed = _MODE_FIELDS[self.mode]
         unused = set().union(*_MODE_FIELDS.values()) - allowed
-        supplied = self.model_fields_set & unused
-        if supplied:
+        fields = type(self).model_fields
+        supplied_unused = {
+            f for f in unused if getattr(self, f) != fields[f].get_default()
+        }
+        if supplied_unused:
             raise PydanticCustomError(
                 "value_error",
-                f"mode '{self.mode}' does not use {sorted(supplied)}",
+                f"mode '{self.mode}' does not use {sorted(supplied_unused)}",
             )
         return self
 
