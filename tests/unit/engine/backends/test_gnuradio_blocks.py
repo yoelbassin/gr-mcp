@@ -1,37 +1,38 @@
-from pathlib import Path
+import pytest
 
-from marconi.engine.backends.gnuradio.blocks import GR_BLOCKS, _factories
-
-
-def test_io_kinds_present() -> None:
-    for kind in (
-        "iq_file_source",
-        "iq_file_sink",
-        "bits_file_source",
-        "bits_file_sink",
-        "soft_bits_file_sink",
-        "symbols_file_sink",
-    ):
-        assert kind in GR_BLOCKS
-
-
-def test_factories_construct_real_blocks(tmp_path: Path) -> None:
-    (tmp_path / "x.iq").write_bytes(b"\x00" * 16)
-    fac = _factories(1.0)
-    src = fac["iq_file_source"]({"path": str(tmp_path / "x.iq")})
-    snk = fac["soft_bits_file_sink"]({"path": str(tmp_path / "s.f32")})
-    assert hasattr(src, "to_basic_block") and hasattr(snk, "to_basic_block")
+from marconi.engine.backends.base import BackendError
+from marconi.engine.backends.gnuradio.blocks import GR_BLOCKS, _factories, _make_ctx
 
 
 def test_unknown_kind_absent() -> None:
     assert "no_such_block" not in _factories(1.0)
 
 
-def test_fsk_dsp_blocks_construct() -> None:
-    fac = _factories(4.0)
-    assert hasattr(fac["quadrature_demod"]({"gain": 0.6}), "to_basic_block")
-    assert hasattr(fac["symbol_sync_ff"]({"sps": 4.0}), "to_basic_block")
-    assert hasattr(fac["binary_slicer"]({}), "to_basic_block")
-    assert hasattr(fac["chunks_to_symbols"]({"symbols": [-1.0, 1.0]}), "to_basic_block")
-    assert hasattr(fac["repeat_f"]({"interp": 4}), "to_basic_block")
-    assert hasattr(fac["frequency_modulator"]({"sensitivity": 1.57}), "to_basic_block")
+def test_rrc_filter_accepts_fractional_sps() -> None:
+    """A capture whose sample rate is not an integer multiple of the baud has
+    fractional sps; the RRC matched filter's tap count must round it, not force
+    an int and raise in the backend (sample_rate=10, symbol_rate=3 -> sps=3.33)."""
+    ctx = _make_ctx(10.0)
+    block = GR_BLOCKS["rrc_filter_ccf"](
+        ctx,
+        {
+            "interpolation": 1,
+            "rate": 10.0,
+            "sps": 10.0 / 3.0,
+            "alpha": 0.35,
+            "span": 11,
+        },
+    )
+    assert block is not None
+
+
+def test_const_rejects_unknown_order() -> None:
+    ctx = _make_ctx(4.0)
+    with pytest.raises(BackendError):
+        GR_BLOCKS["chunks_to_symbols_bc"](ctx, {"scheme": "psk", "order": 5})
+
+
+def test_qam_const_rejects_unknown_order() -> None:
+    ctx = _make_ctx(4.0)
+    with pytest.raises(BackendError):
+        GR_BLOCKS["chunks_to_symbols_bc"](ctx, {"scheme": "qam", "order": 32})

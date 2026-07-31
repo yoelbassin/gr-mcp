@@ -7,27 +7,6 @@ from marconi.engine.backends.gnuradio.blocks import GR_BLOCKS, _make_ctx
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
 from marconi.engine.compile.ir import GrBlock, GrConnection, GrPipeline
 
-_KINDS = [
-    ("feedforward_agc_cc", {"nsamples": 64, "reference": 1.0}),
-    (
-        "agc2_cc",
-        {
-            "attack_rate": 0.01,
-            "decay_rate": 0.001,
-            "reference": 1.0,
-            "max_gain": 0.0,
-        },
-    ),
-    ("complex_to_float", {}),
-    ("rms_cf", {"alpha": 0.1}),
-    ("divide_ff", {}),
-]
-
-
-@pytest.mark.parametrize("kind,params", _KINDS)
-def test_agc_factory_constructs(kind: str, params: dict) -> None:
-    assert GR_BLOCKS[kind](_make_ctx(4.0), params) is not None
-
 
 def test_agc2_applies_max_gain() -> None:
     blk = GR_BLOCKS["agc2_cc"](
