@@ -8,6 +8,7 @@ from marconi.engine.stages.base import StageDirectionError
 from marconi.engine.stages.conditioning import (
     Channelize,
     ChannelizeStep,
+    ClockCorrectStep,
     Invert,
     InvertStep,
 )
@@ -70,6 +71,15 @@ def test_param_validation() -> None:
         ChannelizeStep(bandwidth_hz=4.0)  # type: ignore[call-arg]
     with pytest.raises(ValidationError):
         ChannelizeStep(decim=0, bandwidth_hz=4.0)
+
+
+def test_clock_correct_rejects_pole_ppm() -> None:
+    with pytest.raises(ValidationError):
+        ClockCorrectStep(ppm=-1e6)
+
+
+def test_clock_correct_accepts_normal_ppm() -> None:
+    ClockCorrectStep(ppm=6.0)
 
 
 def test_rate_threads_through_channelize_to_demod() -> None:
