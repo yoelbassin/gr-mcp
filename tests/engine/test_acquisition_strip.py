@@ -7,10 +7,11 @@ from marconi.engine.compile.compiler import compile_modem
 from marconi.engine.stages.acquisition import PreambleSyncStep
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Carrier, Descriptor
+from marconi.engine.types.enums import ItemType
 from marconi.engine.types.levels import Level
 from marconi.engine.types.models import Modem
 
-SYM_C = Descriptor(Level.SYMBOLS, "c", carrier=Carrier.SOFT)
+SYM_C = Descriptor(Level.SYMBOLS, ItemType.C, carrier=Carrier.SOFT)
 
 
 def _qpsk_points() -> np.ndarray:

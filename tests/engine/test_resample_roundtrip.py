@@ -10,10 +10,11 @@ from marconi.engine.modulation.fsk.stages import FskStep
 from marconi.engine.stages.conditioning import ResampleStep
 from marconi.engine.stages.general import SliceStep
 from marconi.engine.types.descriptor import Descriptor
+from marconi.engine.types.enums import ItemType
 from marconi.engine.types.levels import Level
 from marconi.engine.types.models import Modem
 
-IQ = Descriptor(Level.IQ, "c")
+IQ = Descriptor(Level.IQ, ItemType.C)
 _DEV, _SYM = 0.75, 1.0
 
 

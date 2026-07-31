@@ -50,13 +50,13 @@ from marconi.engine.run import run_rx
 from marconi.engine.stages.conditioning import ChannelizeStep
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Descriptor
-from marconi.engine.types.enums import DcMode
+from marconi.engine.types.enums import DcMode, ItemType
 from marconi.engine.types.levels import Level
 from marconi.engine.types.models import Modem
 
 PAYLOAD_BITS = 96
 
-IQ = Descriptor(Level.IQ, "c")
+IQ = Descriptor(Level.IQ, ItemType.C)
 RATE = 39062.0
 _SLICE = (
     Path(__file__).resolve().parents[2] / "artifacts" / "assets" / "DMR" / "dmr.cf32"

@@ -5,6 +5,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any, Generic, TypeVar
 
 from marconi.engine.types.descriptor import Amplitude, Carrier, Descriptor
+from marconi.engine.types.enums import ItemType
 from marconi.engine.types.levels import Level
 from marconi.engine.types.models import ValidationIssue
 from marconi.engine.types.step import Step
@@ -58,7 +59,7 @@ class Stage(ABC, Generic[B, S]):
     # consumer) fails at compile, not in the worker. None = polymorphic. The rule
     # they encode: SYMBOLS is SOFT except QAM/CSS (hard@SYMBOLS); BITS is HARD
     # except the soft-LLR lane ("f"/SOFT).
-    accepts_item_type: str | None = None
+    accepts_item_type: ItemType | None = None
     accepts_carrier: Carrier | None = None
     # The amplitude statistics this stage can decode from, or None if it is
     # scale-invariant. A set, not one value: a constant-modulus demod tolerates

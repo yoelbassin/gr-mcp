@@ -4,9 +4,10 @@ from marconi.engine.compile.compile_context import CompileContext
 from marconi.engine.modulation.fsk.stages import MskStep
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Carrier, Descriptor
+from marconi.engine.types.enums import ItemType
 from marconi.engine.types.levels import Level
 
-IQ = Descriptor(Level.IQ, "c")
+IQ = Descriptor(Level.IQ, ItemType.C)
 
 
 def test_msk_registered_and_contract() -> None:

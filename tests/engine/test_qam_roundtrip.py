@@ -16,12 +16,12 @@ from marconi.engine.compile.compiler import compile_modem
 from marconi.engine.modulation.qam.stages import QamDemapStep, QamDemodStep
 from marconi.engine.stages.conditioning import AgcStep
 from marconi.engine.types.descriptor import Carrier, Descriptor
-from marconi.engine.types.enums import AgcMode, QamOrder
+from marconi.engine.types.enums import AgcMode, ItemType, QamOrder
 from marconi.engine.types.levels import Level
 from marconi.engine.types.models import Modem
 
-IQ = Descriptor(Level.IQ, "c")
-SYM_B = Descriptor(Level.SYMBOLS, "b", carrier=Carrier.HARD)
+IQ = Descriptor(Level.IQ, ItemType.C)
+SYM_B = Descriptor(Level.SYMBOLS, ItemType.B, carrier=Carrier.HARD)
 _SR, _SYM = 4.0, 1.0
 
 # order -> (N_bits, cfo_frac, snr_db, settle) — prototype-locked, SER-0 over 10 seeds

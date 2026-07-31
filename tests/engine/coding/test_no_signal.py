@@ -61,11 +61,12 @@ from marconi.engine.io.bitfile import read_bits
 from marconi.engine.run import run_rx
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Carrier, Descriptor
+from marconi.engine.types.enums import ItemType
 from marconi.engine.types.levels import Level
 from marconi.engine.types.models import Bitstream, Modem, Symbolstream
 
-BITS = Descriptor(Level.BITS, "b")
-SOFT_SYMBOLS = Descriptor(Level.SYMBOLS, "f", carrier=Carrier.SOFT)
+BITS = Descriptor(Level.BITS, ItemType.B)
+SOFT_SYMBOLS = Descriptor(Level.SYMBOLS, ItemType.F, carrier=Carrier.SOFT)
 _N = 60_000
 
 _Decoder = Callable[[np.ndarray, list[int]], int]

@@ -11,10 +11,11 @@ from marconi.engine.backends.stub import StubBackend
 from marconi.engine.compile.compiler import compile_modem
 from marconi.engine.compile.ir import GrBlock, GrConnection, GrPipeline
 from marconi.engine.types.descriptor import Descriptor
+from marconi.engine.types.enums import ItemType
 from marconi.engine.types.levels import Level
 from marconi.engine.types.models import Modem
 
-IQ = Descriptor(Level.IQ, "c")
+IQ = Descriptor(Level.IQ, ItemType.C)
 
 
 def test_instantiate_resolves_a_compiled_pipeline() -> None:

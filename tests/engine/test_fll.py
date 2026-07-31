@@ -38,12 +38,12 @@ from marconi.engine.stages.acquisition import FllStep
 from marconi.engine.stages.conditioning import AgcStep
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Descriptor
-from marconi.engine.types.enums import AgcMode, PskOrder
+from marconi.engine.types.enums import AgcMode, ItemType, PskOrder
 from marconi.engine.types.levels import Level
 from marconi.engine.types.models import Modem
 from marconi.engine.types.step import Step
 
-IQ = Descriptor(Level.IQ, "c")
+IQ = Descriptor(Level.IQ, ItemType.C)
 _SR, _SYM, _ORDER, _NBITS = 8.0, 1.0, 4, 8192
 _SETTLE, _MAX_SHIFT = 400, 1200  # max_shift MUST exceed settle or nothing aligns
 
@@ -125,7 +125,7 @@ def test_fll_preserves_the_amplitude_claim() -> None:
     from marconi.engine.types.descriptor import Amplitude
 
     stage = stage_registry()["fll"]
-    normalized = Descriptor(Level.IQ, "c", amplitude=Amplitude.RMS_UNITY)
+    normalized = Descriptor(Level.IQ, ItemType.C, amplitude=Amplitude.RMS_UNITY)
     step = FllStep()
     assert stage.out_descriptor(normalized, step).amplitude is Amplitude.RMS_UNITY
     assert stage.rate_factor(step) == 1.0

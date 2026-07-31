@@ -10,7 +10,7 @@ from marconi.engine.modulation.qam.stages import (
 )
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Carrier, Descriptor
-from marconi.engine.types.enums import QamOrder
+from marconi.engine.types.enums import ItemType, QamOrder
 from marconi.engine.types.levels import Level
 
 
@@ -21,17 +21,17 @@ def test_registered() -> None:
 
 def test_demod_descriptor_is_hard_symbol_index() -> None:
     out = QamDemod().out_descriptor(
-        Descriptor(Level.IQ, "c"), QamDemodStep(order=QamOrder(16))
+        Descriptor(Level.IQ, ItemType.C), QamDemodStep(order=QamOrder(16))
     )
-    assert out == Descriptor(Level.SYMBOLS, "b", carrier=Carrier.HARD, order=16)
+    assert out == Descriptor(Level.SYMBOLS, ItemType.B, carrier=Carrier.HARD, order=16)
 
 
 def test_demap_descriptor_is_hard_bits() -> None:
     out = QamDemap().out_descriptor(
-        Descriptor(Level.SYMBOLS, "b", carrier=Carrier.HARD),
+        Descriptor(Level.SYMBOLS, ItemType.B, carrier=Carrier.HARD),
         QamDemapStep(order=QamOrder(16)),
     )
-    assert out == Descriptor(Level.BITS, "b", carrier=Carrier.HARD)
+    assert out == Descriptor(Level.BITS, ItemType.B, carrier=Carrier.HARD)
 
 
 def test_order_validation_rejects_bad_and_missing() -> None:
@@ -43,7 +43,7 @@ def test_order_validation_rejects_bad_and_missing() -> None:
 
 
 def test_demod_rx_chain_is_rrc_sync_receiver() -> None:
-    b = CompileContext(Descriptor(Level.IQ, "c"), rate=8.0, symbol_rate=2.0)
+    b = CompileContext(Descriptor(Level.IQ, ItemType.C), rate=8.0, symbol_rate=2.0)
     QamDemod().emit_rx(b, QamDemodStep(order=QamOrder(16)))
     p = b.build("t", 8.0)
     assert [x.kind for x in p.blocks] == [
@@ -58,7 +58,7 @@ def test_demod_rx_chain_is_rrc_sync_receiver() -> None:
 
 
 def test_demod_tx_maps_then_shapes_with_interp_sps() -> None:
-    b = CompileContext(Descriptor(Level.IQ, "c"), rate=8.0, symbol_rate=2.0)
+    b = CompileContext(Descriptor(Level.IQ, ItemType.C), rate=8.0, symbol_rate=2.0)
     QamDemod().emit_tx(b, QamDemodStep(order=QamOrder(64)))
     p = b.build("t", 8.0)
     assert [x.kind for x in p.blocks] == ["chunks_to_symbols_bc", "rrc_filter_ccf"]
@@ -70,13 +70,17 @@ def test_demod_tx_maps_then_shapes_with_interp_sps() -> None:
 
 def test_demap_is_pure_pack_unpack_of_k() -> None:
     tx = CompileContext(
-        Descriptor(Level.SYMBOLS, "b", carrier=Carrier.HARD), rate=4.0, symbol_rate=1.0
+        Descriptor(Level.SYMBOLS, ItemType.B, carrier=Carrier.HARD),
+        rate=4.0,
+        symbol_rate=1.0,
     )
     QamDemap().emit_tx(tx, QamDemapStep(order=QamOrder(64)))
     pack = next(x for x in tx.build("t", 4.0).blocks if x.kind == "pack_k_bits_bb")
     assert pack.params["k"] == 6  # log2(64)
     rx = CompileContext(
-        Descriptor(Level.SYMBOLS, "b", carrier=Carrier.HARD), rate=4.0, symbol_rate=1.0
+        Descriptor(Level.SYMBOLS, ItemType.B, carrier=Carrier.HARD),
+        rate=4.0,
+        symbol_rate=1.0,
     )
     QamDemap().emit_rx(rx, QamDemapStep(order=QamOrder(16)))
     unpack = next(x for x in rx.build("t", 4.0).blocks if x.kind == "unpack_k_bits_bb")

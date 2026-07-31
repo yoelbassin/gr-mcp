@@ -23,11 +23,12 @@ from marconi.engine.modulation.css.stages import (
 )
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Carrier, Descriptor
+from marconi.engine.types.enums import ItemType
 from marconi.engine.types.levels import Level
 
-IQ = Descriptor(Level.IQ, "c")
-SYMBOLS_HARD = Descriptor(Level.SYMBOLS, "s", carrier=Carrier.HARD)
-BITS_HARD = Descriptor(Level.BITS, "b", carrier=Carrier.HARD)
+IQ = Descriptor(Level.IQ, ItemType.C)
+SYMBOLS_HARD = Descriptor(Level.SYMBOLS, ItemType.S, carrier=Carrier.HARD)
+BITS_HARD = Descriptor(Level.BITS, ItemType.B, carrier=Carrier.HARD)
 
 
 # ─── Registry ────────────────────────────────────────────────────────────────
@@ -58,7 +59,7 @@ def test_dechirp_out_descriptor_is_symbols_hard() -> None:
     from marconi.engine.modulation.css.stages import Dechirp
 
     out = Dechirp().out_descriptor(IQ, DechirpStep(sf=7, oversample=2, zero_pad=4))
-    assert out == Descriptor(Level.SYMBOLS, "s", carrier=Carrier.HARD, order=128)
+    assert out == Descriptor(Level.SYMBOLS, ItemType.S, carrier=Carrier.HARD, order=128)
 
 
 def test_css_demap_out_descriptor_is_bits_hard() -> None:

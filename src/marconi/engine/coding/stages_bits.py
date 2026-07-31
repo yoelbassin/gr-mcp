@@ -10,7 +10,7 @@ from marconi.engine.coding.builder import CodingBuilder
 from marconi.engine.coding.primitives import can_correct, syndrome_table
 from marconi.engine.stages.base import RxStage, Stage
 from marconi.engine.types.descriptor import Carrier
-from marconi.engine.types.enums import DecodeMode, EmitMode
+from marconi.engine.types.enums import DecodeMode, EmitMode, ItemType
 from marconi.engine.types.levels import Level
 from marconi.engine.types.step import Step
 
@@ -131,7 +131,7 @@ class SyncWord(RxStage[CodingBuilder, SyncWordStep]):
     to_level = Level.BITS
     seeds_windows = True
     family = "acquisition"
-    accepts_item_type = "b"
+    accepts_item_type = ItemType.B
     accepts_carrier = Carrier.HARD
     step_model = SyncWordStep
 
@@ -151,7 +151,7 @@ class MarkFrame(RxStage[CodingBuilder, MarkFrameStep]):
     to_level = Level.BITS
     seeds_windows = True
     family = "acquisition"
-    accepts_item_type = "b"
+    accepts_item_type = ItemType.B
     accepts_carrier = Carrier.HARD
     step_model = MarkFrameStep
 
@@ -171,7 +171,7 @@ class Segment(RxStage[CodingBuilder, SegmentStep]):
     to_level = Level.BITS
     seeds_windows = True
     family = "acquisition"
-    accepts_item_type = "b"
+    accepts_item_type = ItemType.B
     accepts_carrier = Carrier.HARD
     step_model = SegmentStep
 
@@ -185,7 +185,7 @@ class Codebook(RxStage[CodingBuilder, CodebookStep]):
     from_level = Level.BITS
     to_level = Level.BITS
     family = "coding"
-    accepts_item_type = "b"
+    accepts_item_type = ItemType.B
     accepts_carrier = Carrier.HARD
     step_model = CodebookStep
 
@@ -263,7 +263,7 @@ class BlockCode(RxStage[CodingBuilder, BlockCodeStep]):
     from_level = Level.BITS
     to_level = Level.BITS
     family = "coding"
-    accepts_item_type = "b"
+    accepts_item_type = ItemType.B
     accepts_carrier = Carrier.HARD
     step_model = BlockCodeStep
 
@@ -300,7 +300,7 @@ class Permute(RxStage[CodingBuilder, PermuteStep]):
     from_level = Level.BITS
     to_level = Level.BITS
     family = "coding"
-    accepts_item_type = "b"
+    accepts_item_type = ItemType.B
     accepts_carrier = Carrier.HARD
     step_model = PermuteStep
 
@@ -319,7 +319,7 @@ class Realign(RxStage[CodingBuilder, RealignStep]):
     from_level = Level.BITS
     to_level = Level.BITS
     family = "coding"
-    accepts_item_type = "b"
+    accepts_item_type = ItemType.B
     accepts_carrier = Carrier.HARD
     step_model = RealignStep
 
@@ -338,7 +338,7 @@ class Differential(RxStage[CodingBuilder, DifferentialStep]):
     from_level = Level.BITS
     to_level = Level.BITS
     family = "coding"
-    accepts_item_type = "b"
+    accepts_item_type = ItemType.B
     accepts_carrier = Carrier.HARD
     step_model = DifferentialStep
 
@@ -356,7 +356,7 @@ class NibbleSwap(RxStage[CodingBuilder, NibbleSwapStep]):
     from_level = Level.BITS
     to_level = Level.BITS
     family = "coding"
-    accepts_item_type = "b"
+    accepts_item_type = ItemType.B
     accepts_carrier = Carrier.HARD
     step_model = NibbleSwapStep
 
@@ -393,7 +393,7 @@ class RsCode(RxStage[CodingBuilder, RsCodeStep]):
     from_level = Level.BITS
     to_level = Level.BITS
     family = "coding"
-    accepts_item_type = "b"
+    accepts_item_type = ItemType.B
     accepts_carrier = Carrier.HARD
     step_model = RsCodeStep
 
@@ -416,7 +416,7 @@ class Descramble(RxStage[CodingBuilder, DescrambleStep]):
     from_level = Level.BITS
     to_level = Level.BITS
     family = "coding"
-    accepts_item_type = "b"
+    accepts_item_type = ItemType.B
     accepts_carrier = Carrier.HARD
     step_model = DescrambleStep
 

@@ -17,12 +17,12 @@ from marconi.engine.compile.compiler import compile_modem
 from marconi.engine.modulation.psk.stages import PskDemapStep, PskDemodStep
 from marconi.engine.stages.conditioning import AgcStep
 from marconi.engine.types.descriptor import Carrier, Descriptor
-from marconi.engine.types.enums import AgcMode, PskOrder
+from marconi.engine.types.enums import AgcMode, ItemType, PskOrder
 from marconi.engine.types.levels import Level
 from marconi.engine.types.models import Modem
 
-IQ = Descriptor(Level.IQ, "c")
-SYM_C = Descriptor(Level.SYMBOLS, "c", carrier=Carrier.SOFT)
+IQ = Descriptor(Level.IQ, ItemType.C)
+SYM_C = Descriptor(Level.SYMBOLS, ItemType.C, carrier=Carrier.SOFT)
 _SR, _SYM = 4.0, 1.0
 
 # order -> (N_bits, cfo_frac, settle) — prototype-locked, SER-0 over 10 seeds

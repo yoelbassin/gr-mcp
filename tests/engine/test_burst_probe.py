@@ -19,11 +19,12 @@ from marconi.engine.modulation.css.stages import (
 from marconi.engine.stages.probes import BurstProbeStep
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Descriptor
+from marconi.engine.types.enums import ItemType
 from marconi.engine.types.levels import Level
 from marconi.engine.types.models import Modem
 from marconi.engine.types.step import Step
 
-IQ = Descriptor(Level.IQ, "c")
+IQ = Descriptor(Level.IQ, ItemType.C)
 _SF, _OVERSAMPLE, _ZERO_PAD = 7, 2, 4
 _PREAMBLE_LEN, _SFD_SYMBOLS, _SYNC_SYMBOLS = 8, 2.25, 2
 _SYM = 1.0

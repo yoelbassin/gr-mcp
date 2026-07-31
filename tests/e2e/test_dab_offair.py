@@ -33,10 +33,11 @@ from marconi.engine.modulation.ofdm.stages import DqpskSoftDemapStep, OfdmDemodS
 from marconi.engine.run import run_rx
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Descriptor
+from marconi.engine.types.enums import ItemType
 from marconi.engine.types.levels import Level
 from marconi.engine.types.models import Modem
 
-IQ = Descriptor(Level.IQ, "c")
+IQ = Descriptor(Level.IQ, ItemType.C)
 RATE = 2_048_000.0
 _SLICE = (
     Path(__file__).resolve().parents[1]

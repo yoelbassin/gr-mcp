@@ -37,12 +37,13 @@ from marconi.engine.stages.conditioning import ResampleStep
 from marconi.engine.stages.probes import BurstProbeStep
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Descriptor
+from marconi.engine.types.enums import ItemType
 from marconi.engine.types.levels import Level
 from marconi.engine.types.models import Bitstream, Modem
 from marconi.engine.types.params import ParamValue
 
-IQ = Descriptor(Level.IQ, "c")
-BITS = Descriptor(Level.BITS, "b")
+IQ = Descriptor(Level.IQ, ItemType.C)
+BITS = Descriptor(Level.BITS, ItemType.B)
 RATE = 1_000_000.0
 _SLICE = (
     Path(__file__).resolve().parents[2]

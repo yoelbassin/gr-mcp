@@ -21,10 +21,11 @@ from marconi.engine.compile.compiler import compile_modem
 from marconi.engine.stages.conditioning import EqualizerStep
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Amplitude, Descriptor
+from marconi.engine.types.enums import ItemType
 from marconi.engine.types.levels import Level
 from marconi.engine.types.models import Modem
 
-IQ = Descriptor(Level.IQ, "c")
+IQ = Descriptor(Level.IQ, ItemType.C)
 _SR, _SYM = 1.0, 1.0  # the equalizer runs symbol-spaced, on a 1-sps stream
 
 # A causal 4-tap real channel: every symbol bleeds into the next three. Real
@@ -92,7 +93,7 @@ def test_equalizer_reopens_an_isi_closed_eye(tmp_path: Path) -> None:
 def test_equalizer_is_rate_preserving_and_clears_amplitude() -> None:
     stage = stage_registry()["equalizer"]
     assert stage.rate_factor(EqualizerStep()) == 1.0
-    normalized = Descriptor(Level.IQ, "c", amplitude=Amplitude.RMS_UNITY)
+    normalized = Descriptor(Level.IQ, ItemType.C, amplitude=Amplitude.RMS_UNITY)
     out = stage.out_descriptor(normalized, EqualizerStep())
     assert out.level is Level.IQ
     # CMA drives the amplitude to a constant modulus, but its steady state is
@@ -101,7 +102,7 @@ def test_equalizer_is_rate_preserving_and_clears_amplitude() -> None:
 
 
 def test_equalizer_builds_a_single_cma_block() -> None:
-    ctx = CompileContext(Descriptor(Level.IQ, "c"), _SR, _SYM)
+    ctx = CompileContext(Descriptor(Level.IQ, ItemType.C), _SR, _SYM)
     stage_registry()["equalizer"].emit_rx(
         ctx, EqualizerStep(num_taps=15, step_size=0.01, modulus=1.0)
     )

@@ -10,6 +10,7 @@ from marconi.engine.io.bitfile import read_bits
 from marconi.engine.modulation.coding.stages import Fec, FecStep
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Carrier, Descriptor
+from marconi.engine.types.enums import ItemType
 from marconi.engine.types.levels import Level
 from marconi.engine.types.models import Modem
 
@@ -62,7 +63,7 @@ def _roundtrip(tmp_path, *, rate_inv, polys, frame_bits, seed):
         stage_registry(),
         direction="rx",
         sample_rate=1.0,
-        start=Descriptor(Level.BITS, "f", Carrier.SOFT),
+        start=Descriptor(Level.BITS, ItemType.F, Carrier.SOFT),
         source_io={"path": str(src)},
         sink_io={"path": str(snk)},
     )
@@ -159,7 +160,7 @@ def test_fec_conv_unterminated_frame_tail_bits_correct(tmp_path):
         stage_registry(),
         direction="rx",
         sample_rate=1.0,
-        start=Descriptor(Level.BITS, "f", Carrier.SOFT),
+        start=Descriptor(Level.BITS, ItemType.F, Carrier.SOFT),
         source_io={"path": str(src)},
         sink_io={"path": str(snk)},
     )
@@ -220,7 +221,7 @@ def test_fec_conv_rate_two_thirds_k2(tmp_path):
         stage_registry(),
         direction="rx",
         sample_rate=1.0,
-        start=Descriptor(Level.BITS, "f", Carrier.SOFT),
+        start=Descriptor(Level.BITS, ItemType.F, Carrier.SOFT),
         source_io={"path": str(src)},
         sink_io={"path": str(snk)},
     )

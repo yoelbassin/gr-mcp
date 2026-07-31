@@ -22,15 +22,15 @@ from marconi.engine.stages.acquisition import PreambleSyncStep
 from marconi.engine.stages.conditioning import ChannelizeStep, ClockCorrectStep
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Amplitude, Descriptor
-from marconi.engine.types.enums import PskOrder
+from marconi.engine.types.enums import ItemType, PskOrder
 from marconi.engine.types.levels import Level
 from marconi.engine.types.models import Modem
 from marconi.engine.types.step import Step
 
-IQ = Descriptor(Level.IQ, "c")
+IQ = Descriptor(Level.IQ, ItemType.C)
 # a clean synthetic transmitter output, so the scale is known without an agc --
 # which would otherwise add blocks to the very census under test
-IQ_NORMALIZED = Descriptor(Level.IQ, "c", amplitude=Amplitude.PEAK_UNITY)
+IQ_NORMALIZED = Descriptor(Level.IQ, ItemType.C, amplitude=Amplitude.PEAK_UNITY)
 _SR, _SYM, _NBITS = 8.0, 1.0, 4096
 _QPSK = PskOrder.QPSK
 

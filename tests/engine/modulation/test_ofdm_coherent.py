@@ -13,6 +13,7 @@ from marconi.engine.compile.compiler import compile_modem
 from marconi.engine.modulation.ofdm.stages import OfdmCoherentSyncStep
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Descriptor
+from marconi.engine.types.enums import ItemType
 from marconi.engine.types.levels import Level
 from marconi.engine.types.models import Modem
 
@@ -41,7 +42,7 @@ def test_ofdm_coherent_equalizes_to_clean_qpsk(tmp_path: Path) -> None:
         stage_registry(),
         direction="rx",
         sample_rate=_drm.RATE,
-        start=Descriptor(Level.IQ, "c"),
+        start=Descriptor(Level.IQ, ItemType.C),
         source_io={"path": str(_SLICE)},
         sink_io={"path": str(snk)},
     )
@@ -72,7 +73,7 @@ def test_synthetic_lattice_full_chain_equalizes(tmp_path: Path) -> None:
         stage_registry(),
         direction="rx",
         sample_rate=_lattice.RATE,
-        start=Descriptor(Level.IQ, "c"),
+        start=Descriptor(Level.IQ, ItemType.C),
         source_io={"path": str(src)},
         sink_io={"path": str(snk)},
     )
@@ -119,7 +120,7 @@ def test_synthetic_dropout_relocks_through_real_chain(tmp_path: Path) -> None:
         stage_registry(),
         direction="rx",
         sample_rate=_lattice.RATE,
-        start=Descriptor(Level.IQ, "c"),
+        start=Descriptor(Level.IQ, ItemType.C),
         source_io={"path": str(src)},
         sink_io={"path": str(snk)},
     )

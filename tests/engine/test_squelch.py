@@ -14,15 +14,15 @@ from marconi.engine.compile.compiler import CompileError, compile_modem
 from marconi.engine.stages.conditioning import AgcStep, SquelchStep
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Amplitude, Descriptor
-from marconi.engine.types.enums import AgcMode
+from marconi.engine.types.enums import AgcMode, ItemType
 from marconi.engine.types.levels import Level
 from marconi.engine.types.models import Modem
 from marconi.engine.types.step import Step
 
-IQ = Descriptor(Level.IQ, "c")
+IQ = Descriptor(Level.IQ, ItemType.C)
 # The squelch is the unit under test, so the source declares the normalized
 # scale its threshold is relative to rather than an agc establishing it.
-IQ_NORMALIZED = Descriptor(Level.IQ, "c", amplitude=Amplitude.RMS_UNITY)
+IQ_NORMALIZED = Descriptor(Level.IQ, ItemType.C, amplitude=Amplitude.RMS_UNITY)
 _SR, _SYM = 8.0, 1.0
 
 
@@ -88,7 +88,7 @@ def test_squelch_requires_a_known_scale() -> None:
 def test_squelch_is_rate_and_amplitude_transparent() -> None:
     stage = stage_registry()["squelch"]
     assert stage.rate_factor(SquelchStep(threshold_db=-20.0)) == 1.0
-    normalized = Descriptor(Level.IQ, "c", amplitude=Amplitude.RMS_UNITY)
+    normalized = Descriptor(Level.IQ, ItemType.C, amplitude=Amplitude.RMS_UNITY)
     out = stage.out_descriptor(normalized, SquelchStep(threshold_db=-20.0))
     assert out.amplitude is Amplitude.RMS_UNITY
 
@@ -96,7 +96,7 @@ def test_squelch_is_rate_and_amplitude_transparent() -> None:
 def test_squelch_never_gates_the_stream() -> None:
     """gate=True would make output length signal-dependent, which no
     rate_factor can express; the stage must not expose it."""
-    ctx = CompileContext(Descriptor(Level.IQ, "c"), _SR, _SYM)
+    ctx = CompileContext(Descriptor(Level.IQ, ItemType.C), _SR, _SYM)
     stage_registry()["squelch"].emit_rx(ctx, SquelchStep(threshold_db=-20.0))
     blocks = ctx.build("t", _SR).blocks
     assert [b.kind for b in blocks] == ["pwr_squelch_cc"]

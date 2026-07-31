@@ -2,10 +2,11 @@ import pytest
 
 from marconi.engine.compile.compile_context import CompileContext, SampleRateError
 from marconi.engine.types.descriptor import Descriptor
+from marconi.engine.types.enums import ItemType
 from marconi.engine.types.levels import Level
 from marconi.errors import classify_error
 
-IQ = Descriptor(Level.IQ, "c")
+IQ = Descriptor(Level.IQ, ItemType.C)
 
 
 def test_sps_int_accepts_integral_rate_pair() -> None:

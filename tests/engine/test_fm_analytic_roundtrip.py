@@ -19,10 +19,11 @@ from marconi.engine.stages.conditioning import AnalyticStep, ChannelizeStep, FmD
 from marconi.engine.stages.general import SliceStep
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Descriptor
+from marconi.engine.types.enums import ItemType
 from marconi.engine.types.levels import Level
 from marconi.engine.types.models import Modem
 
-IQ = Descriptor(Level.IQ, "c")
+IQ = Descriptor(Level.IQ, ItemType.C)
 RATE = 48000.0
 BAUD = 2400.0
 SPS = int(RATE / BAUD)

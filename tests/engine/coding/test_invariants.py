@@ -24,6 +24,7 @@ from marconi.engine.coding.stages_symbols import SymbolMapStep
 from marconi.engine.compile.compiler import CompileError, compile_pipeline
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Carrier, Descriptor
+from marconi.engine.types.enums import ItemType
 from marconi.engine.types.levels import Level
 from marconi.engine.types.models import Modem
 
@@ -114,7 +115,7 @@ def test_soft_bits_into_sync_word_is_a_compile_error() -> None:
             stage_registry(),
             direction="rx",
             sample_rate=1.0,
-            start=Descriptor(Level.BITS, "f", carrier=Carrier.SOFT),
+            start=Descriptor(Level.BITS, ItemType.F, carrier=Carrier.SOFT),
             source_io={},
             sink_io={},
         )
@@ -131,7 +132,7 @@ def test_soft_symbols_into_a_hard_symbol_stage_is_a_compile_error() -> None:
             stage_registry(),
             direction="rx",
             sample_rate=1.0,
-            start=Descriptor(Level.SYMBOLS, "f", carrier=Carrier.SOFT),
+            start=Descriptor(Level.SYMBOLS, ItemType.F, carrier=Carrier.SOFT),
             source_io={},
             sink_io={},
         )

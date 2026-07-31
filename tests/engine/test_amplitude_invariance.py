@@ -49,13 +49,18 @@ from marconi.engine.stages.conditioning import AgcStep  # noqa: E402
 from marconi.engine.stages.general import SliceStep  # noqa: E402
 from marconi.engine.stages.registry import stage_registry  # noqa: E402
 from marconi.engine.types.descriptor import Amplitude, Carrier, Descriptor  # noqa: E402
-from marconi.engine.types.enums import AgcMode, PskOrder, QamOrder  # noqa: E402
+from marconi.engine.types.enums import (  # noqa: E402
+    AgcMode,
+    ItemType,
+    PskOrder,
+    QamOrder,
+)
 from marconi.engine.types.levels import Level  # noqa: E402
 from marconi.engine.types.models import Modem  # noqa: E402
 from marconi.engine.types.step import Step  # noqa: E402
 
-IQ = Descriptor(Level.IQ, "c")
-SYM_C = Descriptor(Level.SYMBOLS, "c", carrier=Carrier.SOFT)
+IQ = Descriptor(Level.IQ, ItemType.C)
+SYM_C = Descriptor(Level.SYMBOLS, ItemType.C, carrier=Carrier.SOFT)
 _SR, _SYM = 8.0, 1.0
 
 

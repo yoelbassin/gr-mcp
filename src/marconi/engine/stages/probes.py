@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from marconi.engine.compile.compile_context import CompileContext
-from marconi.engine.stages.base import RxStage
+from marconi.engine.stages.base import RxStage, Stage
+from marconi.engine.types.enums import ItemType
 from marconi.engine.types.levels import Level
 from marconi.engine.types.step import Step
 
@@ -22,10 +23,10 @@ class BurstProbe(RxStage[CompileContext, BurstProbeStep]):
     to_level = Level.SYMBOLS
     family = "probe"
     step_model = BurstProbeStep
-    accepts_item_type = "s"
+    accepts_item_type = ItemType.S
 
     def emit_rx(self, b: CompileContext, step: BurstProbeStep) -> None:
         b.chain("burst_probe")
 
 
-PROBE_STAGES: tuple[type[RxStage[CompileContext, BurstProbeStep]], ...] = (BurstProbe,)
+PROBE_STAGES: tuple[type[Stage[CompileContext, Any]], ...] = (BurstProbe,)

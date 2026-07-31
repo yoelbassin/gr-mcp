@@ -16,6 +16,7 @@ from marconi.engine.modulation.coding.stages import (
 from marconi.engine.modulation.ofdm.stages import DqpskSoftDemapStep, OfdmDemodStep
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Descriptor
+from marconi.engine.types.enums import ItemType
 from marconi.engine.types.levels import Level
 from marconi.engine.types.models import Modem
 from marconi.engine.types.step import Step
@@ -121,7 +122,7 @@ def test_dab_phy_decodes_crc_valid_fibs(tmp_path):
         stage_registry(),
         direction="rx",
         sample_rate=2_048_000.0,
-        start=Descriptor(Level.IQ, "c"),
+        start=Descriptor(Level.IQ, ItemType.C),
         source_io={"path": str(_SLICE)},
         sink_io={"path": str(snk)},
     )

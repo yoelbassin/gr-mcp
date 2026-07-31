@@ -21,11 +21,11 @@ from marconi.engine.io.bitfile import read_bits, write_bits
 from marconi.engine.run import run_rx
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Descriptor
-from marconi.engine.types.enums import DecodeMode
+from marconi.engine.types.enums import DecodeMode, ItemType
 from marconi.engine.types.levels import Level
 from marconi.engine.types.models import Bitstream, Modem
 
-BITS = Descriptor(Level.BITS, "b")
+BITS = Descriptor(Level.BITS, ItemType.B)
 
 # 32-chip / 4-bit-symbol codebook, MSB-first ints — caller data. Same shape
 # as IEEE 802.15.4 O-QPSK: entries 1-7 are entry 0 left-rotated by 4 chips at

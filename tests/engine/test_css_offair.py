@@ -28,11 +28,12 @@ from marconi.engine.stages.conditioning import (
     ResampleStep,
 )
 from marconi.engine.types.descriptor import Descriptor
+from marconi.engine.types.enums import ItemType
 from marconi.engine.types.levels import Level
 from marconi.engine.types.models import Modem
 from marconi.engine.types.step import Step
 
-IQ = Descriptor(Level.IQ, "c")
+IQ = Descriptor(Level.IQ, ItemType.C)
 
 _ASSET_ROOT = Path(__file__).parent.parent.parent / "artifacts" / "assets" / "CSS"
 

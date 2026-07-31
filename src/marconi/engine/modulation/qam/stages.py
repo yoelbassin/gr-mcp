@@ -6,9 +6,9 @@ from typing import Any, Literal
 from pydantic import StrictInt
 
 from marconi.engine.compile.compile_context import CompileContext
-from marconi.engine.stages.base import DuplexStage
+from marconi.engine.stages.base import DuplexStage, Stage
 from marconi.engine.types.descriptor import Amplitude, Carrier, Descriptor
-from marconi.engine.types.enums import QamOrder
+from marconi.engine.types.enums import ItemType, QamOrder
 from marconi.engine.types.levels import Level
 from marconi.engine.types.step import Step
 
@@ -69,7 +69,9 @@ class QamDemod(DuplexStage[CompileContext, QamDemodStep]):
         )
 
     def out_descriptor(self, in_desc: Descriptor, step: QamDemodStep) -> Descriptor:
-        return Descriptor(Level.SYMBOLS, "b", Carrier.HARD, order=int(step.order))
+        return Descriptor(
+            Level.SYMBOLS, ItemType.B, Carrier.HARD, order=int(step.order)
+        )
 
 
 class QamDemapStep(Step):
@@ -89,7 +91,7 @@ class QamDemap(DuplexStage[CompileContext, QamDemapStep]):
     to_level = Level.BITS
     family = "qam"
     step_model = QamDemapStep
-    accepts_item_type = "b"
+    accepts_item_type = ItemType.B
     accepts_carrier = Carrier.HARD
 
     def emit_rx(self, b: CompileContext, step: QamDemapStep) -> None:
@@ -99,10 +101,10 @@ class QamDemap(DuplexStage[CompileContext, QamDemapStep]):
         b.chain("pack_k_bits_bb", k=int(math.log2(int(step.order))))
 
     def out_descriptor(self, in_desc: Descriptor, step: QamDemapStep) -> Descriptor:
-        return Descriptor(Level.BITS, "b", Carrier.HARD)
+        return Descriptor(Level.BITS, ItemType.B, Carrier.HARD)
 
     def required_input_order(self, step: QamDemapStep) -> int | None:
         return int(step.order)
 
 
-QAM_STAGES: tuple[type[DuplexStage[CompileContext, Any]], ...] = (QamDemod, QamDemap)
+QAM_STAGES: tuple[type[Stage[CompileContext, Any]], ...] = (QamDemod, QamDemap)

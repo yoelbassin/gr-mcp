@@ -17,11 +17,11 @@ from marconi.engine.stages.conditioning import (
 from marconi.engine.stages.general import SliceStep
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Amplitude, Descriptor
-from marconi.engine.types.enums import PskOrder
+from marconi.engine.types.enums import ItemType, PskOrder
 from marconi.engine.types.levels import Level
 from marconi.engine.types.models import Modem
 
-IQ = Descriptor(Level.IQ, "c")
+IQ = Descriptor(Level.IQ, ItemType.C)
 
 
 def _compile(modem: Modem) -> GrPipeline:
@@ -110,7 +110,7 @@ def test_run_rx_rejects_complex_symbol_final(tmp_path) -> None:
             modem,
             stage_registry(),
             sample_rate=4.0,
-            start=Descriptor(Level.IQ, "c", amplitude=Amplitude.RMS_UNITY),
+            start=Descriptor(Level.IQ, ItemType.C, amplitude=Amplitude.RMS_UNITY),
             workdir=tmp_path,
             source_io={"path": str(tmp_path / "in.cf32")},
         )

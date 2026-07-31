@@ -17,12 +17,12 @@ from marconi.engine.modulation.psk.stages import PskDemapStep, PskDemodStep
 from marconi.engine.stages.acquisition import PreambleSyncStep
 from marconi.engine.stages.conditioning import AgcStep
 from marconi.engine.types.descriptor import Descriptor
-from marconi.engine.types.enums import AgcMode, PskOrder
+from marconi.engine.types.enums import AgcMode, ItemType, PskOrder
 from marconi.engine.types.levels import Level
 from marconi.engine.types.models import Modem
 from marconi.engine.types.step import Step
 
-IQ = Descriptor(Level.IQ, "c")
+IQ = Descriptor(Level.IQ, ItemType.C)
 _SR, _SYM = 4.0, 1.0
 # order -> (N_payload_bits, cfo_frac) — same impairment levels as the PSK round-trip
 _CFG = {2: (2048, 0.004), 4: (4096, 0.006), 8: (6144, 0.001)}

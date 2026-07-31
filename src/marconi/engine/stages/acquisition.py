@@ -10,6 +10,7 @@ from pydantic_core import PydanticCustomError
 from marconi.engine.compile.compile_context import CompileContext
 from marconi.engine.stages.base import DuplexStage, RxStage, Stage
 from marconi.engine.types.descriptor import Carrier, Descriptor
+from marconi.engine.types.enums import ItemType
 from marconi.engine.types.levels import Level
 from marconi.engine.types.step import Step
 
@@ -54,7 +55,7 @@ class PreambleSync(DuplexStage[CompileContext, PreambleSyncStep]):
     step_model = PreambleSyncStep
     # corr_est_cc + sym_strip are complex-only: reject real-float symbols (fsk)
     # at compile instead of dying on an itemsize mismatch in the backend.
-    accepts_item_type = "c"
+    accepts_item_type = ItemType.C
     accepts_carrier = Carrier.SOFT
 
     def emit_rx(self, b: CompileContext, step: PreambleSyncStep) -> None:

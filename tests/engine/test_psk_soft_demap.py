@@ -21,12 +21,12 @@ from marconi.engine.modulation.coding.stages import DeinterleaveStep, FecStep
 from marconi.engine.modulation.psk.stages import PskDemapStep, PskSoftDemapStep
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Carrier, Descriptor
-from marconi.engine.types.enums import PskOrder
+from marconi.engine.types.enums import ItemType, PskOrder
 from marconi.engine.types.levels import Level
 from marconi.engine.types.models import Modem
 from marconi.engine.types.step import Step
 
-SYM_C = Descriptor(Level.SYMBOLS, "c", carrier=Carrier.SOFT)
+SYM_C = Descriptor(Level.SYMBOLS, ItemType.C, carrier=Carrier.SOFT)
 _POLYS = [0o171, 0o133]
 _D = len(_POLYS)
 _TAIL = 6

@@ -10,11 +10,12 @@ from marconi.engine.modulation.coding.stages import (
 )
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Carrier, Descriptor
+from marconi.engine.types.enums import ItemType
 from marconi.engine.types.levels import Level
 from marconi.engine.types.models import Modem
 from marconi.engine.types.step import Step
 
-BITS_F = Descriptor(Level.BITS, "f", carrier=Carrier.SOFT)
+BITS_F = Descriptor(Level.BITS, ItemType.F, carrier=Carrier.SOFT)
 _CODE = "10110111"
 _POLYS2: list[int] = [0o133, 0o171]
 _POLYS3: list[int] = [0o133, 0o171, 0o165]
@@ -96,7 +97,7 @@ def test_depuncture_nondivisible_kept_fails() -> None:
 
 
 def test_harden_preserves_frame_len() -> None:
-    framed = Descriptor(Level.BITS, "f", Carrier.SOFT, frame_len=100)
+    framed = Descriptor(Level.BITS, ItemType.F, Carrier.SOFT, frame_len=100)
     out = stage_registry()["harden"].out_descriptor(framed, HardenStep())
     assert out.frame_len == 100
 
@@ -115,4 +116,4 @@ def test_unframed_stream_skips_fec_geometry() -> None:
 
 def test_frame_len_below_one_rejected() -> None:
     with pytest.raises(ValueError):
-        Descriptor(Level.BITS, "f", Carrier.SOFT, frame_len=0)
+        Descriptor(Level.BITS, ItemType.F, Carrier.SOFT, frame_len=0)

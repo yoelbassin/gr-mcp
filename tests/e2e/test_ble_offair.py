@@ -34,11 +34,12 @@ from marconi.engine.stages.conditioning import ChannelizeStep
 from marconi.engine.stages.general import SliceStep
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Descriptor
+from marconi.engine.types.enums import ItemType
 from marconi.engine.types.levels import Level
 from marconi.engine.types.models import Modem
 from marconi.engine.types.params import OPEN_LOOP
 
-IQ = Descriptor(Level.IQ, "c")
+IQ = Descriptor(Level.IQ, ItemType.C)
 RATE = 5_000_000.0
 _SLICE = (
     Path(__file__).resolve().parents[2] / "artifacts" / "assets" / "BLE" / "ble.cf32"

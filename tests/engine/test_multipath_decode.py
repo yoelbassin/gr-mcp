@@ -33,13 +33,13 @@ from marconi.engine.modulation.psk.stages import (
 from marconi.engine.stages.conditioning import EqualizerStep
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Amplitude, Descriptor
-from marconi.engine.types.enums import PskOrder
+from marconi.engine.types.enums import ItemType, PskOrder
 from marconi.engine.types.levels import Level
 from marconi.engine.types.models import Modem
 from marconi.engine.types.step import Step
 
-IQ = Descriptor(Level.IQ, "c")
-IQ_RMS = Descriptor(Level.IQ, "c", amplitude=Amplitude.RMS_UNITY)
+IQ = Descriptor(Level.IQ, ItemType.C)
+IQ_RMS = Descriptor(Level.IQ, ItemType.C, amplitude=Amplitude.RMS_UNITY)
 _SR, _SYM, _SPS, _ORDER = 4.0, 1.0, 4, 2
 # A causal echo at one full symbol (4 samples), 0.8 of the main path: severe
 # symbol-rate ISI the matched filter + slicer cannot open on their own.

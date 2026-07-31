@@ -11,7 +11,7 @@ from marconi.engine.coding.builder import CodingBuilder
 from marconi.engine.coding.stages_bits import _codebook_kw, check_codebook_sizing
 from marconi.engine.stages.base import RxStage, Stage
 from marconi.engine.types.descriptor import Amplitude, Carrier, Descriptor
-from marconi.engine.types.enums import DcMode, DecodeMode
+from marconi.engine.types.enums import DcMode, DecodeMode, ItemType
 from marconi.engine.types.levels import Level
 from marconi.engine.types.step import Step
 
@@ -30,7 +30,7 @@ class SyncSymbols(RxStage[CodingBuilder, SyncSymbolsStep]):
     to_level = Level.SYMBOLS
     family = "symbols"
     step_model = SyncSymbolsStep
-    accepts_item_type = "f"
+    accepts_item_type = ItemType.F
 
     def emit_rx(self, b: CodingBuilder, step: SyncSymbolsStep) -> None:
         b.add(
@@ -55,7 +55,7 @@ class Normalize(RxStage[CodingBuilder, NormalizeStep]):
     to_level = Level.SYMBOLS
     family = "symbols"
     step_model = NormalizeStep
-    accepts_item_type = "f"
+    accepts_item_type = ItemType.F
 
     def emit_rx(self, b: CodingBuilder, step: NormalizeStep) -> None:
         b.add(
@@ -91,7 +91,7 @@ class MSlice(RxStage[CodingBuilder, MSliceStep]):
     to_level = Level.SYMBOLS
     family = "symbols"
     step_model = MSliceStep
-    accepts_item_type = "f"
+    accepts_item_type = ItemType.F
 
     def emit_rx(self, b: CodingBuilder, step: MSliceStep) -> None:
         b.add(
@@ -103,7 +103,7 @@ class MSlice(RxStage[CodingBuilder, MSliceStep]):
     def out_descriptor(self, in_desc: Descriptor, step: MSliceStep) -> Descriptor:
         return replace(
             in_desc,
-            item_type="s",
+            item_type=ItemType.S,
             carrier=Carrier.HARD,
             order=len(step.levels),
         )
@@ -132,14 +132,14 @@ class SymbolMap(RxStage[CodingBuilder, SymbolMapStep]):
     to_level = Level.BITS
     family = "coding"
     step_model = SymbolMapStep
-    accepts_item_type = "s"
+    accepts_item_type = ItemType.S
     accepts_carrier = Carrier.HARD
 
     def emit_rx(self, b: CodingBuilder, step: SymbolMapStep) -> None:
         b.add(ops_bits.codebook_rx, **_codebook_kw(step), symbol_input=True)
 
     def out_descriptor(self, in_desc: Descriptor, step: SymbolMapStep) -> Descriptor:
-        return Descriptor(Level.BITS, "b", Carrier.HARD, Amplitude.UNKNOWN)
+        return Descriptor(Level.BITS, ItemType.B, Carrier.HARD, Amplitude.UNKNOWN)
 
 
 CODING_SYMBOL_STAGES: tuple[type[Stage[CodingBuilder, Any]], ...] = (

@@ -262,19 +262,19 @@ def run_rx(
     if isinstance(input_stream, Bitstream) and cp.boundary.item_type != "b":
         raise ValueError(
             f"input_stream is a Bitstream (item_type 'b') but the entry "
-            f"boundary is item_type {cp.boundary.item_type!r}"
+            f"boundary is item_type {cp.boundary.item_type.value!r}"
         )
     if isinstance(input_stream, Symbolstream):
         if cp.boundary.item_type not in ("s", "f"):
             raise ValueError(
                 f"input_stream is a Symbolstream (item_type "
                 f"{input_stream.item_type!r}) but the entry boundary is item_type "
-                f"{cp.boundary.item_type!r}"
+                f"{cp.boundary.item_type.value!r}"
             )
         if input_stream.item_type != cp.boundary.item_type:
             raise ValueError(
                 f"input_stream item_type {input_stream.item_type!r} does not "
-                f"match the entry boundary item_type {cp.boundary.item_type!r}"
+                f"match the entry boundary item_type {cp.boundary.item_type.value!r}"
             )
     if isinstance(input_stream, Symbolstream) and input_stream.item_type == "f":
         flagged = _nonfinite_input(input_stream.path, "f")

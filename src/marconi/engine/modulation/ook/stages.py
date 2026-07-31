@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import Field
 
 from marconi.engine.compile.compile_context import CompileContext
-from marconi.engine.stages.base import DuplexStage
+from marconi.engine.stages.base import DuplexStage, Stage
 from marconi.engine.types.descriptor import Amplitude, Carrier, Descriptor
+from marconi.engine.types.enums import ItemType
 from marconi.engine.types.levels import Level
 from marconi.engine.types.step import Step
 
@@ -46,9 +47,7 @@ class OokEnvelope(DuplexStage[CompileContext, OokEnvelopeStep]):
         b.chain("float_to_complex")
 
     def out_descriptor(self, in_desc: Descriptor, step: OokEnvelopeStep) -> Descriptor:
-        return Descriptor(Level.SYMBOLS, "f", Carrier.SOFT)
+        return Descriptor(Level.SYMBOLS, ItemType.F, Carrier.SOFT)
 
 
-OOK_STAGES: tuple[type[DuplexStage[CompileContext, OokEnvelopeStep]], ...] = (
-    OokEnvelope,
-)
+OOK_STAGES: tuple[type[Stage[CompileContext, Any]], ...] = (OokEnvelope,)

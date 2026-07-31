@@ -26,6 +26,7 @@ from marconi.engine.compile.compile_context import CompileContext
 from marconi.engine.compile.ir import GrBlock, GrConnection, GrPipeline
 from marconi.engine.modulation.css.stages import Dechirp, DechirpStep
 from marconi.engine.types.descriptor import Descriptor
+from marconi.engine.types.enums import ItemType
 from marconi.engine.types.levels import Level
 
 SF, OS, ZP = 7, 2, 4
@@ -35,7 +36,7 @@ PREAMBLE_LEN = 8
 # How many full CSS symbols to round-trip
 N_SYMS = 50
 
-_IQ = Descriptor(Level.IQ, "c")
+_IQ = Descriptor(Level.IQ, ItemType.C)
 
 
 def _bits_to_bits_pipeline(

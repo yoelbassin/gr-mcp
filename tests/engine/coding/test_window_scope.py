@@ -19,10 +19,11 @@ from marconi.engine.coding.stages_bits import BlockCodeStep, SyncWordStep
 from marconi.engine.run import run_rx
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Descriptor
+from marconi.engine.types.enums import ItemType
 from marconi.engine.types.levels import Level
 from marconi.engine.types.models import Bitstream, Modem
 
-BITS = Descriptor(Level.BITS, "b")
+BITS = Descriptor(Level.BITS, ItemType.B)
 HAMMING74 = [0b1011, 0b1101, 0b0111]
 
 

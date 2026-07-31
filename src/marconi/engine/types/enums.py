@@ -34,3 +34,10 @@ class DcMode(StrEnum):
     MEDIAN = "median"
     MEAN = "mean"
     NONE = "none"
+
+
+class ItemType(StrEnum):
+    C = "c"
+    F = "f"
+    B = "b"
+    S = "s"

@@ -17,14 +17,14 @@ from marconi.engine.run import run_rx
 from marconi.engine.stages.conditioning import AgcStep
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Descriptor
-from marconi.engine.types.enums import AgcMode, PskOrder
+from marconi.engine.types.enums import AgcMode, ItemType, PskOrder
 from marconi.engine.types.levels import Level
 from marconi.engine.types.models import Modem
 
 _SPS = 4
 _SETTLE_BITS = 384
 
-IQ = Descriptor(Level.IQ, "c")
+IQ = Descriptor(Level.IQ, ItemType.C)
 
 
 def _const_angles() -> np.ndarray:

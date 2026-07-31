@@ -10,6 +10,7 @@ from pydantic_core import PydanticCustomError
 from marconi.engine.compile.compile_context import CompileContext
 from marconi.engine.stages.base import RxStage, Stage
 from marconi.engine.types.descriptor import Carrier, Descriptor
+from marconi.engine.types.enums import ItemType
 from marconi.engine.types.levels import Level
 from marconi.engine.types.step import Step
 
@@ -28,7 +29,7 @@ class Deinterleave(RxStage[CompileContext, DeinterleaveStep]):
     to_level = Level.BITS
     family = "coding"
     step_model = DeinterleaveStep
-    accepts_item_type = "f"
+    accepts_item_type = ItemType.F
     accepts_carrier = Carrier.SOFT
 
     def emit_rx(self, b: CompileContext, step: DeinterleaveStep) -> None:
@@ -74,7 +75,7 @@ class Depuncture(RxStage[CompileContext, DepunctureStep]):
     to_level = Level.BITS
     family = "coding"
     step_model = DepunctureStep
-    accepts_item_type = "f"
+    accepts_item_type = ItemType.F
     accepts_carrier = Carrier.SOFT
 
     def emit_rx(self, b: CompileContext, step: DepunctureStep) -> None:
@@ -121,7 +122,7 @@ class Harden(RxStage[CompileContext, HardenStep]):
     to_level = Level.BITS
     family = "coding"
     step_model = HardenStep
-    accepts_item_type = "f"
+    accepts_item_type = ItemType.F
     accepts_carrier = Carrier.SOFT
 
     def emit_rx(self, b: CompileContext, step: HardenStep) -> None:
@@ -129,7 +130,9 @@ class Harden(RxStage[CompileContext, HardenStep]):
         b.chain("binary_slicer")
 
     def out_descriptor(self, in_desc: Descriptor, step: HardenStep) -> Descriptor:
-        return Descriptor(Level.BITS, "b", Carrier.HARD, frame_len=in_desc.frame_len)
+        return Descriptor(
+            Level.BITS, ItemType.B, Carrier.HARD, frame_len=in_desc.frame_len
+        )
 
 
 class SyncAlignStep(Step):
@@ -165,7 +168,7 @@ class SyncAlign(RxStage[CompileContext, SyncAlignStep]):
     to_level = Level.BITS
     family = "coding"
     step_model = SyncAlignStep
-    accepts_item_type = "f"
+    accepts_item_type = ItemType.F
     accepts_carrier = Carrier.SOFT
 
     def emit_rx(self, b: CompileContext, step: SyncAlignStep) -> None:
@@ -240,14 +243,16 @@ class Fec(RxStage[CompileContext, FecStep]):
     to_level = Level.BITS
     family = "coding"
     step_model = FecStep
-    accepts_item_type = "f"
+    accepts_item_type = ItemType.F
     accepts_carrier = Carrier.SOFT
 
     def emit_rx(self, b: CompileContext, step: FecStep) -> None:
         _FEC_EMIT[step.scheme](b, step)
 
     def out_descriptor(self, in_desc: Descriptor, step: FecStep) -> Descriptor:
-        return Descriptor(Level.BITS, "b", Carrier.HARD, frame_len=int(step.frame_bits))
+        return Descriptor(
+            Level.BITS, ItemType.B, Carrier.HARD, frame_len=int(step.frame_bits)
+        )
 
     def validate_input(self, in_desc: Descriptor, step: FecStep) -> str | None:
         need = (step.frame_bits + step.tail) // step.k * step.rate_inv

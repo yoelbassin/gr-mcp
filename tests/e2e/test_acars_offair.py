@@ -76,11 +76,12 @@ from marconi.engine.stages.conditioning import (
 from marconi.engine.stages.general import SliceStep
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Descriptor
+from marconi.engine.types.enums import ItemType
 from marconi.engine.types.levels import Level
 from marconi.engine.types.models import Modem
 from marconi.engine.types.step import Step
 
-IQ = Descriptor(Level.IQ, "c")
+IQ = Descriptor(Level.IQ, ItemType.C)
 RATE = 2_000_000.0
 _ASSETS = Path(__file__).resolve().parents[2] / "artifacts" / "assets" / "ACRAS"
 _CF32 = _ASSETS / "acars.cf32"

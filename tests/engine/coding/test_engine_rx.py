@@ -16,12 +16,13 @@ from marconi.engine.stages.conditioning import InvertStep
 from marconi.engine.stages.general import SliceStep
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Carrier, Descriptor
+from marconi.engine.types.enums import ItemType
 from marconi.engine.types.levels import Level
 from marconi.engine.types.models import Bitstream, Modem, Symbolstream
 
-BITS = Descriptor(Level.BITS, "b")
-SOFT_SYMBOLS = Descriptor(Level.SYMBOLS, "f", carrier=Carrier.SOFT)
-HARD_SYMBOLS = Descriptor(Level.SYMBOLS, "s", carrier=Carrier.HARD)
+BITS = Descriptor(Level.BITS, ItemType.B)
+SOFT_SYMBOLS = Descriptor(Level.SYMBOLS, ItemType.F, carrier=Carrier.SOFT)
+HARD_SYMBOLS = Descriptor(Level.SYMBOLS, ItemType.S, carrier=Carrier.HARD)
 _FLAG_BITS = np.concatenate(
     [
         np.zeros(3, np.uint8),
@@ -197,7 +198,7 @@ def test_iq_terminal_pipeline_is_rejected_before_running(tmp_path: Path) -> None
             modem,
             stage_registry(),
             sample_rate=8.0,
-            start=Descriptor(Level.IQ, "c"),
+            start=Descriptor(Level.IQ, ItemType.C),
             workdir=tmp_path,
             source_io={"path": str(iq)},
         )
@@ -219,7 +220,7 @@ def test_nonfinite_iq_source_is_an_error_before_the_gr_run(tmp_path: Path) -> No
         modem,
         stage_registry(),
         sample_rate=48000.0,
-        start=Descriptor(Level.IQ, "c"),
+        start=Descriptor(Level.IQ, ItemType.C),
         workdir=tmp_path,
         source_io={"path": str(p)},
         backend=_CannedBackend(RunResult(status="ok")),

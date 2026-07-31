@@ -10,7 +10,7 @@ from marconi.engine.modulation.psk.stages import (
 )
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Carrier, Descriptor
-from marconi.engine.types.enums import PskOrder
+from marconi.engine.types.enums import ItemType, PskOrder
 from marconi.engine.types.levels import Level
 
 
@@ -21,17 +21,17 @@ def test_registered() -> None:
 
 def test_demod_descriptor_is_soft_complex_symbols() -> None:
     out = PskDemod().out_descriptor(
-        Descriptor(Level.IQ, "c"), PskDemodStep(order=PskOrder(4))
+        Descriptor(Level.IQ, ItemType.C), PskDemodStep(order=PskOrder(4))
     )
-    assert out == Descriptor(Level.SYMBOLS, "c", carrier=Carrier.SOFT, order=4)
+    assert out == Descriptor(Level.SYMBOLS, ItemType.C, carrier=Carrier.SOFT, order=4)
 
 
 def test_demap_descriptor_is_hard_bits() -> None:
     out = PskDemap().out_descriptor(
-        Descriptor(Level.SYMBOLS, "c", carrier=Carrier.SOFT),
+        Descriptor(Level.SYMBOLS, ItemType.C, carrier=Carrier.SOFT),
         PskDemapStep(order=PskOrder(4)),
     )
-    assert out == Descriptor(Level.BITS, "b", carrier=Carrier.HARD)
+    assert out == Descriptor(Level.BITS, ItemType.B, carrier=Carrier.HARD)
 
 
 def test_order_validation_rejects_bad_and_missing() -> None:
@@ -44,7 +44,7 @@ def test_order_validation_rejects_bad_and_missing() -> None:
 
 def test_demod_rx_uses_iq_rate_and_sps() -> None:
     # rate=8, symbol_rate=2 -> sps=4 != rate; RRC symbol_rate arg must be rate/sps
-    b = CompileContext(Descriptor(Level.IQ, "c"), rate=8.0, symbol_rate=2.0)
+    b = CompileContext(Descriptor(Level.IQ, ItemType.C), rate=8.0, symbol_rate=2.0)
     PskDemod().emit_rx(b, PskDemodStep(order=PskOrder(4)))
     p = b.build("t", 8.0)
     rrc = next(x for x in p.blocks if x.kind == "rrc_filter_ccf")
@@ -56,7 +56,7 @@ def test_demod_rx_uses_iq_rate_and_sps() -> None:
 
 
 def test_demod_tx_shaping_interp_is_sps() -> None:
-    b = CompileContext(Descriptor(Level.IQ, "c"), rate=8.0, symbol_rate=2.0)
+    b = CompileContext(Descriptor(Level.IQ, ItemType.C), rate=8.0, symbol_rate=2.0)
     PskDemod().emit_tx(b, PskDemodStep(order=PskOrder(4)))
     rrc = next(x for x in b.build("t", 8.0).blocks if x.kind == "rrc_filter_ccf")
     assert rrc.params["interpolation"] == 4
@@ -64,7 +64,9 @@ def test_demod_tx_shaping_interp_is_sps() -> None:
 
 def test_demap_tx_packs_then_maps() -> None:
     b = CompileContext(
-        Descriptor(Level.SYMBOLS, "c", carrier=Carrier.SOFT), rate=4.0, symbol_rate=1.0
+        Descriptor(Level.SYMBOLS, ItemType.C, carrier=Carrier.SOFT),
+        rate=4.0,
+        symbol_rate=1.0,
     )
     PskDemap().emit_tx(b, PskDemapStep(order=PskOrder(8)))
     kinds = [x.kind for x in b.build("t", 4.0).blocks]

@@ -8,6 +8,7 @@ from pydantic_core import PydanticCustomError
 from marconi.engine.compile.compile_context import CompileContext
 from marconi.engine.stages.base import DuplexStage, Stage
 from marconi.engine.types.descriptor import Carrier, Descriptor
+from marconi.engine.types.enums import ItemType
 from marconi.engine.types.levels import Level
 from marconi.engine.types.step import Step
 
@@ -173,7 +174,9 @@ class Dechirp(DuplexStage[CompileContext, DechirpStep]):
         b.chain("chirp_mod", sf=step.sf, oversample=step.oversample)
 
     def out_descriptor(self, in_desc: Descriptor, step: DechirpStep) -> Descriptor:
-        return Descriptor(Level.SYMBOLS, "s", Carrier.HARD, order=1 << int(step.sf))
+        return Descriptor(
+            Level.SYMBOLS, ItemType.S, Carrier.HARD, order=1 << int(step.sf)
+        )
 
     def required_input_rate(
         self, step: DechirpStep, symbol_rate: float
@@ -192,7 +195,7 @@ class CssDemap(DuplexStage[CompileContext, CssDemapStep]):
     to_level = Level.BITS
     family = "css"
     step_model = CssDemapStep
-    accepts_item_type = "s"
+    accepts_item_type = ItemType.S
     accepts_carrier = Carrier.HARD
 
     def emit_rx(self, b: CompileContext, step: CssDemapStep) -> None:
@@ -202,7 +205,7 @@ class CssDemap(DuplexStage[CompileContext, CssDemapStep]):
         b.chain("css_map", sf=int(step.sf))
 
     def out_descriptor(self, in_desc: Descriptor, step: CssDemapStep) -> Descriptor:
-        return Descriptor(Level.BITS, "b", Carrier.HARD)
+        return Descriptor(Level.BITS, ItemType.B, Carrier.HARD)
 
     def required_input_order(self, step: CssDemapStep) -> int | None:
         return 1 << int(step.sf)

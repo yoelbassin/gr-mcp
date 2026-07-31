@@ -9,7 +9,7 @@ from marconi.engine.modulation.psk.stages import PskDemodStep
 from marconi.engine.stages.acquisition import PreambleSync, PreambleSyncStep
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Amplitude, Carrier, Descriptor
-from marconi.engine.types.enums import PskOrder
+from marconi.engine.types.enums import ItemType, PskOrder
 from marconi.engine.types.levels import Level
 from marconi.engine.types.models import Modem
 from marconi.engine.types.step import Step
@@ -21,7 +21,7 @@ _P = PreambleSyncStep(
     pad_symbols=192,
     threshold=0.9,
 )
-SYM_C = Descriptor(Level.SYMBOLS, "c", carrier=Carrier.SOFT)
+SYM_C = Descriptor(Level.SYMBOLS, ItemType.C, carrier=Carrier.SOFT)
 
 
 def test_registered_as_acquisition() -> None:
@@ -60,7 +60,7 @@ def _compile_rx(*steps: Step):
         stage_registry(),
         direction="rx",
         sample_rate=8.0,
-        start=Descriptor(Level.IQ, "c", amplitude=Amplitude.PEAK_UNITY),
+        start=Descriptor(Level.IQ, ItemType.C, amplitude=Amplitude.PEAK_UNITY),
         source_io={"path": "in.iq"},
         sink_io={"path": "out.cf32"},
     )

@@ -29,11 +29,11 @@ from marconi.engine.modulation.psk.stages import (
 from marconi.engine.stages.conditioning import AgcStep
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Amplitude, Carrier, Descriptor
-from marconi.engine.types.enums import AgcMode, PskOrder
+from marconi.engine.types.enums import AgcMode, ItemType, PskOrder
 from marconi.engine.types.levels import Level
 from marconi.engine.types.models import Modem
 
-IQ = Descriptor(Level.IQ, "c")
+IQ = Descriptor(Level.IQ, ItemType.C)
 _SR, _SYM, _SPS = 4.0, 1.0, 4
 
 
@@ -110,13 +110,13 @@ def test_symbol_sync_decimates_by_sps() -> None:
     step = SymbolSyncStep(sps=_SPS)
     assert stage.rate_factor(step) == 1.0 / _SPS
     assert stage.required_input_rate(step, _SYM) == _SPS * _SYM
-    out = stage.out_descriptor(Descriptor(Level.IQ, "c"), step)
+    out = stage.out_descriptor(Descriptor(Level.IQ, ItemType.C), step)
     assert out.level is Level.IQ
     assert out.amplitude is Amplitude.UNKNOWN
 
 
 def test_symbol_sync_builds_matched_filter_then_gardner() -> None:
-    ctx = CompileContext(Descriptor(Level.IQ, "c"), _SR, _SYM)
+    ctx = CompileContext(Descriptor(Level.IQ, ItemType.C), _SR, _SYM)
     stage_registry()["symbol_sync"].emit_rx(ctx, SymbolSyncStep(sps=_SPS))
     kinds = [b.kind for b in ctx.build("t", _SR).blocks]
     assert kinds == ["rrc_filter_ccf", "symbol_sync_cc"]
@@ -136,7 +136,7 @@ def test_symbol_sync_rejects_a_rate_that_does_not_deliver_sps(tmp_path: Path) ->
             stage_registry(),
             direction="rx",
             sample_rate=_SR,
-            start=Descriptor(Level.IQ, "c", amplitude=Amplitude.RMS_UNITY),
+            start=Descriptor(Level.IQ, ItemType.C, amplitude=Amplitude.RMS_UNITY),
             source_io={"path": "in.iq"},
             sink_io={"path": "out.iq"},
         )
@@ -172,6 +172,6 @@ def test_symbol_sync_rejects_invalid_params() -> None:
 def test_symbol_sync_output_carries_soft_iq() -> None:
     stage = stage_registry()["symbol_sync"]
     out = stage.out_descriptor(
-        Descriptor(Level.IQ, "c", carrier=Carrier.HARD), SymbolSyncStep(sps=_SPS)
+        Descriptor(Level.IQ, ItemType.C, carrier=Carrier.HARD), SymbolSyncStep(sps=_SPS)
     )
     assert out.item_type == "c"

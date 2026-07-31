@@ -15,7 +15,7 @@ from marconi.engine.modulation.psk.stages import PskDemapStep, PskDemodStep
 from marconi.engine.stages.general import SliceStep
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Descriptor
-from marconi.engine.types.enums import PskOrder
+from marconi.engine.types.enums import ItemType, PskOrder
 from marconi.engine.types.levels import Level
 from marconi.engine.types.models import Modem
 from marconi.engine.types.step import Step
@@ -33,7 +33,7 @@ class GainResult:
     ber: float
 
 
-IQ = Descriptor(Level.IQ, "c")
+IQ = Descriptor(Level.IQ, ItemType.C)
 _SR, _SYM = 8.0, 1.0
 _GAINS = [1e-3, 1e-1, 1.0, 1e1, 1e3]
 

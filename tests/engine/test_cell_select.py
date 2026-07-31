@@ -11,10 +11,11 @@ from marconi.engine.compile.compiler import CompileError, compile_modem
 from marconi.engine.modulation.ofdm.stages import CellSelectStep
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Carrier, Descriptor
+from marconi.engine.types.enums import ItemType
 from marconi.engine.types.levels import Level
 from marconi.engine.types.models import Modem
 
-SYM_C = Descriptor(Level.SYMBOLS, "c", Carrier.SOFT)
+SYM_C = Descriptor(Level.SYMBOLS, ItemType.C, Carrier.SOFT)
 
 
 def _compile(modem: Modem, src: Path, snk: Path, start: Descriptor = SYM_C):
@@ -67,7 +68,7 @@ def test_cell_select_rejects_keep_beyond_block() -> None:
 
 
 def test_cell_select_rejects_frame_len_mismatch(tmp_path: Path) -> None:
-    framed = Descriptor(Level.SYMBOLS, "c", Carrier.SOFT, frame_len=5)
+    framed = Descriptor(Level.SYMBOLS, ItemType.C, Carrier.SOFT, frame_len=5)
     modem = Modem(
         symbol_rate=1.0,
         path=[CellSelectStep(select_perm=list(range(12)), keep=3)],
@@ -79,7 +80,7 @@ def test_cell_select_rejects_frame_len_mismatch(tmp_path: Path) -> None:
 def test_cell_select_accepts_frame_len_whole_blocks_tile_frame(tmp_path: Path) -> None:
     # frame_len=12, select_perm len 3: whole gather blocks tile exactly into one
     # upstream frame (12 % 3 == 0, no straddle)
-    framed = Descriptor(Level.SYMBOLS, "c", Carrier.SOFT, frame_len=12)
+    framed = Descriptor(Level.SYMBOLS, ItemType.C, Carrier.SOFT, frame_len=12)
     modem = Modem(
         symbol_rate=1.0,
         path=[CellSelectStep(select_perm=[1, 0, 2], keep=2)],
@@ -93,7 +94,7 @@ def test_cell_select_accepts_frame_len_gather_spans_whole_frames(
 ) -> None:
     # frame_len=3, select_perm len 12: gather span divides evenly by frame_len
     # (12 % 3 == 0, gather blocks span whole frames, no straddle)
-    framed = Descriptor(Level.SYMBOLS, "c", Carrier.SOFT, frame_len=3)
+    framed = Descriptor(Level.SYMBOLS, ItemType.C, Carrier.SOFT, frame_len=3)
     modem = Modem(
         symbol_rate=1.0,
         path=[CellSelectStep(select_perm=list(range(12)), keep=3)],

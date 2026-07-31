@@ -19,14 +19,14 @@ from marconi.engine.stages.acquisition import PreambleSyncStep
 from marconi.engine.stages.conditioning import AgcStep
 from marconi.engine.stages.registry import stage_registry, step_models
 from marconi.engine.types.descriptor import Carrier, Descriptor
-from marconi.engine.types.enums import AgcMode, PskOrder, QamOrder
+from marconi.engine.types.enums import AgcMode, ItemType, PskOrder, QamOrder
 from marconi.engine.types.levels import Level
 from marconi.engine.types.models import Modem
 from marconi.engine.types.params import ParamValue
 from marconi.engine.types.step import Step
 
-IQ = Descriptor(Level.IQ, "c")
-SYM_C = Descriptor(Level.SYMBOLS, "c", carrier=Carrier.SOFT)
+IQ = Descriptor(Level.IQ, ItemType.C)
+SYM_C = Descriptor(Level.SYMBOLS, ItemType.C, carrier=Carrier.SOFT)
 _AGC = AgcStep(mode=AgcMode.POWER)
 _DECHIRP_PARAMS: dict[str, ParamValue] = {"sf": 7, "oversample": 2, "zero_pad": 4}
 
@@ -70,14 +70,14 @@ def test_dechirp_pins_order() -> None:
 
 
 def test_level_preserving_default_propagates_order() -> None:
-    pinned = Descriptor(Level.SYMBOLS, "c", Carrier.SOFT, order=4)
+    pinned = Descriptor(Level.SYMBOLS, ItemType.C, Carrier.SOFT, order=4)
     step = PreambleSyncStep(preamble_i=[1.0, -1.0], preamble_q=[0.0, 0.0])
     out = stage_registry()["preamble_sync"].out_descriptor(pinned, step)
     assert out.order == 4
 
 
 def test_level_change_resets_order() -> None:
-    pinned = Descriptor(Level.SYMBOLS, "c", Carrier.SOFT, order=4)
+    pinned = Descriptor(Level.SYMBOLS, ItemType.C, Carrier.SOFT, order=4)
     out = stage_registry()["psk_demap"].out_descriptor(
         pinned, PskDemapStep(order=PskOrder.QPSK)
     )
@@ -239,7 +239,7 @@ def test_unpinned_boundary_skips_preamble_check() -> None:
     )
 
 
-SYM_F = Descriptor(Level.SYMBOLS, "f", carrier=Carrier.SOFT)
+SYM_F = Descriptor(Level.SYMBOLS, ItemType.F, carrier=Carrier.SOFT)
 
 
 def _m_slice() -> MSliceStep:
@@ -261,7 +261,7 @@ def test_mfsk_soft_demap_declares_required_order() -> None:
 
 
 def test_m_slice_conflicting_upstream_pin_fails_at_compile() -> None:
-    pinned = Descriptor(Level.SYMBOLS, "f", Carrier.SOFT, order=4)
+    pinned = Descriptor(Level.SYMBOLS, ItemType.F, Carrier.SOFT, order=4)
     with pytest.raises(CompileError) as exc:
         compile_pipeline(
             Modem(symbol_rate=1.0, path=[_m_slice()]),
@@ -310,7 +310,7 @@ def test_order_bearing_stages_are_in_the_contract() -> None:
         params, expected = _ORDER_MATRIX[name]
         step = models[name](**params)  # type: ignore[arg-type]
         if produces:
-            out = stage.out_descriptor(Descriptor(stage.from_level, "c"), step)
+            out = stage.out_descriptor(Descriptor(stage.from_level, ItemType.C), step)
             assert out.order == expected, name
         if consumes:
             assert stage.required_input_order(step) == expected, name

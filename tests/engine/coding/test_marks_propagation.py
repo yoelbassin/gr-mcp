@@ -18,11 +18,12 @@ from marconi.engine.modulation.css.stages import CssDemapStep, DechirpStep
 from marconi.engine.stages.probes import BurstProbeStep
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Descriptor
+from marconi.engine.types.enums import ItemType
 from marconi.engine.types.levels import Level
 from marconi.engine.types.models import Modem
 
 MARKS = (3, 9)
-IQ = Descriptor(Level.IQ, "c")
+IQ = Descriptor(Level.IQ, ItemType.C)
 _SF = 11
 
 

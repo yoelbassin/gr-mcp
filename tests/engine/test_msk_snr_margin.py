@@ -51,11 +51,12 @@ from marconi.engine.modulation.fsk.stages import FskStep, MskStep
 from marconi.engine.stages.general import SliceStep
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Descriptor
+from marconi.engine.types.enums import ItemType
 from marconi.engine.types.levels import Level
 from marconi.engine.types.models import Modem
 from marconi.engine.types.step import Step
 
-IQ = Descriptor(Level.IQ, "c")
+IQ = Descriptor(Level.IQ, ItemType.C)
 _SR, _SYM = 20.0, 1.0
 _SNR_DB = 22.0
 _SEEDS = (0, 1, 2, 3, 4)

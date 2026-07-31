@@ -9,12 +9,12 @@ from marconi.engine.stages.conditioning import AgcStep
 from marconi.engine.stages.general import SliceStep
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Descriptor
-from marconi.engine.types.enums import AgcMode, PskOrder, QamOrder
+from marconi.engine.types.enums import AgcMode, ItemType, PskOrder, QamOrder
 from marconi.engine.types.levels import Level
 from marconi.engine.types.models import Modem
 from marconi.engine.types.step import Step
 
-IQ = Descriptor(Level.IQ, "c")
+IQ = Descriptor(Level.IQ, ItemType.C)
 _AGC = AgcStep(mode=AgcMode.POWER)
 
 

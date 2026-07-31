@@ -8,9 +8,9 @@ from pydantic import Field, StrictInt, model_validator
 from pydantic_core import PydanticCustomError
 
 from marconi.engine.compile.compile_context import CompileContext
-from marconi.engine.stages.base import RxStage
+from marconi.engine.stages.base import RxStage, Stage
 from marconi.engine.types.descriptor import Amplitude, Descriptor
-from marconi.engine.types.enums import AgcMode
+from marconi.engine.types.enums import AgcMode, ItemType
 from marconi.engine.types.levels import Level
 from marconi.engine.types.step import Step
 
@@ -394,7 +394,7 @@ class Am(RxStage[CompileContext, AmStep]):
         b.chain("dc_blocker_ff", d=step.dc_block_len)
 
     def out_descriptor(self, in_desc: Descriptor, step: AmStep) -> Descriptor:
-        return Descriptor(Level.AUDIO, "f", in_desc.carrier)
+        return Descriptor(Level.AUDIO, ItemType.F, in_desc.carrier)
 
 
 class FmDemodStep(Step):
@@ -425,7 +425,7 @@ class FmDemod(RxStage[CompileContext, FmDemodStep]):
         b.chain("dc_blocker_ff", d=step.dc_block_len)
 
     def out_descriptor(self, in_desc: Descriptor, step: FmDemodStep) -> Descriptor:
-        return Descriptor(Level.AUDIO, "f", in_desc.carrier)
+        return Descriptor(Level.AUDIO, ItemType.F, in_desc.carrier)
 
 
 class AnalyticStep(Step):
@@ -453,10 +453,10 @@ class Analytic(RxStage[CompileContext, AnalyticStep]):
         b.chain("hilbert_fc", ntaps=step.ntaps)
 
     def out_descriptor(self, in_desc: Descriptor, step: AnalyticStep) -> Descriptor:
-        return Descriptor(Level.IQ, "c", in_desc.carrier)
+        return Descriptor(Level.IQ, ItemType.C, in_desc.carrier)
 
 
-CONDITIONING_STAGES: tuple[type[RxStage[CompileContext, Any]], ...] = (
+CONDITIONING_STAGES: tuple[type[Stage[CompileContext, Any]], ...] = (
     Channelize,
     Invert,
     Resample,

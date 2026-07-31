@@ -45,11 +45,11 @@ from marconi.engine.stages.conditioning import AgcStep, ChannelizeStep
 from marconi.engine.stages.general import SliceStep
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Descriptor
-from marconi.engine.types.enums import EmitMode
+from marconi.engine.types.enums import EmitMode, ItemType
 from marconi.engine.types.levels import Level
 from marconi.engine.types.models import Modem
 
-IQ = Descriptor(Level.IQ, "c")
+IQ = Descriptor(Level.IQ, ItemType.C)
 RATE = 128000.0
 _SLICE = (
     Path(__file__).resolve().parents[2]

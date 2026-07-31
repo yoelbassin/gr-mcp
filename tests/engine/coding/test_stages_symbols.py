@@ -14,6 +14,7 @@ from marconi.engine.coding.stages_symbols import (
 )
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Carrier, Descriptor
+from marconi.engine.types.enums import ItemType
 from marconi.engine.types.levels import Level
 
 
@@ -27,17 +28,17 @@ def test_registry_holds_both_flavors() -> None:
 
 
 def test_m_slice_out_descriptor_hardens() -> None:
-    d = Descriptor(Level.SYMBOLS, "f", carrier=Carrier.SOFT)
+    d = Descriptor(Level.SYMBOLS, ItemType.F, carrier=Carrier.SOFT)
     out = MSlice().out_descriptor(d, MSliceStep(thresholds=[0.0], levels=[0, 1]))
     assert out.item_type == "s" and out.carrier is Carrier.HARD
 
 
 def test_symbol_map_out_descriptor_lands_on_hard_bits() -> None:
-    d = Descriptor(Level.SYMBOLS, "s", carrier=Carrier.HARD)
+    d = Descriptor(Level.SYMBOLS, ItemType.S, carrier=Carrier.HARD)
     out = SymbolMap().out_descriptor(
         d, SymbolMapStep(code_bits=1, data_bits=1, table=[0, 1])
     )
-    assert out == Descriptor(Level.BITS, "b", carrier=Carrier.HARD)
+    assert out == Descriptor(Level.BITS, ItemType.B, carrier=Carrier.HARD)
 
 
 # --- sync_symbols_rx (ported from tests/bits/test_sync_symbols.py) ---

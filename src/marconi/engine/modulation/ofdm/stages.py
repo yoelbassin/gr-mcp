@@ -9,6 +9,7 @@ from pydantic_core import PydanticCustomError
 from marconi.engine.compile.compile_context import CompileContext
 from marconi.engine.stages.base import RxStage, Stage
 from marconi.engine.types.descriptor import Carrier, Descriptor
+from marconi.engine.types.enums import ItemType
 from marconi.engine.types.levels import Level
 from marconi.engine.types.step import Step
 
@@ -90,7 +91,7 @@ class OfdmDemod(RxStage[CompileContext, OfdmDemodStep]):
         b.chain("keep_m_in_n_c", m=step.n_carriers, n=fft_len, offset=0)
 
     def out_descriptor(self, in_desc: Descriptor, step: OfdmDemodStep) -> Descriptor:
-        return Descriptor(Level.SYMBOLS, "c", Carrier.SOFT)
+        return Descriptor(Level.SYMBOLS, ItemType.C, Carrier.SOFT)
 
 
 class DqpskSoftDemapStep(Step):
@@ -112,7 +113,7 @@ class DqpskSoftDemap(RxStage[CompileContext, DqpskSoftDemapStep]):
     to_level = Level.BITS
     family = "ofdm"
     step_model = DqpskSoftDemapStep
-    accepts_item_type = "c"
+    accepts_item_type = ItemType.C
     accepts_carrier = Carrier.SOFT
 
     def emit_rx(self, b: CompileContext, step: DqpskSoftDemapStep) -> None:
@@ -131,7 +132,7 @@ class DqpskSoftDemap(RxStage[CompileContext, DqpskSoftDemapStep]):
     def out_descriptor(
         self, in_desc: Descriptor, step: DqpskSoftDemapStep
     ) -> Descriptor:
-        return Descriptor(Level.BITS, "f", Carrier.SOFT)
+        return Descriptor(Level.BITS, ItemType.F, Carrier.SOFT)
 
     def required_input_order(self, step: DqpskSoftDemapStep) -> int | None:
         return int(step.order)
@@ -212,7 +213,7 @@ class OfdmCoherentSync(RxStage[CompileContext, OfdmCoherentSyncStep]):
     def out_descriptor(
         self, in_desc: Descriptor, step: OfdmCoherentSyncStep
     ) -> Descriptor:
-        return Descriptor(Level.SYMBOLS, "c", Carrier.SOFT)
+        return Descriptor(Level.SYMBOLS, ItemType.C, Carrier.SOFT)
 
 
 class SoftDemapStep(Step):
@@ -279,7 +280,7 @@ class SoftDemap(RxStage[CompileContext, SoftDemapStep]):
     to_level = Level.BITS
     family = "ofdm"
     step_model = SoftDemapStep
-    accepts_item_type = "c"
+    accepts_item_type = ItemType.C
     accepts_carrier = Carrier.SOFT
 
     def emit_rx(self, b: CompileContext, step: SoftDemapStep) -> None:
@@ -299,7 +300,7 @@ class SoftDemap(RxStage[CompileContext, SoftDemapStep]):
     def out_descriptor(self, in_desc: Descriptor, step: SoftDemapStep) -> Descriptor:
         k = step.alphabet().bit_length() - 1
         frame = None if in_desc.frame_len is None else in_desc.frame_len * k
-        return Descriptor(Level.BITS, "f", Carrier.SOFT, frame_len=frame)
+        return Descriptor(Level.BITS, ItemType.F, Carrier.SOFT, frame_len=frame)
 
     def required_input_order(self, step: SoftDemapStep) -> int | None:
         return step.alphabet()
@@ -339,7 +340,7 @@ class CellSelect(RxStage[CompileContext, CellSelectStep]):
     to_level = Level.SYMBOLS
     family = "ofdm"
     step_model = CellSelectStep
-    accepts_item_type = "c"
+    accepts_item_type = ItemType.C
     accepts_carrier = Carrier.SOFT
 
     def emit_rx(self, b: CompileContext, step: CellSelectStep) -> None:

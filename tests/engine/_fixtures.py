@@ -6,6 +6,7 @@ from marconi.engine.backends.stub import BlockArity
 from marconi.engine.compile.compile_context import CompileContext
 from marconi.engine.stages.base import DuplexStage, RxStage, Stage
 from marconi.engine.types.descriptor import Carrier, Descriptor
+from marconi.engine.types.enums import ItemType
 from marconi.engine.types.levels import Level
 from marconi.engine.types.step import Step
 
@@ -67,7 +68,7 @@ class FakeDemod(DuplexStage[CompileContext, FakeDemodStep]):
         b.chain("fake_mod", sps=b.sps)
 
     def out_descriptor(self, in_desc: Descriptor, step: FakeDemodStep) -> Descriptor:
-        return Descriptor(Level.SYMBOLS, "s", in_desc.carrier)
+        return Descriptor(Level.SYMBOLS, ItemType.S, in_desc.carrier)
 
 
 class FakeDemap(DuplexStage[CompileContext, FakeDemapStep]):
@@ -84,7 +85,7 @@ class FakeDemap(DuplexStage[CompileContext, FakeDemapStep]):
         b.chain("fake_map")
 
     def out_descriptor(self, in_desc: Descriptor, step: FakeDemapStep) -> Descriptor:
-        return Descriptor(Level.BITS, "b", Carrier.HARD)
+        return Descriptor(Level.BITS, ItemType.B, Carrier.HARD)
 
 
 class FakeSoftDemap(DuplexStage[CompileContext, FakeSoftDemapStep]):
@@ -103,7 +104,7 @@ class FakeSoftDemap(DuplexStage[CompileContext, FakeSoftDemapStep]):
     def out_descriptor(
         self, in_desc: Descriptor, step: FakeSoftDemapStep
     ) -> Descriptor:
-        return Descriptor(Level.BITS, "f", Carrier.SOFT)
+        return Descriptor(Level.BITS, ItemType.F, Carrier.SOFT)
 
 
 class FakeSoftFec(RxStage[CompileContext, FakeSoftFecStep]):
@@ -112,14 +113,14 @@ class FakeSoftFec(RxStage[CompileContext, FakeSoftFecStep]):
     to_level = Level.BITS
     family = "general"
     step_model = FakeSoftFecStep
-    accepts_item_type = "f"
+    accepts_item_type = ItemType.F
     accepts_carrier = Carrier.SOFT
 
     def emit_rx(self, b: CompileContext, step: FakeSoftFecStep) -> None:
         b.chain("fake_soft_fec")
 
     def out_descriptor(self, in_desc: Descriptor, step: FakeSoftFecStep) -> Descriptor:
-        return Descriptor(Level.BITS, "b", Carrier.HARD)
+        return Descriptor(Level.BITS, ItemType.B, Carrier.HARD)
 
 
 class RxOnlyDemod(RxStage[CompileContext, RxOnlyDemodStep]):
@@ -133,7 +134,7 @@ class RxOnlyDemod(RxStage[CompileContext, RxOnlyDemodStep]):
         b.chain("fake_demod", sps=b.sps)
 
     def out_descriptor(self, in_desc: Descriptor, step: RxOnlyDemodStep) -> Descriptor:
-        return Descriptor(Level.SYMBOLS, "s", in_desc.carrier)
+        return Descriptor(Level.SYMBOLS, ItemType.S, in_desc.carrier)
 
 
 def fixture_registry() -> dict[str, Stage[CompileContext, Any]]:

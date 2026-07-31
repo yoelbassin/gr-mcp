@@ -6,6 +6,7 @@ from marconi.engine.io.bitfile import read_bits
 from marconi.engine.modulation.coding.stages import HardenStep
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Carrier, Descriptor
+from marconi.engine.types.enums import ItemType
 from marconi.engine.types.levels import Level
 from marconi.engine.types.models import Modem
 
@@ -24,7 +25,7 @@ def test_harden_matches_bitfile_convention(tmp_path) -> None:
         stage_registry(),
         direction="rx",
         sample_rate=1.0,
-        start=Descriptor(Level.BITS, "f", Carrier.SOFT),
+        start=Descriptor(Level.BITS, ItemType.F, Carrier.SOFT),
         source_io={"path": str(src)},
         sink_io={"path": str(snk)},
     )
@@ -46,7 +47,7 @@ def test_harden_rejects_hard_input() -> None:
             stage_registry(),
             direction="rx",
             sample_rate=1.0,
-            start=Descriptor(Level.BITS, "f", Carrier.SOFT),
+            start=Descriptor(Level.BITS, ItemType.F, Carrier.SOFT),
             source_io={"path": "x"},
             sink_io={"path": "y"},
         )

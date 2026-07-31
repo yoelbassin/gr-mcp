@@ -9,6 +9,7 @@ from pydantic_core import PydanticCustomError
 from marconi.engine.compile.compile_context import CompileContext
 from marconi.engine.stages.base import DuplexStage, RxStage, Stage
 from marconi.engine.types.descriptor import Carrier, Descriptor
+from marconi.engine.types.enums import ItemType
 from marconi.engine.types.levels import Level
 from marconi.engine.types.step import Step
 
@@ -45,7 +46,7 @@ class Fsk(DuplexStage[CompileContext, FskStep]):
         )
 
     def out_descriptor(self, in_desc: Descriptor, step: FskStep) -> Descriptor:
-        return Descriptor(Level.SYMBOLS, "f", Carrier.SOFT)
+        return Descriptor(Level.SYMBOLS, ItemType.F, Carrier.SOFT)
 
 
 class MskStep(Step):
@@ -71,7 +72,7 @@ class Msk(RxStage[CompileContext, MskStep]):
         b.chain("msk_demod", sps=b.sps, loop_bw=step.loop_bw)
 
     def out_descriptor(self, in_desc: Descriptor, step: MskStep) -> Descriptor:
-        return Descriptor(Level.SYMBOLS, "f", Carrier.SOFT)
+        return Descriptor(Level.SYMBOLS, ItemType.F, Carrier.SOFT)
 
 
 class MfskSoftDemapStep(Step):
@@ -121,7 +122,7 @@ class MfskSoftDemap(RxStage[CompileContext, MfskSoftDemapStep]):
     to_level = Level.BITS
     family = "fsk"
     step_model = MfskSoftDemapStep
-    accepts_item_type = "f"
+    accepts_item_type = ItemType.F
     accepts_carrier = Carrier.SOFT
 
     def emit_rx(self, b: CompileContext, step: MfskSoftDemapStep) -> None:
@@ -138,7 +139,7 @@ class MfskSoftDemap(RxStage[CompileContext, MfskSoftDemapStep]):
     def out_descriptor(
         self, in_desc: Descriptor, step: MfskSoftDemapStep
     ) -> Descriptor:
-        return Descriptor(Level.BITS, "f", Carrier.SOFT)
+        return Descriptor(Level.BITS, ItemType.F, Carrier.SOFT)
 
     def required_input_order(self, step: MfskSoftDemapStep) -> int | None:
         return len(step.levels)

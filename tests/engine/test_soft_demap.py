@@ -13,12 +13,12 @@ from marconi.engine.modulation.ofdm.stages import SoftDemapStep
 from marconi.engine.modulation.psk.stages import PskSoftDemapStep
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Carrier, Descriptor
-from marconi.engine.types.enums import PskOrder
+from marconi.engine.types.enums import ItemType, PskOrder
 from marconi.engine.types.levels import Level
 from marconi.engine.types.models import Modem
 from marconi.engine.types.params import ParamValue
 
-SYM_C = Descriptor(Level.SYMBOLS, "c", Carrier.SOFT)
+SYM_C = Descriptor(Level.SYMBOLS, ItemType.C, Carrier.SOFT)
 
 
 def _run_bits(
@@ -89,7 +89,7 @@ def test_soft_demap_psk_matches_psk_soft_demap(tmp_path: Path) -> None:
 
 
 def test_soft_demap_scales_frame_len_by_bits_per_symbol() -> None:
-    framed = Descriptor(Level.SYMBOLS, "c", Carrier.SOFT, frame_len=65)
+    framed = Descriptor(Level.SYMBOLS, ItemType.C, Carrier.SOFT, frame_len=65)
     out = stage_registry()["soft_demap"].out_descriptor(
         framed, SoftDemapStep(scheme="psk", order=4)
     )

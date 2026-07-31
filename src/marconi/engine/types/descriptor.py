@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 
+from marconi.engine.types.enums import ItemType
 from marconi.engine.types.levels import Level
 
 
@@ -27,7 +28,7 @@ class Amplitude(str, Enum):
 @dataclass(frozen=True)
 class Descriptor:
     level: Level
-    item_type: str  # GR wire type "c/f/b/s"; selects IO blocks
+    item_type: ItemType  # GR wire type c/f/b/s; selects IO blocks
     carrier: Carrier = Carrier.HARD  # decision-hardness, a seam invariant
     amplitude: Amplitude = Amplitude.UNKNOWN
     order: int | None = None

@@ -2,6 +2,7 @@ from typing import Literal
 
 from marconi.engine.stages.base import RxStage
 from marconi.engine.types.descriptor import Amplitude, Carrier, Descriptor
+from marconi.engine.types.enums import ItemType
 from marconi.engine.types.levels import Level
 from marconi.engine.types.step import Step
 
@@ -31,11 +32,11 @@ class _Demod(_PassThrough):
     to_level = Level.SYMBOLS
 
 
-_NORMALIZED = Descriptor(Level.IQ, "c", Carrier.HARD, Amplitude.RMS_UNITY)
+_NORMALIZED = Descriptor(Level.IQ, ItemType.C, Carrier.HARD, Amplitude.RMS_UNITY)
 
 
 def test_descriptor_defaults_to_unknown_amplitude() -> None:
-    assert Descriptor(Level.IQ, "c").amplitude is Amplitude.UNKNOWN
+    assert Descriptor(Level.IQ, ItemType.C).amplitude is Amplitude.UNKNOWN
 
 
 def test_iq_stage_passes_amplitude_through() -> None:

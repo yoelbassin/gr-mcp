@@ -10,6 +10,7 @@ from marconi.engine.compile.compile_context import CompileContext
 from marconi.engine.compile.ir import GrPipeline
 from marconi.engine.stages.base import Stage, validate_path
 from marconi.engine.types.descriptor import Amplitude, Descriptor
+from marconi.engine.types.enums import ItemType
 from marconi.engine.types.models import Modem, ValidationIssue
 from marconi.engine.types.params import ParamValue
 from marconi.engine.types.step import Step
@@ -26,24 +27,26 @@ register_error(CompileError, "invalid_argument")  # an uncompilable spec
 # item_type -> (source_kind, sink_kind). The GR wire type alone selects IO;
 # carrier is decision-hardness (a seam invariant), never a routing knob. Descriptor
 # data, never stage names: replaces v1's rate-by-name scan and sink-by-type lookup.
-_IO_BLOCKS: dict[str, tuple[str | None, str]] = {
-    "c": ("iq_file_source", "iq_file_sink"),
-    "s": (None, "symbols_file_sink"),
-    "b": ("bits_file_source", "bits_file_sink"),
-    "f": ("soft_bits_file_source", "soft_bits_file_sink"),
+_IO_BLOCKS: dict[ItemType, tuple[str | None, str]] = {
+    ItemType.C: ("iq_file_source", "iq_file_sink"),
+    ItemType.S: (None, "symbols_file_sink"),
+    ItemType.B: ("bits_file_source", "bits_file_sink"),
+    ItemType.F: ("soft_bits_file_source", "soft_bits_file_sink"),
 }
 
 
 def _io_kinds(desc: Descriptor) -> tuple[str | None, str]:
     if desc.item_type not in _IO_BLOCKS:
-        raise CompileError(f"no source/sink block for item_type {desc.item_type!r}")
+        raise CompileError(
+            f"no source/sink block for item_type {desc.item_type.value!r}"
+        )
     return _IO_BLOCKS[desc.item_type]
 
 
 def _source_kind(desc: Descriptor) -> str:
     src, _ = _io_kinds(desc)
     if src is None:
-        raise CompileError(f"item_type {desc.item_type!r} has no source block")
+        raise CompileError(f"item_type {desc.item_type.value!r} has no source block")
     return src
 
 
@@ -98,8 +101,8 @@ def _validate_descriptors(
         ):
             raise CompileError(
                 f"stage '{step.conv}' accepts item_type "
-                f"{stage.accepts_item_type!r} but '{producer}' produces "
-                f"{in_desc.item_type!r}"
+                f"{stage.accepts_item_type.value!r} but '{producer}' produces "
+                f"{in_desc.item_type.value!r}"
             )
         if (
             stage.accepts_carrier is not None

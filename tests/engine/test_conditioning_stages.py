@@ -13,6 +13,7 @@ from marconi.engine.stages.conditioning import (
 )
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Descriptor
+from marconi.engine.types.enums import ItemType
 from marconi.engine.types.levels import Level
 
 
@@ -25,8 +26,8 @@ def test_registered_as_conditioning() -> None:
 def test_channelize_is_iq_to_iq_and_decimates() -> None:
     c = Channelize()
     step = ChannelizeStep(decim=2, bandwidth_hz=4.0)
-    out = c.out_descriptor(Descriptor(Level.IQ, "c"), step)
-    assert out == Descriptor(Level.IQ, "c")
+    out = c.out_descriptor(Descriptor(Level.IQ, ItemType.C), step)
+    assert out == Descriptor(Level.IQ, ItemType.C)
     assert c.rate_factor(step) == 0.5
     assert c.rate_factor(ChannelizeStep(decim=4, bandwidth_hz=4.0)) == 0.25
 
@@ -34,13 +35,13 @@ def test_channelize_is_iq_to_iq_and_decimates() -> None:
 def test_invert_is_iq_to_iq_unity_rate() -> None:
     c = Invert()
     step = InvertStep()
-    out = c.out_descriptor(Descriptor(Level.IQ, "c"), step)
-    assert out == Descriptor(Level.IQ, "c")
+    out = c.out_descriptor(Descriptor(Level.IQ, ItemType.C), step)
+    assert out == Descriptor(Level.IQ, ItemType.C)
     assert c.rate_factor(step) == 1.0
 
 
 def test_rx_only_rejects_tx() -> None:
-    b = CompileContext(Descriptor(Level.IQ, "c"), rate=16.0, symbol_rate=1.0)
+    b = CompileContext(Descriptor(Level.IQ, ItemType.C), rate=16.0, symbol_rate=1.0)
     with pytest.raises(StageDirectionError):
         Channelize().emit_tx(b, ChannelizeStep(decim=2, bandwidth_hz=4.0))
     with pytest.raises(StageDirectionError):
@@ -48,7 +49,7 @@ def test_rx_only_rejects_tx() -> None:
 
 
 def test_channelize_emit_uses_input_rate_and_decim() -> None:
-    b = CompileContext(Descriptor(Level.IQ, "c"), rate=16.0, symbol_rate=1.0)
+    b = CompileContext(Descriptor(Level.IQ, ItemType.C), rate=16.0, symbol_rate=1.0)
     Channelize().emit_rx(b, ChannelizeStep(decim=2, bandwidth_hz=4.0, center_hz=4.0))
     p = b.build("t", 16.0)
     fx = next(x for x in p.blocks if x.kind == "freq_xlating_fir_filter_ccf")
@@ -59,7 +60,7 @@ def test_channelize_emit_uses_input_rate_and_decim() -> None:
 
 
 def test_invert_emit_is_conjugate() -> None:
-    b = CompileContext(Descriptor(Level.IQ, "c"), rate=16.0, symbol_rate=1.0)
+    b = CompileContext(Descriptor(Level.IQ, ItemType.C), rate=16.0, symbol_rate=1.0)
     Invert().emit_rx(b, InvertStep())
     assert [x.kind for x in b.build("t", 16.0).blocks] == ["conjugate_cc"]
 
@@ -91,7 +92,7 @@ def test_rate_threads_through_channelize_to_demod() -> None:
         stage_registry(),
         direction="rx",
         sample_rate=16.0,
-        start=D(Level.IQ, "c"),
+        start=D(Level.IQ, ItemType.C),
         source_io={"path": "x"},
         sink_io={"path": "y"},
     )

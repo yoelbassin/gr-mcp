@@ -11,6 +11,7 @@ from marconi.engine.stages.base import (
     validate_path,
 )
 from marconi.engine.types.descriptor import Carrier, Descriptor
+from marconi.engine.types.enums import ItemType
 from marconi.engine.types.levels import Level
 from marconi.engine.types.models import ValidationIssue
 from marconi.engine.types.step import Step
@@ -40,7 +41,7 @@ class Demod(DuplexStage["_FakeBuilder", _DemodStep]):
         b.ops.append("tx")
 
     def out_descriptor(self, d: Descriptor, step: _DemodStep) -> Descriptor:
-        return Descriptor(self.to_level, "f", carrier=Carrier.SOFT)
+        return Descriptor(self.to_level, ItemType.F, carrier=Carrier.SOFT)
 
 
 class _ResampleStep(Step):
@@ -102,8 +103,8 @@ def _registry() -> dict[str, Stage[Any, Any]]:
 
 
 def test_stage_declares_descriptor_and_rate_transforms() -> None:
-    out = Demod().out_descriptor(Descriptor(Level.IQ, "c"), _DemodStep(sps=4))
-    assert out == Descriptor(Level.SYMBOLS, "f", carrier=Carrier.SOFT)
+    out = Demod().out_descriptor(Descriptor(Level.IQ, ItemType.C), _DemodStep(sps=4))
+    assert out == Descriptor(Level.SYMBOLS, ItemType.F, carrier=Carrier.SOFT)
     assert Resample().rate_factor(_ResampleStep(interpolation=3, decimation=2)) == 1.5
     assert Demod().rate_factor(_DemodStep(sps=4)) == 1.0  # default identity
 

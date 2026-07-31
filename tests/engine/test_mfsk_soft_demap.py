@@ -23,12 +23,13 @@ from marconi.engine.modulation.coding.stages import FecStep
 from marconi.engine.modulation.fsk.stages import FskStep, MfskSoftDemapStep
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Carrier, Descriptor
+from marconi.engine.types.enums import ItemType
 from marconi.engine.types.levels import Level
 from marconi.engine.types.models import Modem
 from marconi.engine.types.step import Step
 
-SYM_F = Descriptor(Level.SYMBOLS, "f", carrier=Carrier.SOFT)
-IQ = Descriptor(Level.IQ, "c")
+SYM_F = Descriptor(Level.SYMBOLS, ItemType.F, carrier=Carrier.SOFT)
+IQ = Descriptor(Level.IQ, ItemType.C)
 _POLYS = [0o171, 0o133]
 _D, _TAIL, _FRAME_BITS = 2, 6, 512
 _SR, _SYM_RATE, _DEV = 48000.0, 4800.0, 1800.0

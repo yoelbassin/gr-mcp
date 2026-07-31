@@ -14,11 +14,12 @@ from pydantic import ValidationError
 
 from marconi.engine.compile.compiler import CompileError, compile_modem
 from marconi.engine.types.descriptor import Descriptor
+from marconi.engine.types.enums import ItemType
 from marconi.engine.types.levels import Level
 from marconi.engine.types.models import Modem
 from marconi.engine.types.step import Step
 
-IQ = Descriptor(Level.IQ, "c")
+IQ = Descriptor(Level.IQ, ItemType.C)
 
 
 def _modem(*steps: Step, symbol_rate: float) -> Modem:

@@ -45,12 +45,12 @@ from marconi.engine.stages.conditioning import (
 )
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Descriptor
-from marconi.engine.types.enums import AgcMode, PskOrder
+from marconi.engine.types.enums import AgcMode, ItemType, PskOrder
 from marconi.engine.types.levels import Level
 from marconi.engine.types.models import Bitstream, Modem
 
-IQ = Descriptor(Level.IQ, "c")
-BITS = Descriptor(Level.BITS, "b")
+IQ = Descriptor(Level.IQ, ItemType.C)
+BITS = Descriptor(Level.BITS, ItemType.B)
 RATE = 250_000.0
 SYMBOL_RATE = 2375.0  # biphase symbols; data runs at half this
 _CAPTURE = (

@@ -14,12 +14,13 @@ from marconi.engine.stages.conditioning import AgcStep, ChannelizeStep
 from marconi.engine.stages.general import SliceStep
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Carrier, Descriptor
+from marconi.engine.types.enums import ItemType
 from marconi.engine.types.levels import Level
 from marconi.engine.types.models import Modem
 from marconi.engine.types.step import Step
 
-IQ = Descriptor(Level.IQ, "c")
-SOFT_BITS = Descriptor(Level.BITS, "b", carrier=Carrier.HARD)
+IQ = Descriptor(Level.IQ, ItemType.C)
+SOFT_BITS = Descriptor(Level.BITS, ItemType.B, carrier=Carrier.HARD)
 
 # exact POCSAG GR prefix (tests/bits/test_pocsag_offair.py:89-101) so the
 # rate/amplitude contract checks see a known-good chain

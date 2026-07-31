@@ -22,10 +22,11 @@ from marconi.engine.io.bitfile import read_bits, write_bits
 from marconi.engine.run import run_rx
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Descriptor
+from marconi.engine.types.enums import ItemType
 from marconi.engine.types.levels import Level
 from marconi.engine.types.models import Bitstream, Modem
 
-BITS = Descriptor(Level.BITS, "b")
+BITS = Descriptor(Level.BITS, ItemType.B)
 _FRAME_BODY_LEN = 2056
 
 # Captured by:

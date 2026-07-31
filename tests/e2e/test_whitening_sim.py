@@ -18,11 +18,12 @@ from marconi.engine.io.bitfile import read_bits, write_bits
 from marconi.engine.run import run_rx
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Descriptor
+from marconi.engine.types.enums import ItemType
 from marconi.engine.types.levels import Level
 from marconi.engine.types.models import Bitstream, Modem
 from marconi.engine.types.step import Step
 
-BITS = Descriptor(Level.BITS, "b")
+BITS = Descriptor(Level.BITS, ItemType.B)
 SYNC = "5c3b"
 MASK, SEED, LEN = 0b0000011, 0x55, 7
 CRC_PARAMS = {"poly": 0x1021, "bits": 16, "init": 0xFFFF, "xorout": 0x0000}

@@ -11,15 +11,15 @@ from marconi.engine.compile.compiler import compile_modem
 from marconi.engine.stages.conditioning import AgcStep
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Amplitude, Carrier, Descriptor
-from marconi.engine.types.enums import AgcMode
+from marconi.engine.types.enums import AgcMode, ItemType
 from marconi.engine.types.levels import Level
 from marconi.engine.types.models import Modem
 
-_NORMALIZED = Descriptor(Level.IQ, "c", Carrier.HARD, Amplitude.RMS_UNITY)
+_NORMALIZED = Descriptor(Level.IQ, ItemType.C, Carrier.HARD, Amplitude.RMS_UNITY)
 
 
 def _emit(params: Mapping[str, Any], rate: float = 8.0, symbol_rate: float = 1.0):
-    ctx = CompileContext(Descriptor(Level.IQ, "c"), rate, symbol_rate)
+    ctx = CompileContext(Descriptor(Level.IQ, ItemType.C), rate, symbol_rate)
     step = AgcStep(**params)
     stage_registry()["agc"].emit_rx(ctx, step)
     return ctx.build("t", rate).blocks
@@ -43,7 +43,7 @@ def test_agc_is_registered_as_conditioning() -> None:
 def test_agc_mode_selects_the_amplitude_statistic(
     mode: str, statistic: Amplitude
 ) -> None:
-    unknown = Descriptor(Level.IQ, "c")
+    unknown = Descriptor(Level.IQ, ItemType.C)
     out = stage_registry()["agc"].out_descriptor(unknown, AgcStep(mode=AgcMode(mode)))
     assert out.amplitude is statistic
 
@@ -98,7 +98,7 @@ def _compile_agc(
         stage_registry(),
         direction="rx",
         sample_rate=rate,
-        start=Descriptor(Level.IQ, "c"),
+        start=Descriptor(Level.IQ, ItemType.C),
         source_io={"path": "/dev/null"},
         sink_io={"path": "/dev/null"},
     ).blocks
@@ -174,7 +174,7 @@ def test_agc_runs_and_normalizes_a_scaled_stream(mode: str, tmp_path: Path) -> N
         stage_registry(),
         direction="rx",
         sample_rate=8.0,
-        start=Descriptor(Level.IQ, "c"),
+        start=Descriptor(Level.IQ, ItemType.C),
         source_io={"path": str(src)},
         sink_io={"path": str(snk)},
     )

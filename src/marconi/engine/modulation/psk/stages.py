@@ -9,7 +9,7 @@ from pydantic_core import PydanticCustomError
 from marconi.engine.compile.compile_context import CompileContext
 from marconi.engine.stages.base import DuplexStage, RxStage, Stage
 from marconi.engine.types.descriptor import Amplitude, Carrier, Descriptor
-from marconi.engine.types.enums import PskOrder
+from marconi.engine.types.enums import ItemType, PskOrder
 from marconi.engine.types.levels import Level
 from marconi.engine.types.step import Step
 
@@ -97,7 +97,7 @@ class SampleSymbols(RxStage[CompileContext, SampleSymbolsStep]):
     def out_descriptor(
         self, in_desc: Descriptor, step: SampleSymbolsStep
     ) -> Descriptor:
-        return Descriptor(Level.SYMBOLS, "c", Carrier.SOFT)
+        return Descriptor(Level.SYMBOLS, ItemType.C, Carrier.SOFT)
 
     def required_input_rate(
         self, step: SampleSymbolsStep, symbol_rate: float
@@ -122,7 +122,7 @@ class DifferentialDemod(RxStage[CompileContext, DifferentialDemodStep]):
     to_level = Level.SYMBOLS
     family = "psk"
     step_model = DifferentialDemodStep
-    accepts_item_type = "c"
+    accepts_item_type = ItemType.C
     accepts_carrier = Carrier.SOFT
 
     def emit_rx(self, b: CompileContext, step: DifferentialDemodStep) -> None:
@@ -191,7 +191,9 @@ class PskDemod(DuplexStage[CompileContext, PskDemodStep]):
         )
 
     def out_descriptor(self, in_desc: Descriptor, step: PskDemodStep) -> Descriptor:
-        return Descriptor(Level.SYMBOLS, "c", Carrier.SOFT, order=int(step.order))
+        return Descriptor(
+            Level.SYMBOLS, ItemType.C, Carrier.SOFT, order=int(step.order)
+        )
 
 
 class PskDemapStep(Step):
@@ -209,7 +211,7 @@ class PskDemap(DuplexStage[CompileContext, PskDemapStep]):
     to_level = Level.BITS
     family = "psk"
     step_model = PskDemapStep
-    accepts_item_type = "c"
+    accepts_item_type = ItemType.C
     accepts_carrier = Carrier.SOFT
 
     def emit_rx(self, b: CompileContext, step: PskDemapStep) -> None:
@@ -223,7 +225,7 @@ class PskDemap(DuplexStage[CompileContext, PskDemapStep]):
         b.chain("chunks_to_symbols_bc", scheme="psk", order=order)
 
     def out_descriptor(self, in_desc: Descriptor, step: PskDemapStep) -> Descriptor:
-        return Descriptor(Level.BITS, "b", Carrier.HARD)
+        return Descriptor(Level.BITS, ItemType.B, Carrier.HARD)
 
     def required_input_order(self, step: PskDemapStep) -> int | None:
         return int(step.order)
@@ -252,7 +254,7 @@ class PskSoftDemap(RxStage[CompileContext, PskSoftDemapStep]):
     to_level = Level.BITS
     family = "psk"
     step_model = PskSoftDemapStep
-    accepts_item_type = "c"
+    accepts_item_type = ItemType.C
     accepts_carrier = Carrier.SOFT
 
     def emit_rx(self, b: CompileContext, step: PskSoftDemapStep) -> None:
@@ -260,7 +262,7 @@ class PskSoftDemap(RxStage[CompileContext, PskSoftDemapStep]):
         b.chain("multiply_const_ff", value=-1.0)
 
     def out_descriptor(self, in_desc: Descriptor, step: PskSoftDemapStep) -> Descriptor:
-        return Descriptor(Level.BITS, "f", Carrier.SOFT)
+        return Descriptor(Level.BITS, ItemType.F, Carrier.SOFT)
 
     def required_input_order(self, step: PskSoftDemapStep) -> int | None:
         return int(step.order)
