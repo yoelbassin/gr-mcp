@@ -87,12 +87,14 @@ class Modem(BaseModel):
         cls, data: Mapping[str, object], step_models: Mapping[str, type[Step]]
     ) -> "Modem":
         raw = data.get("path", [])
-        if not isinstance(raw, Sequence):
-            raise ValueError("modem 'path' must be a list")
-        items = [dict(s) for s in raw]
-        steps = steps_from_spec(items, step_models)  # type: ignore[arg-type]
+        if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes)):
+            raise ValueError("modem spec 'path' must be a list of steps")
+        rate = data.get("symbol_rate")
+        if not isinstance(rate, (int, float)) or isinstance(rate, bool):
+            raise ValueError("modem spec requires a numeric 'symbol_rate'")
+        steps = steps_from_spec([dict(s) for s in raw], step_models)
         return cls(
             name=str(data.get("name", "modem")),
-            symbol_rate=float(data["symbol_rate"]),  # type: ignore[arg-type]
+            symbol_rate=float(rate),
             path=steps,
         )

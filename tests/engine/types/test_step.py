@@ -5,7 +5,7 @@ from typing import Literal
 import pytest
 from pydantic import ValidationError
 
-from marconi.engine.types.step import Step, steps_from_spec
+from marconi.engine.types.step import Step, StepSpecError, steps_from_spec
 
 
 class _FakeStep(Step):
@@ -34,10 +34,14 @@ def test_steps_from_spec_parses_by_conv() -> None:
 
 
 def test_steps_from_spec_unknown_conv_raises() -> None:
-    with pytest.raises(KeyError):
-        steps_from_spec([{"conv": "nope"}], {"fake": _FakeStep})
+    with pytest.raises(StepSpecError) as exc:
+        steps_from_spec(
+            [{"conv": "fake", "order": 1}, {"conv": "nope"}], {"fake": _FakeStep}
+        )
+    assert exc.value.index == 1 and exc.value.conv == "nope"
 
 
 def test_steps_from_spec_bad_param_raises_eagerly() -> None:
-    with pytest.raises(ValidationError):
+    with pytest.raises(StepSpecError) as exc:
         steps_from_spec([{"conv": "fake", "order": "x"}], {"fake": _FakeStep})
+    assert exc.value.index == 0 and exc.value.conv == "fake"

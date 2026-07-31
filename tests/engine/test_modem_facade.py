@@ -11,7 +11,6 @@ import sys
 from pathlib import Path
 
 import pytest
-from pydantic import ValidationError
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "modulation"))
 import _lattice  # noqa: E402  (sibling helper, tests/engine/modulation/_lattice.py)
@@ -91,7 +90,7 @@ from marconi.engine.stages.probes import BurstProbeStep  # noqa: E402
 from marconi.engine.stages.registry import stage_registry, step_models  # noqa: E402
 from marconi.engine.types.enums import AgcMode, PskOrder, QamOrder  # noqa: E402
 from marconi.engine.types.models import Modem  # noqa: E402
-from marconi.engine.types.step import Step  # noqa: E402
+from marconi.engine.types.step import Step, StepSpecError  # noqa: E402
 
 # OFDM bin_perm has no pydantic-level shape constraint (the DAG-level geometry
 # check lives at compile time), but a plausible carrier-select permutation
@@ -230,13 +229,26 @@ def test_to_spec_includes_subclass_fields() -> None:
 
 
 def test_unknown_conv_fails_at_parse() -> None:
-    with pytest.raises(KeyError):
-        Modem.from_spec({"symbol_rate": 1e5, "path": [{"conv": "nope"}]}, step_models())
+    with pytest.raises(StepSpecError) as exc:
+        Modem.from_spec(
+            {
+                "symbol_rate": 1e5,
+                "path": [{"conv": "psk_demod", "order": 4}, {"conv": "nope"}],
+            },
+            step_models(),
+        )
+    assert exc.value.index == 1 and exc.value.conv == "nope"
 
 
 def test_bad_param_fails_at_parse() -> None:
-    with pytest.raises(ValidationError):
+    with pytest.raises(StepSpecError) as exc:
         Modem.from_spec(
             {"symbol_rate": 1e5, "path": [{"conv": "psk_demod", "order": 3}]},
             step_models(),
         )
+    assert exc.value.index == 0 and exc.value.conv == "psk_demod"
+
+
+def test_missing_symbol_rate_fails_cleanly() -> None:
+    with pytest.raises(ValueError, match="symbol_rate"):
+        Modem.from_spec({"path": []}, step_models())

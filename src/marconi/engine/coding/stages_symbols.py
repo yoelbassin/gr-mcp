@@ -8,7 +8,7 @@ from pydantic_core import PydanticCustomError
 
 from marconi.engine.coding import ops_bits, ops_symbols
 from marconi.engine.coding.builder import CodingBuilder
-from marconi.engine.coding.stages_bits import _codebook_kw
+from marconi.engine.coding.stages_bits import _codebook_kw, check_codebook_sizing
 from marconi.engine.stages.base import RxStage, Stage
 from marconi.engine.types.descriptor import Amplitude, Carrier, Descriptor
 from marconi.engine.types.enums import DcMode, DecodeMode
@@ -121,29 +121,7 @@ class SymbolMapStep(Step):
 
     @model_validator(mode="after")
     def _sized(self) -> "SymbolMapStep":
-        if len(self.table) != (1 << self.data_bits):
-            raise PydanticCustomError(
-                "value_error",
-                "codebook table needs {want} entries for data_bits={data_bits}, "
-                "got {have}",
-                {
-                    "want": 1 << self.data_bits,
-                    "data_bits": self.data_bits,
-                    "have": len(self.table),
-                },
-            )
-        if self.decode == DecodeMode.EXACT and self.code_bits > 24:
-            raise PydanticCustomError(
-                "value_error",
-                "exact decode builds a 2^code_bits inverse table; beyond 24 "
-                "bits use decode='nearest', which never builds it",
-            )
-        if self.decode == DecodeMode.NEAREST and self.code_bits > 63:
-            raise PydanticCustomError(
-                "value_error",
-                "nearest decode packs codewords through int64; 63 bits is "
-                "the ceiling",
-            )
+        check_codebook_sizing(self.code_bits, self.data_bits, self.table, self.decode)
         return self
 
 

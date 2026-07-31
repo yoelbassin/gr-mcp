@@ -35,6 +35,33 @@ class SyncWordStep(Step):
         return self
 
 
+def check_codebook_sizing(
+    code_bits: int, data_bits: int, table: list[int], decode: DecodeMode
+) -> None:
+    if len(table) != (1 << data_bits):
+        raise PydanticCustomError(
+            "value_error",
+            "codebook table needs {want} entries for data_bits={data_bits}, "
+            "got {have}",
+            {
+                "want": 1 << data_bits,
+                "data_bits": data_bits,
+                "have": len(table),
+            },
+        )
+    if decode == DecodeMode.EXACT and code_bits > 24:
+        raise PydanticCustomError(
+            "value_error",
+            "exact decode builds a 2^code_bits inverse table; beyond 24 "
+            "bits use decode='nearest', which never builds it",
+        )
+    if decode == DecodeMode.NEAREST and code_bits > 63:
+        raise PydanticCustomError(
+            "value_error",
+            "nearest decode packs codewords through int64; 63 bits is " "the ceiling",
+        )
+
+
 class CodebookStep(Step):
     conv: Literal["codebook"] = "codebook"
     code_bits: StrictInt = Field(ge=1)
@@ -44,29 +71,7 @@ class CodebookStep(Step):
 
     @model_validator(mode="after")
     def _sized(self) -> "CodebookStep":
-        if len(self.table) != (1 << self.data_bits):
-            raise PydanticCustomError(
-                "value_error",
-                "codebook table needs {want} entries for data_bits={data_bits}, "
-                "got {have}",
-                {
-                    "want": 1 << self.data_bits,
-                    "data_bits": self.data_bits,
-                    "have": len(self.table),
-                },
-            )
-        if self.decode == DecodeMode.EXACT and self.code_bits > 24:
-            raise PydanticCustomError(
-                "value_error",
-                "exact decode builds a 2^code_bits inverse table; beyond 24 "
-                "bits use decode='nearest', which never builds it",
-            )
-        if self.decode == DecodeMode.NEAREST and self.code_bits > 63:
-            raise PydanticCustomError(
-                "value_error",
-                "nearest decode packs codewords through int64; 63 bits is "
-                "the ceiling",
-            )
+        check_codebook_sizing(self.code_bits, self.data_bits, self.table, self.decode)
         return self
 
 
