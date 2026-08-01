@@ -7,8 +7,13 @@ from helpers._fixtures import (
     fixture_registry,
 )
 
-from marconi.engine.compile.compiler import CompileError, compile_modem
-from marconi.engine.types.descriptor import Descriptor
+from marconi.engine.compile.compiler import (
+    CompileError,
+    _sink_kind,
+    _source_kind,
+    compile_modem,
+)
+from marconi.engine.types.descriptor import Carrier, Descriptor
 from marconi.engine.types.enums import ItemType
 from marconi.engine.types.levels import Level
 from marconi.engine.types.models import Modem
@@ -110,3 +115,9 @@ def test_bad_direction_raises_compile_error() -> None:
 def test_step_carries_conv_with_no_extra_params() -> None:
     step = FakeDemodStep()
     assert step.conv == "fake_demod" and step.model_dump(exclude={"conv"}) == {}
+
+
+def test_complex_soft_symbols_route_to_iq_blocks() -> None:
+    d = Descriptor(Level.SYMBOLS, ItemType.C, carrier=Carrier.SOFT)
+    assert _source_kind(d) == "iq_file_source"
+    assert _sink_kind(d) == "iq_file_sink"

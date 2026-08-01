@@ -1,5 +1,7 @@
 import math
 
+import pytest
+
 from marconi.engine.compile.compiler import compile_modem
 from marconi.engine.modulation.fsk.stages import FskStep
 from marconi.engine.stages.general import SliceStep
@@ -122,3 +124,17 @@ def test_formulas_use_iq_rate_not_sps() -> None:
     fm = next(b for b in tx.blocks if b.kind == "frequency_modulator")
     sens = 2 * math.pi * 1.0 / 8.0  # uses b.rate=8, not b.sps=4
     assert abs(fm.params["sensitivity"] - sens) < 1e-9  # type: ignore[operator]
+
+
+def test_fsk_and_ook_accept_open_loop_reject_negative() -> None:
+    from pydantic import ValidationError
+
+    from marconi.engine.modulation.ook.stages import OokEnvelopeStep
+    from marconi.engine.types.params import OPEN_LOOP
+
+    assert FskStep(deviation=2400.0, loop_bw=OPEN_LOOP).loop_bw == 0.0
+    assert OokEnvelopeStep(loop_bw=OPEN_LOOP).loop_bw == 0.0
+    with pytest.raises(ValidationError):
+        FskStep(deviation=2400.0, loop_bw=-0.01)
+    with pytest.raises(ValidationError):
+        OokEnvelopeStep(loop_bw=-0.01)
