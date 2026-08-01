@@ -108,7 +108,8 @@ def _ais_modem(center_hz: float) -> Modem:
             ChannelizeStep(decim=5, bandwidth_hz=14000.0, center_hz=center_hz),
             # window_symbols spans many burst gaps on purpose: a short window
             # lifts the inter-burst noise floor to meet the squelch threshold
-            # and nothing gets muted (tests/phy/test_squelch.py pins this).
+            # and nothing gets muted (tests/unit/engine/stages/test_squelch.py
+            # pins this).
             AgcStep(mode=AgcMode.POWER, window_symbols=4096.0),
             SquelchStep(threshold_db=-12.0, alpha_symbols=2.0),
             FskStep(deviation=2400.0),

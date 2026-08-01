@@ -6,11 +6,12 @@ never needed -- the 3-of-6 line code (codebook), sync-word seeding, and
 length-field framing -- plus a CRC as the oracle.
 
 A SIM round-trip, not an off-air capture: the modem's coding tail is just
-[codebook, sync_word] -- the coded-TX path was retired (tests/phy/coding/
-test_partition.py::test_tx_with_coding_stage_is_a_compile_error), so the wire
-fixture is built test-side in plain numpy from the same table/CRC/field
-constants the RX modem decodes with, reproducing the old codec's TX chain
-order (parse -> crc -> sync prepend -> codebook encode) by hand.
+[codebook, sync_word] -- the coded-TX path was retired
+(tests/integration/engine/coding/test_partition.py::
+test_tx_with_coding_stage_is_a_compile_error), so the wire fixture is built
+test-side in plain numpy from the same table/CRC/field constants the RX modem
+decodes with, reproducing the old codec's TX chain order (parse -> crc ->
+sync prepend -> codebook encode) by hand.
 
 Per CLAUDE.md, the protocol's parameters (3-of-6 table, sync word, EN-13757
 CRC, field layout) live here in the test, never in the ecosystem source.

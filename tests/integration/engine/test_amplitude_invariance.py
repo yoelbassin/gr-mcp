@@ -18,45 +18,45 @@ from helpers._dsp import (
     write_bits,
 )
 
-from marconi.engine.backends.gnuradio.runner import (  # noqa: E402
+from marconi.engine.backends.gnuradio.runner import (
     GnuRadioBackend,
     ensure_worker_warm,
 )
-from marconi.engine.compile.compiler import CompileError, compile_modem  # noqa: E402
-from marconi.engine.compile.ir import GrPipeline  # noqa: E402
-from marconi.engine.modulation.css.stages import (  # noqa: E402
+from marconi.engine.compile.compiler import CompileError, compile_modem
+from marconi.engine.compile.ir import GrPipeline
+from marconi.engine.modulation.css.stages import (
     ChirpSyncStep,
     CssDemapStep,
     DechirpStep,
 )
-from marconi.engine.modulation.fsk.stages import FskStep, MskStep  # noqa: E402
-from marconi.engine.modulation.ofdm.stages import (  # noqa: E402
+from marconi.engine.modulation.fsk.stages import FskStep, MskStep
+from marconi.engine.modulation.ofdm.stages import (
     OfdmCoherentSyncStep,
     OfdmDemodStep,
 )
-from marconi.engine.modulation.ook.stages import OokEnvelopeStep  # noqa: E402
-from marconi.engine.modulation.psk.stages import (  # noqa: E402
+from marconi.engine.modulation.ook.stages import OokEnvelopeStep
+from marconi.engine.modulation.psk.stages import (
     PskDemapStep,
     PskDemodStep,
     SampleSymbolsStep,
 )
-from marconi.engine.modulation.qam.stages import (  # noqa: E402
+from marconi.engine.modulation.qam.stages import (
     QamDemapStep,
     QamDemodStep,
 )
-from marconi.engine.stages.conditioning import AgcStep  # noqa: E402
-from marconi.engine.stages.general import SliceStep  # noqa: E402
-from marconi.engine.stages.registry import stage_registry  # noqa: E402
-from marconi.engine.types.descriptor import Amplitude, Carrier, Descriptor  # noqa: E402
-from marconi.engine.types.enums import (  # noqa: E402
+from marconi.engine.stages.conditioning import AgcStep
+from marconi.engine.stages.general import SliceStep
+from marconi.engine.stages.registry import stage_registry
+from marconi.engine.types.descriptor import Amplitude, Carrier, Descriptor
+from marconi.engine.types.enums import (
     AgcMode,
     ItemType,
     PskOrder,
     QamOrder,
 )
-from marconi.engine.types.levels import Level  # noqa: E402
-from marconi.engine.types.models import Modem  # noqa: E402
-from marconi.engine.types.step import Step  # noqa: E402
+from marconi.engine.types.levels import Level
+from marconi.engine.types.models import Modem
+from marconi.engine.types.step import Step
 
 IQ = Descriptor(Level.IQ, ItemType.C)
 SYM_C = Descriptor(Level.SYMBOLS, ItemType.C, carrier=Carrier.SOFT)
@@ -68,7 +68,7 @@ def _agc(mode: str = "feedforward", **params: float) -> AgcStep:
 
 
 # CSS operates at its own sample-per-symbol scale (oversample*2^sf), not the
-# modem's _SR/_SYM -- geometry mirrors tests/phy/test_css_roundtrip.py's
+# modem's _SR/_SYM -- geometry mirrors test_css_roundtrip.py's
 # cheapest mode (sf=7, oversample=2).
 _CSS_SF, _CSS_OSR = 7, 2
 _CSS_RATE = _CSS_OSR * (1 << _CSS_SF) * _SYM
@@ -83,7 +83,8 @@ _CSS_PARAMS: dict[str, Any] = {
 }
 
 # ofdm_demod is RX-only (no TX conv in the vocabulary), so its recipe's IQ is
-# synthesized directly (IFFT+CP), geometry from tests/phy/test_ofdm_demod_stage.py.
+# synthesized directly (IFFT+CP), geometry from
+# tests/unit/engine/modulation/test_ofdm_demod_stage.py.
 _OFDM_FFT, _OFDM_CP, _OFDM_SYM, _OFDM_NULL, _OFDM_NC = 16, 4, 20, 24, 4
 _OFDM_ACTIVE = [1, 2, 14, 15]
 _OFDM_BIN_PERM: list[int] = _OFDM_ACTIVE + [
@@ -168,7 +169,7 @@ _RECIPES: dict[str, dict[str, object]] = {
         "agc": _agc(),
         "path": [MskStep(), SliceStep()],
         # msk is RX-only; TX is the fsk stage at h=0.5 (deviation=symbol_rate/4),
-        # matching tests/phy/test_msk_roundtrip.py.
+        # matching test_msk_roundtrip.py.
         "tx_path": [FskStep(deviation=_SYM / 4.0), SliceStep()],
         "sample_rate": 20.0,  # the ACARS operating point (test_msk_roundtrip.py)
         "n_bits": 2048,

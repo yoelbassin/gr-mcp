@@ -9,7 +9,7 @@ corrupt length can never swallow a real burst. Blind mode assumes back-to-back
 frames from 0 and stops at the first header failure.
 
 Demoted from a registered stage 2026-07: the composition proof
-(tests/phy/coding/test_css_explicit_composition.py) shows this adds no
+(tests/unit/engine/coding/test_css_explicit_composition.py) shows this adds no
 vocabulary the product lane doesn't already have."""
 
 from __future__ import annotations

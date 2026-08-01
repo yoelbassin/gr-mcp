@@ -1,3 +1,7 @@
+"""External truth vectors: expected values sourced OUTSIDE this codebase
+(published Gray/Hamming tables, an off-air-derived header vector), so an
+internally-consistent-but-wrong implementation cannot pass."""
+
 from __future__ import annotations
 
 from itertools import permutations

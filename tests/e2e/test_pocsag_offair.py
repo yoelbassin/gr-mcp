@@ -191,8 +191,8 @@ def test_pocsag_offair_sync_align(tmp_path: Path) -> None:
     detected and each batch gated inside the GR flowgraph (correlate_access_code
     + tag_gate), then decoded to the same multimon RICs. Exercises sync_align's
     sync-detect + fixed-frame gate end to end on real RF; the sync->Viterbi
-    pairing is covered by tests/engine/test_sync_align.py (no off-air conv-coded
-    burst exists in the assets)."""
+    pairing is covered by tests/unit/engine/stages/test_sync_align.py (no
+    off-air conv-coded burst exists in the assets)."""
     ensure_worker_warm()
     res = run_rx(
         _pocsag_sync_align_modem(),

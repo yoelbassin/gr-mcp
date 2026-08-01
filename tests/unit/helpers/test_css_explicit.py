@@ -1,6 +1,6 @@
 """Behavior of the test-side CSS explicit-header orchestrator (demoted from a
 registered stage 2026-07; tests ported with it). The synthesis funnel lives in
-tests/phy/coding/_css_synth.py; the SF11 fixtures are real off-air symbols."""
+tests/helpers/_css_synth.py; the SF11 fixtures are real off-air symbols."""
 
 from __future__ import annotations
 

@@ -90,7 +90,7 @@ def test_no_coding_stage_touches_the_frames_level() -> None:
 
 
 def test_coding_stages_are_rx_only() -> None:
-    # the coded-TX path is a compile error (tests/phy/coding/test_partition.py);
+    # the coded-TX path is a compile error (test_partition.py);
     # every stage the registry offers on this engine backs that up statically.
     for name, stage in _coding_stages().items():
         assert stage.directions == frozenset({"rx"}), (name, stage.directions)

@@ -98,8 +98,9 @@ def test_amplitude_check_does_not_apply_to_tx() -> None:
 def test_amplitude_requiring_stages_declare_measured_statistics() -> None:
     """Each set is the measured gain-invariant subset, not a guess.
 
-    See tests/phy/test_amplitude_invariance.py::test_declared_amplitude_
-    statistics_are_the_ones_that_work, which re-derives these by measurement.
+    See tests/integration/engine/test_amplitude_invariance.py::
+    test_amplitude_acceptance_matches_the_declared_set, which re-derives
+    these by measurement.
     """
     reg = stage_registry()
     assert reg["qam_demod"].accepts_amplitude == frozenset({Amplitude.RMS_UNITY})

@@ -1,4 +1,4 @@
-# tests/phy/test_dab_ofdm_offair.py
+# tests/e2e/test_dab_ofdm_offair.py
 from pathlib import Path
 
 import numpy as np
@@ -38,7 +38,7 @@ def _bin_perm():
 
 
 @pytest.mark.skipif(
-    not _SLICE.exists(), reason="DAB slice absent — run tests/phy/make_dab_slice.py"
+    not _SLICE.exists(), reason="DAB slice absent — run tests/e2e/make_dab_slice.py"
 )
 def test_dab_carriers_lock(tmp_path):
     ensure_worker_warm()

@@ -7,7 +7,8 @@ comment that only makes sense for one protocol), by TABLE (its FEC parity /
 sync words / charset as a literal), or by FORMULA (arithmetic bit-identical to
 one vendor's datasheet). This test enforces the first two structurally across
 every distributed package; the third is covered by keeping the frame-length
-math parameterized (test_css_coding proves LoRa's values live in tests)."""
+math parameterized (tests/unit/helpers/test_coding.py proves LoRa's values live
+in tests)."""
 
 from __future__ import annotations
 

@@ -89,7 +89,8 @@ from marconi.engine.types.step import Step, StepSpecError  # noqa: E402
 
 # OFDM bin_perm has no pydantic-level shape constraint (the DAG-level geometry
 # check lives at compile time), but a plausible carrier-select permutation
-# mirrors tests/engine/test_amplitude_invariance.py's _OFDM_BIN_PERM fixture.
+# mirrors tests/integration/engine/test_amplitude_invariance.py's
+# _OFDM_BIN_PERM fixture.
 _OFDM_FFT = 16
 _OFDM_ACTIVE = [1, 2, 14, 15]
 _OFDM_BIN_PERM = _OFDM_ACTIVE + [b for b in range(_OFDM_FFT) if b not in _OFDM_ACTIVE]
