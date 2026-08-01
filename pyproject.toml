@@ -48,6 +48,3 @@ disallow_untyped_defs = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
-markers = [
-    "perf: throughput-sensitive test (timing-based, generous best-of-N thresholds)",
-]

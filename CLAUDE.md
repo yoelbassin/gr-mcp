@@ -100,8 +100,10 @@ with `@tool_error_boundary`.
 ### Tests
 
 - **Test real behavior, not mocks** — round-trip BER-0 sweeps through the real engine,
-  AWGN introduction, real CRCs, malformed input. The test tree mirrors the source tree,
-  with seperation into units, integration and e2e.
+  AWGN introduction, real CRCs, malformed input. The test tree is kind-first: `tests/unit` (one component; may run a tiny flowgraph for
+  a single block, never a compiled multi-stage pipeline — source tree mirrored inside),
+  `tests/integration` (compiled pipelines through the real engine on synthetic signals),
+  `tests/e2e` (off-air captures and sim protocol gates with exact oracles).
 - **Green at every commit** — the full `pytest` suite passes before work is done.
 
 ### Tooling
