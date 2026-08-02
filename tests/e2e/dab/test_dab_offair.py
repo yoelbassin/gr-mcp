@@ -159,7 +159,7 @@ def _parse_ensemble(payload30: bytes) -> str | None:
 
 
 @pytest.mark.skipif(
-    not _SLICE.exists(), reason="DAB slice absent — run tests/e2e/make_dab_slice.py"
+    not _SLICE.exists(), reason="DAB slice absent — run tests/e2e/dab/make_dab_slice.py"
 )
 def test_dab_offair(tmp_path: Path) -> None:
     ensure_worker_warm()

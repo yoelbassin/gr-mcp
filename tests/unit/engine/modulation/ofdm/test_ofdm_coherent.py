@@ -22,7 +22,7 @@ _SLICE = ARTIFACTS / "assets" / "DRM" / "dw_modeb.cf32"
 
 
 @pytest.mark.skipif(
-    not _SLICE.exists(), reason="DRM slice absent — run tests/e2e/make_drm_slice.py"
+    not _SLICE.exists(), reason="DRM slice absent — run tests/e2e/drm/make_drm_slice.py"
 )
 def test_ofdm_coherent_equalizes_to_clean_qpsk(tmp_path: Path) -> None:
     ensure_worker_warm()

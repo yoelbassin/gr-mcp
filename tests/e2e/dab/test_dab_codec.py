@@ -1,7 +1,7 @@
 """DAB's coding tail (descramble -> segment) over a golden decoded bit array,
 deterministic — pins the pure-coding half of run_rx: a Bitstream in, 12
 segmented windows out (4 CIF x 3 FIBs), every one CRC-16 valid. The golden
-bits are the FEC-decoded output of tests/e2e/test_dab_offair.py's phy chain on
+bits are the FEC-decoded output of tests/e2e/dab/test_dab_offair.py's phy chain on
 one real off-air super-frame, captured once (data/dab_decoded_golden.npy,
 uint8 shape (3072,); provenance: tests/bits/test_dab_codec.py)."""
 

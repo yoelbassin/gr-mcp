@@ -3,7 +3,7 @@ driven through the product coding engine (a coding-only Modem over
 run_rx) instead of calling the plain-function bptc_generic in _dmr.py
 directly. Every DMR value here -- deinterleave/transpose/extract perms,
 Hamming-derived parity masks, CRC xorouts, field offsets -- is caller data
-(tests/e2e/_dmr.py); the generic vocabulary (permute + block_code
+(tests/e2e/dmr/_dmr.py); the generic vocabulary (permute + block_code
 emit="codeword", iterated row/column) carries the whole product-code decode
 in one pipeline. Tables verified vs OK-DMRlib + dsd-neo.
 """

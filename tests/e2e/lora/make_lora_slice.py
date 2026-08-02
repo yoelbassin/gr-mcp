@@ -4,7 +4,7 @@ by the off-air gate, not hidden by a hand-trimmed single frame).
 
 Run once before test_lora_offair.py:
     cd /Users/joel/Clones/gr-mcp-rebuild
-    .venv/bin/python tests/e2e/make_lora_slice.py
+    .venv/bin/python tests/e2e/lora/make_lora_slice.py
 """
 
 from __future__ import annotations

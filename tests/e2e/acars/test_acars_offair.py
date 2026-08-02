@@ -171,7 +171,7 @@ def _norm_label(label: object) -> str:
 
 @pytest.mark.skipif(
     not (_CF32.exists() and _GOLDEN.exists()),
-    reason="ACARS assets absent -- run tests/e2e/make_acars_slice.py "
+    reason="ACARS assets absent -- run tests/e2e/acars/make_acars_slice.py "
     "+ make_acars_golden.py",
 )
 def test_acars_offair_matches_acarsdec_golden(tmp_path: Path) -> None:

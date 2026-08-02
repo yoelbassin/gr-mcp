@@ -125,7 +125,7 @@ def _pack_msb(bits: np.ndarray) -> bytes:
 
 def test_parse_fac_roundtrips_channel_parameter_fields():
     # parse_fac(bytes.fromhex(...)) reads msb-first packed bytes end to end
-    # (helpers.bitops.bits_to_bytes convention) -- see tests/e2e/test_drm_offair.py.
+    # (helpers.bitops.bits_to_bytes convention) -- see tests/e2e/drm/test_drm_offair.py.
     bits = np.zeros(72, np.int64)
     bits[0] = 1  # base_enh
     bits[1:3] = [1, 1]  # identity = 11

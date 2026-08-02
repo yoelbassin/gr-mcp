@@ -14,7 +14,7 @@ are test-side helpers over run 2's per-frame windows, the same per-window
 pattern as the POCSAG/BLE gates.
 
 Capture: IQ_2 (LoPy4), 1 Msps, SF11/BW125/CR4-5/LDRO — cropped to a ~11.3 Msample
-window holding two back-to-back frames (tests/e2e/make_lora_slice.py). Both
+window holding two back-to-back frames (tests/e2e/lora/make_lora_slice.py). Both
 payloads read "RF fingerpring Project for Lora device..." — CRC-16/CCITT
 (poly 0x1021, init 0) self-validates each 255-byte whitened payload.
 """
@@ -136,7 +136,8 @@ def _codec_modem() -> Modem:
 
 
 @pytest.mark.skipif(
-    not _SLICE.exists(), reason="LoRa slice absent — run tests/e2e/make_lora_slice.py"
+    not _SLICE.exists(),
+    reason="LoRa slice absent — run tests/e2e/lora/make_lora_slice.py",
 )
 def test_lora_offair(tmp_path: Path) -> None:
     ensure_worker_warm()

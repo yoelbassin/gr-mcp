@@ -2,7 +2,7 @@
 
 Run once before test_ais_offair.py:
     cd /Users/joel/Clones/gr-mcp-rebuild
-    .venv/bin/python tests/e2e/make_ais_slice.py
+    .venv/bin/python tests/e2e/ais/make_ais_slice.py
 The 60 s cf32 slice lands in the gitignored artifacts/ tree. (The slice is
 reproducible; the GR *demod* of it is not — hence the threshold assertion.)
 """

@@ -120,7 +120,7 @@ def _ais_modem(center_hz: float) -> Modem:
 
 
 @pytest.mark.skipif(
-    not _SLICE.exists(), reason="AIS slice absent — run tests/e2e/make_ais_slice.py"
+    not _SLICE.exists(), reason="AIS slice absent — run tests/e2e/ais/make_ais_slice.py"
 )
 def test_ais_offair_crc(tmp_path: Path) -> None:
     ensure_worker_warm()

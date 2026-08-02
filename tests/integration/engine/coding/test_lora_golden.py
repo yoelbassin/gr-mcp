@@ -1,6 +1,6 @@
 """LoRa's coding tail (nibble_swap -> segment) over de-FEC'd header-decode
 output, deterministic — a golden bit array bypasses css_explicit_decode itself
-(covered live by tests/e2e/test_lora_offair.py) to pin the pure-coding half of
+(covered live by tests/e2e/lora/test_lora_offair.py) to pin the pure-coding half of
 run_rx: a Bitstream in, one segmented window out, dewhitened and CRC-16-valid.
 
 The golden bits are css_explicit_decode(_SF11_SYMBOLS)'s output, captured once

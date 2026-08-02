@@ -163,7 +163,7 @@ def _pocsag_rics(bits: np.ndarray, windows: list[int]) -> dict[int, int]:
 
 @pytest.mark.skipif(
     not _SLICE.exists(),
-    reason="POCSAG slice absent — run tests/e2e/make_pocsag_slice.py",
+    reason="POCSAG slice absent — run tests/e2e/pocsag/make_pocsag_slice.py",
 )
 def test_pocsag_offair(tmp_path: Path) -> None:
     ensure_worker_warm()
@@ -184,7 +184,7 @@ def test_pocsag_offair(tmp_path: Path) -> None:
 
 @pytest.mark.skipif(
     not _SLICE.exists(),
-    reason="POCSAG slice absent — run tests/e2e/make_pocsag_slice.py",
+    reason="POCSAG slice absent — run tests/e2e/pocsag/make_pocsag_slice.py",
 )
 def test_pocsag_offair_sync_align(tmp_path: Path) -> None:
     """Off-air exercise of the GR-native sync_align: the frame sync codeword is

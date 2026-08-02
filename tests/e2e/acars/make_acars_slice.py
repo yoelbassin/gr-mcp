@@ -1,6 +1,6 @@
 """One-time asset regeneration: SDRuno IQ wav -> cf32 (complex64) slice.
 
-Regenerates the gitignored acars.cf32 that tests/e2e/test_acars_offair.py
+Regenerates the gitignored acars.cf32 that tests/e2e/acars/test_acars_offair.py
 consumes (the real off-air ACARS proof, tracker issues 22/23). Not collected by
 pytest, no importer — run by hand when the asset is missing.
 

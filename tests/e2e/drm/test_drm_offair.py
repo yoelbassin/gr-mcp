@@ -42,7 +42,7 @@ _SLICE = (
 
 
 @pytest.mark.skipif(
-    not _SLICE.exists(), reason="DRM slice absent — run tests/e2e/make_drm_slice.py"
+    not _SLICE.exists(), reason="DRM slice absent — run tests/e2e/drm/make_drm_slice.py"
 )
 def test_drm_fac(tmp_path: Path) -> None:
     ensure_worker_warm()
@@ -80,7 +80,7 @@ def test_drm_fac(tmp_path: Path) -> None:
 
 
 @pytest.mark.skipif(
-    not _SLICE.exists(), reason="DRM slice absent — run tests/e2e/make_drm_slice.py"
+    not _SLICE.exists(), reason="DRM slice absent — run tests/e2e/drm/make_drm_slice.py"
 )
 def test_drm_sdc(tmp_path: Path) -> None:
     # SDC lives in symbols 0-1 of the SUPER-frame; the coherent sync emits only

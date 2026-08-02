@@ -199,7 +199,7 @@ def sdc_select_perm(phase: int = 0) -> list[int]:
 # rate-1/4 mother code; bit-reversing each 7-bit value reproduces Dream's own
 # ConvEncoder masks (0o155, 0o117, 0o123, 0o155) exactly. This is the exact
 # polys/rate_inv already proven against real off-air DAB via the generic
-# trellis "fec" stage (tests/e2e/test_dab_offair.py).
+# trellis "fec" stage (tests/e2e/dab/test_dab_offair.py).
 CONV_POLYS = [0o133, 0o171, 0o145, 0o133]
 CONV_RATE_INV = 4
 FAC_FRAME_BITS = 72

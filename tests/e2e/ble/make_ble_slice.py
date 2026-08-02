@@ -4,7 +4,7 @@ Downloads the SDR4IoT BLE/Zigbee dataset (Zenodo 10.5281/zenodo.4639390, CC-BY),
 extracts seven CRC-valid channel-37 advertising bursts (their exact sample windows
 in the scenario-5 recordings, each a .sigmf tar of complex64 IQ), and concatenates
 them (500-sample guards) into the slice the off-air gate
-(tests/e2e/test_ble_offair.py) decodes. 5 Msps.
+(tests/e2e/ble/test_ble_offair.py) decodes. 5 Msps.
 Oracle self-validates via BLE CRC-24; ground truth cross-checked independently."""
 
 from __future__ import annotations

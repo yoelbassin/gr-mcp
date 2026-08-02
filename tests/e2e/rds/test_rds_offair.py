@@ -141,7 +141,8 @@ def _decode_groups(bits: np.ndarray) -> tuple[int, str]:
 
 
 @pytest.mark.skipif(
-    not _CAPTURE.exists(), reason="RDS capture absent — run tests/e2e/make_rds_asset.py"
+    not _CAPTURE.exists(),
+    reason="RDS capture absent — run tests/e2e/rds/make_rds_asset.py",
 )
 def test_rds_offair(tmp_path: Path) -> None:
     ensure_worker_warm()

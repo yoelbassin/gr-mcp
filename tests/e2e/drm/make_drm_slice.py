@@ -6,10 +6,10 @@ Source: "DW_ModeB_10kHz.flac" from the Dream decoder's published sample set
 Robustness Mode B, spectrum occupancy 3 (10 kHz), mono 48 kHz real-IF with the DRM
 signal centred at a 12 kHz IF, ~44 s. Not committed (.gitignore: artifacts/);
 download it and place it at SRC, then run:
-    uv run python tests/e2e/make_drm_slice.py
+    uv run python tests/e2e/drm/make_drm_slice.py
 
 Conversion: mix the 12 kHz IF to DC, low-pass (127-tap Hamming-windowed sinc,
-6 kHz cutoff), decimate x4 -> 12 kHz complex64 — the baseband tests/e2e/_drm.py's
+6 kHz cutoff), decimate x4 -> 12 kHz complex64 — the baseband tests/e2e/drm/_drm.py's
 ofdm_coherent_sync expects."""
 
 from __future__ import annotations

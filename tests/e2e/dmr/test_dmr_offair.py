@@ -85,7 +85,7 @@ def _dmr_modem() -> Modem:
 
 @pytest.mark.skipif(
     not _SLICE.exists(),
-    reason="DMR slice absent — run tests/e2e/make_dmr_slice.py",
+    reason="DMR slice absent — run tests/e2e/dmr/make_dmr_slice.py",
 )
 def test_dmr_offair(tmp_path: Path) -> None:
     ensure_worker_warm()

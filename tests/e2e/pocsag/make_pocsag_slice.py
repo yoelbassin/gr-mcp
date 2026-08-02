@@ -2,7 +2,7 @@
 
 Downloads POCSAG_IQ.zip (real off-air pager traffic, 8-bit interleaved IQ WAV at
 128 kHz) and writes t=3..10 s as raw complex64 — the slice the off-air gate
-(tests/e2e/test_pocsag_offair.py) decodes. Ground truth via multimon-ng 1.5.0.
+(tests/e2e/pocsag/test_pocsag_offair.py) decodes. Ground truth via multimon-ng 1.5.0.
 Source: https://www.sigidwiki.com/wiki/POCSAG (File:POCSAG_IQ.zip)."""
 
 from __future__ import annotations

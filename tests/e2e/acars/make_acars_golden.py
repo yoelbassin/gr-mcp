@@ -5,7 +5,7 @@ Marconi code, so the golden is independent of the system under test.
 
 Not collected by pytest, no importer — run by hand to regenerate the golden.
 The frozen golden it produces is the external oracle that
-tests/e2e/test_acars_offair.py matches (the real off-air ACARS proof, tracker
+tests/e2e/acars/test_acars_offair.py matches (the real off-air ACARS proof, tracker
 issues 22/23).
 """
 

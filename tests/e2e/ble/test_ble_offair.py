@@ -101,7 +101,7 @@ def _ble_modem() -> Modem:
 
 
 @pytest.mark.skipif(
-    not _SLICE.exists(), reason="BLE slice absent — run tests/e2e/make_ble_slice.py"
+    not _SLICE.exists(), reason="BLE slice absent — run tests/e2e/ble/make_ble_slice.py"
 )
 def test_ble_offair(tmp_path: Path) -> None:
     ensure_worker_warm()

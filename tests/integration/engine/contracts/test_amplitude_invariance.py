@@ -84,7 +84,7 @@ _CSS_PARAMS: dict[str, Any] = {
 
 # ofdm_demod is RX-only (no TX conv in the vocabulary), so its recipe's IQ is
 # synthesized directly (IFFT+CP), geometry from
-# tests/unit/engine/modulation/test_ofdm_demod_stage.py.
+# tests/unit/engine/modulation/ofdm/test_ofdm_demod_stage.py.
 _OFDM_FFT, _OFDM_CP, _OFDM_SYM, _OFDM_NULL, _OFDM_NC = 16, 4, 20, 24, 4
 _OFDM_ACTIVE = [1, 2, 14, 15]
 _OFDM_BIN_PERM: list[int] = _OFDM_ACTIVE + [

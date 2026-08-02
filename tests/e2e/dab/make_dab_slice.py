@@ -1,8 +1,8 @@
-# tests/e2e/make_dab_slice.py
+# tests/e2e/dab/make_dab_slice.py
 """Crop the V1 DAB wav (read-only) to a gitignored ~1.5 s cf32 slice.
 Run once:
     cd /Users/joel/Clones/gr-mcp-rebuild
-    .venv/bin/python tests/e2e/make_dab_slice.py
+    .venv/bin/python tests/e2e/dab/make_dab_slice.py
 """
 from __future__ import annotations
 

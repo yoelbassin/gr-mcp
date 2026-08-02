@@ -1,4 +1,4 @@
-# tests/e2e/test_dab_fec_offair.py
+# tests/e2e/dab/test_dab_fec_offair.py
 from pathlib import Path
 
 import numpy as np
@@ -106,7 +106,7 @@ def _dab_phy_steps() -> list[Step]:
 
 
 @pytest.mark.skipif(
-    not _SLICE.exists(), reason="DAB slice absent — run tests/e2e/make_dab_slice.py"
+    not _SLICE.exists(), reason="DAB slice absent — run tests/e2e/dab/make_dab_slice.py"
 )
 def test_dab_phy_decodes_crc_valid_fibs(tmp_path):
     ensure_worker_warm()
