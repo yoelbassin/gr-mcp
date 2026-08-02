@@ -1,5 +1,5 @@
 import numpy as np
-from e2e import _drm
+from e2e.drm import _drm
 
 
 def test_scattered_pilot_matches_golden():

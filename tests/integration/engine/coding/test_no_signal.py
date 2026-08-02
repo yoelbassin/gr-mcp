@@ -20,34 +20,34 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from e2e import _dmr
-from e2e.test_ais_offair import _AIS_CRC, _ais_modem
-from e2e.test_ble_offair import (
+from e2e.ais.test_ais_offair import _AIS_CRC, _ais_modem
+from e2e.ble.test_ble_offair import (
     BIT_REVERSE,
 )
-from e2e.test_ble_offair import CRC_INIT as _BLE_CRC_INIT
-from e2e.test_ble_offair import CRC_POLY as _BLE_CRC_POLY
-from e2e.test_ble_offair import (
+from e2e.ble.test_ble_offair import CRC_INIT as _BLE_CRC_INIT
+from e2e.ble.test_ble_offair import CRC_POLY as _BLE_CRC_POLY
+from e2e.ble.test_ble_offair import (
     MAX_PDU_BYTES,
 )
-from e2e.test_ble_offair import WHITEN as _BLE_WHITEN
-from e2e.test_ble_offair import (
+from e2e.ble.test_ble_offair import WHITEN as _BLE_WHITEN
+from e2e.ble.test_ble_offair import (
     _ble_modem,
 )
-from e2e.test_dab_codec import _FRAME_BODY_LEN as _DAB_FRAME_LEN
-from e2e.test_dab_codec import _golden_modem as _dab_golden_modem
-from e2e.test_dmr_offair import _dmr_modem
-from e2e.test_pocsag_offair import (
+from e2e.dab.test_dab_codec import _FRAME_BODY_LEN as _DAB_FRAME_LEN
+from e2e.dab.test_dab_codec import _golden_modem as _dab_golden_modem
+from e2e.dmr import _dmr
+from e2e.dmr.test_dmr_offair import _dmr_modem
+from e2e.pocsag.test_pocsag_offair import (
     BATCH_CODEWORDS,
 )
-from e2e.test_pocsag_offair import DATA_BITS as _POCSAG_DATA_BITS
-from e2e.test_pocsag_offair import (
+from e2e.pocsag.test_pocsag_offair import DATA_BITS as _POCSAG_DATA_BITS
+from e2e.pocsag.test_pocsag_offair import (
     IDLE_DATA,
     _pocsag_modem,
 )
-from e2e.test_pocsag_offair import _word as _pocsag_word
-from e2e.test_rds_offair import _codec_modem as _rds_codec_modem
-from e2e.test_rds_offair import _decode_groups as _rds_decode_groups
+from e2e.pocsag.test_pocsag_offair import _word as _pocsag_word
+from e2e.rds.test_rds_offair import _codec_modem as _rds_codec_modem
+from e2e.rds.test_rds_offair import _decode_groups as _rds_decode_groups
 from helpers import bitops, crc, framing
 from integration.engine.coding.test_lora_golden import (
     _FRAME_BODY_LEN as _LORA_FRAME_LEN,

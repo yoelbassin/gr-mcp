@@ -13,7 +13,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
-from e2e import _dmr
+from e2e.dmr import _dmr
 
 from marconi.engine.coding.stages_bits import SegmentStep
 from marconi.engine.io.bitfile import read_bits, write_bits
