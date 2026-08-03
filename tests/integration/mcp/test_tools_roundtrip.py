@@ -43,6 +43,47 @@ def _aligned_equal(tx_bits: str, rx_bits: str, max_shift: int = 64) -> bool:
     )
 
 
+def test_css_symbols_stream_pages_with_i16_suffix_inference(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("MARCONI_WORKSPACE", str(tmp_path))
+    sf, oversample, zero_pad, symbol_rate = 7, 2, 4, 1.0
+    rate = oversample * (1 << sf) * symbol_rate
+    css_sync = {
+        "conv": "chirp_sync",
+        "sf": sf,
+        "oversample": oversample,
+        "zero_pad": zero_pad,
+        "preamble_len": 8,
+        "sfd_symbols": 2.25,
+        "sync_symbols": 2,
+    }
+    dechirp = {
+        "conv": "dechirp",
+        "sf": sf,
+        "oversample": oversample,
+        "zero_pad": zero_pad,
+    }
+    tx_spec = {
+        "symbol_rate": symbol_rate,
+        "path": [css_sync, dechirp, {"conv": "css_demap", "sf": sf}],
+    }
+    rx_spec = {"symbol_rate": symbol_rate, "path": [css_sync, dechirp]}
+    rng = np.random.default_rng(5)
+    bits = "".join("01"[b] for b in rng.integers(0, 2, sf * 20))
+    tx = run_tx_tool(tx_spec, sample_rate=rate, bits=bits)
+    assert tx["status"] == "ok", tx
+    rx = run_rx_tool(rx_spec, sample_rate=rate, capture_path=cast(str, tx["iq_path"]))
+    assert rx["status"] == "ok", rx
+    stream = cast(dict[str, object], rx["stream"])
+    assert stream["item_type"] == "s"
+    path = cast(str, stream["path"])
+    assert Path(path).suffix == ".i16"
+    page = read_stream(path, count=cast(int, stream["items"]))
+    assert page["item_type"] == "s"
+    assert page["total_items"] == stream["items"]
+
+
 def test_run_rx_rejects_both_inputs(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

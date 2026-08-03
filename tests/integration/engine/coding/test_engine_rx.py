@@ -28,7 +28,6 @@ from marconi.engine.types.descriptor import Carrier, Descriptor
 from marconi.engine.types.enums import ItemType
 from marconi.engine.types.levels import Level
 from marconi.engine.types.models import Bitstream, Modem, Symbolstream
-from marconi.mcp.streams import render_page
 
 IQ = Descriptor(Level.IQ, ItemType.C)
 BITS = Descriptor(Level.BITS, ItemType.B)
@@ -227,9 +226,8 @@ def test_gr_only_hard_symbols_final_get_i16_suffix(tmp_path: Path) -> None:
     assert res.symbolstream.path.is_file()
     assert res.symbolstream.num_symbols >= bits.size // sf
 
-    page = render_page(res.symbolstream.path, offset=0, count=4096, item_type=None)
-    assert page["item_type"] == "s"
-    assert page["total_items"] == res.symbolstream.num_symbols
+    on_disk = np.fromfile(res.symbolstream.path, dtype=np.int16)
+    assert on_disk.size == res.symbolstream.num_symbols
 
 
 def test_empty_gr_run_propagates_status_and_stalled_at(tmp_path: Path) -> None:
