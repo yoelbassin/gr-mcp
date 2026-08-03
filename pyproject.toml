@@ -13,6 +13,9 @@ dependencies = [
 [project.optional-dependencies]
 mcp = ["fastmcp>=2.0"]
 
+[project.scripts]
+marconi-mcp = "marconi.mcp.server:main"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
@@ -29,6 +32,7 @@ dev = [
     "mypy",
     "construct>=2.10",
     "crc>=7",
+    "fastmcp>=2.0",
 ]
 
 [tool.isort]
