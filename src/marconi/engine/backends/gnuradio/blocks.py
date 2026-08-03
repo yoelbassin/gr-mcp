@@ -16,6 +16,7 @@ from marconi.engine.backends.gnuradio.embedded.chirp import (
 from marconi.engine.backends.gnuradio.embedded.cp_sync import make_cp_symbol_sync
 from marconi.engine.backends.gnuradio.embedded.decision import make_peak_decision
 from marconi.engine.backends.gnuradio.embedded.framing import make_tag_gate
+from marconi.engine.backends.gnuradio.embedded.ldpc import make_ldpc_decoder
 from marconi.engine.backends.gnuradio.embedded.msk import make_msk_demod
 from marconi.engine.backends.gnuradio.embedded.ofdm import make_ofdm_frame_sync
 from marconi.engine.backends.gnuradio.embedded.pilot_lattice import (
@@ -69,6 +70,17 @@ def _as_int_list(v: ParamValue) -> list[int]:
 
 def _complex_syms(i: list[float], q: list[float]) -> list[complex]:
     return [complex(a, b) for a, b in zip(i, q)]
+
+
+def _unflatten(flat: list[int], lens: list[int]) -> list[list[int]]:
+    out: list[list[int]] = []
+    i = 0
+    for n in lens:
+        out.append(flat[i : i + n])
+        i += n
+    if i != len(flat):
+        raise BackendError(f"ldpc check_flat length {len(flat)} != sum(check_lens) {i}")
+    return out
 
 
 def _modules() -> tuple[Any, Any, Any, Any, Any, Any, Any, Any, Any, Any]:
@@ -522,6 +534,14 @@ GR_BLOCKS: dict[str, Callable[[_GrCtx, Params], Any]] = {
         frozen_positions=_as_int_list(p["frozen_positions"]),
         frozen_values=_as_int_list(p["frozen_values"]),
         list_size=_as_int(p["list_size"]),
+    ),
+    "ldpc_decode": lambda c, p: make_ldpc_decoder(
+        c,
+        block_size=_as_int(p["block_size"]),
+        check_nodes=_unflatten(
+            _as_int_list(p["check_flat"]), _as_int_list(p["check_lens"])
+        ),
+        max_iterations=_as_int(p["max_iterations"]),
     ),
     "burst_probe": lambda c, p: make_burst_probe(c.gr),
 }

@@ -355,11 +355,93 @@ class Polar(RxStage[CompileContext, PolarStep]):
         return None
 
 
+class LdpcStep(Step):
+    conv: Literal["ldpc"] = "ldpc"
+    block_size: StrictInt = Field(ge=2)
+    check_nodes: list[list[int]]
+    max_iterations: StrictInt = Field(default=50, ge=1)
+
+    @model_validator(mode="after")
+    def _ok(self) -> "LdpcStep":
+        n = self.block_size
+        m = len(self.check_nodes)
+        if not 1 <= m < n:
+            raise PydanticCustomError(
+                "value_error",
+                "need 1..block_size-1 parity checks, got {m}",
+                {"m": m},
+            )
+        for row in self.check_nodes:
+            if not row:
+                raise PydanticCustomError(
+                    "value_error", "each parity check must connect >= 1 variable"
+                )
+            if len(set(row)) != len(row):
+                raise PydanticCustomError(
+                    "value_error", "variable indices within a check must be distinct"
+                )
+            if any(not 0 <= v < n for v in row):
+                raise PydanticCustomError(
+                    "value_error", "variable indices must be in [0, block_size)"
+                )
+        return self
+
+    @property
+    def info_bits(self) -> int:
+        return self.block_size - len(self.check_nodes)
+
+
+class Ldpc(RxStage[CompileContext, LdpcStep]):
+    """LDPC decode, BITS soft -> BITS hard, via stock gr-fec (soft belief-
+    propagation fec.ldpc_decoder in fec.extended_decoder). The parity-check
+    matrix -- given sparsely as the variable indices each check connects -- plus
+    block_size (N) are caller params; the codeword is N bits and the decode emits
+    K = N - (parity checks) info bits. LDPC construction is datasheet work, not
+    the engine's. The engine's LLR is bit 1 = negative but the decoder wants bit
+    1 = positive, so the leading multiply_const_ff(-1) converts the convention
+    (like harden/psk_soft_demap do their sign corrections). The ragged matrix
+    crosses the IR flattened (check_flat + check_lens) because a param is a flat
+    list; the backend rebuilds and serializes it to the alist gr-fec reads."""
+
+    name = "ldpc"
+    from_level = Level.BITS
+    to_level = Level.BITS
+    family = "coding"
+    step_model = LdpcStep
+    accepts_item_type = ItemType.F
+    accepts_carrier = Carrier.SOFT
+
+    def emit_rx(self, b: CompileContext, step: LdpcStep) -> None:
+        b.chain("multiply_const_ff", value=-1.0)
+        b.chain(
+            "ldpc_decode",
+            block_size=step.block_size,
+            check_flat=[v for row in step.check_nodes for v in row],
+            check_lens=[len(row) for row in step.check_nodes],
+            max_iterations=step.max_iterations,
+        )
+
+    def out_descriptor(self, in_desc: Descriptor, step: LdpcStep) -> Descriptor:
+        return Descriptor(
+            Level.BITS, ItemType.B, Carrier.HARD, frame_len=step.info_bits
+        )
+
+    def validate_input(self, in_desc: Descriptor, step: LdpcStep) -> str | None:
+        if in_desc.frame_len is not None and in_desc.frame_len != step.block_size:
+            return (
+                f"decodes {step.block_size}-soft-bit LDPC codewords but the input "
+                f"is framed at {in_desc.frame_len}; align the upstream frame "
+                f"geometry (sync_align.frame_len) with block_size"
+            )
+        return None
+
+
 CODING_STAGES: tuple[type[Stage[CompileContext, Any]], ...] = (
     Deinterleave,
     Depuncture,
     Fec,
     Harden,
+    Ldpc,
     Polar,
     SyncAlign,
 )

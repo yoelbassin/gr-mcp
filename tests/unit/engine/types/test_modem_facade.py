@@ -34,6 +34,7 @@ from marconi.engine.modulation.coding.stages import (  # noqa: E402
     DepunctureStep,
     FecStep,
     HardenStep,
+    LdpcStep,
     PolarStep,
     SyncAlignStep,
 )
@@ -158,6 +159,7 @@ VALID_STEPS: dict[str, Step] = {
     ),
     "ook_envelope": OokEnvelopeStep(),
     "permute": PermuteStep(perm=[0, 1, 2, 3]),
+    "ldpc": LdpcStep(block_size=4, check_nodes=[[0, 1, 2], [1, 2, 3]]),
     "polar": PolarStep(
         block_size=8,
         info_bits=4,
