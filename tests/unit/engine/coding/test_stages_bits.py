@@ -450,6 +450,18 @@ def test_permute_seeded_gathers_relative_to_cursor_and_can_drop_bits() -> None:
     assert _wins(out)[0].cursor == 0
 
 
+def test_permute_window_scope_permutes_every_stride_not_just_the_first() -> None:
+    # a window spanning multiple perm-strides must permute EVERY stride, matching
+    # block_code / descramble / codebook whole-window scope. Regression: the
+    # windowed path used to emit only the first stride and drop the rest.
+    perm = [2, 0, 1]
+    src = np.random.default_rng(0).integers(0, 2, 12, dtype=np.uint8)  # 4 strides
+    c = CodingCarrier(bits=src, windows=[Window(0, 0)])
+    out = ops_bits.permute_rx(c, perm=perm).bits
+    expected = src.reshape(4, 3)[:, perm].reshape(-1)
+    assert out.tolist() == expected.tolist()
+
+
 def test_permute_stage_wired() -> None:
     b = CodingBuilder()
     Permute().emit_rx(b, PermuteStep(perm=[2, 0, 3, 1]))

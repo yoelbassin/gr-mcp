@@ -368,25 +368,15 @@ def _perm_span(idx: np.ndarray) -> int:
     return int(idx.max()) + 1 if idx.size else 0
 
 
+def _permute_block(bits: np.ndarray, idx: np.ndarray, span: int) -> np.ndarray:
+    n = bits.size // span if span else 0
+    return bits[: n * span].reshape(n, span)[:, idx].reshape(-1)
+
+
 def permute_rx(c: CodingCarrier, *, perm: list[int]) -> CodingCarrier:
     idx = np.asarray(perm, np.int64)
     span = _perm_span(idx)
-    if c.windows is None:
-        bits = np.asarray(c.bits, np.uint8)
-        n = bits.size // span if span else 0
-        out = bits[: n * span].reshape(n, span)[:, idx].reshape(-1)
-        return CodingCarrier(bits=out)
-    bits = np.asarray(c.bits, np.uint8)
-    pieces, windows, pos = [], [], 0
-    for w in c.windows:
-        if w.cursor + span > bits.size:
-            continue
-        dec = bits[w.cursor + idx]
-        windows.append(Window(start=pos, cursor=pos))
-        pieces.append(dec)
-        pos += int(dec.size)
-    joined = np.concatenate(pieces) if pieces else np.zeros(0, np.uint8)
-    return CodingCarrier(bits=joined, windows=windows)
+    return _decode_scoped(c, lambda bits: _permute_block(bits, idx, span))
 
 
 def realign_rx(c: CodingCarrier, *, bit_offset: int) -> CodingCarrier:
