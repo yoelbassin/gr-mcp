@@ -127,7 +127,7 @@ def lock_evidence(diagnostics: Sequence[Diagnostic]) -> list[QualityEvidence]:
 
 _SOFT_MIN_ITEMS = 1000
 _SOFT_SAMPLE_ITEMS = 65536
-_SOFT_POSITIVE = 1.8
+_SOFT_POSITIVE = 6.0
 _SOFT_NEGATIVE = 1.45
 
 
