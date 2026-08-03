@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import cast
 
+import pytest
+
 from marconi.mcp.tools import describe_stages, validate_modem
 
 _GOOD = {
@@ -28,6 +30,16 @@ def test_unknown_conv_is_structured_error_not_exception() -> None:
     errors = cast(list[dict[str, object]], out["errors"])
     assert errors[0]["code"] == "invalid_argument"
     assert "warp_drive" in cast(str, errors[0]["message"])
+
+
+def test_bad_input_item_type_raises_instead_of_structured_error() -> None:
+    with pytest.raises(ValueError, match="input_item_type"):
+        validate_modem(_GOOD, sample_rate=4.0, input_item_type="q")
+
+
+def test_bad_input_level_raises_instead_of_structured_error() -> None:
+    with pytest.raises(ValueError, match="input_level"):
+        validate_modem(_GOOD, sample_rate=4.0, input_item_type="b", input_level="nope")
 
 
 def test_sub_nyquist_rate_is_structured_error() -> None:

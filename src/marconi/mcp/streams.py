@@ -45,6 +45,8 @@ def _resolve_item_type(path: Path, item_type: str | None) -> str:
 def render_page(
     path: Path, *, offset: int, count: int, item_type: str | None
 ) -> dict[str, object]:
+    if offset < 0:
+        raise ValueError(f"offset must be >= 0, got {offset}")
     kind = _resolve_item_type(path, item_type)
     dtype = np.dtype(_ITEM_DTYPES[kind])
     total = path.stat().st_size // dtype.itemsize

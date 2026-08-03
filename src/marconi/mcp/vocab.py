@@ -51,7 +51,7 @@ def stage_details(names: list[str]) -> list[dict[str, Any]]:
     unknown = [n for n in names if n not in registry]
     if unknown:
         raise ValueError(f"unknown stage(s) {unknown}; known: {sorted(registry)}")
-    out: list[dict[str, object]] = []
+    out: list[dict[str, Any]] = []
     for n in names:
         s = registry[n]
         entry = _index_entry(s)

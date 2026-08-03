@@ -45,6 +45,13 @@ def test_render_unknown_suffix_needs_item_type(tmp_path: Path) -> None:
     assert render_page(p, offset=0, count=4, item_type="b")["bits"] == "0000"
 
 
+def test_negative_offset_raises_value_error(tmp_path: Path) -> None:
+    p = tmp_path / "out.u8"
+    np.zeros(4, np.uint8).tofile(p)
+    with pytest.raises(ValueError, match="offset"):
+        render_page(p, offset=-1, count=4, item_type=None)
+
+
 def test_page_count_is_clamped(tmp_path: Path) -> None:
     p = tmp_path / "big.u8"
     np.zeros(70000, np.uint8).tofile(p)

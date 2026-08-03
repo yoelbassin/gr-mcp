@@ -4,6 +4,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Literal, cast
 
+import numpy as np
 from pydantic import ValidationError
 
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend
@@ -23,14 +24,14 @@ from marconi.engine.types.levels import Level
 from marconi.engine.types.models import Bitstream, Modem, Symbolstream
 from marconi.errors import classify_error
 from marconi.mcp.boundary import tool_error_boundary
-from marconi.mcp.streams import ensure_cf32, parse_bits, render_page
+from marconi.mcp.streams import _ITEM_DTYPES, ensure_cf32, parse_bits, render_page
 from marconi.mcp.vocab import ENVELOPE, stage_details, stage_index
 from marconi.mcp.workspace import new_run_dir
 
 _START_LEVELS = {"iq": Level.IQ, "symbols": Level.SYMBOLS, "bits": Level.BITS}
 _DEFAULT_LEVEL = {"c": "iq", "b": "bits", "s": "symbols", "f": "symbols"}
 _ITEM = {"c": ItemType.C, "b": ItemType.B, "s": ItemType.S, "f": ItemType.F}
-_ITEM_BYTES = {"b": 1, "s": 2, "f": 4}
+_ITEM_BYTES: dict[str, int] = {k: np.dtype(v).itemsize for k, v in _ITEM_DTYPES.items()}
 
 
 def _start_descriptor(item_type: str, level: str | None) -> Descriptor:
@@ -128,6 +129,7 @@ def validate_modem(
     failing spec is a normal result here, not an exception. direction is
     "rx" (decode) or "tx" (generate); input_item_type/input_level describe
     the entry stream (defaults: complex IQ)."""
+    start = _start_descriptor(input_item_type, input_level)
     try:
         modem = Modem.from_spec(spec, step_models())
         cp = compile_pipeline(
@@ -135,7 +137,7 @@ def validate_modem(
             stage_registry(),
             direction=direction,
             sample_rate=sample_rate,
-            start=_start_descriptor(input_item_type, input_level),
+            start=start,
             source_io={"path": "unused"},
             sink_io={"path": "unused"},
         )
@@ -173,7 +175,8 @@ def run_rx_tool(
     to page with read_stream, windows/marks, per-block census, diagnostics,
     and "quality": a conservative verdict (decoded / uncertain / no_signal)
     with the evidence behind it. Treat only verdict "decoded" as trustworthy
-    output; "uncertain" means the path produced no checkable evidence."""
+    output; "uncertain" means the evidence was absent or conflicting — read
+    quality.rationale."""
     if (capture_path is None) == (input_path is None):
         raise ValueError("pass exactly one of capture_path or input_path")
     modem = Modem.from_spec(spec, step_models())

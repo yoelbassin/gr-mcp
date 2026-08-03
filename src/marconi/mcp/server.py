@@ -18,7 +18,15 @@ def build_server() -> "FastMCP":
 
 
 def main() -> None:
+    try:
+        mcp = build_server()
+    except ModuleNotFoundError as exc:
+        raise SystemExit(
+            "the 'mcp' extra is required to run marconi-mcp: install it with "
+            "`pip install marconi[mcp]` (or `uv sync --extra mcp`)"
+        ) from exc
+
     from marconi.engine.backends.gnuradio.runner import ensure_worker_warm
 
     ensure_worker_warm()
-    build_server().run()
+    mcp.run()
