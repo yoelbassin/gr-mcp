@@ -4,12 +4,21 @@ import numpy as np
 import pytest
 
 from marconi.engine.backends.base import Backend, BlockCensus, RunResult
-from marconi.engine.backends.gnuradio.runner import ensure_worker_warm
+from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
 from marconi.engine.coding.stages_bits import SyncWordStep
 from marconi.engine.coding.stages_symbols import SymbolMapStep, SyncSymbolsStep
-from marconi.engine.compile.compiler import CompileError
+from marconi.engine.compile.compiler import (
+    CompileError,
+    compile_modem,
+    compile_pipeline,
+)
 from marconi.engine.compile.ir import GrPipeline
 from marconi.engine.io.bitfile import read_bits, write_bits
+from marconi.engine.modulation.css.stages import (
+    ChirpSyncStep,
+    CssDemapStep,
+    DechirpStep,
+)
 from marconi.engine.modulation.fsk.stages import FskStep
 from marconi.engine.run import run_rx
 from marconi.engine.stages.conditioning import InvertStep
@@ -19,10 +28,13 @@ from marconi.engine.types.descriptor import Carrier, Descriptor
 from marconi.engine.types.enums import ItemType
 from marconi.engine.types.levels import Level
 from marconi.engine.types.models import Bitstream, Modem, Symbolstream
+from marconi.mcp.streams import render_page
 
+IQ = Descriptor(Level.IQ, ItemType.C)
 BITS = Descriptor(Level.BITS, ItemType.B)
 SOFT_SYMBOLS = Descriptor(Level.SYMBOLS, ItemType.F, carrier=Carrier.SOFT)
 HARD_SYMBOLS = Descriptor(Level.SYMBOLS, ItemType.S, carrier=Carrier.HARD)
+_CSS_SF, _CSS_OSR, _CSS_ZP, _CSS_SYM = 7, 2, 4, 1.0
 _FLAG_BITS = np.concatenate(
     [
         np.zeros(3, np.uint8),
@@ -74,6 +86,41 @@ def _symbol_map_modem() -> Modem:
     return Modem(
         symbol_rate=1.0,
         path=[SymbolMapStep(code_bits=1, data_bits=1, table=[0, 1])],
+    )
+
+
+def _css_tx_modem(sf: int, oversample: int, zero_pad: int) -> Modem:
+    return Modem(
+        symbol_rate=_CSS_SYM,
+        path=[
+            ChirpSyncStep(
+                sf=sf,
+                oversample=oversample,
+                zero_pad=zero_pad,
+                preamble_len=8,
+                sfd_symbols=2.25,
+                sync_symbols=2,
+            ),
+            DechirpStep(sf=sf, oversample=oversample, zero_pad=zero_pad),
+            CssDemapStep(sf=sf),
+        ],
+    )
+
+
+def _css_symbols_rx_modem(sf: int, oversample: int, zero_pad: int) -> Modem:
+    return Modem(
+        symbol_rate=_CSS_SYM,
+        path=[
+            ChirpSyncStep(
+                sf=sf,
+                oversample=oversample,
+                zero_pad=zero_pad,
+                preamble_len=8,
+                sfd_symbols=2.25,
+                sync_symbols=2,
+            ),
+            DechirpStep(sf=sf, oversample=oversample, zero_pad=zero_pad),
+        ],
     )
 
 
@@ -131,6 +178,58 @@ def test_gr_plus_coding_run_shares_windows_and_census(tmp_path: Path) -> None:
     assert res.windows == [11]
     assert len(res.census) >= 3
     assert res.census[-1].kind == "sync_word"
+
+
+def test_gr_only_hard_symbols_final_get_i16_suffix(tmp_path: Path) -> None:
+    ensure_worker_warm()
+    sf, osr, zp = _CSS_SF, _CSS_OSR, _CSS_ZP
+    rate = osr * (1 << sf) * _CSS_SYM
+    bits = np.random.default_rng(5).integers(0, 2, sf * 20).astype(np.uint8)
+    bits_path = tmp_path / "in.u8"
+    write_bits(bits_path, bits)
+    iq_path = tmp_path / "css.iq"
+    tx = compile_modem(
+        _css_tx_modem(sf, osr, zp),
+        stage_registry(),
+        direction="tx",
+        sample_rate=rate,
+        start=IQ,
+        source_io={"path": str(bits_path)},
+        sink_io={"path": str(iq_path)},
+    )
+    assert GnuRadioBackend().run_pipeline(tx).status == "ok"
+
+    rx_modem = _css_symbols_rx_modem(sf, osr, zp)
+    cp = compile_pipeline(
+        rx_modem,
+        stage_registry(),
+        direction="rx",
+        sample_rate=rate,
+        start=IQ,
+        source_io={"path": str(iq_path)},
+        sink_io={"path": "unused"},
+    )
+    assert cp.coding is None
+    assert cp.final.level is Level.SYMBOLS and cp.final.item_type == "s"
+
+    res = run_rx(
+        rx_modem,
+        stage_registry(),
+        sample_rate=rate,
+        start=IQ,
+        workdir=tmp_path,
+        source_io={"path": str(iq_path)},
+    )
+    assert res.status == "ok", res
+    assert res.symbolstream is not None
+    assert res.symbolstream.item_type == "s"
+    assert res.symbolstream.path.suffix == ".i16"
+    assert res.symbolstream.path.is_file()
+    assert res.symbolstream.num_symbols >= bits.size // sf
+
+    page = render_page(res.symbolstream.path, offset=0, count=4096, item_type=None)
+    assert page["item_type"] == "s"
+    assert page["total_items"] == res.symbolstream.num_symbols
 
 
 def test_empty_gr_run_propagates_status_and_stalled_at(tmp_path: Path) -> None:
