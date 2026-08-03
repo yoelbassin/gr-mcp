@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from pathlib import Path
 from typing import Any, Literal
 
+import numpy as np
 from pydantic import BaseModel
 
 from marconi.engine.backends.base import BlockCensus, Diagnostic
@@ -121,3 +123,40 @@ def lock_evidence(diagnostics: Sequence[Diagnostic]) -> list[QualityEvidence]:
                 )
             )
     return out
+
+
+_SOFT_MIN_ITEMS = 1000
+_SOFT_SAMPLE_ITEMS = 65536
+_SOFT_POSITIVE = 1.8
+_SOFT_NEGATIVE = 1.45
+
+
+def soft_evidence(path: Path | None) -> list[QualityEvidence]:
+    if path is None or not path.is_file():
+        return []
+    with path.open("rb") as f:
+        x = np.fromfile(f, dtype=np.float32, count=_SOFT_SAMPLE_ITEMS)
+    x = x[np.isfinite(x)]
+    if x.size < _SOFT_MIN_ITEMS:
+        return []
+    mag = np.abs(x)
+    spread = float(mag.std())
+    mean = float(mag.mean())
+    if spread == 0.0:
+        ratio = np.inf if mean > 0.0 else 0.0
+    else:
+        ratio = mean / spread
+    if ratio >= _SOFT_POSITIVE:
+        assessment: Assessment = "positive"
+    elif ratio <= _SOFT_NEGATIVE:
+        assessment = "negative"
+    else:
+        return []
+    return [
+        QualityEvidence(
+            source="soft_stream",
+            metric="soft_confidence",
+            value=float(min(ratio, 1e6)),
+            assessment=assessment,
+        )
+    ]
