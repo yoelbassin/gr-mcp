@@ -82,9 +82,13 @@ def _branch(bit: int, sps: float) -> int:
 def make_msk_demod(gr: Any, *, sps: float, loop_bw: float = 0.0038) -> Any:
     """Coherent MSK demod: rail de-rotation to OQPSK, matched integration over
     2T, alternating I/Q rail decisions with decision-directed carrier tracking.
-    Measured several dB more sensitive than quadrature_demod+Gardner on weak
-    captures (issue 22, guarded by tests/phy/test_msk_snr_margin.py); one soft
-    float per symbol, sign = bit."""
+    Measured ~2-3 dB more sensitive at operational BER than the best stock
+    composition (matched filter + delay-and-multiply differential detection),
+    and within ~1-2 dB of the coherent-BPSK bound; stock GR 3.10 has no coherent
+    MSK/OQPSK receiver, so this custom block is the only path to that gain
+    (issue 22, guarded by
+    tests/integration/engine/modulation/test_msk_snr_margin.py). One soft float
+    per symbol, sign = bit."""
 
     flen = int(2.0 * sps) + 1
     taps_rows = [tuple(float(t) for t in row) for row in _polyphase_taps(sps, flen)]
