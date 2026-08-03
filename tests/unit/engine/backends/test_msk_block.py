@@ -6,10 +6,13 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from helpers._dsp import aligned_ber_best
+from helpers._dsp import AlignmentNotFound, aligned_ber_best
 from helpers._fakegr import FAKE_GR, drive
 
-from marconi.engine.backends.gnuradio.embedded.msk import make_msk_demod
+from marconi.engine.backends.gnuradio.embedded.msk import (
+    _polyphase_taps,
+    make_msk_demod,
+)
 
 _SPS = 20
 
@@ -108,6 +111,45 @@ def test_no_per_bit_numpy_dispatch(monkeypatch: pytest.MonkeyPatch) -> None:
     iq = (rng.standard_normal(n) + 1j * rng.standard_normal(n)).astype(np.complex64)
     drive(make_msk_demod(FAKE_GR, sps=10.0), iq, chunk=8192, out_dtype=np.float32)
     assert calls["n"] < 400, f"{calls['n']} numpy calls for 4000 bits"
+
+
+def test_mf_oversample_param_threads_into_taps_and_round_trips() -> None:
+    # the param controls the polyphase branch count (not ignored), end to end
+    assert _polyphase_taps(20.0, 41, 8).shape[0] == 9
+    assert _polyphase_taps(20.0, 41, 12).shape[0] == 13
+    rng = np.random.default_rng(0)
+    bits = rng.integers(0, 2, 4096).astype(np.uint8)
+    out = drive(
+        make_msk_demod(FAKE_GR, sps=float(_SPS), mf_oversample=8),
+        _msk_iq(bits, _SPS),
+        chunk=8191,
+        out_dtype=np.float32,
+    )
+    assert _best_ber(out, bits) == 0.0
+
+
+def test_loop_pole_controls_carrier_tracking() -> None:
+    # loop_pole=1.0 freezes the leaky integrator (fc = fc, never updates): the
+    # carrier loop is open, so the small CFO the default pole tracks out is no
+    # longer corrected. Proves the pole is a live knob, not the module constant.
+    rng = np.random.default_rng(1)
+    bits = rng.integers(0, 2, 4096).astype(np.uint8)
+    sig = _msk_iq(bits, _SPS, cfo_cycles=_CFO_PINNED)
+    tracked = drive(
+        make_msk_demod(FAKE_GR, sps=float(_SPS)), sig, chunk=4096, out_dtype=np.float32
+    )
+    frozen = drive(
+        make_msk_demod(FAKE_GR, sps=float(_SPS), loop_pole=1.0),
+        sig,
+        chunk=4096,
+        out_dtype=np.float32,
+    )
+    assert _best_ber(tracked, bits) == 0.0
+    try:
+        frozen_ber = _best_ber(frozen, bits)
+    except AlignmentNotFound:
+        frozen_ber = 0.5  # so far from aligned it reads as random
+    assert frozen_ber > 0.0
 
 
 def test_burst_between_noise_keeps_lock() -> None:

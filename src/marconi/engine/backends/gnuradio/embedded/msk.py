@@ -26,40 +26,37 @@ import numpy as np
 from marconi.engine.backends.gnuradio.embedded.lifecycle import OutQueue, forecast_drain
 
 # Half-cosine matched-filter oversampling: the number of polyphase branches
-# from which sub-sample timing selects one (reference-detector empirical pin).
+# from which sub-sample timing selects one. Default from the reference detector;
+# caller-overridable via the mf_oversample param.
 _MF_OVERSAMPLE = 12
 
-# The decision-directed carrier loop needs BOTH a loop gain and a leaky-
-# integrator pole; the block's single `loop_bw` param carries the gain, so the
-# pole is pinned module-internal at its reference-detector value (Gate-B
-# validated in task-2). freq_corr = _LOOP_POLE·freq_corr + (1−_LOOP_POLE)·gain·err
+# The decision-directed carrier loop needs BOTH a loop gain (loop_bw) and a
+# leaky-integrator pole (loop_pole); defaults from the reference detector (Gate-B
+# validated in task-2). freq_corr = pole·freq_corr + (1−pole)·gain·err
 _LOOP_POLE = 0.52
 _NORM_EPS = 1e-8
 
 
-def _matched_filter(sps: float, flen: int) -> np.ndarray:
-    """Half-cosine MSK matched pulse, oversampled _MF_OVERSAMPLE×: one positive
+def _matched_filter(sps: float, flen: int, oversample: int) -> np.ndarray:
+    """Half-cosine MSK matched pulse, oversampled `oversample`×: one positive
     lobe of a cosine at the MSK deviation (baud/4), spanning two bit periods,
     negatives clamped to zero. The deviation-over-rate ratio is 1/(4·sps)."""
-    n_taps = flen * _MF_OVERSAMPLE + 1
+    n_taps = flen * oversample + 1
     center = (n_taps - 1) / 2.0
     i = np.arange(n_taps, dtype=np.float64)
-    h = np.cos(math.pi / (2.0 * sps * _MF_OVERSAMPLE) * (i - center))
+    h = np.cos(math.pi / (2.0 * sps * oversample) * (i - center))
     h[h < 0.0] = 0.0
     return h
 
 
-def _polyphase_taps(sps: float, flen: int) -> np.ndarray:
-    """(_MF_OVERSAMPLE+1, flen) branch matrix: branch b is the matched filter
-    decimated by _MF_OVERSAMPLE starting at offset b, so a matched-filter dump
+def _polyphase_taps(sps: float, flen: int, oversample: int) -> np.ndarray:
+    """(oversample+1, flen) branch matrix: branch b is the matched filter
+    decimated by `oversample` starting at offset b, so a matched-filter dump
     is a single dot product of a branch against the last `flen` baseband
     samples (chronological, oldest first)."""
-    h = _matched_filter(sps, flen)
+    h = _matched_filter(sps, flen, oversample)
     return np.stack(
-        [
-            h[b : b + flen * _MF_OVERSAMPLE : _MF_OVERSAMPLE]
-            for b in range(_MF_OVERSAMPLE + 1)
-        ]
+        [h[b : b + flen * oversample : oversample] for b in range(oversample + 1)]
     )
 
 
@@ -70,16 +67,23 @@ def _dump_index(bit: int, sps: float) -> int:
     return math.ceil((bit + 1) * sps - 0.5) - 1
 
 
-def _branch(bit: int, sps: float) -> int:
+def _branch(bit: int, sps: float, oversample: int) -> int:
     """Polyphase branch for `bit` from its residual sub-sample timing error
     (0 for integer sps → the centre branch; cycles for fractional sps)."""
     frac = (bit + 1) * sps
     resid = math.ceil(frac - 0.5) - frac  # in [-0.5, 0.5)
-    b = int(_MF_OVERSAMPLE * (resid + 0.5))
-    return min(max(b, 0), _MF_OVERSAMPLE)
+    b = int(oversample * (resid + 0.5))
+    return min(max(b, 0), oversample)
 
 
-def make_msk_demod(gr: Any, *, sps: float, loop_bw: float = 0.0038) -> Any:
+def make_msk_demod(
+    gr: Any,
+    *,
+    sps: float,
+    loop_bw: float = 0.0038,
+    loop_pole: float = _LOOP_POLE,
+    mf_oversample: int = _MF_OVERSAMPLE,
+) -> Any:
     """Coherent MSK demod: rail de-rotation to OQPSK, matched integration over
     2T, alternating I/Q rail decisions with decision-directed carrier tracking.
     Measured ~2-3 dB more sensitive at operational BER than the best stock
@@ -91,8 +95,12 @@ def make_msk_demod(gr: Any, *, sps: float, loop_bw: float = 0.0038) -> Any:
     per symbol, sign = bit."""
 
     flen = int(2.0 * sps) + 1
-    taps_rows = [tuple(float(t) for t in row) for row in _polyphase_taps(sps, flen)]
+    taps_rows = [
+        tuple(float(t) for t in row)
+        for row in _polyphase_taps(sps, flen, mf_oversample)
+    ]
     gain = float(loop_bw)
+    pole = float(loop_pole)
 
     class _MskDemod(gr.basic_block):
         def __init__(self) -> None:
@@ -148,7 +156,7 @@ def make_msk_demod(gr: Any, *, sps: float, loop_bw: float = 0.0038) -> Any:
 
                 win = win[step:] + new
                 v = 0j
-                for t, w in zip(taps_rows[_branch(bit, sps)], win):
+                for t, w in zip(taps_rows[_branch(bit, sps, mf_oversample)], win):
                     v += t * w
                 z = v / (abs(v) + _NORM_EPS)
 
@@ -160,7 +168,7 @@ def make_msk_demod(gr: Any, *, sps: float, loop_bw: float = 0.0038) -> Any:
                     err = z.imag if z.real >= 0.0 else -z.imag
                 softs.append(-rail if (bit & 2) else rail)
 
-                fc = _LOOP_POLE * fc + (1.0 - _LOOP_POLE) * gain * err
+                fc = pole * fc + (1.0 - pole) * gain * err
                 bit += 1
             self._buf = self._buf[pos:]
             self._win = win

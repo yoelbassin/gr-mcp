@@ -237,7 +237,11 @@ GR_BLOCKS: dict[str, Callable[[_GrCtx, Params], Any]] = {
         bool(p.get("gate", False)),
     ),
     "msk_demod": lambda c, p: make_msk_demod(
-        c.gr, sps=_as_float(p["sps"]), loop_bw=_as_float(p.get("loop_bw", 0.0038))
+        c.gr,
+        sps=_as_float(p["sps"]),
+        loop_bw=_as_float(p.get("loop_bw", 0.0038)),
+        loop_pole=_as_float(p.get("loop_pole", 0.52)),
+        mf_oversample=_as_int(p.get("mf_oversample", 12)),
     ),
     "symbol_sync_ff": lambda c, p: c.digital.symbol_sync_ff(
         c.digital.TED_GARDNER,

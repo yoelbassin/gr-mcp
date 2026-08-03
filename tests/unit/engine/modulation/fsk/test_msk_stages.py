@@ -26,13 +26,30 @@ def test_msk_emits_msk_demod_with_ctx_sps() -> None:
     assert blk.params["sps"] == 20.0
 
 
-def test_msk_default_loop_bw_matches_block_registration() -> None:
-    # loop_bw is spelled in MskStep, GR_BLOCKS["msk_demod"], and
+def test_msk_exposes_loop_pole_and_mf_oversample_defaults() -> None:
+    s = MskStep()
+    assert s.loop_pole == 0.52
+    assert s.mf_oversample == 12
+
+
+def test_msk_emit_passes_loop_pole_and_mf_oversample() -> None:
+    msk = stage_registry()["msk"]
+    b = CompileContext(IQ, rate=48000.0, symbol_rate=2400.0)
+    msk.emit_rx(b, MskStep(loop_pole=0.4, mf_oversample=8))
+    (blk,) = [x for x in b.build("t", 48000.0).blocks if x.kind == "msk_demod"]
+    assert blk.params["loop_pole"] == 0.4
+    assert blk.params["mf_oversample"] == 8
+
+
+def test_msk_defaults_match_block_registration() -> None:
+    # loop_bw/loop_pole/mf_oversample are spelled in MskStep, GR_BLOCKS, and
     # make_msk_demod; the stage default is the live value, but a divergence in
     # the block-side fallbacks would be a silent pin drift. Anchor them together.
     import inspect
 
     from marconi.engine.backends.gnuradio.embedded.msk import make_msk_demod
 
-    block_default = inspect.signature(make_msk_demod).parameters["loop_bw"].default
-    assert MskStep().loop_bw == block_default
+    sig = inspect.signature(make_msk_demod).parameters
+    assert MskStep().loop_bw == sig["loop_bw"].default
+    assert MskStep().loop_pole == sig["loop_pole"].default
+    assert MskStep().mf_oversample == sig["mf_oversample"].default

@@ -52,6 +52,8 @@ class Fsk(DuplexStage[CompileContext, FskStep]):
 class MskStep(Step):
     conv: Literal["msk"] = "msk"
     loop_bw: float = 0.0038  # pinned: GR_BLOCKS["msk_demod"]'s registered default
+    loop_pole: float = Field(default=0.52, ge=0.0, le=1.0)
+    mf_oversample: int = Field(default=12, ge=1)
 
 
 class Msk(RxStage[CompileContext, MskStep]):
@@ -70,7 +72,13 @@ class Msk(RxStage[CompileContext, MskStep]):
     step_model = MskStep
 
     def emit_rx(self, b: CompileContext, step: MskStep) -> None:
-        b.chain("msk_demod", sps=b.sps, loop_bw=step.loop_bw)
+        b.chain(
+            "msk_demod",
+            sps=b.sps,
+            loop_bw=step.loop_bw,
+            loop_pole=step.loop_pole,
+            mf_oversample=step.mf_oversample,
+        )
 
     def out_descriptor(self, in_desc: Descriptor, step: MskStep) -> Descriptor:
         return Descriptor(Level.SYMBOLS, ItemType.F, Carrier.SOFT)
