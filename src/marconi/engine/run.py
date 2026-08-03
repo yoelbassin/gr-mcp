@@ -27,8 +27,10 @@ from marconi.engine.io.bitfile import (
     write_llrs,
     write_symbols,
 )
+from marconi.engine.quality import QualityReport, assess_quality
 from marconi.engine.stages.base import Stage
 from marconi.engine.types.descriptor import Descriptor
+from marconi.engine.types.enums import ItemType
 from marconi.engine.types.levels import Level
 from marconi.engine.types.models import Bitstream, Modem, Symbolstream
 from marconi.engine.types.params import ParamValue
@@ -44,6 +46,7 @@ class PipelineResult(BaseModel):
     diagnostics: list[Diagnostic] = []
     stalled_at: str | None = None
     error: str | None = None
+    quality: QualityReport | None = None
 
     def diagnostic(self, block: str, key: str) -> Diagnostic | None:
         return find_diagnostic(self.diagnostics, block, key)
@@ -208,6 +211,22 @@ def _flag_empty_coding(result: PipelineResult) -> PipelineResult:
     )
 
 
+def _soft_stream_path(
+    cp: CompiledPipeline,
+    result: PipelineResult,
+    seam: Path,
+    input_stream: Bitstream | Symbolstream | None,
+) -> Path | None:
+    if result.symbolstream is not None and result.symbolstream.item_type == "f":
+        return result.symbolstream.path
+    if cp.boundary.item_type is ItemType.F:
+        if cp.gr is not None:
+            return seam
+        if input_stream is not None:
+            return input_stream.path
+    return None
+
+
 def run_rx(
     modem: Modem,
     registry: Mapping[str, Stage[Any, Any]],
@@ -311,9 +330,23 @@ def run_rx(
         if isinstance(input_stream, Symbolstream):
             marks = list(input_stream.marks)
     if cp.coding is None:
-        return _wrap_gr_only(cp, seam, marks, census, diagnostics)
-    carrier = _entry_carrier(cp.boundary, entry_path, marks)
-    out = run_coding(cp.coding, carrier, census)
-    return _flag_empty_coding(
-        _wrap_result(cp.final, out, workdir, marks, census, diagnostics)
+        result = _wrap_gr_only(cp, seam, marks, census, diagnostics)
+    else:
+        carrier = _entry_carrier(cp.boundary, entry_path, marks)
+        out = run_coding(cp.coding, carrier, census)
+        result = _flag_empty_coding(
+            _wrap_result(cp.final, out, workdir, marks, census, diagnostics)
+        )
+    if result.status != "ok":
+        return result
+    return result.model_copy(
+        update={
+            "quality": assess_quality(
+                registry=registry,
+                census=result.census,
+                diagnostics=result.diagnostics,
+                marks=result.marks,
+                soft_stream=_soft_stream_path(cp, result, seam, input_stream),
+            )
+        }
     )

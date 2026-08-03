@@ -160,3 +160,22 @@ def soft_evidence(path: Path | None) -> list[QualityEvidence]:
             assessment=assessment,
         )
     ]
+
+
+def assess_quality(
+    *,
+    registry: Mapping[str, Stage[Any, Any]],
+    census: Sequence[BlockCensus],
+    diagnostics: Sequence[Diagnostic],
+    marks: Sequence[int],
+    soft_stream: Path | None,
+) -> QualityReport:
+    evidence = (
+        sync_evidence(census, registry)
+        + survival_evidence(census)
+        + marks_evidence(marks)
+        + lock_evidence(diagnostics)
+        + soft_evidence(soft_stream)
+    )
+    verdict, rationale = verdict_from(evidence)
+    return QualityReport(verdict=verdict, evidence=evidence, rationale=rationale)
