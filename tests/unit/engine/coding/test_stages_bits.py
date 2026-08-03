@@ -21,7 +21,7 @@ from marconi.engine.coding.stages_bits import (
     RealignStep,
     SyncWord,
 )
-from marconi.engine.stages.base import StageDirectionError
+from marconi.engine.stages.base import CodingStage, StageDirectionError
 from marconi.engine.types.enums import EmitMode
 
 
@@ -52,11 +52,10 @@ def test_block_code_window_scope_decodes_per_window_stride() -> None:
     assert [w.start for w in _wins(out)] == [0, 4]
 
 
-def test_all_bit_stages_declare_coding_engine() -> None:
+def test_all_bit_stages_are_coding_stages() -> None:
     for cls in CODING_BITS_STAGES:
-        s = cls()
-        assert s.engine == "coding"
-        assert s.directions == frozenset({"rx"})
+        assert issubclass(cls, CodingStage)
+        assert cls().directions == frozenset({"rx"})
 
 
 def test_descramble_restarts_sequence_per_window() -> None:

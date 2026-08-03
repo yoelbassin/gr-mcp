@@ -9,7 +9,7 @@ from pydantic_core import PydanticCustomError
 from marconi.engine.coding import ops_bits, ops_symbols
 from marconi.engine.coding.builder import CodingBuilder
 from marconi.engine.coding.stages_bits import _codebook_kw, check_codebook_sizing
-from marconi.engine.stages.base import RxStage, Stage
+from marconi.engine.stages.base import CodingStage, Stage
 from marconi.engine.types.descriptor import Amplitude, Carrier, Descriptor
 from marconi.engine.types.enums import DcMode, DecodeMode, ItemType
 from marconi.engine.types.levels import Level
@@ -23,9 +23,8 @@ class SyncSymbolsStep(Step):
     pre_symbols: StrictInt = 0
 
 
-class SyncSymbols(RxStage[CodingBuilder, SyncSymbolsStep]):
+class SyncSymbols(CodingStage[SyncSymbolsStep]):
     name = "sync_symbols"
-    engine = "coding"
     from_level = Level.SYMBOLS
     to_level = Level.SYMBOLS
     family = "symbols"
@@ -48,9 +47,8 @@ class NormalizeStep(Step):
     gain_percentile: float | None = Field(default=None, ge=0.0, le=100.0)
 
 
-class Normalize(RxStage[CodingBuilder, NormalizeStep]):
+class Normalize(CodingStage[NormalizeStep]):
     name = "normalize"
-    engine = "coding"
     from_level = Level.SYMBOLS
     to_level = Level.SYMBOLS
     family = "symbols"
@@ -84,9 +82,8 @@ class MSliceStep(Step):
         return self
 
 
-class MSlice(RxStage[CodingBuilder, MSliceStep]):
+class MSlice(CodingStage[MSliceStep]):
     name = "m_slice"
-    engine = "coding"
     from_level = Level.SYMBOLS
     to_level = Level.SYMBOLS
     family = "symbols"
@@ -125,9 +122,8 @@ class SymbolMapStep(Step):
         return self
 
 
-class SymbolMap(RxStage[CodingBuilder, SymbolMapStep]):
+class SymbolMap(CodingStage[SymbolMapStep]):
     name = "symbol_map"
-    engine = "coding"
     from_level = Level.SYMBOLS
     to_level = Level.BITS
     family = "coding"

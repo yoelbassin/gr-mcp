@@ -63,6 +63,7 @@ from marconi.engine.coding.ops_bits import permute_rx
 from marconi.engine.coding.stages_bits import PermuteStep
 from marconi.engine.io.bitfile import read_bits
 from marconi.engine.run import run_rx
+from marconi.engine.stages.base import CodingStage
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Carrier, Descriptor
 from marconi.engine.types.enums import ItemType
@@ -84,7 +85,7 @@ def _coding_tail(modem: Modem) -> Modem:
     reg = stage_registry()
     return Modem(
         symbol_rate=modem.symbol_rate,
-        path=[s for s in modem.path if reg[s.conv].engine == "coding"],
+        path=[s for s in modem.path if isinstance(reg[s.conv], CodingStage)],
     )
 
 

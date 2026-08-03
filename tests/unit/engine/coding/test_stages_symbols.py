@@ -12,6 +12,7 @@ from marconi.engine.coding.stages_symbols import (
     SymbolMap,
     SymbolMapStep,
 )
+from marconi.engine.stages.base import CodingStage
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Carrier, Descriptor
 from marconi.engine.types.enums import ItemType
@@ -20,8 +21,8 @@ from marconi.engine.types.levels import Level
 
 def test_registry_holds_both_flavors() -> None:
     reg = stage_registry()
-    assert reg["fsk"].engine == "gr"
-    assert reg["sync_word"].engine == "coding"
+    assert not isinstance(reg["fsk"], CodingStage)
+    assert isinstance(reg["sync_word"], CodingStage)
     # demoted 2026-07: LoRa's header chapter is agent/test-side orchestration
     # (tests/helpers/css_explicit.py), not registered vocabulary
     assert "css_explicit_decode" not in reg

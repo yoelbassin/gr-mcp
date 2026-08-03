@@ -4,6 +4,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Mapping, Sequence
 from typing import Any, Generic, TypeVar
 
+from marconi.engine.coding.builder import CodingBuilder
 from marconi.engine.types.descriptor import Amplitude, Carrier, Descriptor
 from marconi.engine.types.enums import ItemType
 from marconi.engine.types.levels import Level
@@ -47,9 +48,6 @@ class Stage(ABC, Generic[B, S]):
     directions: frozenset[str] = frozenset({"rx", "tx"})
     step_model: type[S]
 
-    # Execution flavor: "gr" emits into the GR graph, "coding" into the numpy
-    # coding program. The compiler partitions the path on this, never on names.
-    engine: str = "gr"
     # Establishes burst windows on the coding carrier (PHY sync, not framing).
     seeds_windows: bool = False
 
@@ -134,6 +132,14 @@ class TxStage(Stage[B, S]):
 
 class DuplexStage(Stage[B, S]):
     directions: frozenset[str] = frozenset({"rx", "tx"})
+
+
+class CodingStage(RxStage[CodingBuilder, S]):
+    """Coding-lane stage: emits into the numpy CodingProgram via a
+    CodingBuilder, never the GR graph. The compiler partitions the path on
+    CodingStage membership (isinstance), so a stage's execution flavor and the
+    context its emit body is written against are one fact — it cannot claim one
+    flavor and emit for the other. Coding stages are RX-only."""
 
 
 def validate_path(

@@ -1,7 +1,7 @@
 """Architectural invariants for the coding engine: no gnuradio import (the
 old bits-package guarantee, re-homed to phy/coding, its replacement as the
 pure-python coding layer), plus a registry-driven sweep of every
-engine=='coding' stage against the rules the compiler and codec-shape
+CodingStage against the rules the compiler and codec-shape
 validators lean on.
 
 The old package's frame/window-seeding machinery and its extra level rung
@@ -22,6 +22,7 @@ from helpers._paths import SRC_MARCONI
 from marconi.engine.coding.stages_bits import SyncWordStep
 from marconi.engine.coding.stages_symbols import SymbolMapStep
 from marconi.engine.compile.compiler import CompileError, compile_pipeline
+from marconi.engine.stages.base import CodingStage
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Carrier, Descriptor
 from marconi.engine.types.enums import ItemType
@@ -74,12 +75,12 @@ def _coding_stages():
     return {
         name: stage
         for name, stage in stage_registry().items()
-        if stage.engine == "coding"
+        if isinstance(stage, CodingStage)
     }
 
 
 def test_coding_engine_has_stages() -> None:
-    assert _coding_stages(), "expected at least one engine=='coding' stage"
+    assert _coding_stages(), "expected at least one CodingStage in the registry"
 
 
 def test_no_coding_stage_touches_the_frames_level() -> None:

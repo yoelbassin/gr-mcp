@@ -8,7 +8,7 @@ from pydantic_core import PydanticCustomError
 from marconi.engine.coding import ops_bits
 from marconi.engine.coding.builder import CodingBuilder
 from marconi.engine.coding.primitives import can_correct, syndrome_table
-from marconi.engine.stages.base import RxStage, Stage
+from marconi.engine.stages.base import CodingStage, Stage
 from marconi.engine.types.descriptor import Carrier
 from marconi.engine.types.enums import DecodeMode, EmitMode, ItemType
 from marconi.engine.types.levels import Level
@@ -124,9 +124,8 @@ class DescrambleStep(Step):
         return self
 
 
-class SyncWord(RxStage[CodingBuilder, SyncWordStep]):
+class SyncWord(CodingStage[SyncWordStep]):
     name = "sync_word"
-    engine = "coding"
     from_level = Level.BITS
     to_level = Level.BITS
     seeds_windows = True
@@ -144,9 +143,8 @@ class MarkFrameStep(Step):
     offset_bits: StrictInt = Field(default=0, ge=0)
 
 
-class MarkFrame(RxStage[CodingBuilder, MarkFrameStep]):
+class MarkFrame(CodingStage[MarkFrameStep]):
     name = "mark_frame"
-    engine = "coding"
     from_level = Level.BITS
     to_level = Level.BITS
     seeds_windows = True
@@ -164,9 +162,8 @@ class SegmentStep(Step):
     frame_body_len: StrictInt = Field(ge=1)
 
 
-class Segment(RxStage[CodingBuilder, SegmentStep]):
+class Segment(CodingStage[SegmentStep]):
     name = "segment"
-    engine = "coding"
     from_level = Level.BITS
     to_level = Level.BITS
     seeds_windows = True
@@ -179,9 +176,8 @@ class Segment(RxStage[CodingBuilder, SegmentStep]):
         b.add(ops_bits.segment_rx, frame_body_len=int(step.frame_body_len))
 
 
-class Codebook(RxStage[CodingBuilder, CodebookStep]):
+class Codebook(CodingStage[CodebookStep]):
     name = "codebook"
-    engine = "coding"
     from_level = Level.BITS
     to_level = Level.BITS
     family = "coding"
@@ -257,9 +253,8 @@ class BlockCodeStep(Step):
         return self
 
 
-class BlockCode(RxStage[CodingBuilder, BlockCodeStep]):
+class BlockCode(CodingStage[BlockCodeStep]):
     name = "block_code"
-    engine = "coding"
     from_level = Level.BITS
     to_level = Level.BITS
     family = "coding"
@@ -294,9 +289,8 @@ class PermuteStep(Step):
         return self
 
 
-class Permute(RxStage[CodingBuilder, PermuteStep]):
+class Permute(CodingStage[PermuteStep]):
     name = "permute"
-    engine = "coding"
     from_level = Level.BITS
     to_level = Level.BITS
     family = "coding"
@@ -313,9 +307,8 @@ class RealignStep(Step):
     bit_offset: StrictInt = Field(ge=0)
 
 
-class Realign(RxStage[CodingBuilder, RealignStep]):
+class Realign(CodingStage[RealignStep]):
     name = "realign"
-    engine = "coding"
     from_level = Level.BITS
     to_level = Level.BITS
     family = "coding"
@@ -332,9 +325,8 @@ class DifferentialStep(Step):
     invert: bool = False
 
 
-class Differential(RxStage[CodingBuilder, DifferentialStep]):
+class Differential(CodingStage[DifferentialStep]):
     name = "differential"
-    engine = "coding"
     from_level = Level.BITS
     to_level = Level.BITS
     family = "coding"
@@ -350,9 +342,8 @@ class NibbleSwapStep(Step):
     conv: Literal["nibble_swap"] = "nibble_swap"
 
 
-class NibbleSwap(RxStage[CodingBuilder, NibbleSwapStep]):
+class NibbleSwap(CodingStage[NibbleSwapStep]):
     name = "nibble_swap"
-    engine = "coding"
     from_level = Level.BITS
     to_level = Level.BITS
     family = "coding"
@@ -387,9 +378,8 @@ class RsCodeStep(Step):
         return self
 
 
-class RsCode(RxStage[CodingBuilder, RsCodeStep]):
+class RsCode(CodingStage[RsCodeStep]):
     name = "rs_code"
-    engine = "coding"
     from_level = Level.BITS
     to_level = Level.BITS
     family = "coding"
@@ -410,9 +400,8 @@ class RsCode(RxStage[CodingBuilder, RsCodeStep]):
         )
 
 
-class Descramble(RxStage[CodingBuilder, DescrambleStep]):
+class Descramble(CodingStage[DescrambleStep]):
     name = "descramble"
-    engine = "coding"
     from_level = Level.BITS
     to_level = Level.BITS
     family = "coding"

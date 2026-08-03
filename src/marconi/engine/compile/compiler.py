@@ -8,7 +8,7 @@ from marconi.engine.coding.builder import CodingBuilder
 from marconi.engine.coding.program import CodingProgram
 from marconi.engine.compile.compile_context import CompileContext
 from marconi.engine.compile.ir import GrPipeline
-from marconi.engine.stages.base import Stage, validate_path
+from marconi.engine.stages.base import CodingStage, Stage, validate_path
 from marconi.engine.types.descriptor import Amplitude, Descriptor
 from marconi.engine.types.enums import ItemType
 from marconi.engine.types.models import Modem, ValidationIssue
@@ -253,7 +253,9 @@ def _emit_gr_segment(
 
 def _known_engine(step: Step, registry: Mapping[str, Stage[Any, Any]]) -> str | None:
     stage = registry.get(step.conv)
-    return stage.engine if stage is not None else None
+    if stage is None:
+        return None
+    return "coding" if isinstance(stage, CodingStage) else "gr"
 
 
 def _split_index(
