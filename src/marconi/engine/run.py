@@ -71,6 +71,9 @@ def _entry_carrier(boundary: Descriptor, path: Path, marks: list[int]) -> Coding
     )
 
 
+_FINAL_SUFFIX = {"b": ".u8", "s": ".i16", "f": ".f32"}
+
+
 def _wrap_gr_only(
     cp: CompiledPipeline,
     seam: Path,
@@ -78,8 +81,11 @@ def _wrap_gr_only(
     census: list[BlockCensus],
     diagnostics: list[Diagnostic],
 ) -> PipelineResult:
+    path = seam.with_suffix(_FINAL_SUFFIX[cp.final.item_type])
+    if path != seam:
+        seam.replace(path)
     if cp.final.item_type == "b":
-        bitstream = Bitstream(path=seam, num_bits=int(read_bits(seam).size))
+        bitstream = Bitstream(path=path, num_bits=int(read_bits(path).size))
         return PipelineResult(
             status="ok",
             bitstream=bitstream,
@@ -88,9 +94,9 @@ def _wrap_gr_only(
             diagnostics=diagnostics,
         )
     item_type = cast(Literal["s", "f"], cp.final.item_type)
-    symbols = read_symbols(seam, item_type)
+    symbols = read_symbols(path, item_type)
     symbolstream = Symbolstream(
-        path=seam, num_symbols=int(symbols.size), item_type=item_type, marks=marks
+        path=path, num_symbols=int(symbols.size), item_type=item_type, marks=marks
     )
     return PipelineResult(
         status="ok",
