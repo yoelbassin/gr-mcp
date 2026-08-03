@@ -13,7 +13,14 @@ _EMA = 0.05
 _OUT_CAP = 1 << 15
 
 
-def make_cp_symbol_sync(gr: Any, *, fft_len: int, cp_len: int, warmup_syms: int) -> Any:
+def make_cp_symbol_sync(
+    gr: Any,
+    *,
+    fft_len: int,
+    cp_len: int,
+    warmup_syms: int,
+    lock_min_ratio: float = _LOCK_MIN_RATIO,
+) -> Any:
     sym_len = fft_len + cp_len
     need = warmup_syms * sym_len + fft_len + cp_len
     buf_cap = need + 8 * sym_len
@@ -27,7 +34,10 @@ def make_cp_symbol_sync(gr: Any, *, fft_len: int, cp_len: int, warmup_syms: int)
                 in_sig=[np.complex64],
                 out_sig=[np.complex64],
             )
-            self.diagnostics: dict[str, int] = {"locks": 0}
+            self.diagnostics: dict[str, int] = {
+                "locks": 0,
+                "lock_ratio_best_permille": 0,
+            }
             self._out = OutQueue(np.complex64)
             self._buf = np.empty(0, dtype=np.complex64)
             self._pos = 0
@@ -80,7 +90,10 @@ def make_cp_symbol_sync(gr: Any, *, fft_len: int, cp_len: int, warmup_syms: int)
                 )
                 off = int(np.argmax(strength))
                 ratio = float(strength[off] / (np.median(strength) + 1e-12))
-                if ratio < _LOCK_MIN_RATIO:
+                self.diagnostics["lock_ratio_best_permille"] = max(
+                    self.diagnostics["lock_ratio_best_permille"], int(ratio * 1000)
+                )
+                if ratio < lock_min_ratio:
                     self._pos += need - (fft_len + cp_len)
                     self._trim()
                     continue

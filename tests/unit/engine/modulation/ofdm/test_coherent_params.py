@@ -1,9 +1,17 @@
 from __future__ import annotations
 
 import pytest
+from helpers import _lattice
 from pydantic import ValidationError
 
-from marconi.engine.modulation.ofdm.stages import OfdmCoherentSyncStep
+from marconi.engine.compile.compile_context import CompileContext
+from marconi.engine.modulation.ofdm.stages import (
+    OfdmCoherentSync,
+    OfdmCoherentSyncStep,
+)
+from marconi.engine.types.descriptor import Descriptor
+from marconi.engine.types.enums import ItemType
+from marconi.engine.types.levels import Level
 
 
 def _good() -> dict:
@@ -28,6 +36,25 @@ def _good() -> dict:
 
 def test_valid_params_pass() -> None:
     assert OfdmCoherentSyncStep.model_validate(_good()).fft_len == 64
+
+
+def test_lock_thresholds_default_to_calibrated_values() -> None:
+    step = OfdmCoherentSyncStep.model_validate(_good())
+    assert step.lock_min_ratio == 2.0
+    assert step.lock_min_score == 0.35
+
+
+def test_emit_rx_passes_lock_thresholds_to_their_blocks() -> None:
+    b = CompileContext(Descriptor(Level.IQ, ItemType.C), rate=1.0, symbol_rate=1.0)
+    step = OfdmCoherentSyncStep(
+        **_lattice.sync_params(), lock_min_ratio=1.5, lock_min_score=0.5
+    )
+    OfdmCoherentSync().emit_rx(b, step)
+    p = b.build("t", 1.0)
+    cp = next(x for x in p.blocks if x.kind == "cp_symbol_sync")
+    assert cp.params["lock_min_ratio"] == 1.5
+    eqz = next(x for x in p.blocks if x.kind == "pilot_lattice_equalizer")
+    assert eqz.params["lock_min_score"] == 0.5
 
 
 @pytest.mark.parametrize(

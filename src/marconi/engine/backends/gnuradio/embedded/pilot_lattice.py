@@ -35,6 +35,7 @@ def make_pilot_lattice_equalizer(
     fp_carriers: list[int],
     fp_i: list[float],
     fp_q: list[float],
+    lock_min_score: float = _LOCK_MIN_SCORE,
 ) -> Any:
     if not kmin <= 0 <= kmin + n_carriers:
         raise ValueError(
@@ -159,7 +160,7 @@ def make_pilot_lattice_equalizer(
             theta = float(np.angle(np.sum(pil[1:] * np.conj(pil[:-1]))))
             phi, score = self._estimate_phi(xp, delta)
             self.diagnostics["lock_score_permille"] = int(score * 1000)
-            if score < _LOCK_MIN_SCORE:
+            if score < lock_min_score:
                 return
             self._delta, self._theta, self._phi = delta, theta, phi
             self._emit_bins = emit + dc0 + delta

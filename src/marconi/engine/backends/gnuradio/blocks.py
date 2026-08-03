@@ -449,12 +449,14 @@ GR_BLOCKS: dict[str, Callable[[_GrCtx, Params], Any]] = {
         fp_carriers=_as_int_list(p["fp_carriers"]),
         fp_i=_as_float_list(p["fp_i"]),
         fp_q=_as_float_list(p["fp_q"]),
+        lock_min_score=_as_float(p["lock_min_score"]),
     ),
     "cp_symbol_sync": lambda c, p: make_cp_symbol_sync(
         c.gr,
         fft_len=_as_int(p["fft_len"]),
         cp_len=_as_int(p["cp_len"]),
         warmup_syms=_as_int(p["warmup_syms"]),
+        lock_min_ratio=_as_float(p["lock_min_ratio"]),
     ),
     "stream_to_vector": lambda c, p: c.blocks.stream_to_vector(
         c.gr.sizeof_gr_complex, _as_int(p["vlen"])

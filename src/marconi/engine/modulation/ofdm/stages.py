@@ -155,6 +155,8 @@ class OfdmCoherentSyncStep(Step):
     fp_carriers: list[int]
     fp_i: list[float]
     fp_q: list[float]
+    lock_min_ratio: float = Field(default=2.0, ge=0.0)
+    lock_min_score: float = Field(default=0.35, ge=0.0)
 
     @model_validator(mode="after")
     def _geometry(self) -> "OfdmCoherentSyncStep":
@@ -204,10 +206,11 @@ class OfdmCoherentSync(RxStage[CompileContext, OfdmCoherentSyncStep]):
             fft_len=step.fft_len,
             cp_len=step.cp_len,
             warmup_syms=step.warmup_syms,
+            lock_min_ratio=step.lock_min_ratio,
         )
         b.chain("stream_to_vector", vlen=step.fft_len)
         b.chain("fft_vcc", fft_len=step.fft_len, shift=True)
-        eq = step.model_dump(exclude={"conv", "cp_len", "sym_len"})
+        eq = step.model_dump(exclude={"conv", "cp_len", "sym_len", "lock_min_ratio"})
         b.chain("pilot_lattice_equalizer", **eq)
 
     def out_descriptor(

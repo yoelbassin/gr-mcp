@@ -56,6 +56,38 @@ def test_noise_never_locks() -> None:
     assert blk.diagnostics["locks"] == 0
 
 
+def test_failed_lock_is_legible_via_best_ratio_seen() -> None:
+    # a zero-output run must say WHY: the best CP-metric ratio it saw, so an
+    # operator can tell "close but below threshold" from "pure noise" instead
+    # of a silent status="ok". Pure noise sits below the 2.0 lock threshold.
+    rng = np.random.default_rng(5)
+    iq = 0.3 * (rng.standard_normal(20000) + 1j * rng.standard_normal(20000)).astype(
+        np.complex64
+    )
+    blk = _blk()
+    drive(blk, iq, chunk=1024, out_dtype=np.complex64)
+    assert blk.diagnostics["locks"] == 0
+    assert "lock_ratio_best_permille" in blk.diagnostics
+    best = blk.diagnostics["lock_ratio_best_permille"]
+    assert 0 < best < 2000  # saw a ratio, but below the 2.0 (=2000 permille) gate
+
+
+def test_lock_min_ratio_param_gates_acquisition() -> None:
+    # the synthetic-calibrated 2.0 gate is a caller param: an unreachable
+    # threshold refuses to lock even a clean signal (a knob for real captures).
+    iq = _lattice.make_iq(60, cfo_hz=9.0, snr_db=28.0, sto_frac=0.4, seed=3)
+    blk = make_cp_symbol_sync(
+        FAKE_GR,
+        fft_len=_lattice.FFT_LEN,
+        cp_len=_lattice.CP_LEN,
+        warmup_syms=12,
+        lock_min_ratio=100.0,
+    )
+    out = drive(blk, iq, chunk=320, out_dtype=np.complex64)
+    assert blk.diagnostics["locks"] == 0
+    assert out.size == 0
+
+
 def test_dropout_emits_sync_start_and_relocks() -> None:
     a = _lattice.make_iq(30, seed=7)
     gap = np.zeros(4000, np.complex64)  # EMA(0.05) needs ~35 dead symbols to trip

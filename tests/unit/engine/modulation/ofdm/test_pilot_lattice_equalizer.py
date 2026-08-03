@@ -49,6 +49,18 @@ def test_noise_never_locks_or_emits() -> None:
     assert blk.diagnostics["locks"] == 0
 
 
+def test_lock_min_score_param_gates_acquisition() -> None:
+    # the synthetic-calibrated 0.35 gate is a caller param: an unreachable
+    # threshold (score is a correlation <= 1) refuses to lock a clean signal.
+    _, spec = _lattice.make_spectra(60, start_fs=2, theta=0.01, seed=3)
+    blk = make_pilot_lattice_equalizer(
+        FAKE_GR, **_lattice.eq_params(), lock_min_score=1.5
+    )
+    out = drive(blk, spec, chunk=5, out_dtype=np.complex64)
+    assert blk.diagnostics["locks"] == 0
+    assert out.size == 0
+
+
 def test_sync_start_tag_forces_relock() -> None:
     _, a = _lattice.make_spectra(40, seed=4)
     _, b = _lattice.make_spectra(40, seed=5)
