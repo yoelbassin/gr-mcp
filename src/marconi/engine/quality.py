@@ -70,9 +70,14 @@ def sync_evidence(
     return out
 
 
-def survival_evidence(census: Sequence[BlockCensus]) -> list[QualityEvidence]:
+def survival_evidence(
+    census: Sequence[BlockCensus], registry: Mapping[str, Stage[Any, Any]]
+) -> list[QualityEvidence]:
     out: list[QualityEvidence] = []
     for row in census:
+        stage = registry.get(row.kind)
+        if stage is None or not stage.validates_windows:
+            continue
         if row.windows_in is None or row.windows_out is None:
             continue
         if row.windows_in <= 0 or row.windows_out >= row.windows_in:
@@ -129,6 +134,7 @@ _SOFT_MIN_ITEMS = 1000
 _SOFT_SAMPLE_ITEMS = 65536
 _SOFT_POSITIVE = 6.0
 _SOFT_NEGATIVE = 1.45
+_SOFT_MIN_POLARITY_FRACTION = 0.02
 
 
 def soft_evidence(path: Path | None) -> list[QualityEvidence]:
@@ -146,7 +152,13 @@ def soft_evidence(path: Path | None) -> list[QualityEvidence]:
         ratio = np.inf if mean > 0.0 else 0.0
     else:
         ratio = mean / spread
-    if ratio >= _SOFT_POSITIVE:
+    # A constant or one-sided LLR stream (a CW carrier) can score an
+    # arbitrarily high magnitude ratio without carrying any modulation; both
+    # polarities must show up in real proportion before that ratio counts.
+    both_polarities = (
+        min(float((x > 0).mean()), float((x < 0).mean())) >= _SOFT_MIN_POLARITY_FRACTION
+    )
+    if ratio >= _SOFT_POSITIVE and both_polarities:
         assessment: Assessment = "positive"
     elif ratio <= _SOFT_NEGATIVE:
         assessment = "negative"
@@ -172,7 +184,7 @@ def assess_quality(
 ) -> QualityReport:
     evidence = (
         sync_evidence(census, registry)
-        + survival_evidence(census)
+        + survival_evidence(census, registry)
         + marks_evidence(marks)
         + lock_evidence(diagnostics)
         + soft_evidence(soft_stream)

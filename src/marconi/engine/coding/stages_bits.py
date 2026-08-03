@@ -261,6 +261,7 @@ class BlockCode(CodingStage[BlockCodeStep]):
     family = "coding"
     accepts_item_type = ItemType.B
     accepts_carrier = Carrier.HARD
+    validates_windows = True
     step_model = BlockCodeStep
 
     def emit_rx(self, b: CodingBuilder, step: BlockCodeStep) -> None:

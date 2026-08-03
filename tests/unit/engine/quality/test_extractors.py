@@ -36,16 +36,33 @@ def test_gr_census_rows_are_skipped() -> None:
 
 
 def test_survival_high_positive_low_negative_equal_skipped() -> None:
-    high = survival_evidence([_row("block_code", windows_in=10, windows_out=8)])
-    low = survival_evidence([_row("block_code", windows_in=10, windows_out=1)])
-    same = survival_evidence([_row("block_code", windows_in=10, windows_out=10)])
+    high = survival_evidence(
+        [_row("block_code", windows_in=10, windows_out=8)], stage_registry()
+    )
+    low = survival_evidence(
+        [_row("block_code", windows_in=10, windows_out=1)], stage_registry()
+    )
+    same = survival_evidence(
+        [_row("block_code", windows_in=10, windows_out=10)], stage_registry()
+    )
     assert [e.assessment for e in high] == ["positive"]
     assert [e.assessment for e in low] == ["negative"]
     assert same == []
 
 
 def test_survival_midband_is_skipped() -> None:
-    assert survival_evidence([_row("block_code", windows_in=10, windows_out=3)]) == []
+    rows = [_row("block_code", windows_in=10, windows_out=3)]
+    assert survival_evidence(rows, stage_registry()) == []
+
+
+def test_non_validating_stage_is_not_survival_evidence() -> None:
+    rows = [_row("codebook", windows_in=10, windows_out=1)]
+    assert survival_evidence(rows, stage_registry()) == []
+
+
+def test_survival_unknown_kind_is_skipped() -> None:
+    rows = [_row("symbol_sync_cc", windows_in=10, windows_out=1)]
+    assert survival_evidence(rows, stage_registry()) == []
 
 
 def test_marks_positive_only() -> None:

@@ -55,6 +55,10 @@ class Stage(ABC, Generic[B, S]):
     # unconditionally by geometry): its found-window count is signal evidence.
     sync_search: bool = False
 
+    # A decoder that can reject a window outright as uncorrectable (vs
+    # passing every window through): its kept-window ratio is signal evidence.
+    validates_windows: bool = False
+
     # Seam invariant (issue 06): the wire item_type / decision-carrier a stage
     # accepts on input. The phy compiler checks them against the upstream
     # descriptor, so an ill-typed composition (e.g. hard bits into a soft-LLR
