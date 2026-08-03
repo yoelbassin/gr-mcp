@@ -23,8 +23,8 @@ def make_peak_decision(gr: Any, *, vlen: int, divisor: int, modulo: int) -> Any:
             vecs = input_items[0]
             out = output_items[0]
             k = min(len(vecs), len(out))
-            for i in range(k):
-                out[i] = round(int(np.argmax(vecs[i])) / divisor) % modulo
+            idx = np.argmax(vecs[:k], axis=1)  # full precision, no int16 wrap
+            out[:k] = np.remainder(np.round(idx / divisor).astype(np.int64), modulo)
             return k
 
     return _PeakDecision()

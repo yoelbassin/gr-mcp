@@ -60,7 +60,9 @@ class _BasicBlock:
         self.out_tags.append(FakeTag(int(offset), str(key), value))
 
 
-FAKE_GR = SimpleNamespace(basic_block=_BasicBlock, pmt=_FakePmt, TPP_DONT=0)
+FAKE_GR = SimpleNamespace(
+    basic_block=_BasicBlock, sync_block=_BasicBlock, pmt=_FakePmt, TPP_DONT=0
+)
 
 
 def drive(
