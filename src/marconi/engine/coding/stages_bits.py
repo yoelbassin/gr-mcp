@@ -129,6 +129,7 @@ class SyncWord(CodingStage[SyncWordStep]):
     from_level = Level.BITS
     to_level = Level.BITS
     seeds_windows = True
+    sync_search = True
     family = "acquisition"
     accepts_item_type = ItemType.B
     accepts_carrier = Carrier.HARD

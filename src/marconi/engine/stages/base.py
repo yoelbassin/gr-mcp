@@ -51,6 +51,10 @@ class Stage(ABC, Generic[B, S]):
     # Establishes burst windows on the coding carrier (PHY sync, not framing).
     seeds_windows: bool = False
 
+    # A window-seeding stage that SEARCHES for its pattern (vs cutting
+    # unconditionally by geometry): its found-window count is signal evidence.
+    sync_search: bool = False
+
     # Seam invariant (issue 06): the wire item_type / decision-carrier a stage
     # accepts on input. The phy compiler checks them against the upstream
     # descriptor, so an ill-typed composition (e.g. hard bits into a soft-LLR
