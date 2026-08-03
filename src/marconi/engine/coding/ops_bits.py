@@ -5,7 +5,11 @@ from dataclasses import replace
 from typing import Literal
 
 import numpy as np
-import reedsolo
+
+try:  # creedsolo is reedsolo's Cython twin: identical API, 10-50x faster RS
+    import creedsolo as _rs
+except ImportError:  # pure-Python fallback, always installed
+    import reedsolo as _rs
 
 from marconi.engine.coding.carrier import CodingCarrier, Window
 from marconi.engine.coding.primitives import can_correct, syndrome_table
@@ -316,7 +320,7 @@ def _decode_scoped(
 
 def _rs_decode_words(
     bits: np.ndarray,
-    codec: reedsolo.RSCodec,
+    codec: _rs.RSCodec,
     symbol_bits: int,
     n: int,
     k: int,
@@ -329,7 +333,7 @@ def _rs_decode_words(
         try:
             data, full, _ = codec.decode(word)
             out.extend(full if emit == "codeword" else data)
-        except reedsolo.ReedSolomonError:
+        except _rs.ReedSolomonError:
             # uncorrectable is detectable, never repaired by guessing: emit the
             # received word unchanged so downstream framing keeps its alignment
             out.extend(word if emit == "codeword" else word[:k])
@@ -347,7 +351,7 @@ def rs_code_rx(
     generator: int = 2,
     emit: str = "data",
 ) -> CodingCarrier:
-    codec = reedsolo.RSCodec(
+    codec = _rs.RSCodec(
         nsym=n - k,
         nsize=n,
         fcr=fcr,
