@@ -34,6 +34,7 @@ from marconi.engine.modulation.coding.stages import (  # noqa: E402
     DepunctureStep,
     FecStep,
     HardenStep,
+    PolarStep,
     SyncAlignStep,
 )
 from marconi.engine.modulation.css.stages import (  # noqa: E402
@@ -157,6 +158,12 @@ VALID_STEPS: dict[str, Step] = {
     ),
     "ook_envelope": OokEnvelopeStep(),
     "permute": PermuteStep(perm=[0, 1, 2, 3]),
+    "polar": PolarStep(
+        block_size=8,
+        info_bits=4,
+        frozen_positions=[0, 1, 2, 4],
+        frozen_values=[0, 0, 0, 0],
+    ),
     "preamble_sync": PreambleSyncStep(preamble_i=[1.0, -1.0], preamble_q=[0.0, 0.0]),
     "psk_demap": PskDemapStep(order=PskOrder.QPSK),
     "psk_demod": PskDemodStep(order=PskOrder.QPSK),

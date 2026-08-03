@@ -266,10 +266,100 @@ class Fec(RxStage[CompileContext, FecStep]):
         return None
 
 
+class PolarStep(Step):
+    conv: Literal["polar"] = "polar"
+    block_size: StrictInt = Field(ge=2)
+    info_bits: StrictInt = Field(ge=1)
+    frozen_positions: list[int]
+    frozen_values: list[int]
+    list_size: StrictInt = Field(default=1, ge=1)
+
+    @model_validator(mode="after")
+    def _ok(self) -> "PolarStep":
+        n, k = self.block_size, self.info_bits
+        if n & (n - 1):
+            raise PydanticCustomError(
+                "value_error", "block_size must be a power of two, got {n}", {"n": n}
+            )
+        if k >= n:
+            raise PydanticCustomError(
+                "value_error",
+                "info_bits {k} must be < block_size {n}",
+                {"k": k, "n": n},
+            )
+        nfrozen = len(self.frozen_positions)
+        if nfrozen != n - k:
+            raise PydanticCustomError(
+                "value_error",
+                "need block_size-info_bits={want} frozen positions, got {have}",
+                {"want": n - k, "have": nfrozen},
+            )
+        if len(self.frozen_values) != nfrozen:
+            raise PydanticCustomError(
+                "value_error", "frozen_values must match frozen_positions length"
+            )
+        if len(set(self.frozen_positions)) != nfrozen:
+            raise PydanticCustomError(
+                "value_error", "frozen_positions must be distinct"
+            )
+        if any(not (0 <= p < n) for p in self.frozen_positions):
+            raise PydanticCustomError(
+                "value_error", "frozen_positions must be in [0, block_size)"
+            )
+        if any(v not in (0, 1) for v in self.frozen_values):
+            raise PydanticCustomError("value_error", "frozen_values must be 0 or 1")
+        return self
+
+
+class Polar(RxStage[CompileContext, PolarStep]):
+    """Polar decode, BITS soft -> BITS hard, via stock gr-fec
+    (fec.polar_decoder_sc[_list] in fec.extended_decoder). list_size=1 is plain
+    successive-cancellation; >1 selects the SC-list decoder. block_size (N),
+    info_bits (K), and the frozen set (positions + values) are caller params --
+    polar code construction is datasheet work, not the engine's. The engine's
+    LLR is bit 1 = negative but the SC decoder wants bit 1 = positive, so the
+    leading multiply_const_ff(-1) converts the convention (like harden/psk_soft
+    _demap do their sign corrections)."""
+
+    name = "polar"
+    from_level = Level.BITS
+    to_level = Level.BITS
+    family = "coding"
+    step_model = PolarStep
+    accepts_item_type = ItemType.F
+    accepts_carrier = Carrier.SOFT
+
+    def emit_rx(self, b: CompileContext, step: PolarStep) -> None:
+        b.chain("multiply_const_ff", value=-1.0)
+        b.chain(
+            "polar_decode",
+            block_size=step.block_size,
+            info_bits=step.info_bits,
+            frozen_positions=list(step.frozen_positions),
+            frozen_values=list(step.frozen_values),
+            list_size=step.list_size,
+        )
+
+    def out_descriptor(self, in_desc: Descriptor, step: PolarStep) -> Descriptor:
+        return Descriptor(
+            Level.BITS, ItemType.B, Carrier.HARD, frame_len=int(step.info_bits)
+        )
+
+    def validate_input(self, in_desc: Descriptor, step: PolarStep) -> str | None:
+        if in_desc.frame_len is not None and in_desc.frame_len != step.block_size:
+            return (
+                f"decodes {step.block_size}-soft-bit polar frames but the input is "
+                f"framed at {in_desc.frame_len}; align the upstream frame geometry "
+                f"(sync_align.frame_len) with block_size"
+            )
+        return None
+
+
 CODING_STAGES: tuple[type[Stage[CompileContext, Any]], ...] = (
     Deinterleave,
     Depuncture,
     Fec,
     Harden,
+    Polar,
     SyncAlign,
 )

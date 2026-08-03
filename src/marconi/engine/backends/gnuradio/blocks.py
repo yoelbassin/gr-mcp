@@ -21,6 +21,7 @@ from marconi.engine.backends.gnuradio.embedded.ofdm import make_ofdm_frame_sync
 from marconi.engine.backends.gnuradio.embedded.pilot_lattice import (
     make_pilot_lattice_equalizer,
 )
+from marconi.engine.backends.gnuradio.embedded.polar import make_polar_decoder
 from marconi.engine.backends.gnuradio.embedded.preamble import (
     make_sym_strip,
     sym_prefix,
@@ -70,11 +71,11 @@ def _complex_syms(i: list[float], q: list[float]) -> list[complex]:
     return [complex(a, b) for a, b in zip(i, q)]
 
 
-def _modules() -> tuple[Any, Any, Any, Any, Any, Any, Any, Any, Any]:
+def _modules() -> tuple[Any, Any, Any, Any, Any, Any, Any, Any, Any, Any]:
     """Single gnuradio import gate → (gr, blocks, analog, digital,
-    gr_filter, firdes, pfb, fft, trellis). Called at build time only."""
+    gr_filter, firdes, pfb, fft, trellis, fec). Called at build time only."""
     try:
-        from gnuradio import analog, blocks, digital, fft
+        from gnuradio import analog, blocks, digital, fec, fft
         from gnuradio import filter as gr_filter
         from gnuradio import gr, trellis
         from gnuradio.filter import firdes, pfb
@@ -83,7 +84,7 @@ def _modules() -> tuple[Any, Any, Any, Any, Any, Any, Any, Any, Any]:
             "GNU Radio is not importable. Install GNU Radio 3.10+ system-wide "
             "and use a `uv venv --system-site-packages` venv."
         ) from e
-    return gr, blocks, analog, digital, gr_filter, firdes, pfb, fft, trellis
+    return gr, blocks, analog, digital, gr_filter, firdes, pfb, fft, trellis, fec
 
 
 @dataclass(frozen=True)
@@ -97,11 +98,12 @@ class _GrCtx:
     pfb: Any
     fft: Any
     trellis: Any
+    fec: Any
     rate: float
 
 
 def _make_ctx(rate: float) -> _GrCtx:
-    gr, blocks, analog, digital, gr_filter, firdes, pfb, fft, trellis = _modules()
+    gr, blocks, analog, digital, gr_filter, firdes, pfb, fft, trellis, fec = _modules()
     return _GrCtx(
         gr=gr,
         blocks=blocks,
@@ -112,6 +114,7 @@ def _make_ctx(rate: float) -> _GrCtx:
         pfb=pfb,
         fft=fft,
         trellis=trellis,
+        fec=fec,
         rate=rate,
     )
 
@@ -511,6 +514,14 @@ GR_BLOCKS: dict[str, Callable[[_GrCtx, Params], Any]] = {
     ),
     "keep_m_in_n_b": lambda c, p: c.blocks.keep_m_in_n(
         c.gr.sizeof_char, _as_int(p["m"]), _as_int(p["n"]), 0
+    ),
+    "polar_decode": lambda c, p: make_polar_decoder(
+        c,
+        block_size=_as_int(p["block_size"]),
+        info_bits=_as_int(p["info_bits"]),
+        frozen_positions=_as_int_list(p["frozen_positions"]),
+        frozen_values=_as_int_list(p["frozen_values"]),
+        list_size=_as_int(p["list_size"]),
     ),
     "burst_probe": lambda c, p: make_burst_probe(c.gr),
 }
