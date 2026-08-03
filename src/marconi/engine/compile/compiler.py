@@ -285,6 +285,8 @@ class CompiledPipeline:
     coding: CodingProgram | None
     boundary: Descriptor
     final: Descriptor
+    boundaries: list[Descriptor]
+    rates: list[float]
 
 
 def compile_pipeline(
@@ -337,7 +339,12 @@ def compile_pipeline(
             entry_item_type=boundaries[k].item_type,
         )
     return CompiledPipeline(
-        gr=gr, coding=coding, boundary=boundaries[k], final=boundaries[len(steps)]
+        gr=gr,
+        coding=coding,
+        boundary=boundaries[k],
+        final=boundaries[len(steps)],
+        boundaries=boundaries,
+        rates=rates,
     )
 
 
