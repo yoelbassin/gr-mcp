@@ -8,6 +8,13 @@ _SURVEY_NPERSEG = 4096
 _MAX_INLINE = 512
 
 
+class EnvelopeStats(BaseModel):
+    const_envelope_ratio: float
+    amplitude_kurtosis: float
+    mean_amplitude: float
+    std_amplitude: float
+
+
 class SpectrumStats(BaseModel):
     freqs_hz: list[float]
     psd_db: list[float]
@@ -49,4 +56,17 @@ def _spectrum(x: np.ndarray, sample_rate: float) -> SpectrumStats:
         occupied_bw_hz=hi - lo,
         occupied_lo_hz=lo,
         occupied_hi_hz=hi,
+    )
+
+
+def _envelope(x: np.ndarray) -> EnvelopeStats:
+    a = np.abs(x).astype(np.float64)
+    mean = float(a.mean())
+    std = float(a.std())
+    kurt = float(((a - mean) ** 4).mean() / std**4 - 3.0) if std > 0 else 0.0
+    return EnvelopeStats(
+        const_envelope_ratio=std / mean if mean > 0 else 0.0,
+        amplitude_kurtosis=kurt,
+        mean_amplitude=mean,
+        std_amplitude=std,
     )
