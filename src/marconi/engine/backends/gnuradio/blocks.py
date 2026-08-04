@@ -211,20 +211,34 @@ def _agc2(c: _GrCtx, p: Params) -> Any:
 
 # kind -> (ctx, params) -> live GR block. The ONLY GR-aware vocabulary in phy.
 GR_BLOCKS: dict[str, Callable[[_GrCtx, Params], Any]] = {
+    # offset/length are in items; length 0 = to EOF (stock file_source
+    # semantics) - the streaming way to decode a bounded capture slice
     "iq_file_source": lambda c, p: c.blocks.file_source(
-        c.gr.sizeof_gr_complex, str(p["path"]), bool(p.get("repeat", False))
+        c.gr.sizeof_gr_complex,
+        str(p["path"]),
+        bool(p.get("repeat", False)),
+        _as_int(p.get("offset", 0)),
+        _as_int(p.get("length", 0)),
     ),
     "iq_file_sink": lambda c, p: c.blocks.file_sink(
         c.gr.sizeof_gr_complex, str(p["path"]), False
     ),
     "bits_file_source": lambda c, p: c.blocks.file_source(
-        c.gr.sizeof_char, str(p["path"]), bool(p.get("repeat", False))
+        c.gr.sizeof_char,
+        str(p["path"]),
+        bool(p.get("repeat", False)),
+        _as_int(p.get("offset", 0)),
+        _as_int(p.get("length", 0)),
     ),
     "bits_file_sink": lambda c, p: c.blocks.file_sink(
         c.gr.sizeof_char, str(p["path"]), False
     ),
     "soft_bits_file_source": lambda c, p: c.blocks.file_source(
-        c.gr.sizeof_float, str(p["path"]), bool(p.get("repeat", False))
+        c.gr.sizeof_float,
+        str(p["path"]),
+        bool(p.get("repeat", False)),
+        _as_int(p.get("offset", 0)),
+        _as_int(p.get("length", 0)),
     ),
     "soft_bits_file_sink": lambda c, p: c.blocks.file_sink(
         c.gr.sizeof_float, str(p["path"]), False

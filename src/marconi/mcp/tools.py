@@ -22,6 +22,7 @@ from marconi.engine.types.descriptor import Carrier, Descriptor
 from marconi.engine.types.enums import ItemType
 from marconi.engine.types.levels import Level
 from marconi.engine.types.models import Bitstream, Modem, Symbolstream
+from marconi.engine.types.params import ParamValue
 from marconi.errors import classify_error
 from marconi.mcp.boundary import tool_error_boundary
 from marconi.mcp.streams import _ITEM_DTYPES, ensure_cf32, parse_bits, render_page
@@ -155,11 +156,23 @@ def validate_modem(
     return {"valid": True, "trace": _trace_rows(modem, cp)}
 
 
+_MAX_INLINE_LIST = 512
+
+
+def _cap_list(container: dict[str, Any], key: str) -> None:
+    seq = container.get(key)
+    if isinstance(seq, list) and len(seq) > _MAX_INLINE_LIST:
+        container[f"{key}_total"] = len(seq)
+        container[key] = seq[:_MAX_INLINE_LIST]
+
+
 def run_rx_tool(
     spec: dict[str, Any],
     sample_rate: float,
     capture_path: str | None = None,
     capture_dtype: str = "cf32",
+    capture_offset: int = 0,
+    capture_samples: int = 0,
     input_path: str | None = None,
     input_item_type: str | None = None,
     input_level: str | None = None,
@@ -169,31 +182,48 @@ def run_rx_tool(
     stream for coding-only paths) and return the full pipeline result.
 
     Pass exactly one of capture_path (raw IQ; capture_dtype one of
-    cf32/ci16/ci8/cu8, converted once if not cf32) or input_path (+
-    input_item_type b/s/f and optionally input_level). A soft 'f' stream's
-    sign convention depends on its level: bits-level soft floats are LLRs
-    where bit 1 = NEGATIVE; symbols-level soft floats (the default level for
-    'f' input, and the output of a path ending at a demod stage) are demod
-    outputs where POSITIVE slices to bit 1. The result carries status, a
-    "stream" summary {path, item_type, items} to page with read_stream,
-    windows/marks, per-block census, diagnostics, and "quality": a
-    conservative verdict (decoded / uncertain / no_signal) with the evidence
-    behind it. Treat only verdict "decoded" as trustworthy output;
-    "uncertain" means the evidence was absent or conflicting — read
-    quality.rationale."""
+    cf32/ci16/ci8/cu8, converted once per capture into a shared cache if not
+    cf32) or input_path (+ input_item_type b/s/f and optionally input_level).
+    capture_offset/capture_samples (complex samples; 0 samples = to EOF)
+    decode a bounded slice while streaming - the answer to a capture too
+    large for one run. A soft 'f' stream's sign convention depends on its
+    level: bits-level soft floats are LLRs where bit 1 = NEGATIVE;
+    symbols-level soft floats (the default level for 'f' input, and the
+    output of a path ending at a demod stage) are demod outputs where
+    POSITIVE slices to bit 1. The result carries status, a "stream" summary
+    {path, item_type, items} to page with read_stream, windows/marks
+    (truncated to 512 entries with a *_total count when longer), per-block
+    census, diagnostics, and "quality": a conservative verdict (decoded /
+    uncertain / no_signal) with the evidence behind it. Treat only verdict
+    "decoded" as trustworthy output; "uncertain" means the evidence was
+    absent or conflicting — read quality.rationale."""
     if (capture_path is None) == (input_path is None):
         raise ValueError("pass exactly one of capture_path or input_path")
+    if capture_offset < 0 or capture_samples < 0:
+        raise ValueError("capture_offset and capture_samples must be >= 0")
+    if capture_path is None and (capture_offset or capture_samples):
+        raise ValueError("capture_offset/capture_samples apply to capture_path only")
     modem = Modem.from_spec(spec, step_models())
     run_dir = new_run_dir("rx")
     if capture_path is not None:
-        src = ensure_cf32(Path(capture_path), capture_dtype, run_dir)
+        src, offset, length = ensure_cf32(
+            Path(capture_path),
+            capture_dtype,
+            offset=capture_offset,
+            samples=capture_samples,
+        )
+        source_io: dict[str, ParamValue] = {"path": str(src)}
+        if offset:
+            source_io["offset"] = offset
+        if length:
+            source_io["length"] = length
         result = engine_run_rx(
             modem,
             stage_registry(),
             sample_rate=sample_rate,
             start=_start_descriptor("c", None),
             workdir=run_dir,
-            source_io={"path": str(src)},
+            source_io=source_io,
             timeout=timeout,
         )
     else:
@@ -208,7 +238,12 @@ def run_rx_tool(
             input_stream=_input_stream(Path(cast(str, input_path)), input_item_type),
             timeout=timeout,
         )
-    payload: dict[str, object] = result.model_dump(mode="json")
+    payload: dict[str, Any] = result.model_dump(mode="json")
+    _cap_list(payload, "windows")
+    _cap_list(payload, "marks")
+    for diag in payload.get("diagnostics", []):
+        if isinstance(diag, dict):
+            _cap_list(diag, "marks")
     payload["stream"] = _stream_summary(result)
     return payload
 

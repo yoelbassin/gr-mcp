@@ -59,19 +59,52 @@ def test_page_count_is_clamped(tmp_path: Path) -> None:
     assert page["count"] == 65536
 
 
-def test_ensure_cf32_converts_ci16(tmp_path: Path) -> None:
+def test_ensure_cf32_converts_ci16(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("MARCONI_WORKSPACE", str(tmp_path))
     src = tmp_path / "cap.iq"
     np.array([32767, 0, -32768, 16384], np.int16).tofile(src)
-    out = ensure_cf32(src, "ci16", tmp_path / "runs")
+    out, offset, length = ensure_cf32(src, "ci16")
+    assert (offset, length) == (0, 0)
     x = np.fromfile(out, np.complex64)
     assert x.size == 2
     assert abs(x[0].real - 1.0) < 1e-3
     assert abs(x[1].imag - 0.5) < 1e-3
 
 
+def test_ensure_cf32_conversion_is_cached_per_capture(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # iterating specs against one capture must not write a fresh copy per run
+    monkeypatch.setenv("MARCONI_WORKSPACE", str(tmp_path))
+    src = tmp_path / "cap.iq"
+    np.arange(8, dtype=np.int16).tofile(src)
+    first, _, _ = ensure_cf32(src, "ci16")
+    stamp = first.stat().st_mtime_ns
+    again, _, _ = ensure_cf32(src, "ci16")
+    assert again == first
+    assert again.stat().st_mtime_ns == stamp
+
+
+def test_ensure_cf32_converts_only_the_requested_slice(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("MARCONI_WORKSPACE", str(tmp_path))
+    src = tmp_path / "cap.iq"
+    np.array([100, 200, 300, 400, 500, 600, 700, 800], np.int16).tofile(src)
+    out, offset, length = ensure_cf32(src, "ci16", offset=1, samples=2)
+    assert (offset, length) == (0, 0)
+    x = np.fromfile(out, np.complex64)
+    assert x.size == 2
+    assert abs(x[0].real - 300 / 32768.0) < 1e-6
+    assert abs(x[1].imag - 600 / 32768.0) < 1e-6
+
+
 def test_ensure_cf32_passthrough_and_unknown(tmp_path: Path) -> None:
     src = tmp_path / "cap.cf32"
     np.zeros(2, np.complex64).tofile(src)
-    assert ensure_cf32(src, "cf32", tmp_path) == src
+    # cf32 passes through with the slice delegated to the GR file source
+    assert ensure_cf32(src, "cf32", offset=5, samples=7) == (src, 5, 7)
     with pytest.raises(ValueError, match="cu8"):
-        ensure_cf32(src, "wat", tmp_path)
+        ensure_cf32(src, "wat")

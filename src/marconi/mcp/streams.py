@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import hashlib
+import os
 from pathlib import Path
 
 import numpy as np
+
+from marconi.mcp.workspace import conversion_cache_dir
 
 _MAX_INLINE_BITS = 1_048_576
 _MAX_PAGE_ITEMS = 65536
@@ -70,24 +74,48 @@ def render_page(
     return page
 
 
-def ensure_cf32(src: Path, dtype: str, dest_dir: Path) -> Path:
+def ensure_cf32(
+    src: Path, dtype: str, *, offset: int = 0, samples: int = 0
+) -> tuple[Path, int, int]:
+    """Resolve a capture to (cf32 path, source offset items, source length
+    items). cf32 passes through untouched - the GR file source does the
+    slicing while streaming. Raw integer formats convert only the requested
+    slice, into a content-keyed cache shared across runs: iterating specs
+    against one capture must not write a fresh multi-GB copy per run."""
     if dtype == "cf32":
-        return src
+        return src, offset, samples
     if dtype not in _RAW_SCALES:
         raise ValueError(
             f"capture_dtype must be one of {sorted(('cf32', *_RAW_SCALES))}"
         )
+    st = src.stat()
+    key = f"{src.resolve()}|{st.st_size}|{st.st_mtime_ns}|{dtype}|{offset}|{samples}"
+    dest = conversion_cache_dir() / (
+        hashlib.sha1(key.encode()).hexdigest()[:24] + ".cf32"
+    )
+    if dest.is_file():
+        return dest, 0, 0
     raw_dtype, scale, bias = _RAW_SCALES[dtype]
-    dest_dir.mkdir(parents=True, exist_ok=True)
-    dest = dest_dir / (src.stem + ".cf32")
-    with src.open("rb") as fin, dest.open("wb") as fout:
+    raw_size = np.dtype(raw_dtype).itemsize
+    tmp = dest.with_name(f"{dest.name}.tmp{os.getpid()}")
+    remaining = samples * 2 if samples > 0 else None
+    with src.open("rb") as fin, tmp.open("wb") as fout:
+        fin.seek(offset * 2 * raw_size)
         while True:
-            block: np.ndarray = np.fromfile(
-                fin, dtype=raw_dtype, count=_CHUNK_ITEMS * 2
+            want = (
+                _CHUNK_ITEMS * 2
+                if remaining is None
+                else min(_CHUNK_ITEMS * 2, remaining)
             )
+            if want == 0:
+                break
+            block: np.ndarray = np.fromfile(fin, dtype=raw_dtype, count=want)
             if block.size == 0:
                 break
+            if remaining is not None:
+                remaining -= int(block.size)
             pairs = block[: block.size - (block.size % 2)].astype(np.float32)
             pairs = (pairs - bias) / scale
             (pairs[0::2] + 1j * pairs[1::2]).astype(np.complex64).tofile(fout)
-    return dest
+    os.replace(tmp, dest)
+    return dest, 0, 0
