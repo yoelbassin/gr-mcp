@@ -13,6 +13,12 @@ _MAX_INLINE_BITS = 1_048_576
 _MAX_PAGE_ITEMS = 65536
 _CHUNK_ITEMS = 1 << 20
 
+_STATS_SAMPLE_ITEMS = 65536
+_STATS_SAMPLE_CHUNKS = 16
+_STATS_MAX_CLUSTERS = 16
+_STATS_MAX_BINS = 200
+_STATS_KMEANS_ITERS = 100
+
 # "l" (int64) is a paging-only type for run sidecars (windows/marks offsets),
 # never an engine wire type
 _SUFFIX_TYPES = {".u8": "b", ".i16": "s", ".f32": "f", ".i64": "l"}
@@ -151,3 +157,91 @@ def ensure_cf32(
                 pass
             raise
     return dest, 0, 0
+
+
+def _sample_stream(path: Path, dtype: np.dtype) -> tuple[np.ndarray, int, bool]:
+    total = path.stat().st_size // dtype.itemsize
+    with path.open("rb") as f:
+        if total <= _STATS_SAMPLE_ITEMS:
+            return np.fromfile(f, dtype=dtype), total, False
+        per = _STATS_SAMPLE_ITEMS // _STATS_SAMPLE_CHUNKS
+        starts = np.linspace(0, total - per, _STATS_SAMPLE_CHUNKS).astype(np.int64)
+        parts = []
+        for s in starts:
+            f.seek(int(s) * dtype.itemsize)
+            parts.append(np.fromfile(f, dtype=dtype, count=per))
+    return np.concatenate(parts), total, True
+
+
+def _kmeans_1d(x: np.ndarray, k: int) -> np.ndarray:
+    lo, hi = (float(v) for v in np.percentile(x, [1.0, 99.0]))
+    if hi <= lo:
+        hi = lo + 1.0
+    xc = np.clip(x, lo, hi)
+    seeds = np.percentile(xc, np.linspace(0.0, 1.0, k + 2)[1:-1] * 100.0)
+    centers = np.unique(seeds)
+    if centers.size < k:
+        centers = np.linspace(lo, hi, k)
+    for _ in range(_STATS_KMEANS_ITERS):
+        labels = np.abs(xc[:, None] - centers[None, :]).argmin(1)
+        moved = np.array(
+            [
+                xc[labels == j].mean() if np.any(labels == j) else centers[j]
+                for j in range(k)
+            ]
+        )
+        if np.allclose(moved, centers):
+            break
+        centers = moved
+    return np.sort(centers)
+
+
+def stream_stats(
+    path: Path, *, item_type: str | None, clusters: int, bins: int
+) -> dict[str, object]:
+    _require_file(path)
+    kind = _resolve_item_type(path, item_type)
+    if not 1 <= bins <= _STATS_MAX_BINS:
+        raise ValueError(f"bins must be 1..{_STATS_MAX_BINS}, got {bins}")
+    if not 0 <= clusters <= _STATS_MAX_CLUSTERS:
+        raise ValueError(f"clusters must be 0..{_STATS_MAX_CLUSTERS}, got {clusters}")
+    dtype = np.dtype(_ITEM_DTYPES[kind])
+    sample, total, sampled = _sample_stream(path, dtype)
+    out: dict[str, object] = {
+        "item_type": kind,
+        "total_items": int(total),
+        "sampled_items": int(sample.size),
+        "sampled": sampled,
+    }
+    if kind == "b":
+        ones = float((sample & np.uint8(1)).mean()) if sample.size else 0.0
+        out["ones_fraction"] = round(ones, 6)
+        return out
+    x = sample.astype(np.float64)
+    x = x[np.isfinite(x)]
+    if x.size == 0:
+        raise ValueError("stream has no finite items to summarize")
+    out["sampled_items"] = int(x.size)
+    out.update(
+        min=round(float(x.min()), 6),
+        max=round(float(x.max()), 6),
+        mean=round(float(x.mean()), 6),
+        std=round(float(x.std()), 6),
+    )
+    lo, hi = (float(v) for v in np.percentile(x, [0.5, 99.5]))
+    if hi <= lo:
+        hi = lo + 1.0
+    edges = np.linspace(lo, hi, bins + 1)
+    counts, _ = np.histogram(np.clip(x, lo, hi), bins=edges)
+    mids = (edges[:-1] + edges[1:]) / 2.0
+    out["histogram"] = [
+        {"center": round(float(c), 6), "count": int(n)} for c, n in zip(mids, counts)
+    ]
+    if clusters >= 1:
+        centers = _kmeans_1d(x, clusters)
+        labels = np.abs(x[:, None] - centers[None, :]).argmin(1)
+        rounded = [round(float(v), 6) for v in centers]
+        out["centers"] = rounded
+        out["cluster_counts"] = [int((labels == j).sum()) for j in range(clusters)]
+        out["levels"] = list(rounded)
+    return out
