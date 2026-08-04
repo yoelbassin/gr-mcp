@@ -80,6 +80,13 @@ def _envelope(x: np.ndarray) -> EnvelopeStats:
 _SURVEY_IFREQ_BINS = 65
 _SURVEY_RATE_K = 5
 _SURVEY_CLOCK_CHUNKS = 16
+_SURVEY_RATE_POOL_K = 2 * _SURVEY_RATE_K
+_SURVEY_ACTIVE_FRACTION = 0.3
+_SURVEY_FUNDAMENTAL_POOL = 20
+_SURVEY_COMB_ORDER_CAP = 20
+_SURVEY_COMB_REL_TOL = 0.02
+_SURVEY_COMB_MAJORITY = 0.5
+_SURVEY_COMB_DAMPING = 0.05
 
 
 class InstFreqStats(BaseModel):
@@ -122,17 +129,92 @@ def _peaks_in_band(
     return fb[top], mb[top]
 
 
+def _active_mask(x: np.ndarray, fraction: float) -> np.ndarray:
+    mag = np.abs(x)
+    med = float(np.median(mag))
+    if med <= 0.0:
+        return np.ones(x.size, dtype=bool)
+    return mag > fraction * med
+
+
+def _gate(values: np.ndarray, keep: np.ndarray) -> np.ndarray:
+    gated = values[keep]
+    return gated if gated.size else values
+
+
+def _comb_harmonic_mask(
+    freqs: np.ndarray, fundamental: float, bin_hz: float
+) -> np.ndarray:
+    orders = np.round(freqs / fundamental)
+    tol = np.maximum(_SURVEY_COMB_REL_TOL * freqs, 2.0 * bin_hz)
+    in_range = (orders >= 2) & (orders <= _SURVEY_COMB_ORDER_CAP)
+    return in_range & (np.abs(freqs - orders * fundamental) < tol)
+
+
+def _fundamental_below(
+    freqs: np.ndarray, mag: np.ndarray, lo: float, targets: np.ndarray, bin_hz: float
+) -> float | None:
+    # A non-symbol periodicity (TDMA/burst repetition, capture-chain ripple)
+    # is sought only below the caller's own symbol-rate floor, so it can
+    # never explain away the true rate as its own comb's fundamental. It
+    # must explain a MAJORITY of the actual in-band candidates being ranked —
+    # scoring against a wide, low-frequency-heavy side pool instead lets a
+    # small candidate "explain" many unrelated noise peaks by sheer grid
+    # density (many cheap low-order slots) and shadow a real, isolated rate.
+    floor = 1.5 * bin_hz
+    if floor >= lo or targets.size == 0:
+        return None
+    candidates, _ = _peaks_in_band(freqs, mag, floor, lo, _SURVEY_FUNDAMENTAL_POOL)
+    if candidates.size == 0:
+        return None
+    required = _SURVEY_COMB_MAJORITY * targets.size
+    best_g, best_matches = None, 0
+    for g in candidates:
+        n = int(_comb_harmonic_mask(targets, float(g), bin_hz).sum())
+        if n > required and n > best_matches:
+            best_g, best_matches = float(g), n
+    return best_g
+
+
+def _damp_harmonics(
+    freqs: np.ndarray,
+    strengths: np.ndarray,
+    fundamental: float | None,
+    bin_hz: float,
+) -> np.ndarray:
+    if fundamental is None or freqs.size == 0:
+        return strengths
+    mask = _comb_harmonic_mask(freqs, fundamental, bin_hz)
+    return np.where(mask, strengths * _SURVEY_COMB_DAMPING, strengths)
+
+
 def _symbol_rate(
     x: np.ndarray, sample_rate: float, lo: float, hi: float
 ) -> SymbolRateStats:
     ya = np.abs(np.diff(np.abs(x)))
     dphi = np.angle(x[1:] * np.conj(x[:-1]))
-    yf = np.abs(np.diff(dphi))
+    yf_full = np.abs(np.diff(dphi))
+
+    # Only the frequency clock is restricted to the active (above-median
+    # magnitude) span: near-zero-amplitude instants make angle() noisy and
+    # inject a burst on/off comb the amplitude clock doesn't share. An
+    # amplitude-modulated signal (OOK/ASK) carries its own clock in exactly
+    # the envelope edges this would drop, so ya is left untouched.
+    active = _active_mask(x, _SURVEY_ACTIVE_FRACTION)
+    active_pairs = active[1:] & active[:-1]
+    yf = _gate(yf_full, active_pairs[1:] & active_pairs[:-1])
+
     fa, ma = _clock_spectrum(ya, sample_rate, _SURVEY_CLOCK_CHUNKS)
     fg, mg = _clock_spectrum(yf, sample_rate, _SURVEY_CLOCK_CHUNKS)
     norm = max(float(ma.max(initial=0.0)), float(mg.max(initial=0.0)), 1e-20)
-    ca, sa = _peaks_in_band(fa, ma, lo, hi, _SURVEY_RATE_K)
-    cg, sg = _peaks_in_band(fg, mg, lo, hi, _SURVEY_RATE_K)
+    ca, sa = _peaks_in_band(fa, ma, lo, hi, _SURVEY_RATE_POOL_K)
+    cg, sg = _peaks_in_band(fg, mg, lo, hi, _SURVEY_RATE_POOL_K)
+
+    dfa = fa[1] - fa[0] if fa.size > 1 else 1.0
+    dfg = fg[1] - fg[0] if fg.size > 1 else 1.0
+    sa = _damp_harmonics(ca, sa, _fundamental_below(fa, ma, lo, ca, dfa), dfa)
+    sg = _damp_harmonics(cg, sg, _fundamental_below(fg, mg, lo, cg, dfg), dfg)
+
     cand = np.concatenate([ca, cg])
     strg = np.concatenate([sa, sg]) / norm
     tol = max((hi - lo) * 0.01, sample_rate / max(x.size, 1))
@@ -152,6 +234,10 @@ def _symbol_rate(
 
 
 def _inst_freq(x: np.ndarray, sample_rate: float) -> InstFreqStats:
+    # A fixed LO-leakage/DC offset is negligible against an active carrier
+    # but dominates during near-zero-amplitude (idle/TDMA-gap) instants,
+    # piling the angle() estimate up at 0 Hz and burying the real tones.
+    x = x - x.mean()
     f = np.angle(x[1:] * np.conj(x[:-1])) / (2 * np.pi) * sample_rate
     lo, hi = (float(v) for v in np.percentile(f, [0.5, 99.5]))
     if hi <= lo:

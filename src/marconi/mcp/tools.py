@@ -375,9 +375,14 @@ def survey(
     bandwidth, peak — read spectral asymmetry off this yourself), "envelope"
     (constant-envelope ratio + kurtosis — you decide FSK vs PSK vs QAM),
     "symbol_rate" (cyclostationary rate candidates_hz ranked by strengths that are
-    RELATIVE — each normalized to the spectrum's own peak, so strengths[0] is ~1.0
-    even for pure noise: strengths rank the candidates, they are not a
-    signal-present score. Treat candidates as ranked hypotheses, expect harmonics
+    RELATIVE — each normalized to the spectrum's own peak, so even pure noise
+    produces a top strength near 1.0: strengths rank the candidates, they are
+    not a signal-present score. A candidate that looks like a low-order
+    harmonic of some other, weaker-frequency periodicity (TDMA/burst
+    repetition, a capture-chain artifact) is down-weighted, so strengths[0]
+    is not always the largest raw line and can read well under 1.0 even for a
+    confidently-detected signal; the true rate's own harmonics are never
+    touched this way. Treat candidates as ranked hypotheses, expect harmonics
     of the true rate among them, and note the estimate is least reliable for
     amplitude-null signals such as OOK/ASK with a carrier offset; narrow with
     min_symbol_rate/max_symbol_rate), "inst_freq" (instantaneous-frequency
