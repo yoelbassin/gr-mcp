@@ -37,6 +37,7 @@ def make_cp_symbol_sync(
             self.diagnostics: dict[str, int] = {
                 "locks": 0,
                 "lock_ratio_best_permille": 0,
+                "lock_min_permille": int(lock_min_ratio * 1000),
             }
             self._out = OutQueue(np.complex64)
             self._buf = np.empty(0, dtype=np.complex64)

@@ -55,9 +55,11 @@ class Stage(ABC, Generic[B, S]):
     # unconditionally by geometry): its found-window count is signal evidence.
     sync_search: bool = False
 
-    # A decoder that can reject a window outright as uncorrectable (vs
-    # passing every window through): its kept-window ratio is signal evidence.
-    validates_windows: bool = False
+    # A decoder that checks every codeword against its code structure and
+    # tallies how many passed (words_valid/words_total in its census row): the
+    # valid fraction measured against chance is signal evidence. Output is
+    # still passed through unchanged - validation counts, it never drops.
+    validates_words: bool = False
 
     # Seam invariant (issue 06): the wire item_type / decision-carrier a stage
     # accepts on input. The phy compiler checks them against the upstream

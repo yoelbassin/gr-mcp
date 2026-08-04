@@ -32,8 +32,9 @@ def verdict_from(evidence: Sequence[QualityEvidence]) -> tuple[Verdict, str]:
     negatives = [e for e in evidence if e.assessment == "negative"]
     if not evidence:
         return "uncertain", (
-            "path produces no checkable evidence (no sync search, no soft "
-            "stream, no validating decoder); bits out does not mean signal in"
+            "path produces no checkable evidence (no sync matches beyond "
+            "chance, no soft stream, no validating decoder); bits out does "
+            "not mean signal in"
         )
     if positives and negatives:
         names = ", ".join(sorted({e.metric for e in negatives}))
@@ -45,9 +46,22 @@ def verdict_from(evidence: Sequence[QualityEvidence]) -> tuple[Verdict, str]:
     return "decoded", f"positive evidence: {names}"
 
 
-_SURVIVAL_POSITIVE = 0.5
-_SURVIVAL_NEGATIVE = 0.1
-_LOCK_POSITIVE_PERMILLE = 500
+# A sync count is only evidence once it clears what pure chance would find on
+# random bits: expected chance matches plus a 5-sigma Poisson margin. Short or
+# error-tolerant sync words raise the bar on their own; a 32-bit sync keeps
+# expecting ~0 so a single hit still counts.
+_SYNC_CHANCE_SIGMA = 5.0
+
+_WORD_VALIDITY_POSITIVE = 0.5
+_WORD_VALIDITY_NEGATIVE = 0.1
+# A code whose chance-valid rate exceeds this cannot separate signal from
+# noise (a perfect code validates EVERY word), so it contributes no evidence.
+_WORD_CHANCE_MAX = 0.125
+
+# Fallback when a lock diagnostic arrives without its block's configured
+# threshold; matches cp_symbol_sync's calibrated default (noise ~1300-1600
+# permille, real lock >= 2000).
+_LOCK_MIN_FALLBACK_PERMILLE = 2000
 
 
 def sync_evidence(
@@ -58,13 +72,22 @@ def sync_evidence(
         stage = registry.get(row.kind)
         if stage is None or not stage.sync_search or row.windows_out is None:
             continue
-        found = row.windows_out > 0
+        expected = row.chance_windows if row.chance_windows is not None else 0.0
+        floor = expected + _SYNC_CHANCE_SIGMA * float(np.sqrt(expected))
+        if row.windows_out == 0:
+            assessment: Assessment = "negative"
+        elif row.windows_out > floor:
+            assessment = "positive"
+        else:
+            # found something, but no more than random bits would match:
+            # indistinguishable from chance, so it proves nothing either way
+            continue
         out.append(
             QualityEvidence(
                 source=row.block,
                 metric="sync_matches",
                 value=float(row.windows_out),
-                assessment="positive" if found else "negative",
+                assessment=assessment,
             )
         )
     return out
@@ -76,23 +99,24 @@ def survival_evidence(
     out: list[QualityEvidence] = []
     for row in census:
         stage = registry.get(row.kind)
-        if stage is None or not stage.validates_windows:
+        if stage is None or not stage.validates_words:
             continue
-        if row.windows_in is None or row.windows_out is None:
+        if not row.words_total or row.words_valid is None:
             continue
-        if row.windows_in <= 0 or row.windows_out >= row.windows_in:
+        chance = row.chance_word_rate
+        if chance is None or chance > _WORD_CHANCE_MAX:
             continue
-        ratio = row.windows_out / row.windows_in
-        if ratio >= _SURVIVAL_POSITIVE:
+        ratio = row.words_valid / row.words_total
+        if ratio >= _WORD_VALIDITY_POSITIVE:
             assessment: Assessment = "positive"
-        elif ratio <= _SURVIVAL_NEGATIVE:
+        elif ratio <= max(_WORD_VALIDITY_NEGATIVE, 2.0 * chance):
             assessment = "negative"
         else:
             continue
         out.append(
             QualityEvidence(
                 source=row.block,
-                metric="frame_survival",
+                metric="word_validity",
                 value=ratio,
                 assessment=assessment,
             )
@@ -114,19 +138,24 @@ def marks_evidence(marks: Sequence[int]) -> list[QualityEvidence]:
 
 
 def lock_evidence(diagnostics: Sequence[Diagnostic]) -> list[QualityEvidence]:
+    floors = {
+        d.block: d.count
+        for d in diagnostics
+        if d.key == "lock_min_permille" and d.count is not None
+    }
     out: list[QualityEvidence] = []
     for d in diagnostics:
         if d.key != "lock_ratio_best_permille" or d.count is None:
             continue
-        if d.count >= _LOCK_POSITIVE_PERMILLE:
-            out.append(
-                QualityEvidence(
-                    source=d.block,
-                    metric="ofdm_lock_ratio",
-                    value=d.count / 1000.0,
-                    assessment="positive",
-                )
+        floor = floors.get(d.block, _LOCK_MIN_FALLBACK_PERMILLE)
+        out.append(
+            QualityEvidence(
+                source=d.block,
+                metric="ofdm_lock_ratio",
+                value=d.count / 1000.0,
+                assessment="positive" if d.count >= floor else "negative",
             )
+        )
     return out
 
 

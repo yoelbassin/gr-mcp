@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from collections.abc import Callable
 from dataclasses import replace
 from typing import Literal
@@ -11,8 +12,27 @@ try:  # creedsolo is reedsolo's Cython twin: identical API, 10-50x faster RS
 except ImportError:  # pure-Python fallback, always installed
     import reedsolo as _rs
 
-from marconi.engine.coding.carrier import CodingCarrier, Window
+from marconi.engine.coding.carrier import CodingCarrier, StepStats, Window
 from marconi.engine.coding.primitives import can_correct, syndrome_table
+
+
+def _chance_valid_rate(n: int, redundancy: int, t: int, q: int) -> float:
+    """Probability that a uniformly random q-ary word of length n lands within
+    distance t of a codeword (sphere volume over the redundancy space), in log
+    space so huge codes cannot overflow. Doubles as the per-position chance of
+    matching an n-symbol pattern within t errors (redundancy = n)."""
+    log_q = math.log(q)
+    total = 0.0
+    for i in range(t + 1):
+        log_term = (
+            math.lgamma(n + 1)
+            - math.lgamma(i + 1)
+            - math.lgamma(n - i + 1)
+            + i * math.log(q - 1)
+            - redundancy * log_q
+        )
+        total += math.exp(min(log_term, 0.0))
+    return min(total, 1.0)
 
 
 def _bitorder(bit_order: str) -> Literal["little", "big"]:
@@ -50,10 +70,16 @@ def sync_word_rx(c: CodingCarrier, *, sync: str, max_errors: int = 0) -> CodingC
     m = pat.size
     windows: list[Window] = []
     if m == 0 or bits.size < m:
-        return CodingCarrier(bits=bits, windows=windows, marks=c.marks)
+        return CodingCarrier(
+            bits=bits,
+            windows=windows,
+            marks=c.marks,
+            stats=StepStats(chance_windows=0.0),
+        )
     # one O(n) mismatch accumulator per pattern bit, never an (n, m) array:
     # at the bits-layer budget an n x m compare is tens of GiB
     size = bits.size - m + 1
+    chance = float(size) * _chance_valid_rate(m, m, max_errors, 2)
     counts = np.zeros(size, np.min_scalar_type(m))
     for j in range(m):
         counts += bits[j : j + size] != pat[j]
@@ -65,7 +91,12 @@ def sync_word_rx(c: CodingCarrier, *, sync: str, max_errors: int = 0) -> CodingC
         start = int(i) + m
         windows.append(Window(start=start, cursor=start))
         reach = int(i) + m
-    return CodingCarrier(bits=bits, windows=windows, marks=c.marks)
+    return CodingCarrier(
+        bits=bits,
+        windows=windows,
+        marks=c.marks,
+        stats=StepStats(chance_windows=chance),
+    )
 
 
 def mark_frame_rx(c: CodingCarrier, *, offset_bits: int = 0) -> CodingCarrier:
@@ -218,15 +249,25 @@ def _syndromes(
     return s_int
 
 
+def _effective_t(
+    n_parity: int, data_bits: int, correct_single: bool | None, correct: int | None
+) -> int:
+    if correct is not None:
+        return correct
+    do_single = (
+        can_correct(n_parity, data_bits) if correct_single is None else correct_single
+    )
+    return 1 if do_single else 0
+
+
 def _block_decode(
     bits: np.ndarray,
     code_bits: int,
     data_bits: int,
     parity_masks: list[int],
-    correct_single: bool | None,
-    correct: int | None,
+    t: int,
     emit: str,
-) -> np.ndarray:
+) -> tuple[np.ndarray, tuple[int, int]]:
     # Codeword basis is LSB-first: stream bit j of a stride is codeword bit j,
     # so parity_masks and the emitted data bits are LSB-first too. The CSS
     # explicit decoder assembles the same block_fec_decode input MSB-first
@@ -234,50 +275,47 @@ def _block_decode(
     # must reconcile the basis (supply masks LSB-first, or reverse each
     # stride).
     n_parity = code_bits - data_bits
-    if correct is not None:
-        t = correct
-    else:
-        do_correct_single = (
-            can_correct(n_parity, data_bits)
-            if correct_single is None
-            else correct_single
-        )
-        t = 1 if do_correct_single else 0
     n_words = bits.size // code_bits
     words = bits[: n_words * code_bits].reshape(n_words, code_bits).copy()
-    do_correct = t == 1
-    if do_correct and n_words and parity_masks:
-        dtype = _sym_dtype(n_parity)
-        rows = [[(m >> b) & 1 for b in range(data_bits)] for m in parity_masks]
+    ok = np.zeros(n_words, bool)
+    if n_words and parity_masks:
         s_int = _syndromes(words, parity_masks, code_bits, data_bits)
-        # a column's syndrome signature, data columns then the parity identity;
-        # first ascending match flips, matching the scalar column scan
-        weights = np.left_shift(1, np.arange(n_parity - 1, -1, -1, dtype=dtype))
-        col_sig = np.concatenate([np.asarray(rows, dtype).T @ weights, weights])
-        bad = np.flatnonzero(s_int)
-        if bad.size:
-            match = s_int[bad, None] == col_sig[None, :]
-            col_idx = match.argmax(axis=1)
-            fixable = match.any(axis=1)
-            words[bad[fixable], col_idx[fixable]] ^= 1
-    if t >= 2 and n_words:
-        lut = syndrome_table(parity_masks, code_bits, data_bits, t)
-        keys = np.fromiter(lut.keys(), np.int64, len(lut))
-        flips = np.fromiter(lut.values(), np.int64, len(lut))
-        order_ = np.argsort(keys)
-        keys, flips = keys[order_], flips[order_]
-        s_int = _syndromes(words, parity_masks, code_bits, data_bits).astype(np.int64)
-        bad = np.flatnonzero(s_int)
-        if bad.size:
-            pos = np.searchsorted(keys, s_int[bad])
-            pos = np.clip(pos, 0, keys.size - 1)
-            hit = keys[pos] == s_int[bad]
-            flip = flips[pos[hit]]
-            rows = bad[hit]
-            flip_bits = ((flip[:, None] >> np.arange(code_bits)) & 1).astype(np.uint8)
-            words[rows] ^= flip_bits
+        ok = s_int == 0
+        if t == 1:
+            dtype = _sym_dtype(n_parity)
+            rows = [[(m >> b) & 1 for b in range(data_bits)] for m in parity_masks]
+            # a column's syndrome signature, data columns then the parity
+            # identity; first ascending match flips, matching the scalar scan
+            weights = np.left_shift(1, np.arange(n_parity - 1, -1, -1, dtype=dtype))
+            col_sig = np.concatenate([np.asarray(rows, dtype).T @ weights, weights])
+            bad = np.flatnonzero(s_int)
+            if bad.size:
+                match = s_int[bad, None] == col_sig[None, :]
+                col_idx = match.argmax(axis=1)
+                fixable = match.any(axis=1)
+                words[bad[fixable], col_idx[fixable]] ^= 1
+                ok[bad[fixable]] = True
+        if t >= 2:
+            lut = syndrome_table(parity_masks, code_bits, data_bits, t)
+            keys = np.fromiter(lut.keys(), np.int64, len(lut))
+            flips = np.fromiter(lut.values(), np.int64, len(lut))
+            order_ = np.argsort(keys)
+            keys, flips = keys[order_], flips[order_]
+            s64 = s_int.astype(np.int64)
+            bad = np.flatnonzero(s64)
+            if bad.size:
+                pos = np.searchsorted(keys, s64[bad])
+                pos = np.clip(pos, 0, keys.size - 1)
+                hit = keys[pos] == s64[bad]
+                flip = flips[pos[hit]]
+                fixed = bad[hit]
+                flip_bits = ((flip[:, None] >> np.arange(code_bits)) & 1).astype(
+                    np.uint8
+                )
+                words[fixed] ^= flip_bits
+                ok[fixed] = True
     out = words if emit == "codeword" else words[:, :data_bits]
-    return out.reshape(-1)
+    return out.reshape(-1), (int(ok.sum()), n_words)
 
 
 def block_code_rx(
@@ -290,19 +328,38 @@ def block_code_rx(
     correct: int | None = None,
     emit: str = "data",
 ) -> CodingCarrier:
+    t = _effective_t(code_bits - data_bits, data_bits, correct_single, correct)
     return _decode_scoped(
         c,
-        lambda bits: _block_decode(
-            bits, code_bits, data_bits, parity_masks, correct_single, correct, emit
-        ),
+        lambda bits: _block_decode(bits, code_bits, data_bits, parity_masks, t, emit),
+        chance_word_rate=_chance_valid_rate(code_bits, code_bits - data_bits, t, 2),
+    )
+
+
+def _word_stats(
+    tallies: list[tuple[int, int]], chance_word_rate: float | None
+) -> StepStats | None:
+    if not tallies:
+        return None
+    return StepStats(
+        words_valid=sum(v for v, _ in tallies),
+        words_total=sum(n for _, n in tallies),
+        chance_word_rate=chance_word_rate,
     )
 
 
 def _decode_scoped(
-    c: CodingCarrier, decode: Callable[[np.ndarray], np.ndarray]
+    c: CodingCarrier,
+    decode: Callable[[np.ndarray], tuple[np.ndarray, tuple[int, int] | None]],
+    *,
+    chance_word_rate: float | None = None,
 ) -> CodingCarrier:
+    tallies: list[tuple[int, int]] = []
     if c.windows is None:
-        return CodingCarrier(bits=decode(np.asarray(c.bits, np.uint8)))
+        out, tally = decode(np.asarray(c.bits, np.uint8))
+        if tally is not None:
+            tallies.append(tally)
+        return CodingCarrier(bits=out, stats=_word_stats(tallies, chance_word_rate))
     bits = np.asarray(c.bits, np.uint8)
     cursors = [w.cursor for w in c.windows]
     bounds = cursors[1:] + [int(bits.size)]
@@ -310,12 +367,16 @@ def _decode_scoped(
     windows: list[Window] = []
     pos = 0
     for w, hi in zip(c.windows, bounds):
-        dec = decode(bits[w.cursor : hi])
+        dec, tally = decode(bits[w.cursor : hi])
+        if tally is not None:
+            tallies.append(tally)
         windows.append(Window(start=pos, cursor=pos))
         pieces.append(dec)
         pos += int(dec.size)
     joined = np.concatenate(pieces) if pieces else np.zeros(0, np.uint8)
-    return CodingCarrier(bits=joined, windows=windows)
+    return CodingCarrier(
+        bits=joined, windows=windows, stats=_word_stats(tallies, chance_word_rate)
+    )
 
 
 def _rs_decode_words(
@@ -325,19 +386,22 @@ def _rs_decode_words(
     n: int,
     k: int,
     emit: str,
-) -> np.ndarray:
+) -> tuple[np.ndarray, tuple[int, int]]:
     syms = _unpack_symbols(bits, symbol_bits)
     out: list[int] = []
-    for w in range(syms.size // n):
+    total = syms.size // n
+    valid = 0
+    for w in range(total):
         word = [int(s) for s in syms[w * n : (w + 1) * n]]
         try:
             data, full, _ = codec.decode(word)
             out.extend(full if emit == "codeword" else data)
+            valid += 1
         except _rs.ReedSolomonError:
             # uncorrectable is detectable, never repaired by guessing: emit the
             # received word unchanged so downstream framing keeps its alignment
             out.extend(word if emit == "codeword" else word[:k])
-    return _pack_symbols(np.asarray(out, np.int64), symbol_bits)
+    return _pack_symbols(np.asarray(out, np.int64), symbol_bits), (valid, total)
 
 
 def rs_code_rx(
@@ -360,7 +424,9 @@ def rs_code_rx(
         c_exp=symbol_bits,
     )
     return _decode_scoped(
-        c, lambda bits: _rs_decode_words(bits, codec, symbol_bits, n, k, emit)
+        c,
+        lambda bits: _rs_decode_words(bits, codec, symbol_bits, n, k, emit),
+        chance_word_rate=_chance_valid_rate(n, n - k, (n - k) // 2, 1 << symbol_bits),
     )
 
 
@@ -380,7 +446,7 @@ def _permute_block(bits: np.ndarray, idx: np.ndarray, span: int) -> np.ndarray:
 def permute_rx(c: CodingCarrier, *, perm: list[int]) -> CodingCarrier:
     idx = np.asarray(perm, np.int64)
     span = _perm_span(idx)
-    return _decode_scoped(c, lambda bits: _permute_block(bits, idx, span))
+    return _decode_scoped(c, lambda bits: (_permute_block(bits, idx, span), None))
 
 
 def realign_rx(c: CodingCarrier, *, bit_offset: int) -> CodingCarrier:

@@ -21,7 +21,11 @@ register_error(BackendError, "invalid_argument")
 
 class BlockCensus(BaseModel):
     """How many items a block consumed and produced. None where the port does
-    not exist (a source has no input, a sink no output)."""
+    not exist (a source has no input, a sink no output). The chance_* and
+    words_* fields are set only by steps that measure them: chance_windows is
+    how many windows pure chance would seed on this input, words_valid/total
+    count codewords that passed validation, chance_word_rate is the
+    probability a random word passes."""
 
     block: str
     kind: str
@@ -29,6 +33,10 @@ class BlockCensus(BaseModel):
     items_out: int | None = None
     windows_in: int | None = None
     windows_out: int | None = None
+    chance_windows: float | None = None
+    words_valid: int | None = None
+    words_total: int | None = None
+    chance_word_rate: float | None = None
 
 
 class Diagnostic(BaseModel):

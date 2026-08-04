@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 
@@ -37,6 +37,7 @@ def _windows(c: CodingCarrier) -> int | None:
 
 
 def _row(step: CodingStep, before: CodingCarrier, after: CodingCarrier) -> BlockCensus:
+    stats = after.stats
     return BlockCensus(
         block=step.name,
         kind=step.kind,
@@ -44,6 +45,10 @@ def _row(step: CodingStep, before: CodingCarrier, after: CodingCarrier) -> Block
         items_out=_items(after),
         windows_in=_windows(before),
         windows_out=_windows(after),
+        chance_windows=stats.chance_windows if stats else None,
+        words_valid=stats.words_valid if stats else None,
+        words_total=stats.words_total if stats else None,
+        chance_word_rate=stats.chance_word_rate if stats else None,
     )
 
 
@@ -53,8 +58,11 @@ def run_coding(
     census: list[BlockCensus] | None = None,
 ) -> CodingCarrier:
     for step in program.steps:
-        after = step.call(carrier)
+        # stats describe the step that computed them; ops built on replace()
+        # would otherwise carry the previous step's stats into their own row
+        src = replace(carrier, stats=None) if carrier.stats is not None else carrier
+        after = step.call(src)
         if census is not None:
-            census.append(_row(step, carrier, after))
+            census.append(_row(step, src, after))
         carrier = after
     return carrier
