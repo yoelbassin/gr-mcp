@@ -111,6 +111,50 @@ def test_qam_demod_ser0_under_impairments(order: int, tmp_path: Path) -> None:
     assert resolved_ser_hard(rx_idx, tsi, points, settle=settle) == 0.0
 
 
+def test_run_rx_wraps_symbol_index_final_as_symbolstream(tmp_path: Path) -> None:
+    # a demod-only path ends at SYMBOLS with uint8 indices on the wire; run_rx
+    # must hand back a Symbolstream, not a "Bitstream" of 4-bit values
+    from marconi.engine.run import run_rx
+    from marconi.engine.stages.registry import stage_registry
+
+    ensure_worker_warm()
+    be = GnuRadioBackend()
+    order = 16
+    n_bits, cfo_frac, snr_db, settle = _CFG[order]
+    points, k = _const_points(order)
+    bits = np.random.default_rng(order).integers(0, 2, n_bits).astype(np.uint8)
+    bp = write_bits(tmp_path / "in.bits", bits)
+    clean, imp = tmp_path / "c.iq", tmp_path / "i.iq"
+    assert be.run_pipeline(_compile(_full(order), "tx", IQ, bp, clean)).status == "ok"
+    channel(
+        clean,
+        imp,
+        snr_db=snr_db,
+        cfo_hz=cfo_frac * _SR,
+        sto=1.5,
+        sfo_ppm=500.0,
+        sample_rate=_SR,
+        seed=order,
+    )
+    workdir = tmp_path / "rx"
+    workdir.mkdir()
+    res = run_rx(
+        _demod(order),
+        stage_registry(),
+        sample_rate=_SR,
+        start=IQ,
+        workdir=workdir,
+        source_io={"path": str(imp)},
+    )
+    assert res.status == "ok", res
+    assert res.bitstream is None
+    assert res.symbolstream is not None and res.symbolstream.item_type == "s"
+    rx_idx = np.fromfile(res.symbolstream.path, dtype=np.int16)
+    assert res.symbolstream.num_symbols == rx_idx.size
+    tsi = tx_sym_indices(bits, k)
+    assert resolved_ser_hard(rx_idx, tsi, points, settle=settle) == 0.0
+
+
 @pytest.mark.parametrize("order", [16, 64])
 def test_qam_demap_clean_identity(order: int, tmp_path: Path) -> None:
     # BITS -> symbol-index bytes -> BITS through the pure pack/unpack, no channel.

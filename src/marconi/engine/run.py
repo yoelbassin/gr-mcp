@@ -84,6 +84,25 @@ def _wrap_gr_only(
     path = seam.with_suffix(_FINAL_SUFFIX[cp.final.item_type])
     if path != seam:
         seam.replace(path)
+    if cp.final.item_type == "b" and cp.final.level is Level.SYMBOLS:
+        # hard symbol indices on the u8 wire (a qam-class demod final): a
+        # Bitstream label would invite bitwise parsing of symbol indices
+        symbols = read_bits(path).astype(np.int16)
+        sym_path = path.with_suffix(".i16")
+        write_symbols(sym_path, symbols)
+        path.unlink()
+        return PipelineResult(
+            status="ok",
+            symbolstream=Symbolstream(
+                path=sym_path,
+                num_symbols=int(symbols.size),
+                item_type="s",
+                marks=marks,
+            ),
+            marks=marks,
+            census=census,
+            diagnostics=diagnostics,
+        )
     if cp.final.item_type == "b":
         bitstream = Bitstream(path=path, num_bits=int(read_bits(path).size))
         return PipelineResult(

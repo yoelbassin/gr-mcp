@@ -33,7 +33,7 @@ def test_render_llr_and_symbol_pages(tmp_path: Path) -> None:
     np.array([-1.5, 2.25], np.float32).tofile(f)
     s = tmp_path / "out.i16"
     np.array([3, -1], np.int16).tofile(s)
-    assert render_page(f, offset=0, count=10, item_type=None)["llrs"] == [-1.5, 2.25]
+    assert render_page(f, offset=0, count=10, item_type=None)["values"] == [-1.5, 2.25]
     assert render_page(s, offset=0, count=10, item_type=None)["symbols"] == [3, -1]
 
 

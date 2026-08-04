@@ -22,7 +22,11 @@ ENVELOPE: dict[str, object] = {
     "item_types": {
         "c": "complex64",
         "s": "int16 hard symbol index",
-        "f": "float32 soft value; engine convention: bit 1 = NEGATIVE LLR",
+        "f": (
+            "float32 soft value; sign is per level: at bits it is an LLR "
+            "where bit 1 = NEGATIVE, at symbols it is a demod output where "
+            "POSITIVE slices to bit 1"
+        ),
         "b": "uint8 hard bit, one byte per bit",
     },
     "direction": (

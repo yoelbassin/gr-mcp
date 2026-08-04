@@ -170,12 +170,16 @@ def run_rx_tool(
 
     Pass exactly one of capture_path (raw IQ; capture_dtype one of
     cf32/ci16/ci8/cu8, converted once if not cf32) or input_path (+
-    input_item_type b/s/f; f is float32 soft values where bit 1 = NEGATIVE).
-    The result carries status, a "stream" summary {path, item_type, items}
-    to page with read_stream, windows/marks, per-block census, diagnostics,
-    and "quality": a conservative verdict (decoded / uncertain / no_signal)
-    with the evidence behind it. Treat only verdict "decoded" as trustworthy
-    output; "uncertain" means the evidence was absent or conflicting — read
+    input_item_type b/s/f and optionally input_level). A soft 'f' stream's
+    sign convention depends on its level: bits-level soft floats are LLRs
+    where bit 1 = NEGATIVE; symbols-level soft floats (the default level for
+    'f' input, and the output of a path ending at a demod stage) are demod
+    outputs where POSITIVE slices to bit 1. The result carries status, a
+    "stream" summary {path, item_type, items} to page with read_stream,
+    windows/marks, per-block census, diagnostics, and "quality": a
+    conservative verdict (decoded / uncertain / no_signal) with the evidence
+    behind it. Treat only verdict "decoded" as trustworthy output;
+    "uncertain" means the evidence was absent or conflicting — read
     quality.rationale."""
     if (capture_path is None) == (input_path is None):
         raise ValueError("pass exactly one of capture_path or input_path")
@@ -262,11 +266,15 @@ def read_stream(
 
     Bits (.u8) return as a '0'/'1' string — the files are unpacked and frames
     are rarely byte-aligned, so slice the string at any bit offset for your
-    framing/CRC/field work. Hard symbols (.i16) return as ints, soft values
-    (.f32) as floats (bit 1 = NEGATIVE). item_type b/s/f overrides suffix
-    inference (required for suffix-less paths). Pages are capped at 65536
-    items; use offset to walk longer streams. total_items reports the full
-    stream length."""
+    framing/CRC/field work. Hard symbols (.i16) return as ints. Soft floats
+    (.f32) return as "values", whose sign convention depends on the stream's
+    level (the final validate_modem trace row states it): bits-level soft
+    streams are LLRs where bit 1 = NEGATIVE; symbols-level soft streams (a
+    path ending at a demod stage, e.g. bare fsk) are demod outputs where
+    POSITIVE slices to bit 1. item_type b/s/f overrides suffix inference
+    (required for suffix-less paths). Pages are capped at 65536 items; use
+    offset to walk longer streams. total_items reports the full stream
+    length."""
     return render_page(Path(path), offset=offset, count=count, item_type=item_type)
 
 
