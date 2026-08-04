@@ -31,3 +31,19 @@ def test_envelope_separates_constant_from_ook() -> None:
     assert _envelope(const).const_envelope_ratio < 0.1
     assert _envelope(ook).const_envelope_ratio > _envelope(const).const_envelope_ratio
     assert _envelope(const).mean_amplitude > 0.0
+
+
+def test_envelope_kurtosis_matches_two_level_ground_truth() -> None:
+    n = 1 << 14
+    amp = np.concatenate([np.ones(n // 2), 3.0 * np.ones(n // 2)])
+    x = (amp * np.exp(2j * np.pi * 0.05 * np.arange(n))).astype(np.complex64)
+    e = _envelope(x)
+    assert abs(e.mean_amplitude - 2.0) < 0.05
+    assert abs(e.std_amplitude - 1.0) < 0.05
+    assert abs(e.amplitude_kurtosis - (-2.0)) < 0.1
+
+
+def test_envelope_zero_input_is_safe() -> None:
+    e = _envelope(np.zeros(4096, dtype=np.complex64))
+    assert e.const_envelope_ratio == 0.0
+    assert e.amplitude_kurtosis == 0.0
