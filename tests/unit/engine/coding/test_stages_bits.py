@@ -102,6 +102,22 @@ def test_sync_word_stage_declares_seeder_and_validates_hex() -> None:
         stage.step_model.model_validate({"sync": "zz"})  # not hex
 
 
+def test_bit_string_sync_seeds_at_non_byte_length() -> None:
+    # a 5-bit sync word is inexpressible as hex; the bits form covers it
+    pat = np.array([1, 0, 1, 1, 0], np.uint8)
+    stream = np.concatenate([np.zeros(3, np.uint8), pat, np.ones(6, np.uint8)])
+    c = ops_bits.sync_word_rx(CodingCarrier(bits=stream), bits="10110")
+    assert [w.cursor for w in _wins(c)] == [8]
+
+
+def test_sync_word_step_takes_exactly_one_pattern_form() -> None:
+    stage = SyncWord()
+    assert stage.step_model.model_validate({"bits": "10110"}).bits == "10110"
+    for spec in ({}, {"sync": "7e", "bits": "1"}, {"bits": "012"}):
+        with pytest.raises(Exception):
+            stage.step_model.model_validate(spec)
+
+
 def test_mark_frame_seeds_one_window_per_mark() -> None:
     out = ops_bits.mark_frame_rx(
         CodingCarrier(bits=np.zeros(20, np.uint8), marks=(0, 8)), offset_bits=0

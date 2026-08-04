@@ -62,26 +62,33 @@ def segment_rx(c: CodingCarrier, *, frame_body_len: int) -> CodingCarrier:
     return CodingCarrier(bits=c.bits, windows=windows, marks=c.marks)
 
 
-def sync_word_rx(c: CodingCarrier, *, sync: str, max_errors: int = 0) -> CodingCarrier:
+def sync_word_rx(
+    c: CodingCarrier, *, sync: str = "", bits: str = "", max_errors: int = 0
+) -> CodingCarrier:
     """Correlating window seeder: seed a window just past every position where
-    the bitstream matches ``sync`` within ``max_errors`` bit flips (a sync word
-    is detected by correlation, not equality). Matches are taken
+    the bitstream matches the pattern (``sync`` as hex, or ``bits`` as a
+    '0'/'1' string for non-byte lengths) within ``max_errors`` bit flips (a
+    sync word is detected by correlation, not equality). Matches are taken
     non-overlapping."""
-    pat = bytes_to_bits(bytes.fromhex(sync))
-    bits = np.asarray(c.bits, dtype=np.uint8)
+    pat = (
+        bytes_to_bits(bytes.fromhex(sync))
+        if sync
+        else np.asarray([int(ch) for ch in bits], np.uint8)
+    )
+    stream = np.asarray(c.bits, dtype=np.uint8)
     m = pat.size
     windows: list[Window] = []
-    if m == 0 or bits.size < m:
+    if m == 0 or stream.size < m:
         # no search ran (the stream cannot contain the pattern): no stats, so
         # the quality extractor treats it as untestable rather than negative
-        return CodingCarrier(bits=bits, windows=windows, marks=c.marks)
+        return CodingCarrier(bits=stream, windows=windows, marks=c.marks)
     # one O(n) mismatch accumulator per pattern bit, never an (n, m) array:
     # at the bits-layer budget an n x m compare is tens of GiB
-    size = bits.size - m + 1
+    size = stream.size - m + 1
     chance = float(size) * _chance_valid_rate(m, m, max_errors, 2)
     counts = np.zeros(size, np.min_scalar_type(m))
     for j in range(m):
-        counts += bits[j : j + size] != pat[j]
+        counts += stream[j : j + size] != pat[j]
     hits = np.flatnonzero(counts <= max_errors)
     reach = 0
     for i in hits:
@@ -91,7 +98,7 @@ def sync_word_rx(c: CodingCarrier, *, sync: str, max_errors: int = 0) -> CodingC
         windows.append(Window(start=start, cursor=start))
         reach = int(i) + m
     return CodingCarrier(
-        bits=bits,
+        bits=stream,
         windows=windows,
         marks=c.marks,
         stats=StepStats(chance_windows=chance),

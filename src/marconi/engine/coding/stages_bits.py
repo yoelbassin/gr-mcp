@@ -20,18 +20,30 @@ if TYPE_CHECKING:
 
 class SyncWordStep(Step):
     conv: Literal["sync_word"] = "sync_word"
-    sync: str
+    # exactly one of the two: sync = whole-byte pattern as hex; bits = a '0'/'1'
+    # string for non-byte-multiple sync words (the HARD-only QAM/CSS seams have
+    # no soft-lane workaround for those)
+    sync: str = ""
+    bits: str = ""
     max_errors: StrictInt = Field(default=0, ge=0)
 
     @model_validator(mode="after")
-    def _hex(self) -> "SyncWordStep":
-        try:
-            if not bytes.fromhex(self.sync):
-                raise ValueError
-        except ValueError:
+    def _pattern(self) -> "SyncWordStep":
+        if bool(self.sync) == bool(self.bits):
             raise PydanticCustomError(
-                "value_error", "sync must be a non-empty even-length hex string"
-            ) from None
+                "value_error", "exactly one of sync (hex) or bits ('0'/'1') must be set"
+            )
+        if self.sync:
+            try:
+                bytes.fromhex(self.sync)
+            except ValueError:
+                raise PydanticCustomError(
+                    "value_error", "sync must be an even-length hex string"
+                ) from None
+        elif set(self.bits) - {"0", "1"}:
+            raise PydanticCustomError(
+                "value_error", "bits must contain only '0' and '1'"
+            )
         return self
 
 
@@ -136,7 +148,12 @@ class SyncWord(CodingStage[SyncWordStep]):
     step_model = SyncWordStep
 
     def emit_rx(self, b: CodingBuilder, step: SyncWordStep) -> None:
-        b.add(ops_bits.sync_word_rx, sync=step.sync, max_errors=step.max_errors)
+        b.add(
+            ops_bits.sync_word_rx,
+            sync=step.sync,
+            bits=step.bits,
+            max_errors=step.max_errors,
+        )
 
 
 class MarkFrameStep(Step):

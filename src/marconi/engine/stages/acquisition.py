@@ -24,6 +24,11 @@ class PreambleSyncStep(Step):
     preamble_q: list[float]
     pad_symbols: StrictInt = 192
     threshold: float = 0.9
+    # True: the preamble is drawn from the payload constellation, so the
+    # modulus/phase-grid typo check applies. False: a freeform training
+    # sequence (CAZAC/Zadoff-Chu, mixed-amplitude) - correlation and phase
+    # recovery work the same, only the grid check is skipped.
+    constellation_preamble: bool = True
 
     @model_validator(mode="after")
     def _ok(self) -> "PreambleSyncStep":
@@ -78,7 +83,7 @@ class PreambleSync(DuplexStage[CompileContext, PreambleSyncStep]):
         )
 
     def validate_input(self, in_desc: Descriptor, step: PreambleSyncStep) -> str | None:
-        if in_desc.order is None:
+        if in_desc.order is None or not step.constellation_preamble:
             return None
         m = in_desc.order
         points = [complex(i, q) for i, q in zip(step.preamble_i, step.preamble_q)]

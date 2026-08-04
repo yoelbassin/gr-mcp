@@ -223,6 +223,24 @@ def test_zero_preamble_point_fails() -> None:
     assert "zero" in str(exc.value)
 
 
+def test_freeform_preamble_skips_grid_check() -> None:
+    # a CAZAC-class training sequence is deliberately off the data
+    # constellation; declaring it freeform keeps the order check alive on the
+    # rest of the path instead of forcing an unpinned producer
+    off: dict[str, list[float]] = {
+        "preamble_i": [0.7071, 0.5736],
+        "preamble_q": [0.7071, 0.8192],
+    }
+    path = _psk_path(4, off)
+    idx = next(i for i, s in enumerate(path) if isinstance(s, PreambleSyncStep))
+    path[idx] = PreambleSyncStep(
+        preamble_i=off["preamble_i"],
+        preamble_q=off["preamble_q"],
+        constellation_preamble=False,
+    )
+    _compile(path)
+
+
 def test_unpinned_boundary_skips_preamble_check() -> None:
     off_grid: dict[str, list[float]] = {
         "preamble_i": [0.7071, 0.5736],
