@@ -7,22 +7,19 @@ from typing import Any
 from marconi.engine.coding.builder import CodingBuilder
 from marconi.engine.coding.program import CodingProgram
 from marconi.engine.compile.compile_context import CompileContext
+from marconi.engine.compile.errors import CompileError
 from marconi.engine.compile.ir import GrPipeline
-from marconi.engine.stages.base import CodingStage, Stage, validate_path
+from marconi.engine.stages.base import (
+    CodingStage,
+    SpecValidationError,
+    Stage,
+    validate_path,
+)
 from marconi.engine.types.descriptor import Amplitude, Descriptor
 from marconi.engine.types.enums import ItemType
 from marconi.engine.types.models import Modem, ValidationIssue
 from marconi.engine.types.params import ParamValue
 from marconi.engine.types.step import Step
-from marconi.errors import register_error
-
-
-class CompileError(Exception):
-    pass
-
-
-register_error(CompileError, "invalid_argument")  # an uncompilable spec
-
 
 # item_type -> (source_kind, sink_kind). The GR wire type alone selects IO;
 # carrier is decision-hardness (a seam invariant), never a routing knob. Descriptor
@@ -200,14 +197,7 @@ def _validate(
         modem.path, registry, start.level, "modem", issues, direction=direction
     )
     if issues:
-        raise CompileError(
-            "modem path invalid:\n"
-            + "\n".join(
-                f"  {i.block_id or '<modem>'}"
-                f"{'.' + i.field if i.field else ''}: {i.message}"
-                for i in issues
-            )
-        )
+        raise SpecValidationError(issues, "modem")
 
 
 def _emit_gr_segment(

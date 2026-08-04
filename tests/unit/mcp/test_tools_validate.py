@@ -32,6 +32,19 @@ def test_unknown_conv_is_structured_error_not_exception() -> None:
     assert "warp_drive" in cast(str, errors[0]["message"])
 
 
+def test_multi_issue_spec_returns_one_error_per_issue() -> None:
+    # two independent level faults (slice starts at symbols, not iq; a second
+    # slice cannot follow the first's bits output) must arrive as an
+    # addressable list with per-issue positions, not one newline-joined blob
+    bad = {"symbol_rate": 1.0, "path": [{"conv": "slice"}, {"conv": "slice"}]}
+    out = validate_modem(bad, sample_rate=4.0)
+    assert out["valid"] is False
+    errors = cast(list[dict[str, object]], out["errors"])
+    assert len(errors) == 2
+    assert [e["at"] for e in errors] == ["slice[0]", "slice[1]"]
+    assert all(e["code"] == "invalid_argument" for e in errors)
+
+
 def test_bad_input_item_type_raises_instead_of_structured_error() -> None:
     with pytest.raises(ValueError, match="input_item_type"):
         validate_modem(_GOOD, sample_rate=4.0, input_item_type="q")

@@ -5,6 +5,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any, Generic, TypeVar
 
 from marconi.engine.coding.builder import CodingBuilder
+from marconi.engine.compile.errors import CompileError
 from marconi.engine.types.descriptor import Amplitude, Carrier, Descriptor
 from marconi.engine.types.enums import ItemType
 from marconi.engine.types.levels import Level
@@ -16,7 +17,11 @@ B = TypeVar("B")
 S = TypeVar("S", bound=Step)
 
 
-class SpecValidationError(Exception):
+class SpecValidationError(CompileError):
+    """Carries the individual issues so the MCP surface can return them as an
+    addressable list; subclasses CompileError so callers catching the general
+    compile failure keep working."""
+
     def __init__(self, issues: list[ValidationIssue], kind: str) -> None:
         self.issues = issues
         lines = [
