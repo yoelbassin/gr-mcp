@@ -109,7 +109,8 @@ def test_inst_freq_finds_four_fsk_tones() -> None:
     fs, rate, dev = 48_000.0, 2_400.0, 1_500.0
     x = _fsk(fs, rate, dev, 6000, np.array([-3.0, -1.0, 1.0, 3.0]))
     s = _inst_freq(x, fs)
-    assert 3 <= len(s.peaks_hz) <= 5
-    peaks = sorted(s.peaks_hz)
-    assert peaks[0] < -dev and peaks[-1] > dev
+    assert len(s.peaks_hz) == 4
+    expected = [-4500.0, -1500.0, 1500.0, 4500.0]
+    for got, want in zip(sorted(s.peaks_hz), expected):
+        assert abs(got - want) < 200.0, (sorted(s.peaks_hz), expected)
     assert len(s.hist_centers_hz) == len(s.hist_counts) == 65
