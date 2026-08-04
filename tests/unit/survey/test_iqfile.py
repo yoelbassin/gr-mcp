@@ -5,7 +5,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from marconi.engine.io.iqfile import (
+from marconi.survey.iqfile import (
     CaptureTooShort,
     iter_iq,
     sample_iq,

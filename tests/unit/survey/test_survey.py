@@ -2,7 +2,7 @@ from pathlib import Path
 
 import numpy as np
 
-from marconi.engine.survey import (
+from marconi.survey.measure import (
     _SURVEY_COMB_DAMPING,
     _bursts,
     _damp_harmonics,
@@ -183,8 +183,8 @@ def test_bursts_stitches_across_chunk_boundaries(  # type: ignore[no-untyped-def
     x = np.tile(slot, reps)
     p = tmp_path / "bursty.cf32"
     x.tofile(p)
-    import marconi.engine.survey as survey_mod
-    from marconi.engine.io import iqfile
+    import marconi.survey.measure as survey_mod
+    from marconi.survey import iqfile
 
     monkeypatch.setattr(
         survey_mod,

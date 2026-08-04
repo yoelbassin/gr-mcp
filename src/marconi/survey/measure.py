@@ -7,7 +7,7 @@ from pydantic import BaseModel
 from scipy.ndimage import uniform_filter1d
 from scipy.signal import find_peaks, welch
 
-from marconi.engine.io.iqfile import iter_iq, sample_iq
+from marconi.survey.iqfile import iter_iq, sample_iq
 
 _SURVEY_NPERSEG = 4096
 _MAX_INLINE = 512

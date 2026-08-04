@@ -6,8 +6,8 @@ from typing import cast
 import numpy as np
 import pytest
 
-from marconi.engine.io.iqfile import CaptureTooShort
 from marconi.mcp.tools import survey
+from marconi.survey import CaptureTooShort
 
 
 def _fsk4_cf32(

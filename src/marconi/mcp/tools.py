@@ -18,7 +18,6 @@ from marconi.engine.run import PipelineResult
 from marconi.engine.run import run_rx as engine_run_rx
 from marconi.engine.stages.base import SpecValidationError
 from marconi.engine.stages.registry import stage_registry, step_models
-from marconi.engine.survey import survey_iq
 from marconi.engine.types.descriptor import Carrier, Descriptor
 from marconi.engine.types.enums import ItemType
 from marconi.engine.types.levels import Level
@@ -36,6 +35,7 @@ from marconi.mcp.streams import (
 from marconi.mcp.streams import stream_stats as _compute_stats
 from marconi.mcp.vocab import ENVELOPE, stage_details, stage_index
 from marconi.mcp.workspace import new_run_dir
+from marconi.survey import survey_iq
 
 _START_LEVELS = {"iq": Level.IQ, "symbols": Level.SYMBOLS, "bits": Level.BITS}
 _DEFAULT_LEVEL = {"c": "iq", "b": "bits", "s": "symbols", "f": "symbols"}

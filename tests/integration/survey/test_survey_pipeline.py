@@ -2,7 +2,7 @@ from pathlib import Path
 
 import numpy as np
 
-from marconi.engine.survey import survey_iq
+from marconi.survey import survey_iq
 
 
 def _fsk4(fs: float, rate: float, dev: float, n_sym: int) -> np.ndarray:
