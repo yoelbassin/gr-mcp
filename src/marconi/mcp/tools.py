@@ -202,7 +202,9 @@ def run_rx_tool(
     census, diagnostics, and "quality": a conservative verdict (decoded /
     uncertain / no_signal) with the evidence behind it. Treat only verdict
     "decoded" as trustworthy output; "uncertain" means the evidence was
-    absent or conflicting — read quality.rationale."""
+    absent or conflicting — read quality.rationale. Output streams live under
+    ./marconi-runs/ and are not auto-cleaned; page them with read_stream/stream_stats
+    until you remove them."""
     if (capture_path is None) == (input_path is None):
         raise ValueError("pass exactly one of capture_path or input_path")
     if capture_offset < 0 or capture_samples < 0:
@@ -316,7 +318,9 @@ def read_stream(
     run_rx result) return as ints under "values". item_type b/s/f/l overrides
     suffix inference (required for suffix-less paths). Pages are capped at
     65536 items; use offset to walk longer streams. total_items reports the
-    full stream length."""
+    full stream length. Stream files live under ./marconi-runs/ (or
+    $MARCONI_WORKSPACE) and persist until externally removed; a missing path
+    returns a [not_found] error asking you to re-run the spec."""
     return render_page(Path(path), offset=offset, count=count, item_type=item_type)
 
 

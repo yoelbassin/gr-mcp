@@ -40,6 +40,14 @@ def parse_bits(text: str) -> np.ndarray:
     return np.frombuffer(text.encode("ascii"), dtype=np.uint8) - ord("0")
 
 
+def _require_file(path: Path) -> None:
+    if not path.is_file():
+        raise FileNotFoundError(
+            f"stream output not found at {path}; marconi-runs/ outputs are "
+            f"not auto-cleaned — re-run the spec if the run was removed"
+        )
+
+
 def _resolve_item_type(path: Path, item_type: str | None) -> str:
     if item_type is not None:
         if item_type not in _ITEM_DTYPES:
@@ -59,6 +67,7 @@ def render_page(
 ) -> dict[str, object]:
     if offset < 0:
         raise ValueError(f"offset must be >= 0, got {offset}")
+    _require_file(path)
     kind = _resolve_item_type(path, item_type)
     dtype = np.dtype(_ITEM_DTYPES[kind])
     total = path.stat().st_size // dtype.itemsize
