@@ -25,7 +25,13 @@ from marconi.engine.types.models import Bitstream, Modem, Symbolstream
 from marconi.engine.types.params import ParamValue
 from marconi.errors import classify_error
 from marconi.mcp.boundary import tool_error_boundary
-from marconi.mcp.streams import _ITEM_DTYPES, ensure_cf32, parse_bits, render_page
+from marconi.mcp.streams import (
+    _ITEM_DTYPES,
+    ensure_cf32,
+    parse_bits,
+    render_page,
+)
+from marconi.mcp.streams import stream_stats as _compute_stats
 from marconi.mcp.vocab import ENVELOPE, stage_details, stage_index
 from marconi.mcp.workspace import new_run_dir
 
@@ -324,10 +330,34 @@ def read_stream(
     return render_page(Path(path), offset=offset, count=count, item_type=item_type)
 
 
+def stream_stats(
+    path: str,
+    item_type: str | None = None,
+    clusters: int = 0,
+    bins: int = 41,
+) -> dict[str, object]:
+    """Summarize a decoded stream: distribution shape and, on request, its
+    modulation levels — the fast way to size an mfsk_soft_demap or spot a
+    closed eye without hand-rolling numpy.
+
+    Returns total_items, the sampled item count (streams over 65536 items are
+    read as evenly-strided chunks across the whole file), min/max/mean/std, and
+    a histogram of {center, count} over the 0.5..99.5 percentile range. Pass
+    clusters=K (1..16) to also fit up to K levels: sorted "centers", their
+    "cluster_counts", and a paste-ready "levels" list for mfsk_soft_demap (ask
+    for a power-of-two K to feed it). Levels with no support are dropped, so
+    "levels" may be shorter than K — a short list means the stream has fewer
+    real modes than you asked for. Read the histogram to judge modality. Bits
+    (.u8) report only ones_fraction. item_type b/s/f/l overrides suffix
+    inference."""
+    return _compute_stats(Path(path), item_type=item_type, clusters=clusters, bins=bins)
+
+
 TOOLS: dict[str, Callable[..., object]] = {
     "describe_stages": tool_error_boundary(describe_stages),
     "validate_modem": tool_error_boundary(validate_modem),
     "run_rx": tool_error_boundary(run_rx_tool),
     "run_tx": tool_error_boundary(run_tx_tool),
     "read_stream": tool_error_boundary(read_stream),
+    "stream_stats": tool_error_boundary(stream_stats),
 }
