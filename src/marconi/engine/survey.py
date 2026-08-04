@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 from pydantic import BaseModel
+from scipy.ndimage import uniform_filter1d
 from scipy.signal import find_peaks, welch
+
+from marconi.engine.io.iqfile import iter_iq
 
 _SURVEY_NPERSEG = 4096
 _MAX_INLINE = 512
@@ -160,4 +165,62 @@ def _inst_freq(x: np.ndarray, sample_rate: float) -> InstFreqStats:
         hist_centers_hz=[float(v) for v in centers],
         hist_counts=[int(v) for v in counts],
         peaks_hz=[float(centers[i - 1]) for i in idx],
+    )
+
+
+_SURVEY_BURST_WINDOW = 64
+_SURVEY_BURST_FRACTION = 0.35
+
+
+class BurstStats(BaseModel):
+    count: int
+    duty_cycle: float
+    dominant_period_samples: int | None
+    segments: list[tuple[int, int]]
+
+
+def _find_runs(mask: np.ndarray) -> list[tuple[int, int]]:
+    if mask.size == 0:
+        return []
+    d = np.diff(mask.astype(np.int8))
+    starts = [int(i) for i in np.flatnonzero(d == 1) + 1]
+    ends = [int(i) for i in np.flatnonzero(d == -1) + 1]
+    if mask[0]:
+        starts = [0, *starts]
+    if mask[-1]:
+        ends = [*ends, int(mask.size)]
+    return list(zip(starts, ends))
+
+
+def _bursts(sample_x: np.ndarray, path: Path, offset: int, length: int) -> BurstStats:
+    thr = _SURVEY_BURST_FRACTION * float(np.percentile(np.abs(sample_x) ** 2, 90))
+    segs: list[tuple[int, int]] = []
+    active_total = 0
+    pos = 0
+    pending: list[int] | None = None
+    for block in iter_iq(path, offset, length):
+        p = uniform_filter1d(
+            np.abs(block).astype(np.float64) ** 2, _SURVEY_BURST_WINDOW
+        )
+        mask = p > thr
+        active_total += int(mask.sum())
+        for s, e in _find_runs(mask):
+            gs, ge = pos + s, pos + e
+            if pending is not None and gs - pending[1] <= _SURVEY_BURST_WINDOW:
+                pending[1] = ge
+            else:
+                if pending is not None:
+                    segs.append((pending[0], pending[1] - pending[0]))
+                pending = [gs, ge]
+        pos += int(block.size)
+    if pending is not None:
+        segs.append((pending[0], pending[1] - pending[0]))
+    starts = [s for s, _ in segs]
+    deltas = np.diff(starts)
+    dom = int(np.median(deltas)) if deltas.size else None
+    return BurstStats(
+        count=len(segs),
+        duty_cycle=active_total / pos if pos else 0.0,
+        dominant_period_samples=dom,
+        segments=segs,
     )
