@@ -21,6 +21,8 @@ register_error(CaptureTooShort, "invalid_argument")
 
 
 def slice_len(path: Path, offset: int, length: int) -> int:
+    if offset < 0 or length < 0:
+        raise ValueError(f"offset and length must be >= 0, got {offset=} {length=}")
     total = path.stat().st_size // _ITEMSIZE
     if offset >= total:
         return 0

@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 from marconi.survey.measure import (
     _SURVEY_COMB_DAMPING,
@@ -30,7 +31,8 @@ def test_spectrum_locates_offset_tone() -> None:
 def test_spectrum_zero_power_input() -> None:
     x = np.zeros(8192, dtype=np.complex64)
     s = _spectrum(x, 48_000.0)
-    assert isinstance(s, type(_spectrum(np.zeros(1, dtype=np.complex64), 48_000.0)))
+    assert s.occupied_bw_hz >= 0.0
+    assert np.isfinite(s.occupied_lo_hz) and np.isfinite(s.occupied_hi_hz)
     assert len(s.freqs_hz) == len(s.psd_db) <= 512
 
 
@@ -174,8 +176,8 @@ def test_bursts_recovers_periodic_cadence(tmp_path: Path) -> None:
     assert abs(b.dominant_period_samples - (on + off)) < 40
 
 
-def test_bursts_stitches_across_chunk_boundaries(  # type: ignore[no-untyped-def]
-    tmp_path: Path, monkeypatch
+def test_bursts_stitches_across_chunk_boundaries(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     on, off, reps = 400, 400, 30
     carrier = np.exp(2j * np.pi * 0.1 * np.arange(on)).astype(np.complex64)

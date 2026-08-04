@@ -50,3 +50,10 @@ def test_too_short_raises(tmp_path: Path) -> None:
     _write(p, np.ones(16, np.complex64))
     with pytest.raises(CaptureTooShort):
         sample_iq(p, 0, 0)
+
+
+def test_negative_offset_raises(tmp_path: Path) -> None:
+    p = tmp_path / "s.cf32"
+    _write(p, np.ones(16, np.complex64))
+    with pytest.raises(ValueError):
+        slice_len(p, -1, 0)

@@ -375,9 +375,11 @@ def survey(
     bandwidth, peak — read spectral asymmetry off this yourself), "envelope"
     (constant-envelope ratio + kurtosis — you decide FSK vs PSK vs QAM),
     "symbol_rate" (cyclostationary rate candidates_hz ranked by strengths that are
-    RELATIVE — each normalized to the spectrum's own peak, so even pure noise
-    produces a top strength near 1.0: strengths rank the candidates, they are
-    not a signal-present score. A candidate that looks like a low-order
+    RELATIVE — normalized to the single strongest line across the clock
+    spectrum's amplitude and phase branches together (not the PSD "spectrum"
+    block above, and not each branch's own peak), so even pure noise produces
+    a top strength near 1.0: strengths rank the candidates, they are not a
+    signal-present score. A candidate that looks like a low-order
     harmonic of some other, weaker-frequency periodicity (TDMA/burst
     repetition, a capture-chain artifact) is down-weighted, so strengths[0]
     is not always the largest raw line and can read well under 1.0 even for a
@@ -390,7 +392,10 @@ def survey(
     min_symbol_rate/max_symbol_rate), "inst_freq" (instantaneous-frequency
     histogram + tone peaks_hz — their count is the tone order, their spacing the
     deviation), and "bursts" (activity segments, duty_cycle, and
-    dominant_period_samples from burst spacing — the TDMA cadence). It never
+    dominant_period_samples from burst spacing — the TDMA cadence; segments is
+    capped at 512 entries, with a segments_total count when longer — survey
+    writes no sidecar, so re-window with capture_offset/capture_samples to
+    inspect a busier span). It never
     labels the modulation, never assembles or runs a spec, and characterizes the
     dominant signal in the slice; window in time for a multi-signal capture."""
     if capture_offset < 0 or capture_samples < 0:

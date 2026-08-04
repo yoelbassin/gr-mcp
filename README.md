@@ -59,6 +59,8 @@ Point your client at the launcher as a stdio server:
 | `run_rx` | Decode: run a modem spec over an IQ capture and return the full pipeline result |
 | `run_tx` | Generate: render bits through a modem spec into an IQ file — simulation only, nothing is transmitted |
 | `read_stream` | Page a decoded stream back as bits/symbols/soft values for framing, CRC, and field parsing |
+| `stream_stats` | Summarize a decoded stream's distribution shape and, on request, fitted modulation levels |
+| `survey` | Characterize a raw-IQ capture — spectrum, envelope, symbol rate, instantaneous frequency, and bursts; pre-demod measurements, no interpretation |
 
 ## Environment
 
