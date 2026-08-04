@@ -47,13 +47,14 @@ def _best_ber(soft: np.ndarray, bits: np.ndarray) -> float:
     return aligned_ber_best([nrzi, 1 - nrzi], bits)
 
 
-def test_clean_msk_ber0_across_chunk_sizes() -> None:
+@pytest.mark.parametrize("sps", [10, _SPS])  # scalar medium at 10, vectorized at 20
+def test_clean_msk_ber0_across_chunk_sizes(sps: int) -> None:
     rng = np.random.default_rng(0)
     bits = rng.integers(0, 2, 4096).astype(np.uint8)
-    sig = _msk_iq(bits, _SPS)
+    sig = _msk_iq(bits, sps)
     for chunk in (997, 8191, 1 << 16):
         out = drive(
-            make_msk_demod(FAKE_GR, sps=float(_SPS)),
+            make_msk_demod(FAKE_GR, sps=float(sps)),
             sig,
             chunk=chunk,
             out_dtype=np.float32,
@@ -89,12 +90,14 @@ def test_eof_drains_pending_tail() -> None:
     assert out.size >= bits.size - 8
 
 
-def test_no_per_bit_numpy_dispatch(monkeypatch: pytest.MonkeyPatch) -> None:
-    # The decision-directed loop is per-bit sequential; the measured perf
-    # killer is per-bit numpy ufunc dispatch on ~sps-sample arrays
-    # (165 kbit/s vs 310 for the scalar rotor). A wall-clock gate cannot
-    # hold a 2x margin under xdist load and P/E-core variance, so gate the
-    # mechanism: numpy invocations must scale with work calls, not bits.
+def test_no_per_bit_numpy_dispatch_below_crossover(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Below _VECTOR_SPS_MIN the decision-directed loop runs on Python scalars:
+    # per-bit numpy ufunc dispatch on ~sps-sample arrays measured slower there
+    # (165 kbit/s vs 310 for the scalar rotor at sps=10). A wall-clock gate
+    # cannot hold a 2x margin under xdist load and P/E-core variance, so gate
+    # the mechanism: numpy invocations must scale with work calls, not bits.
     calls = {"n": 0}
 
     def counted(fn):  # type: ignore[no-untyped-def]
@@ -111,6 +114,34 @@ def test_no_per_bit_numpy_dispatch(monkeypatch: pytest.MonkeyPatch) -> None:
     iq = (rng.standard_normal(n) + 1j * rng.standard_normal(n)).astype(np.complex64)
     drive(make_msk_demod(FAKE_GR, sps=10.0), iq, chunk=8192, out_dtype=np.float32)
     assert calls["n"] < 400, f"{calls['n']} numpy calls for 4000 bits"
+
+
+def test_vectorized_medium_engages_above_crossover(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # At and above _VECTOR_SPS_MIN the per-sample Python rotor is the measured
+    # perf killer (scalar decays linearly with sps: 73 kbit/s at sps=64), so
+    # the block must switch to per-bit vectorized ops: one np.dot per bit is
+    # the mechanism's fingerprint. BER-0 pins that the medium swap is lossless.
+    calls = {"n": 0}
+    real_dot = np.dot
+
+    def counted(*a, **k):  # type: ignore[no-untyped-def]
+        calls["n"] += 1
+        return real_dot(*a, **k)
+
+    monkeypatch.setattr(np, "dot", counted)
+    rng = np.random.default_rng(5)
+    bits = rng.integers(0, 2, 2048).astype(np.uint8)
+    sps = 16
+    out = drive(
+        make_msk_demod(FAKE_GR, sps=float(sps)),
+        _msk_iq(bits, sps),
+        chunk=8192,
+        out_dtype=np.float32,
+    )
+    assert calls["n"] >= bits.size - 64, f"{calls['n']} dot calls for {bits.size} bits"
+    assert _best_ber(out, bits) == 0.0
 
 
 def test_mf_oversample_param_threads_into_taps_and_round_trips() -> None:
