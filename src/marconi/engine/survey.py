@@ -37,7 +37,7 @@ def _spectrum(x: np.ndarray, sample_rate: float) -> SpectrumStats:
     centroid = float((f * pxx).sum() / total)
     peak = float(f[int(np.argmax(pxx))])
     cum = np.cumsum(pxx) / total
-    lo = float(f[int(np.searchsorted(cum, 0.005))])
+    lo = float(f[min(int(np.searchsorted(cum, 0.005)), f.size - 1)])
     hi = float(f[min(int(np.searchsorted(cum, 0.995)), f.size - 1)])
     fd = _downsample(f, _MAX_INLINE)
     pd = 10.0 * np.log10(np.maximum(_downsample(pxx, _MAX_INLINE), 1e-20))

@@ -14,3 +14,10 @@ def test_spectrum_locates_offset_tone() -> None:
     assert abs(s.center_offset_hz - f0) < 500.0
     assert s.occupied_bw_hz < fs / 4
     assert len(s.freqs_hz) == len(s.psd_db) <= 512
+
+
+def test_spectrum_zero_power_input() -> None:
+    x = np.zeros(8192, dtype=np.complex64)
+    s = _spectrum(x, 48_000.0)
+    assert isinstance(s, type(_spectrum(np.zeros(1, dtype=np.complex64), 48_000.0)))
+    assert len(s.freqs_hz) == len(s.psd_db) <= 512
