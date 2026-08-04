@@ -91,6 +91,26 @@ def test_clean_control_is_decoded(tmp_path: Path) -> None:
     assert res.quality is not None and res.quality.verdict == "decoded"
 
 
+def test_noisy_but_decodable_capture_is_decoded(tmp_path: Path) -> None:
+    # 7 dB SNR: raw BER a few percent, squarely decodable - the old soft bar
+    # (6.0, reachable only near-noiseless) starved this whole envelope into
+    # "uncertain"; measured ratio here ~3.9 against the 2.0 bar
+    clean = make_clean_capture(tmp_path)
+    sig = np.fromfile(clean, np.complex64)
+    rng = np.random.default_rng(5)
+    snr_db = 7.0
+    sigma = float(np.sqrt(np.mean(np.abs(sig) ** 2) / 10 ** (snr_db / 10) / 2))
+    noisy = (
+        sig
+        + sigma * (rng.standard_normal(sig.size) + 1j * rng.standard_normal(sig.size))
+    ).astype(np.complex64)
+    iq = tmp_path / "noisy.cf32"
+    noisy.tofile(iq)
+    res = _run(_soft_rx(_SYM), iq, tmp_path / "rx_noisy")
+    assert res.status == "ok"
+    assert res.quality is not None and res.quality.verdict == "decoded", res.quality
+
+
 def test_pure_tone_capture_is_not_called_decoded(tmp_path: Path) -> None:
     n = 16384
     t = np.arange(n)

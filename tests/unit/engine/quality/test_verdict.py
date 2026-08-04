@@ -29,3 +29,19 @@ def test_no_evidence_is_uncertain_with_honest_rationale() -> None:
     verdict, rationale = verdict_from([])
     assert verdict == "uncertain"
     assert "no checkable evidence" in rationale
+
+
+def test_detection_only_positives_are_not_decoded() -> None:
+    # a burst detector firing proves presence, not a correct decode: a CSS
+    # path that detects real chirp preambles but decodes garbage symbols must
+    # not read "decoded" on detection alone
+    verdict, rationale = verdict_from([_ev("positive", metric="burst_marks")])
+    assert verdict == "uncertain"
+    assert "detection only" in rationale
+
+
+def test_detection_plus_decode_grade_positive_is_decoded() -> None:
+    verdict, _ = verdict_from(
+        [_ev("positive", metric="burst_marks"), _ev("positive", metric="sync_matches")]
+    )
+    assert verdict == "decoded"

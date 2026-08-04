@@ -8,6 +8,7 @@ from marconi.engine.quality import (
     marks_evidence,
     survival_evidence,
     sync_evidence,
+    tag_sync_evidence,
 )
 from marconi.engine.stages.registry import stage_registry
 
@@ -124,6 +125,43 @@ def test_survival_unknown_kind_is_skipped() -> None:
         _row("symbol_sync_cc", words_valid=1, words_total=10, chance_word_rate=0.01)
     ]
     assert survival_evidence(rows, stage_registry()) == []
+
+
+def test_tag_sync_above_chance_is_positive() -> None:
+    ev = tag_sync_evidence(
+        [
+            Diagnostic(block="b6", key="sync_tags", count=12),
+            Diagnostic(block="b6", key="sync_chance_micro", count=0),
+        ]
+    )
+    assert [e.assessment for e in ev] == ["positive"]
+    assert ev[0].metric == "sync_matches"
+    assert ev[0].value == 12.0
+
+
+def test_tag_sync_at_chance_level_is_no_evidence() -> None:
+    ev = tag_sync_evidence(
+        [
+            Diagnostic(block="b6", key="sync_tags", count=233),
+            Diagnostic(block="b6", key="sync_chance_micro", count=234_400_000),
+        ]
+    )
+    assert ev == []
+
+
+def test_tag_sync_zero_is_negative() -> None:
+    ev = tag_sync_evidence(
+        [
+            Diagnostic(block="b6", key="sync_tags", count=0),
+            Diagnostic(block="b6", key="sync_chance_micro", count=0),
+        ]
+    )
+    assert [e.assessment for e in ev] == ["negative"]
+
+
+def test_unrelated_diagnostics_are_not_tag_sync_evidence() -> None:
+    rows = [Diagnostic(block="b4", key="locks", count=2)]
+    assert tag_sync_evidence(rows) == []
 
 
 def test_marks_positive_only() -> None:

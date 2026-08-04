@@ -7,7 +7,9 @@ from typing import Literal
 
 import numpy as np
 
-try:  # creedsolo is reedsolo's Cython twin: identical API, 10-50x faster RS
+try:  # reedsolo's optional Cython build: identical API, 10-50x faster RS. NOT
+    # a PyPI package of its own, so it cannot be a declared dependency - only
+    # envs that hand-build reedsolo with cythonization get this path.
     import creedsolo as _rs
 except ImportError:  # pure-Python fallback, always installed
     import reedsolo as _rs

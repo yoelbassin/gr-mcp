@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from collections.abc import Callable
 from dataclasses import replace
 from typing import Any, Literal
@@ -147,6 +148,12 @@ class SyncAlignStep(Step):
             raise PydanticCustomError(
                 "value_error", "access_code must be a non-empty bit string of 0/1"
             )
+        if len(self.access_code) > 64:
+            raise PydanticCustomError(
+                "value_error",
+                "access_code is limited to 64 bits - the stock GR correlator "
+                "packs it into one 64-bit register",
+            )
         if self.threshold >= len(self.access_code):
             raise PydanticCustomError(
                 "value_error", "threshold must be < the access-code length"
@@ -172,6 +179,8 @@ class SyncAlign(RxStage[CompileContext, SyncAlignStep]):
     accepts_carrier = Carrier.SOFT
 
     def emit_rx(self, b: CompileContext, step: SyncAlignStep) -> None:
+        m = len(step.access_code)
+        chance = sum(math.comb(m, i) for i in range(step.threshold + 1)) / 2.0**m
         b.chain("multiply_const_ff", value=-1.0)
         b.chain(
             "correlate_access_code_tag_ff",
@@ -179,7 +188,12 @@ class SyncAlign(RxStage[CompileContext, SyncAlignStep]):
             threshold=step.threshold,
             tag_name="frame_sync",
         )
-        b.chain("tag_gate", frame_len=step.frame_len, tag_name="frame_sync")
+        b.chain(
+            "tag_gate",
+            frame_len=step.frame_len,
+            tag_name="frame_sync",
+            chance_per_item=chance,
+        )
         b.chain("multiply_const_ff", value=-1.0)
 
     def out_descriptor(self, in_desc: Descriptor, step: SyncAlignStep) -> Descriptor:

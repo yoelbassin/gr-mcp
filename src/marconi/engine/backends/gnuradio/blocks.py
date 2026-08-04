@@ -395,7 +395,10 @@ GR_BLOCKS: dict[str, Callable[[_GrCtx, Params], Any]] = {
         str(p["access_code"]), _as_int(p["threshold"]), str(p["tag_name"])
     ),
     "tag_gate": lambda c, p: make_tag_gate(
-        c.gr, frame_len=_as_int(p["frame_len"]), tag_name=str(p["tag_name"])
+        c.gr,
+        frame_len=_as_int(p["frame_len"]),
+        tag_name=str(p["tag_name"]),
+        chance_per_item=_as_float(p["chance_per_item"]),
     ),
     "chirp_prepend": lambda c, p: c.blocks.vector_insert_c(
         chirp_prefix(

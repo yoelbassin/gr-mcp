@@ -28,6 +28,14 @@ class QualityReport(BaseModel):
     rationale: str
 
 
+# Detection-tier metrics prove a signal is PRESENT (energy/preamble events),
+# not that the decode is right: a chirp detector firing on real chirps says
+# nothing about the symbols decoded after it. Only decode-tier positives
+# (sync matches, word validity, soft confidence, coherent lock) reach
+# "decoded"; detection alone stays uncertain.
+_DETECTION_METRICS = frozenset({"burst_marks"})
+
+
 def verdict_from(evidence: Sequence[QualityEvidence]) -> tuple[Verdict, str]:
     positives = [e for e in evidence if e.assessment == "positive"]
     negatives = [e for e in evidence if e.assessment == "negative"]
@@ -43,6 +51,14 @@ def verdict_from(evidence: Sequence[QualityEvidence]) -> tuple[Verdict, str]:
     if negatives:
         names = ", ".join(sorted({e.metric for e in negatives}))
         return "no_signal", f"negative evidence: {names}"
+    decode_grade = [e for e in positives if e.metric not in _DETECTION_METRICS]
+    if not decode_grade:
+        names = ", ".join(sorted({e.metric for e in positives}))
+        return "uncertain", (
+            f"detection only ({names}): a signal is present but nothing "
+            "validated the decoded bits; add a sync/validating/soft stage "
+            "to confirm"
+        )
     names = ", ".join(sorted({e.metric for e in positives}))
     return "decoded", f"positive evidence: {names}"
 
@@ -89,6 +105,16 @@ def _word_excess_significant(valid: int, total: int, chance: float) -> bool:
 _LOCK_MIN_FALLBACK_PERMILLE = 2000
 
 
+def _sync_assessment(found: int, expected: float) -> Assessment | None:
+    """None = indistinguishable from chance: found something, but no more
+    than random bits would match, so it proves nothing either way."""
+    if found == 0:
+        return "negative"
+    if found > expected + _SYNC_CHANCE_SIGMA * math.sqrt(expected):
+        return "positive"
+    return None
+
+
 def sync_evidence(
     census: Sequence[BlockCensus], registry: Mapping[str, Stage[Any, Any]]
 ) -> list[QualityEvidence]:
@@ -97,25 +123,46 @@ def sync_evidence(
         stage = registry.get(row.kind)
         if stage is None or not stage.sync_search or row.windows_out is None:
             continue
-        expected = row.chance_windows if row.chance_windows is not None else 0.0
-        floor = expected + _SYNC_CHANCE_SIGMA * float(np.sqrt(expected))
-        if row.windows_out == 0:
-            if row.chance_windows is None:
-                # the search never ran (stream shorter than the pattern):
-                # untestable is not the same as absent
-                continue
-            assessment: Assessment = "negative"
-        elif row.windows_out > floor:
-            assessment = "positive"
-        else:
-            # found something, but no more than random bits would match:
-            # indistinguishable from chance, so it proves nothing either way
+        if row.chance_windows is None:
+            # the search never ran (stream shorter than the pattern):
+            # untestable is not the same as absent
+            continue
+        assessment = _sync_assessment(row.windows_out, row.chance_windows)
+        if assessment is None:
             continue
         out.append(
             QualityEvidence(
                 source=row.block,
                 metric="sync_matches",
                 value=float(row.windows_out),
+                assessment=assessment,
+            )
+        )
+    return out
+
+
+def tag_sync_evidence(diagnostics: Sequence[Diagnostic]) -> list[QualityEvidence]:
+    """The GR-side twin of sync_evidence: sync_align's tag_gate counts the
+    correlator's sync tags and the chance expectation for the items it
+    scanned, so GR-native sync paths contribute the same sync_matches
+    evidence the coding-lane sync_word does."""
+    expected = {
+        d.block: d.count / 1e6
+        for d in diagnostics
+        if d.key == "sync_chance_micro" and d.count is not None
+    }
+    out: list[QualityEvidence] = []
+    for d in diagnostics:
+        if d.key != "sync_tags" or d.count is None:
+            continue
+        assessment = _sync_assessment(d.count, expected.get(d.block, 0.0))
+        if assessment is None:
+            continue
+        out.append(
+            QualityEvidence(
+                source=d.block,
+                metric="sync_matches",
+                value=float(d.count),
                 assessment=assessment,
             )
         )
@@ -195,16 +242,43 @@ def lock_evidence(diagnostics: Sequence[Diagnostic]) -> list[QualityEvidence]:
 
 _SOFT_MIN_ITEMS = 1000
 _SOFT_SAMPLE_ITEMS = 65536
-_SOFT_POSITIVE = 6.0
+_SOFT_SAMPLE_CHUNKS = 16
+# Calibrated on measured FSK-discriminator streams (|x| mean/std): clean 19.9,
+# SNR 14/9/5/3 dB -> 8.6/5.0/3.1/2.5, demod noise floor 1.6. The positive bar
+# admits the whole decodable envelope; the old 6.0 sat above it and starved
+# real mid-SNR signals into "uncertain". The bar alone cannot reject a
+# wrong-rate decode (oversampled artifact measures 4.6), so a positive also
+# demands whitened decisions: consecutive-sign correlation ~0 for real data
+# vs 0.41 oversampled / 1.0 tone. HONEST LIMIT: an UNDERSAMPLED wrong rate
+# emits genuinely clean decisions of aliased bits and is invisible to every
+# stream statistic - soft confidence attests decision quality, not bit
+# identity; only sync/validity evidence can catch aliasing.
+_SOFT_POSITIVE = 2.0
 _SOFT_NEGATIVE = 1.45
 _SOFT_MIN_POLARITY_FRACTION = 0.02
+_SOFT_MAX_SIGN_CORR = 0.15
+
+
+def _sample_soft(path: Path) -> np.ndarray:
+    """Evenly strided chunks across the WHOLE stream: a head-only sample
+    judges a capture with a noise lead on noise it never needed to decode."""
+    total = path.stat().st_size // 4
+    with path.open("rb") as f:
+        if total <= _SOFT_SAMPLE_ITEMS:
+            return np.fromfile(f, dtype=np.float32)
+        per = _SOFT_SAMPLE_ITEMS // _SOFT_SAMPLE_CHUNKS
+        starts = np.linspace(0, total - per, _SOFT_SAMPLE_CHUNKS).astype(np.int64)
+        parts = []
+        for s in starts:
+            f.seek(int(s) * 4)
+            parts.append(np.fromfile(f, dtype=np.float32, count=per))
+        return np.concatenate(parts)
 
 
 def soft_evidence(path: Path | None) -> list[QualityEvidence]:
     if path is None or not path.is_file():
         return []
-    with path.open("rb") as f:
-        x = np.fromfile(f, dtype=np.float32, count=_SOFT_SAMPLE_ITEMS)
+    x = _sample_soft(path)
     x = x[np.isfinite(x)]
     if x.size < _SOFT_MIN_ITEMS:
         return []
@@ -221,7 +295,10 @@ def soft_evidence(path: Path | None) -> list[QualityEvidence]:
     both_polarities = (
         min(float((x > 0).mean()), float((x < 0).mean())) >= _SOFT_MIN_POLARITY_FRACTION
     )
-    if ratio >= _SOFT_POSITIVE and both_polarities:
+    signs = np.sign(x)
+    sign_corr = float(np.mean(signs[1:] * signs[:-1])) if x.size > 1 else 0.0
+    whitened = abs(sign_corr) <= _SOFT_MAX_SIGN_CORR
+    if ratio >= _SOFT_POSITIVE and both_polarities and whitened:
         assessment: Assessment = "positive"
     elif ratio <= _SOFT_NEGATIVE:
         assessment = "negative"
@@ -247,6 +324,7 @@ def assess_quality(
 ) -> QualityReport:
     evidence = (
         sync_evidence(census, registry)
+        + tag_sync_evidence(diagnostics)
         + survival_evidence(census, registry)
         + marks_evidence(marks)
         + lock_evidence(diagnostics)
