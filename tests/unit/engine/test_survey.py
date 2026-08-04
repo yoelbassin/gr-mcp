@@ -1,6 +1,6 @@
 import numpy as np
 
-from marconi.engine.survey import _envelope, _spectrum, _symbol_rate
+from marconi.engine.survey import _envelope, _inst_freq, _spectrum, _symbol_rate
 
 
 def test_spectrum_locates_offset_tone() -> None:
@@ -102,3 +102,14 @@ def test_symbol_rate_pure_noise_is_honest() -> None:
     s = _symbol_rate(x, fs, fs / 1000, fs / 2)
     assert len(s.candidates_hz) == len(s.strengths)
     assert len(s.strengths) < 2 or s.strengths[1] > 0.5 * s.strengths[0]
+
+
+def test_inst_freq_finds_four_fsk_tones() -> None:
+    np.random.seed(42)
+    fs, rate, dev = 48_000.0, 2_400.0, 1_500.0
+    x = _fsk(fs, rate, dev, 6000, np.array([-3.0, -1.0, 1.0, 3.0]))
+    s = _inst_freq(x, fs)
+    assert 3 <= len(s.peaks_hz) <= 5
+    peaks = sorted(s.peaks_hz)
+    assert peaks[0] < -dev and peaks[-1] > dev
+    assert len(s.hist_centers_hz) == len(s.hist_counts) == 65

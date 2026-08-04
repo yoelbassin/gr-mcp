@@ -72,8 +72,15 @@ def _envelope(x: np.ndarray) -> EnvelopeStats:
     )
 
 
+_SURVEY_IFREQ_BINS = 65
 _SURVEY_RATE_K = 5
 _SURVEY_CLOCK_CHUNKS = 16
+
+
+class InstFreqStats(BaseModel):
+    hist_centers_hz: list[float]
+    hist_counts: list[int]
+    peaks_hz: list[float]
 
 
 class SymbolRateStats(BaseModel):
@@ -136,4 +143,21 @@ def _symbol_rate(
         strengths=merged_s[:_SURVEY_RATE_K],
         search_lo_hz=lo,
         search_hi_hz=hi,
+    )
+
+
+def _inst_freq(x: np.ndarray, sample_rate: float) -> InstFreqStats:
+    f = np.angle(x[1:] * np.conj(x[:-1])) / (2 * np.pi) * sample_rate
+    lo, hi = (float(v) for v in np.percentile(f, [0.5, 99.5]))
+    if hi <= lo:
+        hi = lo + 1.0
+    counts, edges = np.histogram(f, bins=_SURVEY_IFREQ_BINS, range=(lo, hi))
+    centers = (edges[:-1] + edges[1:]) / 2
+    prom = max(float(counts.max()) * 0.05, 1.0)
+    padded = np.concatenate(([0], counts, [0]))
+    idx, _ = find_peaks(padded, prominence=prom, distance=2)
+    return InstFreqStats(
+        hist_centers_hz=[float(v) for v in centers],
+        hist_counts=[int(v) for v in counts],
+        peaks_hz=[float(centers[i - 1]) for i in idx],
     )
