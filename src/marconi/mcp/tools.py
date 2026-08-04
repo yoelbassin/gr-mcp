@@ -18,6 +18,7 @@ from marconi.engine.run import PipelineResult
 from marconi.engine.run import run_rx as engine_run_rx
 from marconi.engine.stages.base import SpecValidationError
 from marconi.engine.stages.registry import stage_registry, step_models
+from marconi.engine.survey import survey_iq
 from marconi.engine.types.descriptor import Carrier, Descriptor
 from marconi.engine.types.enums import ItemType
 from marconi.engine.types.levels import Level
@@ -355,6 +356,58 @@ def stream_stats(
     return _compute_stats(Path(path), item_type=item_type, clusters=clusters, bins=bins)
 
 
+def survey(
+    capture_path: str,
+    sample_rate: float,
+    capture_dtype: str = "cf32",
+    capture_offset: int = 0,
+    capture_samples: int = 0,
+    min_symbol_rate: float | None = None,
+    max_symbol_rate: float | None = None,
+) -> dict[str, object]:
+    """Characterize a raw-IQ capture — pure DSP measurements, no interpretation.
+
+    Runs before you know the modem: the pre-demod counterpart to stream_stats.
+    Reads a bounded slice (capture_offset/capture_samples in complex samples,
+    0 = to EOF; capture_dtype one of cf32/ci16/ci8/cu8, matching run_rx) and
+    returns five measurement blocks, all raw numbers for you to judge:
+    "spectrum" (two-sided PSD, energy-centroid offset, 99%-power occupied
+    bandwidth, peak — read spectral asymmetry off this yourself), "envelope"
+    (constant-envelope ratio + kurtosis — you decide FSK vs PSK vs QAM),
+    "symbol_rate" (cyclostationary rate candidates_hz ranked by strengths that are
+    RELATIVE — each normalized to the spectrum's own peak, so strengths[0] is ~1.0
+    even for pure noise: strengths rank the candidates, they are not a
+    signal-present score. Treat candidates as ranked hypotheses, expect harmonics
+    of the true rate among them, and note the estimate is least reliable for
+    amplitude-null signals such as OOK/ASK with a carrier offset; narrow with
+    min_symbol_rate/max_symbol_rate), "inst_freq" (instantaneous-frequency
+    histogram + tone peaks_hz — their count is the tone order, their spacing the
+    deviation), and "bursts" (activity segments, duty_cycle, and
+    dominant_period_samples from burst spacing — the TDMA cadence). It never
+    labels the modulation, never assembles or runs a spec, and characterizes the
+    dominant signal in the slice; window in time for a multi-signal capture."""
+    if capture_offset < 0 or capture_samples < 0:
+        raise ValueError("capture_offset and capture_samples must be >= 0")
+    _require_file(Path(capture_path))
+    src, offset, length = ensure_cf32(
+        Path(capture_path),
+        capture_dtype,
+        offset=capture_offset,
+        samples=capture_samples,
+    )
+    result = survey_iq(
+        src,
+        sample_rate,
+        offset=offset,
+        length=length,
+        min_symbol_rate=min_symbol_rate,
+        max_symbol_rate=max_symbol_rate,
+    )
+    payload: dict[str, Any] = result.model_dump(mode="json")
+    _cap_list(cast(dict, payload["bursts"]), "segments")
+    return payload
+
+
 TOOLS: dict[str, Callable[..., object]] = {
     "describe_stages": tool_error_boundary(describe_stages),
     "validate_modem": tool_error_boundary(validate_modem),
@@ -362,4 +415,5 @@ TOOLS: dict[str, Callable[..., object]] = {
     "run_tx": tool_error_boundary(run_tx_tool),
     "read_stream": tool_error_boundary(read_stream),
     "stream_stats": tool_error_boundary(stream_stats),
+    "survey": tool_error_boundary(survey),
 }

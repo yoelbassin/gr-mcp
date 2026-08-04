@@ -19,6 +19,7 @@ async def test_all_tools_are_registered() -> None:
         "run_tx",
         "read_stream",
         "stream_stats",
+        "survey",
     }
 
 
