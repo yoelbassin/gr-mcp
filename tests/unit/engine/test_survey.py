@@ -1,6 +1,14 @@
+from pathlib import Path
+
 import numpy as np
 
-from marconi.engine.survey import _envelope, _inst_freq, _spectrum, _symbol_rate
+from marconi.engine.survey import (
+    _bursts,
+    _envelope,
+    _inst_freq,
+    _spectrum,
+    _symbol_rate,
+)
 
 
 def test_spectrum_locates_offset_tone() -> None:
@@ -116,9 +124,7 @@ def test_inst_freq_finds_four_fsk_tones() -> None:
     assert len(s.hist_centers_hz) == len(s.hist_counts) == 65
 
 
-def test_bursts_recovers_periodic_cadence(tmp_path) -> None:  # type: ignore
-    from marconi.engine.survey import _bursts
-
+def test_bursts_recovers_periodic_cadence(tmp_path: Path) -> None:
     on, off, reps = 400, 400, 30
     carrier = np.exp(2j * np.pi * 0.1 * np.arange(on)).astype(np.complex64)
     slot = np.concatenate([carrier, np.zeros(off, np.complex64)])
@@ -130,3 +136,27 @@ def test_bursts_recovers_periodic_cadence(tmp_path) -> None:  # type: ignore
     assert 0.4 < b.duty_cycle < 0.6
     assert b.dominant_period_samples is not None
     assert abs(b.dominant_period_samples - (on + off)) < 40
+
+
+def test_bursts_stitches_across_chunk_boundaries(  # type: ignore[no-untyped-def]
+    tmp_path: Path, monkeypatch
+) -> None:
+    on, off, reps = 400, 400, 30
+    carrier = np.exp(2j * np.pi * 0.1 * np.arange(on)).astype(np.complex64)
+    slot = np.concatenate([carrier, np.zeros(off, np.complex64)])
+    x = np.tile(slot, reps)
+    p = tmp_path / "bursty.cf32"
+    x.tofile(p)
+    import marconi.engine.survey as survey_mod
+    from marconi.engine.io import iqfile
+
+    monkeypatch.setattr(
+        survey_mod,
+        "iter_iq",
+        lambda path, offset, length: iqfile.iter_iq(path, offset, length, chunk=500),
+    )
+    b = _bursts(x, p, 0, 0)
+    assert abs(b.count - reps) <= 1
+    assert b.dominant_period_samples is not None
+    assert abs(b.dominant_period_samples - (on + off)) < 40
+    assert 0.4 < b.duty_cycle < 0.6
