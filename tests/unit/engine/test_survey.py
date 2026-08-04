@@ -3,8 +3,11 @@ from pathlib import Path
 import numpy as np
 
 from marconi.engine.survey import (
+    _SURVEY_COMB_DAMPING,
     _bursts,
+    _damp_harmonics,
     _envelope,
+    _fundamental_below,
     _inst_freq,
     _spectrum,
     _symbol_rate,
@@ -110,6 +113,39 @@ def test_symbol_rate_pure_noise_is_honest() -> None:
     s = _symbol_rate(x, fs, fs / 1000, fs / 2)
     assert len(s.candidates_hz) == len(s.strengths)
     assert len(s.strengths) < 2 or s.strengths[1] > 0.5 * s.strengths[0]
+
+
+def test_comb_suppression_damps_majority_harmonic_pool() -> None:
+    g0, lo, bin_hz = 40.0, 90.0, 1.0
+    freqs = np.array([g0 - 2, g0 - 1, g0, g0 + 1, g0 + 2])
+    mag = np.array([1.0, 5.0, 50.0, 5.0, 1.0])
+
+    harmonics = np.array([2 * g0, 3 * g0, 4 * g0])
+    non_harmonic_line = 25 * g0
+    targets = np.concatenate([harmonics, [non_harmonic_line]])
+    strengths = np.array([10.0, 8.0, 6.0, 4.0])
+
+    fundamental = _fundamental_below(freqs, mag, lo, targets, bin_hz)
+    assert fundamental == g0
+
+    damped = _damp_harmonics(targets, strengths, fundamental, bin_hz)
+    assert np.allclose(damped[:3], strengths[:3] * _SURVEY_COMB_DAMPING)
+    assert damped[3] == strengths[3]
+
+
+def test_comb_suppression_does_not_fire_without_a_majority() -> None:
+    g0, lo, bin_hz = 40.0, 90.0, 1.0
+    freqs = np.array([g0 - 2, g0 - 1, g0, g0 + 1, g0 + 2])
+    mag = np.array([1.0, 5.0, 50.0, 5.0, 1.0])
+
+    targets = np.array([2 * g0, 25 * g0, 26 * g0, 27 * g0])
+    strengths = np.array([9.0, 7.0, 5.0, 3.0])
+
+    fundamental = _fundamental_below(freqs, mag, lo, targets, bin_hz)
+    assert fundamental is None
+
+    damped = _damp_harmonics(targets, strengths, fundamental, bin_hz)
+    assert np.array_equal(damped, strengths)
 
 
 def test_inst_freq_finds_four_fsk_tones() -> None:

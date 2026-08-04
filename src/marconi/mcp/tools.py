@@ -381,10 +381,12 @@ def survey(
     harmonic of some other, weaker-frequency periodicity (TDMA/burst
     repetition, a capture-chain artifact) is down-weighted, so strengths[0]
     is not always the largest raw line and can read well under 1.0 even for a
-    confidently-detected signal; the true rate's own harmonics are never
-    touched this way. Treat candidates as ranked hypotheses, expect harmonics
-    of the true rate among them, and note the estimate is least reliable for
-    amplitude-null signals such as OOK/ASK with a carrier offset; narrow with
+    confidently-detected signal; the true rate itself can never be mistaken
+    for this comb's own fundamental. Treat candidates as ranked hypotheses,
+    expect harmonics of the true rate among them, and note the estimate is
+    least reliable for amplitude-null signals such as OOK/ASK with a carrier
+    offset, and for short windows spanning only a few burst/TDMA cycles —
+    prefer widening the window for bursty signals; narrow with
     min_symbol_rate/max_symbol_rate), "inst_freq" (instantaneous-frequency
     histogram + tone peaks_hz — their count is the tone order, their spacing the
     deviation), and "bursts" (activity segments, duty_cycle, and

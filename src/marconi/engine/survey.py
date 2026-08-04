@@ -84,7 +84,10 @@ _SURVEY_RATE_POOL_K = 2 * _SURVEY_RATE_K
 _SURVEY_ACTIVE_FRACTION = 0.3
 _SURVEY_FUNDAMENTAL_POOL = 20
 _SURVEY_COMB_ORDER_CAP = 20
+_SURVEY_COMB_MIN_ORDER = 2
 _SURVEY_COMB_REL_TOL = 0.02
+_SURVEY_COMB_FLOOR_BINS = 1.5
+_SURVEY_COMB_TOL_FLOOR_BINS = 2.0
 _SURVEY_COMB_MAJORITY = 0.5
 _SURVEY_COMB_DAMPING = 0.05
 
@@ -146,22 +149,15 @@ def _comb_harmonic_mask(
     freqs: np.ndarray, fundamental: float, bin_hz: float
 ) -> np.ndarray:
     orders = np.round(freqs / fundamental)
-    tol = np.maximum(_SURVEY_COMB_REL_TOL * freqs, 2.0 * bin_hz)
-    in_range = (orders >= 2) & (orders <= _SURVEY_COMB_ORDER_CAP)
+    tol = np.maximum(_SURVEY_COMB_REL_TOL * freqs, _SURVEY_COMB_TOL_FLOOR_BINS * bin_hz)
+    in_range = (orders >= _SURVEY_COMB_MIN_ORDER) & (orders <= _SURVEY_COMB_ORDER_CAP)
     return in_range & (np.abs(freqs - orders * fundamental) < tol)
 
 
 def _fundamental_below(
     freqs: np.ndarray, mag: np.ndarray, lo: float, targets: np.ndarray, bin_hz: float
 ) -> float | None:
-    # A non-symbol periodicity (TDMA/burst repetition, capture-chain ripple)
-    # is sought only below the caller's own symbol-rate floor, so it can
-    # never explain away the true rate as its own comb's fundamental. It
-    # must explain a MAJORITY of the actual in-band candidates being ranked —
-    # scoring against a wide, low-frequency-heavy side pool instead lets a
-    # small candidate "explain" many unrelated noise peaks by sheer grid
-    # density (many cheap low-order slots) and shadow a real, isolated rate.
-    floor = 1.5 * bin_hz
+    floor = _SURVEY_COMB_FLOOR_BINS * bin_hz
     if floor >= lo or targets.size == 0:
         return None
     candidates, _ = _peaks_in_band(freqs, mag, floor, lo, _SURVEY_FUNDAMENTAL_POOL)
@@ -195,11 +191,6 @@ def _symbol_rate(
     dphi = np.angle(x[1:] * np.conj(x[:-1]))
     yf_full = np.abs(np.diff(dphi))
 
-    # Only the frequency clock is restricted to the active (above-median
-    # magnitude) span: near-zero-amplitude instants make angle() noisy and
-    # inject a burst on/off comb the amplitude clock doesn't share. An
-    # amplitude-modulated signal (OOK/ASK) carries its own clock in exactly
-    # the envelope edges this would drop, so ya is left untouched.
     active = _active_mask(x, _SURVEY_ACTIVE_FRACTION)
     active_pairs = active[1:] & active[:-1]
     yf = _gate(yf_full, active_pairs[1:] & active_pairs[:-1])
@@ -234,9 +225,6 @@ def _symbol_rate(
 
 
 def _inst_freq(x: np.ndarray, sample_rate: float) -> InstFreqStats:
-    # A fixed LO-leakage/DC offset is negligible against an active carrier
-    # but dominates during near-zero-amplitude (idle/TDMA-gap) instants,
-    # piling the angle() estimate up at 0 Hz and burying the real tones.
     x = x - x.mean()
     f = np.angle(x[1:] * np.conj(x[:-1])) / (2 * np.pi) * sample_rate
     lo, hi = (float(v) for v in np.percentile(f, [0.5, 99.5]))
