@@ -244,12 +244,12 @@ def stream_stats(
     if clusters >= 1:
         centers = _kmeans_1d(x, clusters)
         labels = _nearest_labels(x, centers)
-        counts = np.array([int((labels == j).sum()) for j in range(clusters)])
-        keep = counts > 0
+        cluster_counts = np.array([int((labels == j).sum()) for j in range(clusters)])
+        keep = cluster_counts > 0
         centers = centers[keep]
-        counts = counts[keep]
+        cluster_counts = cluster_counts[keep]
         rounded = [round(float(v), 6) for v in centers]
         out["centers"] = rounded
-        out["cluster_counts"] = [int(n) for n in counts]
+        out["cluster_counts"] = [int(n) for n in cluster_counts]
         out["levels"] = list(rounded)
     return out

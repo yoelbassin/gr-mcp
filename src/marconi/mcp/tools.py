@@ -27,6 +27,7 @@ from marconi.errors import classify_error
 from marconi.mcp.boundary import tool_error_boundary
 from marconi.mcp.streams import (
     _ITEM_DTYPES,
+    _require_file,
     ensure_cf32,
     parse_bits,
     render_page,
@@ -73,6 +74,7 @@ def _input_stream(path: Path, item_type: str) -> Bitstream | Symbolstream:
         raise ValueError(
             "input_item_type must be one of ['b', 'f', 's'] with input_path"
         )
+    _require_file(path)
     items = path.stat().st_size // _ITEM_BYTES[item_type]
     if item_type == "b":
         return Bitstream(path=path, num_bits=items)
@@ -209,8 +211,8 @@ def run_rx_tool(
     uncertain / no_signal) with the evidence behind it. Treat only verdict
     "decoded" as trustworthy output; "uncertain" means the evidence was
     absent or conflicting — read quality.rationale. Output streams live under
-    ./marconi-runs/ and are not auto-cleaned; page them with read_stream/stream_stats
-    until you remove them."""
+    ./marconi-runs/ and are not auto-cleaned; page with read_stream (or summarize
+    with stream_stats) until you remove them."""
     if (capture_path is None) == (input_path is None):
         raise ValueError("pass exactly one of capture_path or input_path")
     if capture_offset < 0 or capture_samples < 0:

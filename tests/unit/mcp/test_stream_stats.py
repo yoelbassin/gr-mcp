@@ -42,7 +42,7 @@ def test_histogram_length_and_totals(tmp_path: Path) -> None:
     hist = out["histogram"]
     assert len(hist) == 32  # type: ignore[arg-type]
     counts = [h["count"] for h in hist]  # type: ignore[attr-defined]
-    assert sum(counts) == out["sampled_items"]  # type: ignore[call-overload]
+    assert sum(counts) == out["sampled_items"]
     assert "centers" not in out
 
 
@@ -86,6 +86,6 @@ def test_over_requested_clusters_drops_phantoms(tmp_path: Path) -> None:
         bins=41,
     )
     assert len(out["levels"]) == 2  # type: ignore[arg-type]
-    counts = out["cluster_counts"]  # type: ignore[assignment]
+    counts = out["cluster_counts"]
     assert all(c > 0 for c in counts)  # type: ignore[attr-defined]
     assert sum(counts) == out["sampled_items"]  # type: ignore[call-overload]
