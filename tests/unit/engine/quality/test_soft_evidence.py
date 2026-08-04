@@ -45,6 +45,30 @@ def test_alternating_stream_is_not_positive(tmp_path: Path) -> None:
     assert soft_evidence(_llr_file(tmp_path, x)) == []
 
 
+def test_structured_unscrambled_data_is_suppressed_by_design(
+    tmp_path: Path,
+) -> None:
+    # measured edge: run-length-8 NRZ (unscrambled zero-heavy protocols) has
+    # sign correlation +0.87 - indistinguishable from an oversampled decode
+    # by this statistic, so the positive is (conservatively) withheld
+    rng = np.random.default_rng(5)
+    signs = np.repeat(rng.choice([-2.0, 2.0], size=500), 8)
+    ev = soft_evidence(_llr_file(tmp_path, signs + rng.normal(0, 0.3, 4000)))
+    assert ev == []
+
+
+def test_mild_oversampling_is_a_documented_blind_spot(tmp_path: Path) -> None:
+    # measured edge: a 1.1x wrong-rate decode repeats ~every 10th decision
+    # (corr ~0.09, under the 0.15 bar) and reads positive - the guard only
+    # protects from ~1.2x up; this pin exists so a future guard change gets a
+    # signal, not because the behavior is desirable
+    rng = np.random.default_rng(6)
+    base = rng.choice([-2.0, 2.0], size=4000)
+    x = np.repeat(base, np.where(np.arange(4000) % 10 == 0, 2, 1))
+    ev = soft_evidence(_llr_file(tmp_path, x + rng.normal(0, 0.3, x.size)))
+    assert [e.assessment for e in ev] == ["positive"]
+
+
 def test_noise_lead_does_not_read_negative(tmp_path: Path) -> None:
     # a capture whose burst starts late: head-only sampling judged it on
     # noise it never needed to decode; strided sampling sees the signal too

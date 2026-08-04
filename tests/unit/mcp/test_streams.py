@@ -101,6 +101,31 @@ def test_ensure_cf32_converts_only_the_requested_slice(
     assert abs(x[1].imag - 600 / 32768.0) < 1e-6
 
 
+def test_ensure_cf32_failure_leaves_no_tmp_in_cache(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("MARCONI_WORKSPACE", str(tmp_path))
+    src = tmp_path / "cap.iq"
+    np.arange(8, dtype=np.int16).tofile(src)
+
+    def boom(*a: object, **k: object) -> np.ndarray:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(np, "fromfile", boom)
+    with pytest.raises(OSError):
+        ensure_cf32(src, "ci16")
+    leftovers = list((tmp_path / "marconi-runs" / "conversions").glob("*.tmp"))
+    assert leftovers == []
+
+
+def test_render_int64_sidecar_page(tmp_path: Path) -> None:
+    p = tmp_path / "windows.i64"
+    np.array([0, 8192, 1 << 40], np.int64).tofile(p)
+    page = render_page(p, offset=1, count=5, item_type=None)
+    assert page["item_type"] == "l"
+    assert page["values"] == [8192, 1 << 40]
+
+
 def test_ensure_cf32_passthrough_and_unknown(tmp_path: Path) -> None:
     src = tmp_path / "cap.cf32"
     np.zeros(2, np.complex64).tofile(src)

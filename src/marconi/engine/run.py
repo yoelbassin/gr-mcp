@@ -175,26 +175,39 @@ _SCAN_DTYPES: dict[str, type] = {"c": np.complex64, "f": np.float32}
 _SCAN_CHUNK = 1 << 22
 
 
-def _first_nonfinite(path: Path, item_type: str) -> int | None:
+def _first_nonfinite(
+    path: Path, item_type: str, offset: int = 0, length: int = 0
+) -> int | None:
     """Bounded-memory scan of a float-format input file; integer formats
-    cannot hold non-finite values and are never scanned."""
+    cannot hold non-finite values and are never scanned. offset/length (items,
+    0 length = to EOF) bound the scan to the slice the run will read: a glitch
+    outside the slice must not reject it, and a sliced run over a huge capture
+    must not pay a whole-file scan."""
     dtype = _SCAN_DTYPES.get(item_type)
     if dtype is None or not path.is_file():
         return None
-    offset = 0
+    itemsize = int(np.dtype(dtype).itemsize)
+    pos = offset
+    end = offset + length if length > 0 else None
     with path.open("rb") as f:
+        f.seek(offset * itemsize)
         while True:
-            block: np.ndarray = np.fromfile(f, dtype=dtype, count=_SCAN_CHUNK)
+            want = _SCAN_CHUNK if end is None else min(_SCAN_CHUNK, end - pos)
+            if want <= 0:
+                return None
+            block: np.ndarray = np.fromfile(f, dtype=dtype, count=want)
             if block.size == 0:
                 return None
             bad = ~np.isfinite(block)
             if bad.any():
-                return offset + int(bad.argmax())
-            offset += int(block.size)
+                return pos + int(bad.argmax())
+            pos += int(block.size)
 
 
-def _nonfinite_input(path: Path, item_type: str) -> PipelineResult | None:
-    bad = _first_nonfinite(path, item_type)
+def _nonfinite_input(
+    path: Path, item_type: str, offset: int = 0, length: int = 0
+) -> PipelineResult | None:
+    bad = _first_nonfinite(path, item_type, offset, length)
     if bad is None:
         return None
     return PipelineResult(
@@ -325,9 +338,15 @@ def run_rx(
         if flagged is not None:
             return flagged
     if cp.gr is not None:
-        src = (source_io or {}).get("path")
+        io = source_io or {}
+        src = io.get("path")
         if isinstance(src, str):
-            flagged = _nonfinite_input(Path(src), start.item_type)
+            flagged = _nonfinite_input(
+                Path(src),
+                start.item_type,
+                int(cast(int, io.get("offset", 0))),
+                int(cast(int, io.get("length", 0))),
+            )
             if flagged is not None:
                 return flagged
     census: list[BlockCensus] = []

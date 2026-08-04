@@ -63,7 +63,7 @@ def _trace_rows(modem: Modem, cp: CompiledPipeline) -> list[dict[str, object]]:
 
 
 def _input_stream(path: Path, item_type: str) -> Bitstream | Symbolstream:
-    if item_type not in _ITEM_BYTES:
+    if item_type not in ("b", "f", "s"):  # "l" is a paging-only sidecar type
         raise ValueError(
             "input_item_type must be one of ['b', 'f', 's'] with input_path"
         )
@@ -159,10 +159,15 @@ def validate_modem(
 _MAX_INLINE_LIST = 512
 
 
-def _cap_list(container: dict[str, Any], key: str) -> None:
+def _cap_list(container: dict[str, Any], key: str, sidecar: Path | None = None) -> None:
     seq = container.get(key)
     if isinstance(seq, list) and len(seq) > _MAX_INLINE_LIST:
         container[f"{key}_total"] = len(seq)
+        if sidecar is not None:
+            # the full list must stay reachable: entries past the cap have no
+            # other home, and a >512-frame carve needs every window offset
+            np.asarray(seq, np.int64).tofile(sidecar)
+            container[f"{key}_path"] = str(sidecar)
         container[key] = seq[:_MAX_INLINE_LIST]
 
 
@@ -192,7 +197,8 @@ def run_rx_tool(
     output of a path ending at a demod stage) are demod outputs where
     POSITIVE slices to bit 1. The result carries status, a "stream" summary
     {path, item_type, items} to page with read_stream, windows/marks
-    (truncated to 512 entries with a *_total count when longer), per-block
+    (truncated to 512 entries when longer, with a *_total count and a *_path
+    int64 sidecar holding the full list - page it with read_stream), per-block
     census, diagnostics, and "quality": a conservative verdict (decoded /
     uncertain / no_signal) with the evidence behind it. Treat only verdict
     "decoded" as trustworthy output; "uncertain" means the evidence was
@@ -239,8 +245,8 @@ def run_rx_tool(
             timeout=timeout,
         )
     payload: dict[str, Any] = result.model_dump(mode="json")
-    _cap_list(payload, "windows")
-    _cap_list(payload, "marks")
+    _cap_list(payload, "windows", run_dir / "windows.i64")
+    _cap_list(payload, "marks", run_dir / "marks.i64")
     for diag in payload.get("diagnostics", []):
         if isinstance(diag, dict):
             _cap_list(diag, "marks")
@@ -306,10 +312,11 @@ def read_stream(
     level (the final validate_modem trace row states it): bits-level soft
     streams are LLRs where bit 1 = NEGATIVE; symbols-level soft streams (a
     path ending at a demod stage, e.g. bare fsk) are demod outputs where
-    POSITIVE slices to bit 1. item_type b/s/f overrides suffix inference
-    (required for suffix-less paths). Pages are capped at 65536 items; use
-    offset to walk longer streams. total_items reports the full stream
-    length."""
+    POSITIVE slices to bit 1. Window/mark sidecars (.i64, from a truncated
+    run_rx result) return as ints under "values". item_type b/s/f/l overrides
+    suffix inference (required for suffix-less paths). Pages are capped at
+    65536 items; use offset to walk longer streams. total_items reports the
+    full stream length."""
     return render_page(Path(path), offset=offset, count=count, item_type=item_type)
 
 

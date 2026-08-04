@@ -151,9 +151,17 @@ def tag_sync_evidence(diagnostics: Sequence[Diagnostic]) -> list[QualityEvidence
         for d in diagnostics
         if d.key == "sync_chance_micro" and d.count is not None
     }
+    scanned = {
+        d.block: d.count
+        for d in diagnostics
+        if d.key == "sync_items_scanned" and d.count is not None
+    }
     out: list[QualityEvidence] = []
     for d in diagnostics:
         if d.key != "sync_tags" or d.count is None:
+            continue
+        if not scanned.get(d.block):
+            # the correlator never consumed anything: untestable, not absent
             continue
         assessment = _sync_assessment(d.count, expected.get(d.block, 0.0))
         if assessment is None:
@@ -247,12 +255,17 @@ _SOFT_SAMPLE_CHUNKS = 16
 # SNR 14/9/5/3 dB -> 8.6/5.0/3.1/2.5, demod noise floor 1.6. The positive bar
 # admits the whole decodable envelope; the old 6.0 sat above it and starved
 # real mid-SNR signals into "uncertain". The bar alone cannot reject a
-# wrong-rate decode (oversampled artifact measures 4.6), so a positive also
-# demands whitened decisions: consecutive-sign correlation ~0 for real data
-# vs 0.41 oversampled / 1.0 tone. HONEST LIMIT: an UNDERSAMPLED wrong rate
-# emits genuinely clean decisions of aliased bits and is invisible to every
-# stream statistic - soft confidence attests decision quality, not bit
-# identity; only sync/validity evidence can catch aliasing.
+# wrong-rate decode (2x-oversampled artifact measures 4.6), so a positive
+# also demands whitened decisions via consecutive-sign correlation - which
+# is ~0 only for SCRAMBLED/random payloads (2x oversample 0.41, tone 1.0).
+# HONEST LIMITS, both measured: (a) structured unscrambled data suppresses
+# the positive (run-length-8 NRZ +0.87, chip-rate Manchester -0.50, heavy
+# 1010 idle <= -0.2) - conservative, the stream reads uncertain, and
+# sync/validity evidence still applies; (b) rate errors milder than ~1.2x
+# slip under the guard (1.1x measures corr 0.095, ratio 2.85 -> positive),
+# and UNDERSAMPLING emits genuinely clean decisions of aliased bits - both
+# invisible to every stream statistic. Soft confidence attests decision
+# quality, not bit identity; only sync/validity evidence catches aliasing.
 _SOFT_POSITIVE = 2.0
 _SOFT_NEGATIVE = 1.45
 _SOFT_MIN_POLARITY_FRACTION = 0.02

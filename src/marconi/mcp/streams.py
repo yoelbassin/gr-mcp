@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import tempfile
 from pathlib import Path
 
 import numpy as np
@@ -12,8 +13,15 @@ _MAX_INLINE_BITS = 1_048_576
 _MAX_PAGE_ITEMS = 65536
 _CHUNK_ITEMS = 1 << 20
 
-_SUFFIX_TYPES = {".u8": "b", ".i16": "s", ".f32": "f"}
-_ITEM_DTYPES: dict[str, type] = {"b": np.uint8, "s": np.int16, "f": np.float32}
+# "l" (int64) is a paging-only type for run sidecars (windows/marks offsets),
+# never an engine wire type
+_SUFFIX_TYPES = {".u8": "b", ".i16": "s", ".f32": "f", ".i64": "l"}
+_ITEM_DTYPES: dict[str, type] = {
+    "b": np.uint8,
+    "s": np.int16,
+    "f": np.float32,
+    "l": np.int64,
+}
 _RAW_SCALES: dict[str, tuple[type, float, float]] = {
     "ci16": (np.int16, 32768.0, 0.0),
     "ci8": (np.int8, 128.0, 0.0),
@@ -69,6 +77,8 @@ def render_page(
         page["bits"] = "".join(chr(ord("0") + int(v & np.uint8(1))) for v in bits_array)
     elif kind == "s":
         page["symbols"] = [int(v) for v in items]
+    elif kind == "l":
+        page["values"] = [int(v) for v in items]
     else:
         page["values"] = [round(float(v), 4) for v in items]
     return page
@@ -89,6 +99,8 @@ def ensure_cf32(
             f"capture_dtype must be one of {sorted(('cf32', *_RAW_SCALES))}"
         )
     st = src.stat()
+    # mtime_ns keying can serve stale on filesystems with coarse timestamps
+    # if a capture is overwritten same-size within one tick; acceptable
     key = f"{src.resolve()}|{st.st_size}|{st.st_mtime_ns}|{dtype}|{offset}|{samples}"
     dest = conversion_cache_dir() / (
         hashlib.sha1(key.encode()).hexdigest()[:24] + ".cf32"
@@ -97,25 +109,36 @@ def ensure_cf32(
         return dest, 0, 0
     raw_dtype, scale, bias = _RAW_SCALES[dtype]
     raw_size = np.dtype(raw_dtype).itemsize
-    tmp = dest.with_name(f"{dest.name}.tmp{os.getpid()}")
     remaining = samples * 2 if samples > 0 else None
-    with src.open("rb") as fin, tmp.open("wb") as fout:
+    with src.open("rb") as fin:
         fin.seek(offset * 2 * raw_size)
-        while True:
-            want = (
-                _CHUNK_ITEMS * 2
-                if remaining is None
-                else min(_CHUNK_ITEMS * 2, remaining)
-            )
-            if want == 0:
-                break
-            block: np.ndarray = np.fromfile(fin, dtype=raw_dtype, count=want)
-            if block.size == 0:
-                break
-            if remaining is not None:
-                remaining -= int(block.size)
-            pairs = block[: block.size - (block.size % 2)].astype(np.float32)
-            pairs = (pairs - bias) / scale
-            (pairs[0::2] + 1j * pairs[1::2]).astype(np.complex64).tofile(fout)
-    os.replace(tmp, dest)
+        # mkstemp: concurrent converters of the same capture (FastMCP runs
+        # tools on worker threads) must never share a tmp path - the loser
+        # would publish interleaved garbage into the immortal cache
+        fd, tmp_name = tempfile.mkstemp(dir=dest.parent, suffix=".cf32.tmp")
+        try:
+            with os.fdopen(fd, "wb") as fout:
+                while True:
+                    want = (
+                        _CHUNK_ITEMS * 2
+                        if remaining is None
+                        else min(_CHUNK_ITEMS * 2, remaining)
+                    )
+                    if want == 0:
+                        break
+                    block: np.ndarray = np.fromfile(fin, dtype=raw_dtype, count=want)
+                    if block.size == 0:
+                        break
+                    if remaining is not None:
+                        remaining -= int(block.size)
+                    pairs = block[: block.size - (block.size % 2)].astype(np.float32)
+                    pairs = (pairs - bias) / scale
+                    (pairs[0::2] + 1j * pairs[1::2]).astype(np.complex64).tofile(fout)
+            os.replace(tmp_name, dest)
+        except BaseException:
+            try:
+                os.unlink(tmp_name)
+            except OSError:
+                pass
+            raise
     return dest, 0, 0

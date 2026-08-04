@@ -39,6 +39,7 @@ def make_tag_gate(
                 "truncated_frame_items": 0,
                 "sync_tags": 0,
                 "sync_chance_micro": 0,
+                "sync_items_scanned": 0,
             }
 
         def forecast(self, noutput_items: int, ninputs: int) -> list[int]:
@@ -76,6 +77,7 @@ def make_tag_gate(
             # only consumed-region tags: the unconsumed remainder reappears
             # in the next window and would double-count
             self.diagnostics["sync_tags"] += sum(1 for o in starts if o < base + r)
+            self.diagnostics["sync_items_scanned"] = self._scanned
             self.diagnostics["sync_chance_micro"] = int(
                 self._scanned * chance_per_item * 1e6
             )

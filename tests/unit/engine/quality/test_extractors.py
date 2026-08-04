@@ -127,36 +127,34 @@ def test_survival_unknown_kind_is_skipped() -> None:
     assert survival_evidence(rows, stage_registry()) == []
 
 
+def _tag_rows(tags: int, chance_micro: int, scanned: int = 60_000) -> list[Diagnostic]:
+    return [
+        Diagnostic(block="b6", key="sync_tags", count=tags),
+        Diagnostic(block="b6", key="sync_chance_micro", count=chance_micro),
+        Diagnostic(block="b6", key="sync_items_scanned", count=scanned),
+    ]
+
+
 def test_tag_sync_above_chance_is_positive() -> None:
-    ev = tag_sync_evidence(
-        [
-            Diagnostic(block="b6", key="sync_tags", count=12),
-            Diagnostic(block="b6", key="sync_chance_micro", count=0),
-        ]
-    )
+    ev = tag_sync_evidence(_tag_rows(12, 0))
     assert [e.assessment for e in ev] == ["positive"]
     assert ev[0].metric == "sync_matches"
     assert ev[0].value == 12.0
 
 
 def test_tag_sync_at_chance_level_is_no_evidence() -> None:
-    ev = tag_sync_evidence(
-        [
-            Diagnostic(block="b6", key="sync_tags", count=233),
-            Diagnostic(block="b6", key="sync_chance_micro", count=234_400_000),
-        ]
-    )
-    assert ev == []
+    assert tag_sync_evidence(_tag_rows(233, 234_400_000)) == []
 
 
 def test_tag_sync_zero_is_negative() -> None:
-    ev = tag_sync_evidence(
-        [
-            Diagnostic(block="b6", key="sync_tags", count=0),
-            Diagnostic(block="b6", key="sync_chance_micro", count=0),
-        ]
-    )
+    ev = tag_sync_evidence(_tag_rows(0, 0))
     assert [e.assessment for e in ev] == ["negative"]
+
+
+def test_tag_sync_never_scanned_is_untestable_not_negative() -> None:
+    # a stream too short for the correlator consumed nothing: zero tags is
+    # not evidence of absence
+    assert tag_sync_evidence(_tag_rows(0, 0, scanned=0)) == []
 
 
 def test_unrelated_diagnostics_are_not_tag_sync_evidence() -> None:
