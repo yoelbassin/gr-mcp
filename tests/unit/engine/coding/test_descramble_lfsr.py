@@ -21,6 +21,26 @@ def _ref_lfsr(mask: int, seed: int, length: int, n: int) -> np.ndarray:
 _MASK, _SEED, _LEN = 0b0000011, 0x7F, 7
 
 
+@pytest.mark.parametrize(
+    "mask,seed,length",
+    [
+        (0b011, 0b101, 3),
+        (_MASK, _SEED, 7),
+        (0x12000, 0x1ACFF, 17),
+        ((1 << 64) - 1, (1 << 63) | 0xDEAD, 64),
+    ],
+)
+def test_lfsr_seq_block_generation_matches_bitwise_reference(
+    mask: int, seed: int, length: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # the block generator must be bit-exact against the per-bit recurrence,
+    # including across chunk boundaries and for n at/below the state length
+    monkeypatch.setattr(ops_bits, "_LFSR_CHUNK", 64)
+    for n in (1, length - 1, length, length + 1, 63, 64, 65, 400):
+        got = ops_bits._lfsr_seq(mask, seed, length, n)
+        assert np.array_equal(got, _ref_lfsr(mask, seed, length, n)), (length, n)
+
+
 def test_lfsr_descramble_matches_reference() -> None:
     rng = np.random.default_rng(3)
     bits = rng.integers(0, 2, 500).astype(np.uint8)

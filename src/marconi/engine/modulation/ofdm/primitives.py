@@ -26,26 +26,23 @@ def find_null(
     env = np.convolve(p, np.ones(w) / w, mode="same")
     thresh = 0.25 * np.median(env)
     low = env < thresh
-    i, n = 0, len(x)
-    while i < n:
-        if low[i]:
-            j = i
-            while j < n and low[j]:
-                j += 1
-            if (j - i) > null_len * 0.5:
-                # Refine: scan forward in raw power from (j - w) to find exact
-                # first high-energy sample, bypassing convolution smear.
-                refined = max(0, j - w)
-                while refined < n and p[refined] <= thresh:
-                    refined += 1
-                if refined >= n:
-                    # Buffer ends inside the null — need more data.
-                    raise ValueError("no null symbol found")
-                return refined
-            i = j
-        else:
-            i += 1
-    raise ValueError("no null symbol found")
+    # run detection in one pass - the acquisition ladder re-calls this per
+    # frame advance, so a per-sample Python scan multiplies into whole-capture
+    # Python time on no-signal input
+    padded = np.concatenate(([False], low, [False]))
+    edges = np.flatnonzero(np.diff(padded.view(np.int8)))
+    starts, ends = edges[0::2], edges[1::2]
+    qualifying = np.flatnonzero((ends - starts) > null_len * 0.5)
+    if qualifying.size == 0:
+        raise ValueError("no null symbol found")
+    # Refine: scan forward in raw power from (run end - w) to find the exact
+    # first high-energy sample, bypassing convolution smear.
+    refined = max(0, int(ends[qualifying[0]]) - w)
+    above = np.flatnonzero(p[refined:] > thresh)
+    if above.size == 0:
+        # Buffer ends inside the null — need more data.
+        raise ValueError("no null symbol found")
+    return refined + int(above[0])
 
 
 def qpsk_lock(z: np.ndarray) -> float:

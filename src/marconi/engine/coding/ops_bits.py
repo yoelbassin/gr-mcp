@@ -484,12 +484,42 @@ def _seq_bits(sequence: str) -> np.ndarray:
     return np.unpackbits(np.frombuffer(bytes.fromhex(sequence), dtype=np.uint8))
 
 
+_LFSR_CHUNK = 1 << 16
+
+
 def _lfsr_seq(mask: int, seed: int, length: int, n: int) -> np.ndarray:
-    out, s = np.empty(n, np.uint8), seed
-    for i in range(n):
-        out[i] = s & 1
-        fb = (s & mask).bit_count() & 1
-        s = (s >> 1) | (fb << (length - 1))
+    # The Fibonacci state is a sliding window of the output, so the output
+    # stream obeys out[t+L] = XOR of out[t+j] over the mask's tap positions:
+    # a whole block resolves as uint64 row-masks AND window + popcount,
+    # never a per-bit Python loop (the blind whole-stream case is up to
+    # 2^30 bits).
+    out = np.empty(n, np.uint8)
+    head = min(length, n)
+    for i in range(head):
+        out[i] = (seed >> i) & 1
+    if n <= length:
+        return out
+    taps = [j for j in range(length) if (mask >> j) & 1]
+    chunk = min(_LFSR_CHUNK, n - length)
+    # row i = which bits of the L-wide window XOR into block output i
+    rows: list[int] = []
+    for i in range(chunk):
+        acc = 0
+        for j in taps:
+            m = i - length + j
+            acc ^= (1 << (m + length)) if m < 0 else rows[m]
+        rows.append(acc)
+    rows_arr = np.asarray(rows, np.uint64)
+    t = length
+    window = seed & ((1 << length) - 1)
+    while t < n:
+        c = min(chunk, n - t)
+        vals = np.bitwise_and(rows_arr[:c], np.uint64(window))
+        out[t : t + c] = (np.bitwise_count(vals) & 1).astype(np.uint8)
+        t += c
+        window = 0
+        for i, b in enumerate(out[t - length : t]):
+            window |= int(b) << i
     return out
 
 
