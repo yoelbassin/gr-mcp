@@ -97,3 +97,17 @@ def test_too_few_items_yield_nothing(tmp_path: Path) -> None:
 def test_none_and_missing_paths_yield_nothing(tmp_path: Path) -> None:
     assert soft_evidence(None) == []
     assert soft_evidence(tmp_path / "absent.f32") == []
+
+
+def test_bursty_duty_cycle_is_not_negative(tmp_path: Path) -> None:
+    # ~50% idle TDMA: bursts of +-2 rails interleaved with idle 0-runs. The
+    # whole-stream mean|x|/std|x| reads as noise; the active-portion gate must
+    # recover the decodable bursts.
+    rng = np.random.default_rng(7)
+    blocks = []
+    for _ in range(60):
+        burst = rng.choice([-2.0, 2.0], size=132) + rng.normal(0, 0.3, 132)
+        blocks.append(np.concatenate([burst, np.zeros(132)]))
+    ev = soft_evidence(_llr_file(tmp_path, np.concatenate(blocks)))
+    assert ev != []
+    assert ev[0].assessment != "negative"

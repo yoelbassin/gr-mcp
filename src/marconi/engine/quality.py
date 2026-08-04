@@ -271,6 +271,18 @@ _SOFT_NEGATIVE = 1.45
 _SOFT_MIN_POLARITY_FRACTION = 0.02
 _SOFT_MAX_SIGN_CORR = 0.15
 
+# Calibrated on a synthetic ~50%-idle bursty stream (TDMA-style +-2 rail
+# bursts / zero idle): windowed power blurs ~half the window width of idle
+# into each burst edge, so the literal ~0.5 duty cycle still needs FRACTION
+# above ~0.3 before that leaked idle stops dragging the active-set ratio
+# under the 2.0 positive bar (measured 0.25 -> 1.94, 0.35 -> 2.46). Flat and
+# continuous streams are insensitive to this knob by design: the 7dB
+# noisy-but-decodable capture measures ratio 3.94 at 0.35, unchanged from
+# its pre-active-gating baseline (~3.9).
+_SOFT_ACTIVE_WINDOW = 64
+_SOFT_ACTIVE_HI_PCTILE = 90.0
+_SOFT_ACTIVE_FRACTION = 0.35
+
 
 def _sample_soft(path: Path) -> np.ndarray:
     """Evenly strided chunks across the WHOLE stream: a head-only sample
@@ -288,6 +300,24 @@ def _sample_soft(path: Path) -> np.ndarray:
         return np.concatenate(parts)
 
 
+def _active_mask(x: np.ndarray) -> np.ndarray:
+    """Sustained-power gate. Idle gaps in a bursty stream sit near zero and drag
+    mean|x| under the noise bar; keep only items whose windowed power clears a
+    fraction of the stream's high-power level. Flat-power streams (noise,
+    continuous signal) pass ~everything, so their statistic is unchanged; only
+    bimodal-power (bursty) streams get their idle removed. Keying on windowed
+    power (not per-sample magnitude) is what stops it selecting stray high
+    noise samples."""
+    if x.size <= _SOFT_ACTIVE_WINDOW:
+        return np.ones(x.size, dtype=bool)
+    window = np.ones(_SOFT_ACTIVE_WINDOW) / _SOFT_ACTIVE_WINDOW
+    power = np.convolve(x * x, window, mode="same")
+    threshold = _SOFT_ACTIVE_FRACTION * float(
+        np.percentile(power, _SOFT_ACTIVE_HI_PCTILE)
+    )
+    return power > threshold
+
+
 def soft_evidence(path: Path | None) -> list[QualityEvidence]:
     if path is None or not path.is_file():
         return []
@@ -295,7 +325,20 @@ def soft_evidence(path: Path | None) -> list[QualityEvidence]:
     x = x[np.isfinite(x)]
     if x.size < _SOFT_MIN_ITEMS:
         return []
-    mag = np.abs(x)
+    active = _active_mask(x)
+    if not active.any():
+        return [
+            QualityEvidence(
+                source="soft_stream",
+                metric="soft_confidence",
+                value=0.0,
+                assessment="negative",
+            )
+        ]
+    xa = x[active]
+    if xa.size < _SOFT_MIN_ITEMS:
+        return []
+    mag = np.abs(xa)
     spread = float(mag.std())
     mean = float(mag.mean())
     if spread == 0.0:
@@ -306,10 +349,12 @@ def soft_evidence(path: Path | None) -> list[QualityEvidence]:
     # arbitrarily high magnitude ratio without carrying any modulation; both
     # polarities must show up in real proportion before that ratio counts.
     both_polarities = (
-        min(float((x > 0).mean()), float((x < 0).mean())) >= _SOFT_MIN_POLARITY_FRACTION
+        min(float((xa > 0).mean()), float((xa < 0).mean()))
+        >= _SOFT_MIN_POLARITY_FRACTION
     )
     signs = np.sign(x)
-    sign_corr = float(np.mean(signs[1:] * signs[:-1])) if x.size > 1 else 0.0
+    pair = active[1:] & active[:-1]
+    sign_corr = float(np.mean((signs[1:] * signs[:-1])[pair])) if pair.any() else 0.0
     whitened = abs(sign_corr) <= _SOFT_MAX_SIGN_CORR
     if ratio >= _SOFT_POSITIVE and both_polarities and whitened:
         assessment: Assessment = "positive"
