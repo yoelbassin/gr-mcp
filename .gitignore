@@ -9,3 +9,5 @@ uv.lock
 artifacts/
 # Superpowers working scaffolding (ephemeral plans/notes; lasting facts live in docs/)
 docs/superpowers/
+# Default MCP workspace when MARCONI_WORKSPACE is unset
+marconi-runs/
