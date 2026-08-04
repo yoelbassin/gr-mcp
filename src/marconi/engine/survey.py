@@ -7,7 +7,7 @@ from pydantic import BaseModel
 from scipy.ndimage import uniform_filter1d
 from scipy.signal import find_peaks, welch
 
-from marconi.engine.io.iqfile import iter_iq
+from marconi.engine.io.iqfile import iter_iq, sample_iq
 
 _SURVEY_NPERSEG = 4096
 _MAX_INLINE = 512
@@ -223,4 +223,41 @@ def _bursts(sample_x: np.ndarray, path: Path, offset: int, length: int) -> Burst
         duty_cycle=active_total / pos if pos else 0.0,
         dominant_period_samples=dom,
         segments=segs,
+    )
+
+
+class SurveyResult(BaseModel):
+    sample_rate: float
+    span_samples: int
+    analyzed_samples: int
+    spectrum: SpectrumStats
+    envelope: EnvelopeStats
+    symbol_rate: SymbolRateStats
+    inst_freq: InstFreqStats
+    bursts: BurstStats
+
+
+def survey_iq(
+    path: Path,
+    sample_rate: float,
+    *,
+    offset: int = 0,
+    length: int = 0,
+    min_symbol_rate: float | None = None,
+    max_symbol_rate: float | None = None,
+) -> SurveyResult:
+    lo = min_symbol_rate if min_symbol_rate is not None else sample_rate / 1000
+    hi = max_symbol_rate if max_symbol_rate is not None else sample_rate / 2
+    if not 0 < lo < hi:
+        raise ValueError("require 0 < min_symbol_rate < max_symbol_rate")
+    x, analyzed, span = sample_iq(path, offset, length)
+    return SurveyResult(
+        sample_rate=sample_rate,
+        span_samples=span,
+        analyzed_samples=analyzed,
+        spectrum=_spectrum(x, sample_rate),
+        envelope=_envelope(x),
+        symbol_rate=_symbol_rate(x, sample_rate, lo, hi),
+        inst_freq=_inst_freq(x, sample_rate),
+        bursts=_bursts(x, path, offset, length),
     )
