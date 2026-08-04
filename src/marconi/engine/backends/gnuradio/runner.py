@@ -113,7 +113,14 @@ def _run_in_subprocess(
         proc.start()
         send.close()
         payload = _receive_payload(recv, timeout)
-        proc.join(max(0.0, deadline - time.monotonic()))
+        # a delivered result caps the wait at teardown grace: a worker wedged
+        # in GR destruction must not hold a finished run to the full deadline
+        join_for = (
+            _GRACE_SECONDS
+            if payload is not None
+            else max(0.0, deadline - time.monotonic())
+        )
+        proc.join(join_for)
         timed_out = proc.is_alive()
         if timed_out:
             proc.terminate()

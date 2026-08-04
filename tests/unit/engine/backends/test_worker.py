@@ -290,6 +290,24 @@ def test_result_larger_than_pipe_buffer_is_not_a_timeout() -> None:
     assert elapsed < 10.0, f"large result waited out the deadline ({elapsed:.1f}s)"
 
 
+def _wedged_teardown_worker(payload_json: str, conn: Any, capture_path: str) -> None:
+    conn.send(RunResult(status="ok").model_dump_json())
+    conn.close()
+    time.sleep(120.0)  # a GR destructor hang after the result was delivered
+
+
+def test_delivered_result_is_not_held_to_the_full_deadline() -> None:
+    """Once the payload has arrived, the parent waits only the short teardown
+    grace before reaping - a worker wedged in GR destruction must not hold a
+    finished 5 s decode for the rest of a 180 s deadline."""
+    ensure_worker_warm()
+    t0 = time.monotonic()
+    res = _run_in_subprocess("{}", timeout=60.0, target=_wedged_teardown_worker)
+    elapsed = time.monotonic() - t0
+    assert res.status == "ok"
+    assert elapsed < 30.0, f"finished run held for {elapsed:.1f}s"
+
+
 def test_result_pipe_outranks_timeout_kill() -> None:
     """A worker that reported ok but lingered in GR teardown past the deadline
     is killed — its completed result (and artifacts) must survive."""
