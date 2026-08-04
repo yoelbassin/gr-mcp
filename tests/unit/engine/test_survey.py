@@ -1,6 +1,6 @@
 import numpy as np
 
-from marconi.engine.survey import _envelope, _spectrum
+from marconi.engine.survey import _envelope, _spectrum, _symbol_rate
 
 
 def test_spectrum_locates_offset_tone() -> None:
@@ -47,3 +47,58 @@ def test_envelope_zero_input_is_safe() -> None:
     e = _envelope(np.zeros(4096, dtype=np.complex64))
     assert e.const_envelope_ratio == 0.0
     assert e.amplitude_kurtosis == 0.0
+
+
+def _fsk(
+    fs: float,
+    rate: float,
+    dev: float,
+    n_sym: int,
+    levels: np.ndarray,
+    smooth_frac: float = 0.0,
+) -> np.ndarray:
+    sps = int(round(fs / rate))
+    syms = levels[np.random.randint(0, levels.size, n_sym)]
+    inst = np.repeat(syms * dev, sps)
+    if smooth_frac > 0:
+        w = max(round(sps * smooth_frac), 1)
+        inst = np.convolve(inst, np.ones(w) / w, mode="same")
+    phase = 2 * np.pi * np.cumsum(inst) / fs
+    return np.exp(1j * phase).astype(np.complex64)
+
+
+def test_symbol_rate_recovers_fsk_baud() -> None:
+    np.random.seed(0)
+    fs, rate = 48_000.0, 2_400.0
+    x = _fsk(fs, rate, 1_000.0, 4000, np.array([-1.0, 1.0]), smooth_frac=0.5)
+    s = _symbol_rate(x, fs, fs / 1000, fs / 2)
+    assert s.candidates_hz, "expected at least one candidate"
+    assert min(abs(c - rate) for c in s.candidates_hz) < 0.05 * rate
+    assert abs(s.candidates_hz[0] - rate) < 0.05 * rate
+
+
+def _ook(fs: float, rate: float, n_sym: int) -> np.ndarray:
+    sps = int(round(fs / rate))
+    bits = np.random.randint(0, 2, n_sym).astype(np.float64)
+    env = np.repeat(bits, sps)
+    w = max(sps // 2, 1)
+    env = np.convolve(env, np.ones(w) / w, mode="same")
+    return env.astype(np.complex64)
+
+
+def test_symbol_rate_recovers_ook_baud() -> None:
+    np.random.seed(1)
+    fs, rate = 48_000.0, 1_200.0
+    x = _ook(fs, rate, 4000)
+    s = _symbol_rate(x, fs, fs / 1000, fs / 2)
+    assert s.candidates_hz, "expected at least one candidate"
+    assert abs(s.candidates_hz[0] - rate) < 0.05 * rate
+
+
+def test_symbol_rate_pure_noise_is_honest() -> None:
+    np.random.seed(2)
+    fs = 48_000.0
+    x = (np.random.randn(1 << 15) + 1j * np.random.randn(1 << 15)).astype(np.complex64)
+    s = _symbol_rate(x, fs, fs / 1000, fs / 2)
+    assert len(s.candidates_hz) == len(s.strengths)
+    assert len(s.strengths) < 2 or s.strengths[1] > 0.5 * s.strengths[0]
