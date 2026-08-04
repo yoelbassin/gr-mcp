@@ -9,7 +9,7 @@ from fastmcp import Client
 from marconi.mcp.server import build_server
 
 
-async def test_all_five_tools_are_registered() -> None:
+async def test_all_tools_are_registered() -> None:
     async with Client(build_server()) as client:
         names = {t.name for t in await client.list_tools()}
     assert names == {
@@ -18,6 +18,7 @@ async def test_all_five_tools_are_registered() -> None:
         "run_rx",
         "run_tx",
         "read_stream",
+        "stream_stats",
     }
 
 
