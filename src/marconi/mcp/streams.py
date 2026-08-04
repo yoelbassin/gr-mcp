@@ -183,7 +183,7 @@ def _kmeans_1d(x: np.ndarray, k: int) -> np.ndarray:
     if centers.size < k:
         centers = np.linspace(lo, hi, k)
     for _ in range(_STATS_KMEANS_ITERS):
-        labels = np.abs(xc[:, None] - centers[None, :]).argmin(1)
+        labels = _nearest_labels(xc, centers)
         moved = np.array(
             [
                 xc[labels == j].mean() if np.any(labels == j) else centers[j]
@@ -194,6 +194,10 @@ def _kmeans_1d(x: np.ndarray, k: int) -> np.ndarray:
             break
         centers = moved
     return np.sort(centers)
+
+
+def _nearest_labels(values: np.ndarray, centers: np.ndarray) -> np.ndarray:
+    return np.abs(values[:, None] - centers[None, :]).argmin(1)
 
 
 def stream_stats(
@@ -239,9 +243,13 @@ def stream_stats(
     ]
     if clusters >= 1:
         centers = _kmeans_1d(x, clusters)
-        labels = np.abs(x[:, None] - centers[None, :]).argmin(1)
+        labels = _nearest_labels(x, centers)
+        counts = np.array([int((labels == j).sum()) for j in range(clusters)])
+        keep = counts > 0
+        centers = centers[keep]
+        counts = counts[keep]
         rounded = [round(float(v), 6) for v in centers]
         out["centers"] = rounded
-        out["cluster_counts"] = [int((labels == j).sum()) for j in range(clusters)]
+        out["cluster_counts"] = [int(n) for n in counts]
         out["levels"] = list(rounded)
     return out

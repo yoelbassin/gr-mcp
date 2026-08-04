@@ -23,12 +23,12 @@ def test_four_level_clusters_recovered(tmp_path: Path) -> None:
         clusters=4,
         bins=41,
     )
-    centers = out["centers"]  # type: ignore[assignment]
-    assert isinstance(centers, list) and len(centers) == 4  # type: ignore[arg-type]
-    assert centers == sorted(centers)  # type: ignore[arg-type]
-    assert centers[0] < -2.0 and centers[-1] > 2.0  # type: ignore[index]
+    centers = out["centers"]
+    assert isinstance(centers, list) and len(centers) == 4
+    assert centers == sorted(centers)
+    assert centers[0] < -2.0 and centers[-1] > 2.0
     assert out["levels"] == centers
-    cluster_counts = out["cluster_counts"]  # type: ignore[assignment]
+    cluster_counts = out["cluster_counts"]
     assert sum(cluster_counts) == out["sampled_items"]  # type: ignore[call-overload]
 
 
@@ -39,9 +39,10 @@ def test_histogram_length_and_totals(tmp_path: Path) -> None:
         clusters=0,
         bins=32,
     )
-    hist = out["histogram"]  # type: ignore[assignment]
+    hist = out["histogram"]
     assert len(hist) == 32  # type: ignore[arg-type]
-    assert sum(h["count"] for h in hist) == out["sampled_items"]  # type: ignore
+    counts = [h["count"] for h in hist]  # type: ignore[attr-defined]
+    assert sum(counts) == out["sampled_items"]  # type: ignore[call-overload]
     assert "centers" not in out
 
 
@@ -69,3 +70,22 @@ def test_bits_stream_reports_ones_fraction(tmp_path: Path) -> None:
 def test_missing_path_is_actionable(tmp_path: Path) -> None:
     with pytest.raises(FileNotFoundError, match="auto-cleaned"):
         stream_stats(tmp_path / "gone.f32", item_type=None, clusters=0, bins=8)
+
+
+def test_over_requested_clusters_drops_phantoms(tmp_path: Path) -> None:
+    # two well-separated clusters queried at clusters=3 must return two real
+    # levels, not three with phantom zero-count centers in the empty gap.
+    rng = np.random.default_rng(4)
+    cluster1 = rng.normal(-3.0, 0.2, 3000)
+    cluster2 = rng.normal(3.0, 0.2, 3000)
+    data = np.concatenate([cluster1, cluster2])
+    out = stream_stats(
+        _f32(tmp_path, data),
+        item_type=None,
+        clusters=3,
+        bins=41,
+    )
+    assert len(out["levels"]) == 2  # type: ignore[arg-type]
+    counts = out["cluster_counts"]  # type: ignore[assignment]
+    assert all(c > 0 for c in counts)  # type: ignore[attr-defined]
+    assert sum(counts) == out["sampled_items"]  # type: ignore[call-overload]
