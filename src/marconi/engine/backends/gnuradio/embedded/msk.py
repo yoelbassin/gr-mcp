@@ -130,9 +130,9 @@ def make_msk_demod(
             )
             self._out = OutQueue(np.float32)
             self._buf = np.empty(0, np.complex64)
-            # derotated matched-filter window, one store per medium
-            self._win: list[complex] = [0j] * flen
-            self._win_arr = np.zeros(flen, np.complex128)
+            # derotated matched-filter window, stored in the chosen medium
+            self._win: list[complex] = [] if vectorized else [0j] * flen
+            self._win_arr = np.zeros(flen if vectorized else 0, np.complex128)
             self._carrier_phase = 0.0
             self._freq_corr = 0.0  # PLL frequency correction (rad/sample)
             self._bit = 0  # running bit index: rail parity + π/2 derotation

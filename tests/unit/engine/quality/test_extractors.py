@@ -75,6 +75,33 @@ def test_word_validity_midband_is_skipped() -> None:
     assert survival_evidence(rows, stage_registry()) == []
 
 
+def test_tiny_word_counts_are_not_positive_evidence() -> None:
+    # 2/2 chance-valid words at the 0.125 cap is 23%-likely garbage: a perfect
+    # ratio without statistical mass must not read as signal
+    for total in (1, 2):
+        rows = [
+            _row(
+                "block_code",
+                words_valid=total,
+                words_total=total,
+                chance_word_rate=0.0625,
+            )
+        ]
+        assert survival_evidence(rows, stage_registry()) == []
+
+
+def test_tiny_word_counts_are_not_negative_evidence() -> None:
+    rows = [_row("block_code", words_valid=0, words_total=2, chance_word_rate=0.03)]
+    assert survival_evidence(rows, stage_registry()) == []
+
+
+def test_short_stream_sync_search_is_untestable_not_negative() -> None:
+    # a stream shorter than the sync pattern never ran a search: no
+    # chance_windows stat, so zero windows must not read as "no signal"
+    rows = [_row("sync_word", windows_out=0, chance_windows=None)]
+    assert sync_evidence(rows, stage_registry()) == []
+
+
 def test_perfect_code_cannot_discriminate_and_is_skipped() -> None:
     # Hamming(7,4): every syndrome is correctable, chance-valid rate 1.0 - a
     # 100% valid tally on garbage must not read as signal

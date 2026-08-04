@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any, Literal
@@ -49,7 +50,9 @@ def verdict_from(evidence: Sequence[QualityEvidence]) -> tuple[Verdict, str]:
 # A sync count is only evidence once it clears what pure chance would find on
 # random bits: expected chance matches plus a 5-sigma Poisson margin. Short or
 # error-tolerant sync words raise the bar on their own; a 32-bit sync keeps
-# expecting ~0 so a single hit still counts.
+# expecting ~0 so a single hit still counts. Chance is modeled on UNIFORM
+# bits: a degenerate low-entropy stream against a matching low-entropy sync
+# word can still exceed the floor.
 _SYNC_CHANCE_SIGMA = 5.0
 
 _WORD_VALIDITY_POSITIVE = 0.5
@@ -57,6 +60,28 @@ _WORD_VALIDITY_NEGATIVE = 0.1
 # A code whose chance-valid rate exceeds this cannot separate signal from
 # noise (a perfect code validates EVERY word), so it contributes no evidence.
 _WORD_CHANCE_MAX = 0.125
+# The ratio bar alone leaks at tiny word counts (2/2 chance-valid words at the
+# 0.125 cap is 23%-likely garbage), so a positive also needs Chernoff-bound
+# significance: P(valid >= k | chance) <= exp(-total*D(k/total||chance)) must
+# sit at ~5-sigma odds (exp(-15) ~ 3e-7). Negatives need a minimum mass too -
+# two failed words say nothing.
+_WORD_EXCESS_MIN_LOG_ODDS = 15.0
+_WORD_NEGATIVE_MIN_WORDS = 8
+
+
+def _word_excess_significant(valid: int, total: int, chance: float) -> bool:
+    q = valid / total
+    p = max(chance, 1e-300)
+    if q <= p:
+        return False
+    if q >= 1.0:
+        log_odds = total * math.log(1.0 / p)
+    else:
+        log_odds = total * (
+            q * math.log(q / p) + (1.0 - q) * math.log((1.0 - q) / (1.0 - p))
+        )
+    return log_odds >= _WORD_EXCESS_MIN_LOG_ODDS
+
 
 # Fallback when a lock diagnostic arrives without its block's configured
 # threshold; matches cp_symbol_sync's calibrated default (noise ~1300-1600
@@ -75,6 +100,10 @@ def sync_evidence(
         expected = row.chance_windows if row.chance_windows is not None else 0.0
         floor = expected + _SYNC_CHANCE_SIGMA * float(np.sqrt(expected))
         if row.windows_out == 0:
+            if row.chance_windows is None:
+                # the search never ran (stream shorter than the pattern):
+                # untestable is not the same as absent
+                continue
             assessment: Assessment = "negative"
         elif row.windows_out > floor:
             assessment = "positive"
@@ -107,9 +136,14 @@ def survival_evidence(
         if chance is None or chance > _WORD_CHANCE_MAX:
             continue
         ratio = row.words_valid / row.words_total
-        if ratio >= _WORD_VALIDITY_POSITIVE:
+        if ratio >= _WORD_VALIDITY_POSITIVE and _word_excess_significant(
+            row.words_valid, row.words_total, chance
+        ):
             assessment: Assessment = "positive"
-        elif ratio <= max(_WORD_VALIDITY_NEGATIVE, 2.0 * chance):
+        elif (
+            ratio <= max(_WORD_VALIDITY_NEGATIVE, 2.0 * chance)
+            and row.words_total >= _WORD_NEGATIVE_MIN_WORDS
+        ):
             assessment = "negative"
         else:
             continue

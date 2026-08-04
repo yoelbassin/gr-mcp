@@ -70,12 +70,9 @@ def sync_word_rx(c: CodingCarrier, *, sync: str, max_errors: int = 0) -> CodingC
     m = pat.size
     windows: list[Window] = []
     if m == 0 or bits.size < m:
-        return CodingCarrier(
-            bits=bits,
-            windows=windows,
-            marks=c.marks,
-            stats=StepStats(chance_windows=0.0),
-        )
+        # no search ran (the stream cannot contain the pattern): no stats, so
+        # the quality extractor treats it as untestable rather than negative
+        return CodingCarrier(bits=bits, windows=windows, marks=c.marks)
     # one O(n) mismatch accumulator per pattern bit, never an (n, m) array:
     # at the bits-layer budget an n x m compare is tens of GiB
     size = bits.size - m + 1

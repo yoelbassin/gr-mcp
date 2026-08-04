@@ -47,11 +47,13 @@ def _best_ber(soft: np.ndarray, bits: np.ndarray) -> float:
     return aligned_ber_best([nrzi, 1 - nrzi], bits)
 
 
-@pytest.mark.parametrize("sps", [10, _SPS])  # scalar medium at 10, vectorized at 20
-def test_clean_msk_ber0_across_chunk_sizes(sps: int) -> None:
+# 10 = scalar medium, 20 = vectorized, 20.5 = vectorized at fractional sps
+# (pins the j_ramp/window geometry; generated at 41 sps then decimated by 2)
+@pytest.mark.parametrize("sps", [10, _SPS, 20.5])
+def test_clean_msk_ber0_across_chunk_sizes(sps: float) -> None:
     rng = np.random.default_rng(0)
     bits = rng.integers(0, 2, 4096).astype(np.uint8)
-    sig = _msk_iq(bits, sps)
+    sig = _msk_iq(bits, 41)[::2] if sps == 20.5 else _msk_iq(bits, int(sps))
     for chunk in (997, 8191, 1 << 16):
         out = drive(
             make_msk_demod(FAKE_GR, sps=float(sps)),
@@ -63,13 +65,14 @@ def test_clean_msk_ber0_across_chunk_sizes(sps: int) -> None:
         assert _best_ber(out, bits) == 0.0
 
 
-def test_small_cfo_tracked() -> None:
+@pytest.mark.parametrize("sps", [10, _SPS])  # both media track the pinned CFO
+def test_small_cfo_tracked(sps: int) -> None:
     # tolerance bound pinned from the Task-2 report's measured CFO range
     rng = np.random.default_rng(1)
     bits = rng.integers(0, 2, 4096).astype(np.uint8)
-    sig = _msk_iq(bits, _SPS, cfo_cycles=_CFO_PINNED)  # cycles/sample; PIN
+    sig = _msk_iq(bits, sps, cfo_cycles=_CFO_PINNED)  # cycles/sample; PIN
     out = drive(
-        make_msk_demod(FAKE_GR, sps=float(_SPS)), sig, chunk=4096, out_dtype=np.float32
+        make_msk_demod(FAKE_GR, sps=float(sps)), sig, chunk=4096, out_dtype=np.float32
     )
     assert out.size >= bits.size - 64
     assert _best_ber(out, bits) == 0.0
@@ -183,7 +186,8 @@ def test_loop_pole_controls_carrier_tracking() -> None:
     assert frozen_ber > 0.0
 
 
-def test_burst_between_noise_keeps_lock() -> None:
+@pytest.mark.parametrize("sps", [10, _SPS])  # both media must re-lock on bursts
+def test_burst_between_noise_keeps_lock(sps: int) -> None:
     # A real ACARS capture is bursty: signal-free stretches surround each frame.
     # The block must re-lock on the burst rather than lose lock permanently on
     # noise, so the burst's bit pattern must reappear intact. Noise spans are a
@@ -193,13 +197,13 @@ def test_burst_between_noise_keeps_lock() -> None:
     # core is asserted as a contiguous subsequence (aligned_ber shift search).
     rng = np.random.default_rng(3)
     bits = rng.integers(0, 2, 512).astype(np.uint8)
-    burst = _msk_iq(bits, _SPS)
-    n_noise = 50 * _SPS
+    burst = _msk_iq(bits, sps)
+    n_noise = 50 * sps
     noise = rng.standard_normal((2, n_noise)) + 1j * rng.standard_normal((2, n_noise))
     sig = np.concatenate([noise[0], burst, noise[1]]).astype(np.complex64)
 
     out = drive(
-        make_msk_demod(FAKE_GR, sps=float(_SPS)), sig, chunk=4096, out_dtype=np.float32
+        make_msk_demod(FAKE_GR, sps=float(sps)), sig, chunk=4096, out_dtype=np.float32
     )
     guard = 8
     core = bits[guard:-guard]

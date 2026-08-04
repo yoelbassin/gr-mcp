@@ -207,6 +207,17 @@ def test_block_code_on_real_codewords_is_decoded(tmp_path: Path) -> None:
     )
 
 
+def test_two_valid_codewords_are_insufficient_evidence(tmp_path: Path) -> None:
+    # even perfectly valid words carry no verdict without statistical mass: two
+    # (15,7) words cannot be told from luck at 5-sigma odds, so the honest
+    # answer is uncertain, not decoded
+    rng = np.random.default_rng(12)
+    bits = _codewords(rng, 2)
+    res = _bits_rx(_block_code_modem(), bits, tmp_path, "bc_tiny")
+    assert res.status == "ok", res
+    assert res.quality is not None and res.quality.verdict == "uncertain"
+
+
 def test_pure_noise_css_marks_path_is_not_called_decoded(tmp_path: Path) -> None:
     ensure_worker_warm()
     rng = np.random.default_rng(11)
