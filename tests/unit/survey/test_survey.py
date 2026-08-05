@@ -48,7 +48,7 @@ def test_envelope_separates_constant_from_varying_amplitude() -> None:
 
 
 def test_envelope_ignores_off_gaps_between_constant_bursts() -> None:
-    on, off, reps = 400, 400, 8
+    on, off, reps = 4_000, 4_000, 8
     burst = np.exp(2j * np.pi * 0.2 * np.arange(on)).astype(np.complex64)
     slot = np.concatenate([burst, np.zeros(off, np.complex64)])
     x = np.tile(slot, reps)
@@ -57,7 +57,8 @@ def test_envelope_ignores_off_gaps_between_constant_bursts() -> None:
 
 def test_envelope_kurtosis_matches_two_level_ground_truth() -> None:
     n = 1 << 14
-    amp = np.concatenate([np.ones(n // 2), 3.0 * np.ones(n // 2)])
+    rng = np.random.default_rng(0)
+    amp = rng.choice([1.0, 3.0], size=n)
     x = (amp * np.exp(2j * np.pi * 0.05 * np.arange(n))).astype(np.complex64)
     e = _envelope(x)
     assert abs(e.mean_amplitude - 2.0) < 0.05
@@ -115,6 +116,15 @@ def test_symbol_rate_recovers_ook_baud() -> None:
     s = _symbol_rate(x, fs, fs / 1000, fs / 2)
     assert s.candidates_hz, "expected at least one candidate"
     assert abs(s.candidates_hz[0] - rate) < 0.05 * rate
+
+
+def test_envelope_detects_rectangular_ook() -> None:
+    np.random.seed(1)
+    fs, rate = 48_000.0, 1_200.0
+    x = _ook(fs, rate, 4000)
+    const = np.exp(2j * np.pi * 0.05 * np.arange(x.size)).astype(np.complex64)
+    assert _envelope(x).const_envelope_ratio > 0.2
+    assert _envelope(x).const_envelope_ratio > _envelope(const).const_envelope_ratio
 
 
 def test_symbol_rate_pure_noise_is_honest() -> None:
@@ -179,10 +189,43 @@ def test_inst_freq_spread_is_near_zero_for_constant_frequency() -> None:
     assert s.spread_hz < 50.0
 
 
+def test_inst_freq_spread_is_wide_for_unshaped_psk_not_just_fsk() -> None:
+    fs, rate = 48_000.0, 2_400.0
+    sps = int(round(fs / rate))
+    rng = np.random.default_rng(3)
+    phases = rng.integers(0, 4, 3000) * (np.pi / 2) + np.pi / 4
+    x = np.repeat(np.exp(1j * phases), sps).astype(np.complex64)
+    s = _inst_freq(x, fs)
+    assert s.spread_hz > rate
+    assert _envelope(x).const_envelope_ratio < 0.1
+
+
+def test_inst_freq_spread_is_wide_for_a_noisy_tone_not_just_fsk() -> None:
+    fs = 48_000.0
+    rng = np.random.default_rng(5)
+    n = 1 << 15
+    tone = np.exp(2j * np.pi * 0.05 * np.arange(n))
+    noise_power = 1.0 / (10 ** (10.0 / 10))
+    noise = np.sqrt(noise_power / 2) * (
+        rng.standard_normal(n) + 1j * rng.standard_normal(n)
+    )
+    x = (tone + noise).astype(np.complex64)
+    s = _inst_freq(x, fs)
+    assert s.spread_hz > 1_000.0
+
+
+def test_inst_freq_all_zero_input_is_safe() -> None:
+    s = _inst_freq(np.zeros(4096, dtype=np.complex64), 48_000.0)
+    assert s.spread_hz == 0.0
+    assert len(s.hist_centers_hz) == len(s.hist_counts) == 65
+
+
 def test_envelope_and_inst_freq_agree_whole_file_vs_single_burst() -> None:
     fs, rate, dev = 48_000.0, 2_400.0, 1_500.0
     np.random.seed(7)
-    burst = _fsk(fs, rate, dev, 400, np.array([-3.0, -1.0, 1.0, 3.0]), smooth_frac=0.3)
+    burst = _fsk(
+        fs, rate, dev, 4_000, np.array([-3.0, -1.0, 1.0, 3.0]), smooth_frac=0.3
+    )
     gap = np.zeros(burst.size, dtype=np.complex64)
     whole = np.concatenate([burst, gap, burst, gap, burst])
 

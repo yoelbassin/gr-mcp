@@ -374,9 +374,12 @@ def survey(
     "spectrum" (two-sided PSD, energy-centroid offset, 99%-power occupied
     bandwidth, peak — read spectral asymmetry off this yourself), "envelope"
     (constant-envelope ratio + kurtosis — you decide FSK vs PSK vs QAM;
-    computed on the active portion of the window only — samples above a
-    fraction of the window's own median magnitude — so idle gaps between
-    bursts don't dilute it into looking amplitude-modulated. A continuous
+    computed on a power-smoothed active portion of the window, gated at
+    burst timescale (a windowed power envelope above a fraction of its own
+    peak) rather than per-sample, so a sustained idle gap between bursts
+    doesn't dilute it into looking amplitude-modulated, while genuine
+    within-burst amplitude keying (OOK/ASK, which varies faster than a
+    burst boundary) still registers as amplitude-modulated. A continuous
     signal has nothing to gate, so this is a no-op there, and the reading
     stays consistent whether you hand survey a whole bursty capture or a
     single isolated burst), "symbol_rate" (cyclostationary rate candidates_hz
@@ -400,13 +403,15 @@ def survey(
     tones fully resolve: at low samples-per-symbol, closely-spaced M-ary FSK
     tones smear into one blurred lobe, so a LOW peak count does not mean
     few-ary or non-FSK — don't trust tone count alone. spread_hz (the
-    standard deviation of the active instantaneous frequency) is the more
-    reliable signal: wide relative to symbol_rate means frequency-modulated
-    even when peaks_hz has collapsed to a single lobe; narrow (near zero)
-    means the carrier is spectrally steady — phase- or amplitude-modulated
-    instead. When envelope reads constant-envelope but inst_freq doesn't
-    clearly settle wide-vs-narrow, don't guess the modulation family from
-    inst_freq alone — run both an fsk demod and a psk/qam demod through
+    standard deviation of the active instantaneous frequency) is ONE-SIDED
+    evidence, not a detector: a NARROW spread relative to symbol_rate
+    reliably rules out wideband frequency modulation, even when peaks_hz
+    has collapsed to a single lobe — but a WIDE spread is AMBIGUOUS, since
+    unshaped/sharp-edged PSK or QAM (abrupt phase steps, not true frequency
+    change) and a plain noisy tone can read just as wide as genuine FSK. Do
+    NOT conclude "frequency-modulated" from a wide spread_hz alone. When
+    spread_hz is wide and envelope reads constant-envelope, don't guess the
+    modulation family — run both an fsk demod and a psk/qam demod through
     run_rx and compare symbol-cluster tightness with stream_stats; the
     demod that produces cleaner clusters is the better hypothesis), and
     "bursts" (activity segments, duty_cycle, and dominant_period_samples

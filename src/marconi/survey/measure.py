@@ -65,7 +65,8 @@ def _spectrum(x: np.ndarray, sample_rate: float) -> SpectrumStats:
 
 
 def _envelope(x: np.ndarray) -> EnvelopeStats:
-    a = np.abs(_gate(x, _active_mask(x, _SURVEY_ACTIVE_FRACTION))).astype(np.float64)
+    active = _slot_active_mask(x, _SURVEY_ACTIVE_FRACTION, _SURVEY_BURST_WINDOW)
+    a = np.abs(_gate(x, active)).astype(np.float64)
     mean = float(a.mean())
     std = float(a.std())
     kurt = float(((a - mean) ** 4).mean() / std**4 - 3.0) if std > 0 else 0.0
@@ -143,6 +144,19 @@ def _active_mask(x: np.ndarray, fraction: float) -> np.ndarray:
 
 def _active_pairs(x: np.ndarray, fraction: float) -> np.ndarray:
     active = _active_mask(x, fraction)
+    return active[1:] & active[:-1]
+
+
+def _slot_active_mask(x: np.ndarray, fraction: float, window: int) -> np.ndarray:
+    power = uniform_filter1d(np.abs(x).astype(np.float64) ** 2, window)
+    peak = float(power.max())
+    if peak <= 0.0:
+        return np.ones(x.size, dtype=bool)
+    return power > fraction * peak
+
+
+def _slot_active_pairs(x: np.ndarray, fraction: float, window: int) -> np.ndarray:
+    active = _slot_active_mask(x, fraction, window)
     return active[1:] & active[:-1]
 
 
@@ -231,7 +245,7 @@ def _symbol_rate(
 
 def _inst_freq(x: np.ndarray, sample_rate: float) -> InstFreqStats:
     f = np.angle(x[1:] * np.conj(x[:-1])) / (2 * np.pi) * sample_rate
-    f = _gate(f, _active_pairs(x, _SURVEY_ACTIVE_FRACTION))
+    f = _gate(f, _slot_active_pairs(x, _SURVEY_ACTIVE_FRACTION, _SURVEY_BURST_WINDOW))
     spread = float(f.std())
     lo, hi = (float(v) for v in np.percentile(f, [0.5, 99.5]))
     if hi <= lo:
