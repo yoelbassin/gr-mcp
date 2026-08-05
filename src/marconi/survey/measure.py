@@ -65,7 +65,7 @@ def _spectrum(x: np.ndarray, sample_rate: float) -> SpectrumStats:
 
 
 def _envelope(x: np.ndarray) -> EnvelopeStats:
-    a = np.abs(x).astype(np.float64)
+    a = np.abs(_gate(x, _active_mask(x, _SURVEY_ACTIVE_FRACTION))).astype(np.float64)
     mean = float(a.mean())
     std = float(a.std())
     kurt = float(((a - mean) ** 4).mean() / std**4 - 3.0) if std > 0 else 0.0
@@ -96,6 +96,7 @@ class InstFreqStats(BaseModel):
     hist_centers_hz: list[float]
     hist_counts: list[int]
     peaks_hz: list[float]
+    spread_hz: float
 
 
 class SymbolRateStats(BaseModel):
@@ -138,6 +139,11 @@ def _active_mask(x: np.ndarray, fraction: float) -> np.ndarray:
     if med <= 0.0:
         return np.ones(x.size, dtype=bool)
     return mag > fraction * med
+
+
+def _active_pairs(x: np.ndarray, fraction: float) -> np.ndarray:
+    active = _active_mask(x, fraction)
+    return active[1:] & active[:-1]
 
 
 def _gate(values: np.ndarray, keep: np.ndarray) -> np.ndarray:
@@ -191,8 +197,7 @@ def _symbol_rate(
     dphi = np.angle(x[1:] * np.conj(x[:-1]))
     yf_full = np.abs(np.diff(dphi))
 
-    active = _active_mask(x, _SURVEY_ACTIVE_FRACTION)
-    active_pairs = active[1:] & active[:-1]
+    active_pairs = _active_pairs(x, _SURVEY_ACTIVE_FRACTION)
     yf = _gate(yf_full, active_pairs[1:] & active_pairs[:-1])
 
     fa, ma = _clock_spectrum(ya, sample_rate, _SURVEY_CLOCK_CHUNKS)
@@ -225,8 +230,9 @@ def _symbol_rate(
 
 
 def _inst_freq(x: np.ndarray, sample_rate: float) -> InstFreqStats:
-    x = x - x.mean()
     f = np.angle(x[1:] * np.conj(x[:-1])) / (2 * np.pi) * sample_rate
+    f = _gate(f, _active_pairs(x, _SURVEY_ACTIVE_FRACTION))
+    spread = float(f.std())
     lo, hi = (float(v) for v in np.percentile(f, [0.5, 99.5]))
     if hi <= lo:
         hi = lo + 1.0
@@ -239,6 +245,7 @@ def _inst_freq(x: np.ndarray, sample_rate: float) -> InstFreqStats:
         hist_centers_hz=[float(v) for v in centers],
         hist_counts=[int(v) for v in counts],
         peaks_hz=[float(centers[i - 1]) for i in idx],
+        spread_hz=spread,
     )
 
 

@@ -36,14 +36,23 @@ def test_spectrum_zero_power_input() -> None:
     assert len(s.freqs_hz) == len(s.psd_db) <= 512
 
 
-def test_envelope_separates_constant_from_ook() -> None:
+def test_envelope_separates_constant_from_varying_amplitude() -> None:
     n = 1 << 14
     const = np.exp(2j * np.pi * 0.05 * np.arange(n)).astype(np.complex64)
-    ook = const.copy()
-    ook[: n // 2] = 0.0
+    rng = np.random.default_rng(0)
+    levels = rng.choice([1.0, 2.5], size=n)
+    ask = (levels * np.exp(2j * np.pi * 0.05 * np.arange(n))).astype(np.complex64)
     assert _envelope(const).const_envelope_ratio < 0.1
-    assert _envelope(ook).const_envelope_ratio > _envelope(const).const_envelope_ratio
+    assert _envelope(ask).const_envelope_ratio > _envelope(const).const_envelope_ratio
     assert _envelope(const).mean_amplitude > 0.0
+
+
+def test_envelope_ignores_off_gaps_between_constant_bursts() -> None:
+    on, off, reps = 400, 400, 8
+    burst = np.exp(2j * np.pi * 0.2 * np.arange(on)).astype(np.complex64)
+    slot = np.concatenate([burst, np.zeros(off, np.complex64)])
+    x = np.tile(slot, reps)
+    assert _envelope(x).const_envelope_ratio < 0.1
 
 
 def test_envelope_kurtosis_matches_two_level_ground_truth() -> None:
@@ -160,6 +169,29 @@ def test_inst_freq_finds_four_fsk_tones() -> None:
     for got, want in zip(sorted(s.peaks_hz), expected):
         assert abs(got - want) < 200.0, (sorted(s.peaks_hz), expected)
     assert len(s.hist_centers_hz) == len(s.hist_counts) == 65
+    assert s.spread_hz > dev
+
+
+def test_inst_freq_spread_is_near_zero_for_constant_frequency() -> None:
+    fs = 48_000.0
+    x = np.exp(2j * np.pi * 0.05 * np.arange(1 << 14)).astype(np.complex64)
+    s = _inst_freq(x, fs)
+    assert s.spread_hz < 50.0
+
+
+def test_envelope_and_inst_freq_agree_whole_file_vs_single_burst() -> None:
+    fs, rate, dev = 48_000.0, 2_400.0, 1_500.0
+    np.random.seed(7)
+    burst = _fsk(fs, rate, dev, 400, np.array([-3.0, -1.0, 1.0, 3.0]), smooth_frac=0.3)
+    gap = np.zeros(burst.size, dtype=np.complex64)
+    whole = np.concatenate([burst, gap, burst, gap, burst])
+
+    e_whole, e_burst = _envelope(whole), _envelope(burst)
+    assert e_whole.const_envelope_ratio < 0.1
+    assert abs(e_whole.const_envelope_ratio - e_burst.const_envelope_ratio) < 0.02
+
+    f_whole, f_burst = _inst_freq(whole, fs), _inst_freq(burst, fs)
+    assert abs(f_whole.spread_hz - f_burst.spread_hz) < 0.1 * f_burst.spread_hz
 
 
 def test_bursts_recovers_periodic_cadence(tmp_path: Path) -> None:

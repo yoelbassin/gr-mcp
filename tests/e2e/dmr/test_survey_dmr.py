@@ -25,9 +25,13 @@ def test_survey_recovers_dmr_parameters() -> None:
     cands = cast(list[float], symbol_rate["candidates_hz"])
     assert any(abs(c - _BAUD) < 0.05 * _BAUD for c in cands), cands
 
+    envelope = cast(dict[str, object], out["envelope"])
+    const_ratio = cast(float, envelope["const_envelope_ratio"])
+    assert const_ratio < 0.1, const_ratio
+
     inst_freq = cast(dict[str, object], out["inst_freq"])
-    peaks = cast(list[float], inst_freq["peaks_hz"])
-    assert 3 <= len(peaks) <= 6, peaks
+    spread_hz = cast(float, inst_freq["spread_hz"])
+    assert spread_hz > 0.1 * _BAUD, spread_hz
 
     spectrum = cast(dict[str, object], out["spectrum"])
     bw = cast(float, spectrum["occupied_bw_hz"])

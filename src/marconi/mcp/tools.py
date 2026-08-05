@@ -373,29 +373,47 @@ def survey(
     returns five measurement blocks, all raw numbers for you to judge:
     "spectrum" (two-sided PSD, energy-centroid offset, 99%-power occupied
     bandwidth, peak — read spectral asymmetry off this yourself), "envelope"
-    (constant-envelope ratio + kurtosis — you decide FSK vs PSK vs QAM),
-    "symbol_rate" (cyclostationary rate candidates_hz ranked by strengths that are
-    RELATIVE — normalized to the single strongest line across the clock
-    spectrum's amplitude and phase branches together (not the PSD "spectrum"
-    block above, and not each branch's own peak), so even pure noise produces
-    a top strength near 1.0: strengths rank the candidates, they are not a
-    signal-present score. A candidate that looks like a low-order
-    harmonic of some other, weaker-frequency periodicity (TDMA/burst
-    repetition, a capture-chain artifact) is down-weighted, so strengths[0]
-    is not always the largest raw line and can read well under 1.0 even for a
-    confidently-detected signal; the true rate itself can never be mistaken
-    for this comb's own fundamental. Treat candidates as ranked hypotheses,
-    expect harmonics of the true rate among them, and note the estimate is
-    least reliable for amplitude-null signals such as OOK/ASK with a carrier
-    offset, and for short windows spanning only a few burst/TDMA cycles —
-    prefer widening the window for bursty signals; narrow with
-    min_symbol_rate/max_symbol_rate), "inst_freq" (instantaneous-frequency
-    histogram + tone peaks_hz — their count is the tone order, their spacing the
-    deviation), and "bursts" (activity segments, duty_cycle, and
-    dominant_period_samples from burst spacing — the TDMA cadence; segments is
-    capped at 512 entries, with a segments_total count when longer — survey
-    writes no sidecar, so re-window with capture_offset/capture_samples to
-    inspect a busier span). It never
+    (constant-envelope ratio + kurtosis — you decide FSK vs PSK vs QAM;
+    computed on the active portion of the window only — samples above a
+    fraction of the window's own median magnitude — so idle gaps between
+    bursts don't dilute it into looking amplitude-modulated. A continuous
+    signal has nothing to gate, so this is a no-op there, and the reading
+    stays consistent whether you hand survey a whole bursty capture or a
+    single isolated burst), "symbol_rate" (cyclostationary rate candidates_hz
+    ranked by strengths that are RELATIVE — normalized to the single
+    strongest line across the clock spectrum's amplitude and phase branches
+    together (not the PSD "spectrum" block above, and not each branch's own
+    peak), so even pure noise produces a top strength near 1.0: strengths
+    rank the candidates, they are not a signal-present score. A candidate
+    that looks like a low-order harmonic of some other, weaker-frequency
+    periodicity (TDMA/burst repetition, a capture-chain artifact) is
+    down-weighted, so strengths[0] is not always the largest raw line and can
+    read well under 1.0 even for a confidently-detected signal; the true
+    rate itself can never be mistaken for this comb's own fundamental. Treat
+    candidates as ranked hypotheses, expect harmonics of the true rate among
+    them, and note the estimate is least reliable for amplitude-null signals
+    such as OOK/ASK with a carrier offset, and for short windows spanning
+    only a few burst/TDMA cycles — prefer widening the window for bursty
+    signals; narrow with min_symbol_rate/max_symbol_rate), "inst_freq"
+    (instantaneous-frequency histogram, tone peaks_hz, and spread_hz —
+    active-gated like envelope. peaks_hz only tells you the tone order when
+    tones fully resolve: at low samples-per-symbol, closely-spaced M-ary FSK
+    tones smear into one blurred lobe, so a LOW peak count does not mean
+    few-ary or non-FSK — don't trust tone count alone. spread_hz (the
+    standard deviation of the active instantaneous frequency) is the more
+    reliable signal: wide relative to symbol_rate means frequency-modulated
+    even when peaks_hz has collapsed to a single lobe; narrow (near zero)
+    means the carrier is spectrally steady — phase- or amplitude-modulated
+    instead. When envelope reads constant-envelope but inst_freq doesn't
+    clearly settle wide-vs-narrow, don't guess the modulation family from
+    inst_freq alone — run both an fsk demod and a psk/qam demod through
+    run_rx and compare symbol-cluster tightness with stream_stats; the
+    demod that produces cleaner clusters is the better hypothesis), and
+    "bursts" (activity segments, duty_cycle, and dominant_period_samples
+    from burst spacing — the TDMA cadence; segments is capped at 512
+    entries, with a segments_total count when longer — survey writes no
+    sidecar, so re-window with capture_offset/capture_samples to inspect a
+    busier span). It never
     labels the modulation, never assembles or runs a spec, and characterizes the
     dominant signal in the slice; window in time for a multi-signal capture."""
     if capture_offset < 0 or capture_samples < 0:
