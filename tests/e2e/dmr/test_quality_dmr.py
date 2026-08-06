@@ -7,10 +7,12 @@ bandwidth literal is duplicated here.
 
 BURST_SEGMENTS are the 7 activity windows survey_iq's own burst detector
 finds in this capture (offset, length in complex samples) — measured once,
-not re-derived per run. Per-burst soft-stream separation is real-data noisy
-(order-4 clustering is universal across all 7, but only some clear the
-quality module's fixed multilevel threshold), so the gate checks across all
-of them rather than betting on a single window."""
+not re-derived per run. Every burst's soft-stream fit_levels order is 4
+(genuine 4-level separation), with separation ~5.07-8.12 against the
+quality module's 4.0 multilevel bar — all 7 currently clear it with
+margin. The gate still checks all 7 and asserts any non-no_signal verdict,
+rather than betting on one hardcoded window, as insurance against a future
+demod or threshold change narrowing any single burst's margin."""
 
 from __future__ import annotations
 
@@ -52,10 +54,11 @@ def _bare_fsk_modem() -> Modem:
 )
 def test_bare_fsk_reads_as_signal(tmp_path: Path) -> None:
     ensure_worker_warm()
+    modem = _bare_fsk_modem()
     verdicts: list[str] = []
     for offset, length in BURST_SEGMENTS:
         res = run_rx(
-            _bare_fsk_modem(),
+            modem,
             stage_registry(),
             sample_rate=RATE,
             start=IQ,
