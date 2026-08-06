@@ -21,12 +21,13 @@ _STATS_KMEANS_ITERS = 100
 
 # "l" (int64) is a paging-only type for run sidecars (windows/marks offsets),
 # never an engine wire type
-_SUFFIX_TYPES = {".u8": "b", ".i16": "s", ".f32": "f", ".i64": "l"}
+_SUFFIX_TYPES = {".u8": "b", ".i16": "s", ".f32": "f", ".i64": "l", ".cf32": "c"}
 _ITEM_DTYPES: dict[str, type] = {
     "b": np.uint8,
     "s": np.int16,
     "f": np.float32,
     "l": np.int64,
+    "c": np.complex64,
 }
 _RAW_SCALES: dict[str, tuple[type, float, float]] = {
     "ci16": (np.int16, 32768.0, 0.0),
@@ -94,6 +95,9 @@ def render_page(
         page["symbols"] = [int(v) for v in items]
     elif kind == "l":
         page["values"] = [int(v) for v in items]
+    elif kind == "c":
+        page["real"] = [round(float(v.real), 6) for v in items]
+        page["imag"] = [round(float(v.imag), 6) for v in items]
     else:
         page["values"] = [round(float(v), 4) for v in items]
     return page
@@ -173,6 +177,18 @@ def _sample_stream(path: Path, dtype: np.dtype) -> tuple[np.ndarray, int, bool]:
     return np.concatenate(parts), total, True
 
 
+def _hist(x: np.ndarray, bins: int) -> list[dict[str, float | int]]:
+    lo, hi = (float(v) for v in np.percentile(x, [0.5, 99.5]))
+    if hi <= lo:
+        hi = lo + 1.0
+    edges = np.linspace(lo, hi, bins + 1)
+    counts, _ = np.histogram(np.clip(x, lo, hi), bins=edges)
+    mids = (edges[:-1] + edges[1:]) / 2.0
+    return [
+        {"center": round(float(c), 6), "count": int(n)} for c, n in zip(mids, counts)
+    ]
+
+
 def _kmeans_1d(x: np.ndarray, k: int) -> np.ndarray:
     lo, hi = (float(v) for v in np.percentile(x, [1.0, 99.0]))
     if hi <= lo:
@@ -200,8 +216,26 @@ def _nearest_labels(values: np.ndarray, centers: np.ndarray) -> np.ndarray:
     return np.abs(values[:, None] - centers[None, :]).argmin(1)
 
 
+def _kmeans_2d(points: np.ndarray, k: int) -> np.ndarray:
+    r = float(np.abs(points).mean()) or 1.0
+    ang = np.linspace(0.0, 2 * np.pi, k, endpoint=False)
+    centers = (r * np.cos(ang) + 1j * r * np.sin(ang)).astype(np.complex128)
+    for _ in range(_STATS_KMEANS_ITERS):
+        labels = _nearest_labels(points, centers)
+        moved = np.array(
+            [
+                points[labels == j].mean() if np.any(labels == j) else centers[j]
+                for j in range(k)
+            ]
+        )
+        if np.allclose(moved, centers):
+            break
+        centers = moved
+    return centers
+
+
 def stream_stats(
-    path: Path, *, item_type: str | None, clusters: int, bins: int
+    path: Path, *, item_type: str | None, clusters: int, bins: int = 41
 ) -> dict[str, object]:
     _require_file(path)
     kind = _resolve_item_type(path, item_type)
@@ -221,6 +255,8 @@ def stream_stats(
         ones = float((sample & np.uint8(1)).mean()) if sample.size else 0.0
         out["ones_fraction"] = round(ones, 6)
         return out
+    if kind == "c":
+        return _constellation_stats(out, sample, clusters, bins)
     x = sample.astype(np.float64)
     x = x[np.isfinite(x)]
     if x.size == 0:
@@ -252,4 +288,49 @@ def stream_stats(
         out["centers"] = rounded
         out["cluster_counts"] = [int(n) for n in cluster_counts]
         out["levels"] = list(rounded)
+    return out
+
+
+def _constellation_stats(
+    out: dict[str, object], sample: np.ndarray, clusters: int, bins: int
+) -> dict[str, object]:
+    z = sample.astype(np.complex128)
+    z = z[np.isfinite(z)]
+    if z.size == 0:
+        raise ValueError("stream has no finite items to summarize")
+    out["sampled_items"] = int(z.size)
+    mag = np.abs(z)
+    mean_mag = float(mag.mean())
+    out.update(
+        mean_magnitude=round(mean_mag, 6),
+        std_magnitude=round(float(mag.std()), 6),
+        constant_modulus_ratio=round(
+            float(mag.std() / mean_mag) if mean_mag else 0.0, 6
+        ),
+    )
+    out["magnitude_histogram"] = _hist(mag, bins)
+    out["phase_histogram"] = _hist(np.angle(z), bins)
+    if clusters >= 1:
+        centers = _kmeans_2d(z, clusters)
+        counts = np.array(
+            [int((_nearest_labels(z, centers) == j).sum()) for j in range(clusters)]
+        )
+        keep = counts > 0
+        centers, counts = centers[keep], counts[keep]
+        order = np.argsort(np.angle(centers))
+        centers, counts = centers[order], counts[order]
+        assigned = centers[_nearest_labels(z, centers)]
+        ref = float(np.sqrt((np.abs(assigned) ** 2).mean()))
+        err = float(np.sqrt((np.abs(z - assigned) ** 2).mean()))
+        out["evm"] = round(err / ref, 6) if ref > 0 else None
+        out["clusters"] = [
+            {
+                "real": round(float(c.real), 6),
+                "imag": round(float(c.imag), 6),
+                "magnitude": round(float(abs(c)), 6),
+                "phase_deg": round(float(np.degrees(np.angle(c))), 6),
+                "count": int(n),
+            }
+            for c, n in zip(centers, counts)
+        ]
     return out
