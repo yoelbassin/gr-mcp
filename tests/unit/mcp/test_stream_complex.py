@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 from marconi.mcp.streams import render_page, stream_stats
 
@@ -25,8 +26,12 @@ def test_read_stream_complex_pages_real_imag(tmp_path: Path) -> None:
     assert page["total_items"] == 10
 
 
-def test_stream_stats_complex_tight_qpsk(tmp_path: Path) -> None:
-    rng = np.random.default_rng(0)
+@pytest.mark.parametrize("seed", range(30))
+def test_stream_stats_complex_tight_qpsk(tmp_path: Path, seed: int) -> None:
+    # canonical QPSK lobes sit at 45/135/225/315 degrees - exactly the
+    # unlucky rotation for a naive axis-aligned k-means seeding grid, so this
+    # sweeps seeds rather than pinning one that happens to converge cleanly.
+    rng = np.random.default_rng(seed)
     centers = np.array([1 + 1j, -1 + 1j, -1 - 1j, 1 - 1j]) / np.sqrt(2)
     z = centers[rng.integers(0, 4, 8000)] + 0.05 * (
         rng.standard_normal(8000) + 1j * rng.standard_normal(8000)

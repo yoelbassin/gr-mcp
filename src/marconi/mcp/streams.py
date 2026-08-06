@@ -216,10 +216,22 @@ def _nearest_labels(values: np.ndarray, centers: np.ndarray) -> np.ndarray:
     return np.abs(values[:, None] - centers[None, :]).argmin(1)
 
 
+def _farthest_point_seeds(points: np.ndarray, k: int) -> np.ndarray:
+    # deterministic greedy k-means++ (no RNG): each seed is the point farthest
+    # from every seed chosen so far. Data-driven, not a fixed angular grid, so
+    # it has no unlucky-rotation basin (a grid seeded exactly between a
+    # constellation's lobes can converge with two lobes merged into one seed).
+    seeds = np.empty(k, dtype=np.complex128)
+    seeds[0] = points[np.argmax(np.abs(points - points.mean()))]
+    dist = np.abs(points - seeds[0])
+    for i in range(1, k):
+        seeds[i] = points[np.argmax(dist)]
+        dist = np.minimum(dist, np.abs(points - seeds[i]))
+    return seeds
+
+
 def _kmeans_2d(points: np.ndarray, k: int) -> np.ndarray:
-    r = float(np.abs(points).mean()) or 1.0
-    ang = np.linspace(0.0, 2 * np.pi, k, endpoint=False)
-    centers = (r * np.cos(ang) + 1j * r * np.sin(ang)).astype(np.complex128)
+    centers = _farthest_point_seeds(points, k)
     for _ in range(_STATS_KMEANS_ITERS):
         labels = _nearest_labels(points, centers)
         moved = np.array(
