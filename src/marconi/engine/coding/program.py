@@ -7,6 +7,7 @@ import numpy as np
 
 from marconi.engine.backends.base import BlockCensus
 from marconi.engine.coding.carrier import CodingCarrier
+from marconi.engine.deadline import check_deadline
 from marconi.engine.types.levels import Level
 
 
@@ -58,6 +59,7 @@ def run_coding(
     census: list[BlockCensus] | None = None,
 ) -> CodingCarrier:
     for step in program.steps:
+        check_deadline()
         # stats describe the step that computed them; ops built on replace()
         # would otherwise carry the previous step's stats into their own row
         src = replace(carrier, stats=None) if carrier.stats is not None else carrier

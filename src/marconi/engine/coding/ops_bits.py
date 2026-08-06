@@ -16,6 +16,7 @@ except ImportError:  # pure-Python fallback, always installed
 
 from marconi.engine.coding.carrier import CodingCarrier, StepStats, Window
 from marconi.engine.coding.primitives import can_correct, syndrome_table
+from marconi.engine.deadline import check_deadline
 
 
 def _chance_valid_rate(n: int, redundancy: int, t: int, q: int) -> float:
@@ -398,6 +399,8 @@ def _rs_decode_words(
     total = syms.size // n
     valid = 0
     for w in range(total):
+        if w & 0xFF == 0:
+            check_deadline()
         word = [int(s) for s in syms[w * n : (w + 1) * n]]
         try:
             data, full, _ = codec.decode(word)
