@@ -20,6 +20,7 @@ from marconi.engine.compile.compiler import (
     CompileError,
     compile_pipeline,
 )
+from marconi.engine.deadline import check_deadline, remaining, set_deadline
 from marconi.engine.io.bitfile import (
     read_bits,
     read_symbols,
@@ -192,6 +193,7 @@ def _first_nonfinite(
     with path.open("rb") as f:
         f.seek(offset * itemsize)
         while True:
+            check_deadline()
             want = _SCAN_CHUNK if end is None else min(_SCAN_CHUNK, end - pos)
             if want <= 0:
                 return None
@@ -277,120 +279,126 @@ def run_rx(
     backend: Backend | None = None,
     timeout: float = 180.0,
 ) -> PipelineResult:
-    seam = workdir / "seam.dat"
-    cp = compile_pipeline(
-        modem,
-        registry,
-        direction="rx",
-        sample_rate=sample_rate,
-        start=start,
-        source_io=source_io or {},
-        sink_io={"path": str(seam)},
-        name=modem.name,
-    )
-    if cp.final.level is Level.IQ:
-        raise CompileError(
-            "rx pipeline ends at IQ; run_rx extracts symbol/bit streams — end "
-            "the path with a demodulation stage (for conditioned-IQ output use "
-            "compile_modem and run the backend directly)"
+    with set_deadline(timeout):
+        seam = workdir / "seam.dat"
+        cp = compile_pipeline(
+            modem,
+            registry,
+            direction="rx",
+            sample_rate=sample_rate,
+            start=start,
+            source_io=source_io or {},
+            sink_io={"path": str(seam)},
+            name=modem.name,
         )
-    if cp.final.level is Level.AUDIO:
-        raise CompileError(
-            "rx pipeline ends at AUDIO; run_rx extracts symbol/bit streams — "
-            "continue the path with a demodulation stage (for audio output "
-            "use compile_modem and run the backend directly)"
-        )
-    if cp.final.level is Level.SYMBOLS and cp.final.item_type == "c":
-        raise CompileError(
-            "rx pipeline ends at complex soft symbols, an interior seam with "
-            "no stream format; end the path with a demap stage (for raw "
-            "symbol output use compile_modem and run the backend directly)"
-        )
-    if cp.gr is not None and input_stream is not None:
-        raise ValueError(
-            "this modem's path has a GR segment fed by source_io; input_stream "
-            "only enters a path that starts with a coding stage"
-        )
-    if cp.gr is None and input_stream is None:
-        raise ValueError(
-            "this modem's path starts with a coding stage, so no GR segment "
-            "writes the seam file; supply input_stream"
-        )
-    if isinstance(input_stream, Bitstream) and cp.boundary.item_type != "b":
-        raise ValueError(
-            f"input_stream is a Bitstream (item_type 'b') but the entry "
-            f"boundary is item_type {cp.boundary.item_type.value!r}"
-        )
-    if isinstance(input_stream, Symbolstream):
-        if cp.boundary.item_type not in ("s", "f"):
+        if cp.final.level is Level.IQ:
+            raise CompileError(
+                "rx pipeline ends at IQ; run_rx extracts symbol/bit streams — end "
+                "the path with a demodulation stage (for conditioned-IQ output "
+                "use compile_modem and run the backend directly)"
+            )
+        if cp.final.level is Level.AUDIO:
+            raise CompileError(
+                "rx pipeline ends at AUDIO; run_rx extracts symbol/bit streams — "
+                "continue the path with a demodulation stage (for audio output "
+                "use compile_modem and run the backend directly)"
+            )
+        if cp.final.level is Level.SYMBOLS and cp.final.item_type == "c":
+            raise CompileError(
+                "rx pipeline ends at complex soft symbols, an interior seam with "
+                "no stream format; end the path with a demap stage (for raw "
+                "symbol output use compile_modem and run the backend directly)"
+            )
+        if cp.gr is not None and input_stream is not None:
             raise ValueError(
-                f"input_stream is a Symbolstream (item_type "
-                f"{input_stream.item_type!r}) but the entry boundary is item_type "
-                f"{cp.boundary.item_type.value!r}"
+                "this modem's path has a GR segment fed by source_io; "
+                "input_stream only enters a path that starts with a coding "
+                "stage"
             )
-        if input_stream.item_type != cp.boundary.item_type:
+        if cp.gr is None and input_stream is None:
             raise ValueError(
-                f"input_stream item_type {input_stream.item_type!r} does not "
-                f"match the entry boundary item_type {cp.boundary.item_type.value!r}"
+                "this modem's path starts with a coding stage, so no GR "
+                "segment writes the seam file; supply input_stream"
             )
-    if isinstance(input_stream, Symbolstream) and input_stream.item_type == "f":
-        flagged = _nonfinite_input(input_stream.path, "f")
-        if flagged is not None:
-            return flagged
-    if cp.gr is not None:
-        io = source_io or {}
-        src = io.get("path")
-        if isinstance(src, str):
-            flagged = _nonfinite_input(
-                Path(src),
-                start.item_type,
-                int(cast(int, io.get("offset", 0))),
-                int(cast(int, io.get("length", 0))),
+        if isinstance(input_stream, Bitstream) and cp.boundary.item_type != "b":
+            raise ValueError(
+                f"input_stream is a Bitstream (item_type 'b') but the entry "
+                f"boundary is item_type {cp.boundary.item_type.value!r}"
             )
+        if isinstance(input_stream, Symbolstream):
+            if cp.boundary.item_type not in ("s", "f"):
+                raise ValueError(
+                    f"input_stream is a Symbolstream (item_type "
+                    f"{input_stream.item_type!r}) but the entry boundary is "
+                    f"item_type {cp.boundary.item_type.value!r}"
+                )
+            if input_stream.item_type != cp.boundary.item_type:
+                raise ValueError(
+                    f"input_stream item_type {input_stream.item_type!r} does "
+                    "not match the entry boundary item_type "
+                    f"{cp.boundary.item_type.value!r}"
+                )
+        if isinstance(input_stream, Symbolstream) and input_stream.item_type == "f":
+            flagged = _nonfinite_input(input_stream.path, "f")
             if flagged is not None:
                 return flagged
-    census: list[BlockCensus] = []
-    diagnostics: list[Diagnostic] = []
-    marks: list[int] = []
-    entry_path = seam
-    if cp.gr is not None:
-        if backend is None:
-            from marconi.engine.backends.gnuradio.runner import GnuRadioBackend
+        if cp.gr is not None:
+            io = source_io or {}
+            src = io.get("path")
+            if isinstance(src, str):
+                flagged = _nonfinite_input(
+                    Path(src),
+                    start.item_type,
+                    int(cast(int, io.get("offset", 0))),
+                    int(cast(int, io.get("length", 0))),
+                )
+                if flagged is not None:
+                    return flagged
+        census: list[BlockCensus] = []
+        diagnostics: list[Diagnostic] = []
+        marks: list[int] = []
+        entry_path = seam
+        if cp.gr is not None:
+            if backend is None:
+                from marconi.engine.backends.gnuradio.runner import GnuRadioBackend
 
-            backend = GnuRadioBackend()
-        r = backend.run_pipeline(cp.gr, timeout=timeout)
-        census, diagnostics = list(r.census), list(r.diagnostics)
-        if r.status != "ok":
-            return PipelineResult(
-                status=r.status,
-                error=r.error,
-                stalled_at=r.stalled_at,
-                census=census,
-                diagnostics=diagnostics,
+                backend = GnuRadioBackend()
+            check_deadline()
+            r = backend.run_pipeline(cp.gr, timeout=remaining())
+            census, diagnostics = list(r.census), list(r.diagnostics)
+            if r.status != "ok":
+                return PipelineResult(
+                    status=r.status,
+                    error=r.error,
+                    stalled_at=r.stalled_at,
+                    census=census,
+                    diagnostics=diagnostics,
+                )
+            marks = _harvest_marks(diagnostics)
+        if input_stream is not None:
+            entry_path = input_stream.path
+            if isinstance(input_stream, Symbolstream):
+                marks = list(input_stream.marks)
+        check_deadline()
+        if cp.coding is None:
+            result = _wrap_gr_only(cp, seam, marks, census, diagnostics)
+        else:
+            carrier = _entry_carrier(cp.boundary, entry_path, marks)
+            out = run_coding(cp.coding, carrier, census)
+            result = _flag_empty_coding(
+                _wrap_result(cp.final, out, workdir, marks, census, diagnostics)
             )
-        marks = _harvest_marks(diagnostics)
-    if input_stream is not None:
-        entry_path = input_stream.path
-        if isinstance(input_stream, Symbolstream):
-            marks = list(input_stream.marks)
-    if cp.coding is None:
-        result = _wrap_gr_only(cp, seam, marks, census, diagnostics)
-    else:
-        carrier = _entry_carrier(cp.boundary, entry_path, marks)
-        out = run_coding(cp.coding, carrier, census)
-        result = _flag_empty_coding(
-            _wrap_result(cp.final, out, workdir, marks, census, diagnostics)
+        if result.status != "ok":
+            return result
+        check_deadline()
+        return result.model_copy(
+            update={
+                "quality": assess_quality(
+                    registry=registry,
+                    census=result.census,
+                    diagnostics=result.diagnostics,
+                    marks=result.marks,
+                    soft_stream=_soft_stream_path(cp, result, seam, input_stream),
+                )
+            }
         )
-    if result.status != "ok":
-        return result
-    return result.model_copy(
-        update={
-            "quality": assess_quality(
-                registry=registry,
-                census=result.census,
-                diagnostics=result.diagnostics,
-                marks=result.marks,
-                soft_stream=_soft_stream_path(cp, result, seam, input_stream),
-            )
-        }
-    )
