@@ -7,6 +7,7 @@ from pathlib import Path
 
 import numpy as np
 
+from marconi.engine.deadline import check_deadline
 from marconi.mcp.workspace import conversion_cache_dir
 
 _MAX_INLINE_BITS = 1_048_576
@@ -138,6 +139,7 @@ def ensure_cf32(
         try:
             with os.fdopen(fd, "wb") as fout:
                 while True:
+                    check_deadline()
                     want = (
                         _CHUNK_ITEMS * 2
                         if remaining is None

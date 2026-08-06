@@ -14,6 +14,7 @@ from marconi.engine.compile.compiler import (
     compile_modem,
     compile_pipeline,
 )
+from marconi.engine.deadline import set_deadline
 from marconi.engine.run import PipelineResult
 from marconi.engine.run import run_rx as engine_run_rx
 from marconi.engine.stages.base import SpecValidationError
@@ -207,16 +208,18 @@ def run_rx_tool(
     POSITIVE slices to bit 1. A path may also end at a bare demod stage
     instead of a bit-level one, landing on complex constellation symbols
     (item_type "c", a .cf32 file) instead of bits or hard/soft symbols;
-    inspect it with stream_stats(item_type="c", clusters=K) to fit a
-    constellation and read its EVM — a genuine demod locks tight and
-    low-EVM, a false lock (wrong modulation family) reads high-EVM or won't
-    tighten. The result carries status, a "stream" summary {path, item_type,
-    items} to page with read_stream, windows/marks (truncated to 512 entries
-    when longer, with a *_total count and a *_path int64 sidecar holding the
-    full list - page it with read_stream), per-block census, diagnostics,
-    and "quality": a conservative verdict (decoded / uncertain / no_signal)
-    with the evidence behind it. Treat only verdict "decoded" as trustworthy
-    output; "uncertain" means the evidence was absent or conflicting — read
+    inspect it with stream_stats(item_type="c") — constant_modulus_ratio is
+    the robust check for whether the demod you picked actually matches the
+    signal (a real lock sits on one ring; a false lock, e.g. the wrong
+    modulation family, does not); clusters=K's EVM/cluster fit corroborates
+    once modulus says the lock is real. The result carries status, a
+    "stream" summary {path, item_type, items} to page with read_stream,
+    windows/marks (truncated to 512 entries when longer, with a *_total
+    count and a *_path int64 sidecar holding the full list - page it with
+    read_stream), per-block census, diagnostics, and "quality": a
+    conservative verdict (decoded / uncertain / no_signal) with the evidence
+    behind it. Treat only verdict "decoded" as trustworthy output;
+    "uncertain" means the evidence was absent or conflicting — read
     quality.rationale. timeout is a hard wall-clock cap on the entire call —
     pre-scan, decode, coding, and quality-scoring all count against it, not
     just the GR pipeline — so a decode too large or slow to finish in time
@@ -236,26 +239,30 @@ def run_rx_tool(
     modem = Modem.from_spec(spec, step_models())
     run_dir = new_run_dir("rx")
     if capture_path is not None:
-        src, offset, length = ensure_cf32(
-            Path(capture_path),
-            capture_dtype,
-            offset=capture_offset,
-            samples=capture_samples,
-        )
-        source_io: dict[str, ParamValue] = {"path": str(src)}
-        if offset:
-            source_io["offset"] = offset
-        if length:
-            source_io["length"] = length
-        result = engine_run_rx(
-            modem,
-            stage_registry(),
-            sample_rate=sample_rate,
-            start=_start_descriptor("c", None),
-            workdir=run_dir,
-            source_io=source_io,
-            timeout=timeout,
-        )
+        # a first-time ci16/ci8/cu8 conversion is real work with no bound of
+        # its own; set_deadline here too so it counts against timeout - the
+        # min-nesting means engine_run_rx's own inner deadline can't extend it
+        with set_deadline(timeout):
+            src, offset, length = ensure_cf32(
+                Path(capture_path),
+                capture_dtype,
+                offset=capture_offset,
+                samples=capture_samples,
+            )
+            source_io: dict[str, ParamValue] = {"path": str(src)}
+            if offset:
+                source_io["offset"] = offset
+            if length:
+                source_io["length"] = length
+            result = engine_run_rx(
+                modem,
+                stage_registry(),
+                sample_rate=sample_rate,
+                start=_start_descriptor("c", None),
+                workdir=run_dir,
+                source_io=source_io,
+                timeout=timeout,
+            )
     else:
         if input_item_type is None:
             raise ValueError("input_item_type is required with input_path")
@@ -370,22 +377,31 @@ def stream_stats(
 
     item_type "c" (complex constellation symbols, e.g. the output of a path
     ending at a demod stage) returns a different shape: mean_magnitude,
-    std_magnitude, and constant_modulus_ratio (std/mean of |z|; near 0 means
-    every symbol sits on one ring — PSK/CPFSK — a large ratio means several
-    rings, e.g. QAM), plus magnitude_histogram and phase_histogram in place of
-    the single histogram. clusters=K here fits a 2-D constellation instead of
-    1-D levels: sorted "clusters" (each {real, imag, magnitude, phase_deg,
-    count}) and an overall "evm" — RMS error from each symbol to its nearest
-    cluster center, normalized by the RMS cluster magnitude. Low EVM with K
-    balanced, tight clusters is a genuine order-K constellation; high EVM, or
-    clusters that never tighten, is a false lock (e.g. a QPSK demod forced
-    onto an FSK/frequency-modulated signal). K is a request, not a
-    measurement of the signal: asking for more clusters than the signal truly
-    has over-splits real lobes into extra low-EVM sub-clusters, so a returned
-    K-length "clusters" list alone is not confirmation of order K — compare
-    EVM across a few K values (it drops sharply at the true order and
-    plateaus past it) together with cluster-count balance, not just whether K
-    clusters came back. item_type b/s/f/l/c overrides suffix inference."""
+    std_magnitude, and constant_modulus_ratio (std/mean of |z|), plus
+    magnitude_histogram and phase_histogram in place of the single
+    histogram. Read constant_modulus_ratio first: it is the robust
+    false-lock check. A genuine PSK/CPFSK lock sits on one ring (ratio near
+    0); a locked QAM constellation sits on a few fixed rings (moderate,
+    structured); a false lock — e.g. an FSK/frequency-modulated signal
+    forced through a PSK demod, or a demod that never fully settled — drifts
+    across many radii and reads a high, erratic ratio, even when a K-cluster
+    fit still happily returns K points. clusters=K (>=1) additionally fits a
+    2-D constellation: sorted "clusters" (each {real, imag, magnitude,
+    phase_deg, count}) and an overall "evm" (RMS error from each symbol to
+    its nearest cluster center, normalized by the RMS cluster magnitude).
+    Treat EVM and cluster balance as corroborating, not primary: once
+    constant_modulus_ratio says the lock is real, tight balanced clusters at
+    low EVM confirm which order K — but EVM by itself is not a safe
+    false-lock check (a demod that partially loses lock mid-capture, e.g. a
+    cycle slip, can read a misleadingly low EVM at the wrong K, or a
+    misleadingly high one on a signal that IS genuinely locked, while
+    constant_modulus_ratio — blind to phase/rotation — does not move). K is
+    a request, not a measurement of the signal: asking for more clusters
+    than the signal truly has over-splits real lobes into extra low-EVM
+    sub-clusters, so a returned K-length "clusters" list alone is not
+    confirmation of order K — compare EVM across a few K values (it drops
+    sharply at the true order and plateaus past it) together with
+    cluster-count balance. item_type b/s/f/l/c overrides suffix inference."""
     return _compute_stats(Path(path), item_type=item_type, clusters=clusters, bins=bins)
 
 

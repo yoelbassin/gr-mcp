@@ -28,5 +28,21 @@ def test_deadline_resets_on_exit():
     assert remaining() == float("inf")
 
 
+def test_nested_set_deadline_keeps_the_earliest_deadline():
+    with set_deadline(0.0):
+        with set_deadline(1000.0):  # a much longer nested budget must not win
+            with pytest.raises(RunTimeout):
+                check_deadline()
+
+
+def test_nested_set_deadline_restores_the_outer_deadline_on_exit():
+    with set_deadline(1000.0):
+        with set_deadline(0.0):
+            with pytest.raises(RunTimeout):
+                check_deadline()
+        check_deadline()  # back to the still-live outer deadline; no raise
+        assert 0.0 < remaining() <= 1000.0
+
+
 def test_runtimeout_classifies():
     assert classify_error(RunTimeout("late"))[0] == "deadline_exceeded"

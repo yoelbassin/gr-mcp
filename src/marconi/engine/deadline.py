@@ -17,7 +17,10 @@ _deadline: ContextVar[float | None] = ContextVar("marconi_run_deadline", default
 
 @contextmanager
 def set_deadline(timeout: float) -> Iterator[None]:
-    token = _deadline.set(time.monotonic() + max(0.0, timeout))
+    new = time.monotonic() + max(0.0, timeout)
+    existing = _deadline.get()
+    dl = new if existing is None else min(existing, new)
+    token = _deadline.set(dl)
     try:
         yield
     finally:
