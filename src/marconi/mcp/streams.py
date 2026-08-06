@@ -8,6 +8,7 @@ from pathlib import Path
 import numpy as np
 
 from marconi.engine.deadline import check_deadline
+from marconi.levels import kmeans_1d
 from marconi.mcp.workspace import conversion_cache_dir
 
 _MAX_INLINE_BITS = 1_048_576
@@ -191,29 +192,6 @@ def _hist(x: np.ndarray, bins: int) -> list[dict[str, float | int]]:
     ]
 
 
-def _kmeans_1d(x: np.ndarray, k: int) -> np.ndarray:
-    lo, hi = (float(v) for v in np.percentile(x, [1.0, 99.0]))
-    if hi <= lo:
-        hi = lo + 1.0
-    xc = np.clip(x, lo, hi)
-    seeds = np.percentile(xc, np.linspace(0.0, 1.0, k + 2)[1:-1] * 100.0)
-    centers = np.unique(seeds)
-    if centers.size < k:
-        centers = np.linspace(lo, hi, k)
-    for _ in range(_STATS_KMEANS_ITERS):
-        labels = _nearest_labels(xc, centers)
-        moved = np.array(
-            [
-                xc[labels == j].mean() if np.any(labels == j) else centers[j]
-                for j in range(k)
-            ]
-        )
-        if np.allclose(moved, centers):
-            break
-        centers = moved
-    return np.sort(centers)
-
-
 def _nearest_labels(values: np.ndarray, centers: np.ndarray) -> np.ndarray:
     return np.abs(values[:, None] - centers[None, :]).argmin(1)
 
@@ -292,7 +270,7 @@ def stream_stats(
         {"center": round(float(c), 6), "count": int(n)} for c, n in zip(mids, counts)
     ]
     if clusters >= 1:
-        centers = _kmeans_1d(x, clusters)
+        centers = kmeans_1d(x, clusters)
         labels = _nearest_labels(x, centers)
         cluster_counts = np.array([int((labels == j).sum()) for j in range(clusters)])
         keep = cluster_counts > 0
