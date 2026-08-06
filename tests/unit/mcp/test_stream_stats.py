@@ -72,6 +72,20 @@ def test_missing_path_is_actionable(tmp_path: Path) -> None:
         stream_stats(tmp_path / "gone.f32", item_type=None, clusters=0, bins=8)
 
 
+def test_tiny_stream_clamps_clusters_without_crash(tmp_path: Path) -> None:
+    # 5 items with clusters=8: kmeans_1d clamps k to x.size and can return
+    # fewer than `clusters` centers - the cluster_counts/keep masking must
+    # follow the actual center count, not the requested one, or this raises.
+    x = np.array([1.0, 2.0, 3.0, 4.0, 5.0], dtype=np.float32)
+    out = stream_stats(_f32(tmp_path, x), item_type=None, clusters=8, bins=8)
+    centers = out["centers"]
+    assert isinstance(centers, list) and 1 <= len(centers) <= x.size
+    cluster_counts = out["cluster_counts"]
+    assert isinstance(cluster_counts, list) and len(cluster_counts) == len(centers)
+    assert sum(cluster_counts) == out["sampled_items"]  # type: ignore[call-overload]
+    assert out["levels"] == centers
+
+
 def test_over_requested_clusters_drops_phantoms(tmp_path: Path) -> None:
     # two well-separated clusters queried at clusters=3 must return two real
     # levels, not three with phantom zero-count centers in the empty gap.

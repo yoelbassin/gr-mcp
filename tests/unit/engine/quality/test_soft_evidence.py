@@ -114,7 +114,7 @@ def test_bursty_duty_cycle_is_not_negative(tmp_path: Path) -> None:
 
 
 def test_clean_four_level_soft_stream_is_positive(tmp_path: Path) -> None:
-    # C4FM-like discriminator: four well-separated levels, not the binary
+    # 4-level FM discriminator: four well-separated levels, not the binary
     # antipodal shape the ratio/polarity/whiteness logic below assumes - a
     # clean M-ary eye must still read as signal-present, not no_signal
     rng = np.random.default_rng(0)

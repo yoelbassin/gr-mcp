@@ -272,7 +272,9 @@ def stream_stats(
     if clusters >= 1:
         centers = kmeans_1d(x, clusters)
         labels = _nearest_labels(x, centers)
-        cluster_counts = np.array([int((labels == j).sum()) for j in range(clusters)])
+        cluster_counts = np.array(
+            [int((labels == j).sum()) for j in range(centers.size)]
+        )
         keep = cluster_counts > 0
         centers = centers[keep]
         cluster_counts = cluster_counts[keep]

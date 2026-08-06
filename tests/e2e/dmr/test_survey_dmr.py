@@ -29,6 +29,9 @@ def test_survey_recovers_dmr_parameters() -> None:
     assert len(eyes) == len(cands), (cands, eyes)
     assert all(e >= 0.0 for e in eyes), eyes
 
+    if max(eyes) >= 8.0:  # _CLEAR_EYE — the re-rank only fires above this
+        assert abs(cands[0] - _BAUD) < 0.05 * _BAUD, (cands, eyes)
+
     envelope = cast(dict[str, object], out["envelope"])
     const_ratio = cast(float, envelope["const_envelope_ratio"])
     assert const_ratio < 0.1, const_ratio
