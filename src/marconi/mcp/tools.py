@@ -204,16 +204,29 @@ def run_rx_tool(
     level: bits-level soft floats are LLRs where bit 1 = NEGATIVE;
     symbols-level soft floats (the default level for 'f' input, and the
     output of a path ending at a demod stage) are demod outputs where
-    POSITIVE slices to bit 1. The result carries status, a "stream" summary
-    {path, item_type, items} to page with read_stream, windows/marks
-    (truncated to 512 entries when longer, with a *_total count and a *_path
-    int64 sidecar holding the full list - page it with read_stream), per-block
-    census, diagnostics, and "quality": a conservative verdict (decoded /
-    uncertain / no_signal) with the evidence behind it. Treat only verdict
-    "decoded" as trustworthy output; "uncertain" means the evidence was
-    absent or conflicting — read quality.rationale. Output streams live under
-    ./marconi-runs/ and are not auto-cleaned; page with read_stream (or summarize
-    with stream_stats) until you remove them."""
+    POSITIVE slices to bit 1. A path may also end at a bare demod stage
+    instead of a bit-level one, landing on complex constellation symbols
+    (item_type "c", a .cf32 file) instead of bits or hard/soft symbols;
+    inspect it with stream_stats(item_type="c", clusters=K) to fit a
+    constellation and read its EVM — a genuine demod locks tight and
+    low-EVM, a false lock (wrong modulation family) reads high-EVM or won't
+    tighten. The result carries status, a "stream" summary {path, item_type,
+    items} to page with read_stream, windows/marks (truncated to 512 entries
+    when longer, with a *_total count and a *_path int64 sidecar holding the
+    full list - page it with read_stream), per-block census, diagnostics,
+    and "quality": a conservative verdict (decoded / uncertain / no_signal)
+    with the evidence behind it. Treat only verdict "decoded" as trustworthy
+    output; "uncertain" means the evidence was absent or conflicting — read
+    quality.rationale. timeout is a hard wall-clock cap on the entire call —
+    pre-scan, decode, coding, and quality-scoring all count against it, not
+    just the GR pipeline — so a decode too large or slow to finish in time
+    raises a [deadline_exceeded] error instead of running unbounded; window a
+    large capture with capture_offset/capture_samples rather than only
+    raising timeout (an exception: a deadline landing specifically while the
+    GR pipeline itself is mid-run instead returns status="timeout" normally,
+    not a raised error). Output streams live under ./marconi-runs/ and are
+    not auto-cleaned; page with read_stream (or summarize with stream_stats)
+    until you remove them."""
     if (capture_path is None) == (input_path is None):
         raise ValueError("pass exactly one of capture_path or input_path")
     if capture_offset < 0 or capture_samples < 0:
@@ -323,8 +336,10 @@ def read_stream(
     level (the final validate_modem trace row states it): bits-level soft
     streams are LLRs where bit 1 = NEGATIVE; symbols-level soft streams (a
     path ending at a demod stage, e.g. bare fsk) are demod outputs where
-    POSITIVE slices to bit 1. Window/mark sidecars (.i64, from a truncated
-    run_rx result) return as ints under "values". item_type b/s/f/l overrides
+    POSITIVE slices to bit 1. Complex constellation symbols (.cf32, item_type
+    "c" — the output of a path ending at a bare demod stage, e.g. psk_demod)
+    return "real"/"imag" lists. Window/mark sidecars (.i64, from a truncated
+    run_rx result) return as ints under "values". item_type b/s/f/l/c overrides
     suffix inference (required for suffix-less paths). Pages are capped at
     65536 items; use offset to walk longer streams. total_items reports the
     full stream length. Stream files live under ./marconi-runs/ (or
@@ -351,8 +366,26 @@ def stream_stats(
     for a power-of-two K to feed it). Levels with no support are dropped, so
     "levels" may be shorter than K — a short list means the stream has fewer
     real modes than you asked for. Read the histogram to judge modality. Bits
-    (.u8) report only ones_fraction. item_type b/s/f/l overrides suffix
-    inference."""
+    (.u8) report only ones_fraction.
+
+    item_type "c" (complex constellation symbols, e.g. the output of a path
+    ending at a demod stage) returns a different shape: mean_magnitude,
+    std_magnitude, and constant_modulus_ratio (std/mean of |z|; near 0 means
+    every symbol sits on one ring — PSK/CPFSK — a large ratio means several
+    rings, e.g. QAM), plus magnitude_histogram and phase_histogram in place of
+    the single histogram. clusters=K here fits a 2-D constellation instead of
+    1-D levels: sorted "clusters" (each {real, imag, magnitude, phase_deg,
+    count}) and an overall "evm" — RMS error from each symbol to its nearest
+    cluster center, normalized by the RMS cluster magnitude. Low EVM with K
+    balanced, tight clusters is a genuine order-K constellation; high EVM, or
+    clusters that never tighten, is a false lock (e.g. a QPSK demod forced
+    onto an FSK/frequency-modulated signal). K is a request, not a
+    measurement of the signal: asking for more clusters than the signal truly
+    has over-splits real lobes into extra low-EVM sub-clusters, so a returned
+    K-length "clusters" list alone is not confirmation of order K — compare
+    EVM across a few K values (it drops sharply at the true order and
+    plateaus past it) together with cluster-count balance, not just whether K
+    clusters came back. item_type b/s/f/l/c overrides suffix inference."""
     return _compute_stats(Path(path), item_type=item_type, clusters=clusters, bins=bins)
 
 
@@ -413,7 +446,10 @@ def survey(
     spread_hz is wide and envelope reads constant-envelope, don't guess the
     modulation family — run both an fsk demod and a psk/qam demod through
     run_rx and compare symbol-cluster tightness with stream_stats; the
-    demod that produces cleaner clusters is the better hypothesis), and
+    demod that produces cleaner clusters is the better hypothesis. Some
+    capture chains mirror IQ spectrally, so if a constant-envelope signal's
+    fsk/msk demod comes back no_signal, prepend the invert stage and retry
+    before ruling out frequency modulation), and
     "bursts" (activity segments, duty_cycle, and dominant_period_samples
     from burst spacing — the TDMA cadence; segments is capped at 512
     entries, with a segments_total count when longer — survey writes no
