@@ -444,11 +444,23 @@ def survey(
     periodicity (TDMA/burst repetition, a capture-chain artifact) is
     down-weighted, so strengths[0] is not always the largest raw line and can
     read well under 1.0 even for a confidently-detected signal; the true
-    rate itself can never be mistaken for this comb's own fundamental. Treat
-    candidates as ranked hypotheses, expect harmonics of the true rate among
-    them, and note the estimate is least reliable for amplitude-null signals
-    such as OOK/ASK with a carrier offset, and for short windows spanning
-    only a few burst/TDMA cycles — prefer widening the window for bursty
+    rate itself can never be mistaken for this comb's own fundamental. Each
+    candidate also carries eye_openness (same index as candidates_hz and
+    strengths): how cleanly a multi-level symbol eye opens when the capture
+    is resampled at that rate — near zero for a smeared or wrong-rate guess,
+    sharply higher at a genuine symbol clock. candidates_hz already re-heads
+    toward whichever candidate's eye clearly opens (preferring the lower
+    rate when more than one does, since a harmonic's eye can look clean
+    too), falling back to the strength order when no eye clearly opens — so
+    strengths[0] is not guaranteed to be the largest strengths value. For
+    constant-envelope/FSK-family signals judge symbol rate by eye_openness,
+    not strengths: strengths ranks spectral lines and can seat a
+    burst-harmonic or spurious line first, while a clean multi-level eye is
+    the decisive tell. Treat candidates as ranked hypotheses, expect
+    harmonics of the true rate among them, and note the estimate is least
+    reliable for amplitude-null signals such as OOK/ASK with a carrier
+    offset, and for short windows spanning only a few burst/TDMA cycles —
+    prefer widening the window for bursty
     signals; narrow with min_symbol_rate/max_symbol_rate), "inst_freq"
     (instantaneous-frequency histogram, tone peaks_hz, and spread_hz —
     active-gated like envelope. peaks_hz only tells you the tone order when

@@ -21,6 +21,7 @@ def test_survey_iq_recovers_fsk_ground_truth(tmp_path: Path) -> None:
     r = survey_iq(p, fs)
     assert r.span_samples == x.size
     assert min(abs(c - rate) for c in r.symbol_rate.candidates_hz) < 0.05 * rate
+    assert len(r.symbol_rate.eye_openness) == len(r.symbol_rate.candidates_hz)
     assert 3 <= len(r.inst_freq.peaks_hz) <= 5
     assert r.envelope.const_envelope_ratio < 0.1
     assert r.spectrum.occupied_bw_hz > 0.0

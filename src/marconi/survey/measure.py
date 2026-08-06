@@ -95,6 +95,10 @@ _SURVEY_COMB_DAMPING = 0.05
 _EYE_MIN_SYMBOLS = 64
 _EYE_MAX_SYMBOLS = 2000
 _EYE_PHASE_STEPS = 8
+_CLEAR_EYE = (
+    8.0  # measured in Task 1: unimodal / wrong-rate smear tops out ~3.6; a real eye ~25
+)
+_HARMONIC_FRAC = 0.6
 
 
 class InstFreqStats(BaseModel):
@@ -107,6 +111,7 @@ class InstFreqStats(BaseModel):
 class SymbolRateStats(BaseModel):
     candidates_hz: list[float]
     strengths: list[float]
+    eye_openness: list[float]
     search_lo_hz: float
     search_hi_hz: float
 
@@ -208,6 +213,25 @@ def _damp_harmonics(
     return np.where(mask, strengths * _SURVEY_COMB_DAMPING, strengths)
 
 
+def _rerank_by_eye(
+    candidates: list[float], strengths: list[float], eyes: list[float]
+) -> tuple[list[float], list[float], list[float]]:
+    order = list(range(len(candidates)))
+    if eyes and max(eyes) >= _CLEAR_EYE:
+        thresh = _HARMONIC_FRAC * max(eyes)
+        strong = [i for i in order if eyes[i] >= thresh]
+        primary = min(strong, key=lambda i: candidates[i])
+        rest = sorted(
+            (i for i in order if i != primary), key=lambda i: eyes[i], reverse=True
+        )
+        order = [primary, *rest]
+    return (
+        [candidates[i] for i in order],
+        [strengths[i] for i in order],
+        [eyes[i] for i in order],
+    )
+
+
 def _symbol_rate(
     x: np.ndarray, sample_rate: float, lo: float, hi: float
 ) -> SymbolRateStats:
@@ -239,9 +263,15 @@ def _symbol_rate(
         if all(abs(f_ - m) > tol for m in merged_f):
             merged_f.append(f_)
             merged_s.append(float(strg[i]))
+
+    candidates = merged_f[:_SURVEY_RATE_K]
+    strengths = merged_s[:_SURVEY_RATE_K]
+    eyes = [_eye_openness(dphi, active_pairs, sample_rate, r) for r in candidates]
+    candidates, strengths, eyes = _rerank_by_eye(candidates, strengths, eyes)
     return SymbolRateStats(
-        candidates_hz=merged_f[:_SURVEY_RATE_K],
-        strengths=merged_s[:_SURVEY_RATE_K],
+        candidates_hz=candidates,
+        strengths=strengths,
+        eye_openness=eyes,
         search_lo_hz=lo,
         search_hi_hz=hi,
     )

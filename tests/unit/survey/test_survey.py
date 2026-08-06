@@ -136,6 +136,60 @@ def test_symbol_rate_pure_noise_is_honest() -> None:
     assert len(s.strengths) < 2 or s.strengths[1] > 0.5 * s.strengths[0]
 
 
+@pytest.fixture
+def _synth_fsk_capture() -> tuple[np.ndarray, float, float]:
+    fs, true_baud, n_sym, dev, sfo = 48_000.0, 3_700.0, 4000, 900.0, 5e-5
+    smooth_frac, decoy_rate, decoy_depth = 0.2, 2_050.0, 0.4
+
+    rng = np.random.default_rng(0)
+    levels = np.array([-3.0, -1.0, 1.0, 3.0])
+    syms = levels[rng.integers(0, levels.size, n_sym)]
+
+    sps = fs / true_baud
+    span = int(n_sym * sps)
+    t = np.arange(span, dtype=np.float64)
+    sym_index = np.clip(np.floor(t / (sps * (1.0 + sfo))).astype(int), 0, n_sym - 1)
+    freq = syms[sym_index] * dev
+    window = max(round(sps * smooth_frac), 1)
+    freq = np.convolve(freq, np.ones(window) / window, mode="same")
+
+    phase = 2 * np.pi * np.cumsum(freq) / fs
+    iq = np.roll(np.exp(1j * phase), 3)
+
+    ripple = 1.0 + decoy_depth * np.sin(2 * np.pi * decoy_rate * t / fs)
+    iq = iq * ripple
+    return iq.astype(np.complex64), fs, true_baud
+
+
+def test_symbol_rate_reranks_true_baud_above_spurious_line(
+    _synth_fsk_capture: tuple[np.ndarray, float, float],
+) -> None:
+    # _synth_fsk_capture: a 4-level FSK IQ array at a generic baud with a decoy
+    # low-frequency amplitude comb; helper added in this test module.
+    x, fs, true_baud = _synth_fsk_capture
+    stats = _symbol_rate(x, fs, lo=fs / 1000, hi=fs / 2)
+    assert stats.eye_openness  # populated, aligned to candidates
+    assert len(stats.eye_openness) == len(stats.candidates_hz)
+    assert abs(stats.candidates_hz[0] - true_baud) / true_baud < 0.05
+
+
+def test_symbol_rate_prefers_fundamental_over_harmonic(
+    _synth_fsk_capture: tuple[np.ndarray, float, float],
+) -> None:
+    x, fs, true_baud = _synth_fsk_capture
+    stats = _symbol_rate(x, fs, lo=fs / 1000, hi=fs / 2)
+    # a 2x-baud harmonic must never outrank the fundamental
+    assert stats.candidates_hz[0] <= true_baud * 1.5
+
+
+def test_symbol_rate_rerank_promotes_a_non_strongest_candidate(
+    _synth_fsk_capture: tuple[np.ndarray, float, float],
+) -> None:
+    x, fs, true_baud = _synth_fsk_capture
+    stats = _symbol_rate(x, fs, lo=fs / 1000, hi=fs / 2)
+    assert stats.strengths[0] < max(stats.strengths)
+
+
 def test_comb_suppression_damps_majority_harmonic_pool() -> None:
     g0, lo, bin_hz = 40.0, 90.0, 1.0
     freqs = np.array([g0 - 2, g0 - 1, g0, g0 + 1, g0 + 2])
