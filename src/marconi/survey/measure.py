@@ -7,6 +7,7 @@ from pydantic import BaseModel
 from scipy.ndimage import uniform_filter1d
 from scipy.signal import find_peaks, welch
 
+from marconi.levels import fit_levels
 from marconi.survey.iqfile import iter_iq, sample_iq
 
 _SURVEY_NPERSEG = 4096
@@ -91,6 +92,9 @@ _SURVEY_COMB_FLOOR_BINS = 1.5
 _SURVEY_COMB_TOL_FLOOR_BINS = 2.0
 _SURVEY_COMB_MAJORITY = 0.5
 _SURVEY_COMB_DAMPING = 0.05
+_EYE_MIN_SYMBOLS = 64
+_EYE_MAX_SYMBOLS = 2000
+_EYE_PHASE_STEPS = 8
 
 
 class InstFreqStats(BaseModel):
@@ -261,6 +265,42 @@ def _inst_freq(x: np.ndarray, sample_rate: float) -> InstFreqStats:
         peaks_hz=[float(centers[i - 1]) for i in idx],
         spread_hz=spread,
     )
+
+
+def _longest_true_run(mask: np.ndarray) -> tuple[int, int] | None:
+    if mask.size == 0 or not bool(mask.any()):
+        return None
+    edges = np.diff(np.concatenate(([0], mask.astype(np.int8), [0])))
+    starts = np.flatnonzero(edges == 1)
+    ends = np.flatnonzero(edges == -1)
+    j = int(np.argmax(ends - starts))
+    return int(starts[j]), int(ends[j])
+
+
+def _eye_openness(
+    instfreq: np.ndarray, active: np.ndarray, sample_rate: float, rate: float
+) -> float:
+    sps = sample_rate / rate
+    if not np.isfinite(sps) or sps < 2.0:
+        return 0.0
+    run = _longest_true_run(active)
+    if run is None:
+        return 0.0
+    lo, hi = run
+    seg = np.asarray(instfreq[lo:hi], dtype=np.float64)
+    n_sym = int(seg.size / sps) - 1
+    if n_sym < _EYE_MIN_SYMBOLS:
+        return 0.0
+    n_sym = min(n_sym, _EYE_MAX_SYMBOLS)
+    grid = np.arange(seg.size, dtype=np.float64)
+    idx = np.arange(n_sym, dtype=np.float64)
+    best = 0.0
+    for p in range(_EYE_PHASE_STEPS):
+        phase = (p + 0.5) * sps / _EYE_PHASE_STEPS
+        samples = np.interp(phase + idx * sps, grid, seg)
+        sep = fit_levels(samples).separation
+        best = max(best, sep)
+    return best
 
 
 _SURVEY_BURST_WINDOW = 64
