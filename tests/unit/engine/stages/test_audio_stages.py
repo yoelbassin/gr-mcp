@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import numpy as np
 import pytest
 from pydantic import ValidationError
 
@@ -100,17 +101,26 @@ def test_run_rx_rejects_audio_final(tmp_path) -> None:
         )
 
 
-def test_run_rx_rejects_complex_symbol_final(tmp_path) -> None:
+def test_run_rx_accepts_complex_symbol_final(tmp_path) -> None:
+    # Now a valid .cf32 terminal (bare demod, no demap), not a compile reject.
     modem = Modem(
         symbol_rate=1.0,
         path=[PskDemodStep(order=PskOrder(2))],
     )
-    with pytest.raises(CompileError, match="complex soft symbols"):
-        run_rx(
-            modem,
-            stage_registry(),
-            sample_rate=4.0,
-            start=Descriptor(Level.IQ, ItemType.C, amplitude=Amplitude.RMS_UNITY),
-            workdir=tmp_path,
-            source_io={"path": str(tmp_path / "in.cf32")},
-        )
+    cap = tmp_path / "in.cf32"
+    n = 8000
+    np.exp(1j * 2 * np.pi * 0.01 * np.arange(n)).astype(np.complex64).tofile(cap)
+    r = run_rx(
+        modem,
+        stage_registry(),
+        sample_rate=4.0,
+        start=Descriptor(Level.IQ, ItemType.C, amplitude=Amplitude.RMS_UNITY),
+        workdir=tmp_path,
+        source_io={"path": str(cap)},
+    )
+    assert r.status == "ok", r
+    assert r.symbolstream is not None
+    assert r.symbolstream.item_type == "c"
+    assert r.symbolstream.path.suffix == ".cf32"
+    assert r.symbolstream.num_symbols > 0
+    assert r.symbolstream.path.stat().st_size // 8 == r.symbolstream.num_symbols

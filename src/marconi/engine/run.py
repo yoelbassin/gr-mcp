@@ -72,7 +72,7 @@ def _entry_carrier(boundary: Descriptor, path: Path, marks: list[int]) -> Coding
     )
 
 
-_FINAL_SUFFIX = {"b": ".u8", "s": ".i16", "f": ".f32"}
+_FINAL_SUFFIX = {"b": ".u8", "s": ".i16", "f": ".f32", "c": ".cf32"}
 
 
 def _wrap_gr_only(
@@ -109,6 +109,17 @@ def _wrap_gr_only(
         return PipelineResult(
             status="ok",
             bitstream=bitstream,
+            marks=marks,
+            census=census,
+            diagnostics=diagnostics,
+        )
+    if cp.final.item_type == "c":
+        num = int(path.stat().st_size // 8)  # complex64 = 8 bytes
+        return PipelineResult(
+            status="ok",
+            symbolstream=Symbolstream(
+                path=path, num_symbols=num, item_type="c", marks=marks
+            ),
             marks=marks,
             census=census,
             diagnostics=diagnostics,
@@ -302,12 +313,6 @@ def run_rx(
                 "rx pipeline ends at AUDIO; run_rx extracts symbol/bit streams — "
                 "continue the path with a demodulation stage (for audio output "
                 "use compile_modem and run the backend directly)"
-            )
-        if cp.final.level is Level.SYMBOLS and cp.final.item_type == "c":
-            raise CompileError(
-                "rx pipeline ends at complex soft symbols, an interior seam with "
-                "no stream format; end the path with a demap stage (for raw "
-                "symbol output use compile_modem and run the backend directly)"
             )
         if cp.gr is not None and input_stream is not None:
             raise ValueError(

@@ -49,13 +49,13 @@ class SoftBitstream(BaseModel):
 
 class Symbolstream(BaseModel):
     """Values at the SYMBOLS rung: hard int16 symbol indices for "s", soft
-    float32 symbol values for "f", one per symbol, plus burst-start marks
-    (symbol offsets) when acquisition tagged them. Sibling to Bitstream,
-    never an optional field on it."""
+    float32 symbol values for "f", complex64 constellation points for "c",
+    one per symbol, plus burst-start marks (symbol offsets) when acquisition
+    tagged them. Sibling to Bitstream, never an optional field on it."""
 
     path: Path
     num_symbols: int = Field(ge=0)
-    item_type: Literal["s", "f"] = "s"
+    item_type: Literal["s", "f", "c"] = "s"
     marks: list[int] = []
     source_capture: Path | None = None
     symbol_rate: float | None = None
