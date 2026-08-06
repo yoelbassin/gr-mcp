@@ -253,11 +253,17 @@ _SOFT_MIN_ITEMS = 1000
 _SOFT_SAMPLE_ITEMS = 65536
 _SOFT_SAMPLE_CHUNKS = 16
 
-# Measured (Task 1, marconi.levels.fit_levels): quantizing one smooth
-# unimodal blob into >2 clusters still only reaches separation ~2.7-3.6; a
-# clean multi-level eye (real M-ary discriminator/symbol levels) measures
-# ~25-40. 8.0 sits in that gap with margin both ways.
-_SOFT_MULTILEVEL_SEPARATION = 8.0
+# Measured on a real off-air 4-level FSK capture through a bare demod front
+# end: several real inter-burst noise gaps all read order=2, separation
+# 2.51-2.78; the capture's real bursts all read order=4, separation
+# 5.07-8.12 -- a clean, non-overlapping gap between real noise and real
+# signal. Task 1's synthetic fixtures corroborate at the extremes (unimodal
+# blob ~2.7-3.6, clean synthetic 4-level ~25-40) but say nothing about where
+# a REAL demodulated signal lands: the prior 8.0 bar was calibrated against
+# synthetics alone and sat above every real burst measured, rejecting all of
+# them as no_signal. 4.0 sits with margin above the real noise ceiling
+# (~2.8) and below the real signal floor (~5.07).
+_SOFT_MULTILEVEL_SEPARATION = 4.0
 
 # Calibrated on measured FSK-discriminator streams (|x| mean/std): clean 19.9,
 # SNR 14/9/5/3 dB -> 8.6/5.0/3.1/2.5, demod noise floor 1.6. The positive bar

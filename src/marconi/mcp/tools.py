@@ -448,19 +448,25 @@ def survey(
     candidate also carries eye_openness (same index as candidates_hz and
     strengths): how cleanly a multi-level symbol eye opens when the capture
     is resampled at that rate — near zero for a smeared or wrong-rate guess,
-    sharply higher at a genuine symbol clock. candidates_hz already re-heads
-    toward whichever candidate's eye clearly opens (preferring the lower
-    rate when more than one does, since a harmonic's eye can look clean
-    too), falling back to the strength order when no eye clearly opens — so
-    strengths[0] is not guaranteed to be the largest strengths value. For
-    constant-envelope/FSK-family signals judge symbol rate by eye_openness,
-    not strengths: strengths ranks spectral lines and can seat a
-    burst-harmonic or spurious line first, while a clean multi-level eye is
-    the decisive tell. Treat candidates as ranked hypotheses, expect
-    harmonics of the true rate among them, and note the estimate is least
-    reliable for amplitude-null signals such as OOK/ASK with a carrier
-    offset, and for short windows spanning only a few burst/TDMA cycles —
-    prefer widening the window for bursty
+    sharply higher when a clean symbol eye is genuinely present. candidates_hz
+    already re-heads toward whichever candidate's eye CLEARLY opens
+    (preferring the lower rate when more than one does, since a harmonic's
+    eye can look clean too), falling back to the strength order when no eye
+    clearly opens — so strengths[0] is not guaranteed to be the largest
+    strengths value. eye_openness is a clean-eye diagnostic, not an
+    authoritative rate finder: on noisy or pulse-shaped real off-air signals
+    the eye can fail to clear its floor even at the true rate, in which case
+    every candidate stays in cyclostationary-strength order, and that order
+    is NOT trustworthy for constant-envelope/FSK-family signals — strengths
+    ranks spectral lines and can seat a burst-harmonic, a TDMA slot-cadence
+    line, or another capture-chain periodicity first. When the eye never
+    clears, don't trust candidates_hz[0] alone; confirm the rate by
+    demodulating your top few candidates through run_rx and comparing
+    decoded-symbol cluster tightness with stream_stats. Treat candidates as
+    ranked hypotheses, expect harmonics of the true rate among them, and note
+    the estimate is least reliable for amplitude-null signals such as
+    OOK/ASK with a carrier offset, and for short windows spanning only a few
+    burst/TDMA cycles — prefer widening the window for bursty
     signals; narrow with min_symbol_rate/max_symbol_rate), "inst_freq"
     (instantaneous-frequency histogram, tone peaks_hz, and spread_hz —
     active-gated like envelope. peaks_hz only tells you the tone order when
