@@ -111,3 +111,24 @@ def test_bursty_duty_cycle_is_not_negative(tmp_path: Path) -> None:
     ev = soft_evidence(_llr_file(tmp_path, np.concatenate(blocks)))
     assert ev != []
     assert ev[0].assessment != "negative"
+
+
+def test_clean_four_level_soft_stream_is_positive(tmp_path: Path) -> None:
+    # C4FM-like discriminator: four well-separated levels, not the binary
+    # antipodal shape the ratio/polarity/whiteness logic below assumes - a
+    # clean M-ary eye must still read as signal-present, not no_signal
+    rng = np.random.default_rng(0)
+    syms = rng.choice([-3.0, -1.0, 1.0, 3.0], size=6000).astype(np.float32)
+    syms += rng.normal(0.0, 0.08, syms.size).astype(np.float32)
+    ev = soft_evidence(_llr_file(tmp_path, syms))
+    assert [e.assessment for e in ev] == ["positive"]
+    assert ev[0].metric == "soft_confidence"
+
+
+def test_four_level_noise_blob_is_not_positive(tmp_path: Path) -> None:
+    # a forced 4-cluster fit on unimodal noise measures low separation (no
+    # real levels present); must fall through to the existing binary path
+    # rather than the new multi-level branch, which stays silent on it
+    blob = np.random.default_rng(1).normal(0.0, 1.0, 6000).astype(np.float32)
+    ev = soft_evidence(_llr_file(tmp_path, blob))
+    assert not any(e.assessment == "positive" for e in ev)

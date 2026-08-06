@@ -10,6 +10,7 @@ from pydantic import BaseModel
 
 from marconi.engine.backends.base import BlockCensus, Diagnostic
 from marconi.engine.stages.base import Stage
+from marconi.levels import fit_levels
 
 Assessment = Literal["positive", "negative"]
 Verdict = Literal["decoded", "uncertain", "no_signal"]
@@ -251,6 +252,13 @@ def lock_evidence(diagnostics: Sequence[Diagnostic]) -> list[QualityEvidence]:
 _SOFT_MIN_ITEMS = 1000
 _SOFT_SAMPLE_ITEMS = 65536
 _SOFT_SAMPLE_CHUNKS = 16
+
+# Measured (Task 1, marconi.levels.fit_levels): quantizing one smooth
+# unimodal blob into >2 clusters still only reaches separation ~2.7-3.6; a
+# clean multi-level eye (real M-ary discriminator/symbol levels) measures
+# ~25-40. 8.0 sits in that gap with margin both ways.
+_SOFT_MULTILEVEL_SEPARATION = 8.0
+
 # Calibrated on measured FSK-discriminator streams (|x| mean/std): clean 19.9,
 # SNR 14/9/5/3 dB -> 8.6/5.0/3.1/2.5, demod noise floor 1.6. The positive bar
 # admits the whole decodable envelope; the old 6.0 sat above it and starved
@@ -338,6 +346,16 @@ def soft_evidence(path: Path | None) -> list[QualityEvidence]:
     xa = x[active]
     if xa.size < _SOFT_MIN_ITEMS:
         return []
+    fit = fit_levels(xa)
+    if fit.order > 2 and fit.separation >= _SOFT_MULTILEVEL_SEPARATION:
+        return [
+            QualityEvidence(
+                source="soft_stream",
+                metric="soft_confidence",
+                value=float(min(fit.separation, 1e6)),
+                assessment="positive",
+            )
+        ]
     mag = np.abs(xa)
     spread = float(mag.std())
     mean = float(mag.mean())
