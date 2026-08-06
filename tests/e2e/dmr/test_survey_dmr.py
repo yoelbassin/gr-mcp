@@ -25,6 +25,10 @@ def test_survey_recovers_dmr_parameters() -> None:
     cands = cast(list[float], symbol_rate["candidates_hz"])
     assert any(abs(c - _BAUD) < 0.05 * _BAUD for c in cands), cands
 
+    eyes = cast(list[float], symbol_rate["eye_openness"])
+    assert len(eyes) == len(cands), (cands, eyes)
+    assert all(e >= 0.0 for e in eyes), eyes
+
     envelope = cast(dict[str, object], out["envelope"])
     const_ratio = cast(float, envelope["const_envelope_ratio"])
     assert const_ratio < 0.1, const_ratio
