@@ -268,18 +268,17 @@ def _inst_freq(x: np.ndarray, sample_rate: float) -> InstFreqStats:
 
 
 def _longest_true_run(mask: np.ndarray) -> tuple[int, int] | None:
-    if mask.size == 0 or not bool(mask.any()):
+    runs = _find_runs(mask)
+    if not runs:
         return None
-    edges = np.diff(np.concatenate(([0], mask.astype(np.int8), [0])))
-    starts = np.flatnonzero(edges == 1)
-    ends = np.flatnonzero(edges == -1)
-    j = int(np.argmax(ends - starts))
-    return int(starts[j]), int(ends[j])
+    return max(runs, key=lambda se: se[1] - se[0])
 
 
 def _eye_openness(
     instfreq: np.ndarray, active: np.ndarray, sample_rate: float, rate: float
 ) -> float:
+    if rate <= 0.0:
+        return 0.0
     sps = sample_rate / rate
     if not np.isfinite(sps) or sps < 2.0:
         return 0.0
