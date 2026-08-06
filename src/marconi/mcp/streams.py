@@ -318,25 +318,28 @@ def _constellation_stats(
     out.update(
         mean_magnitude=round(mean_mag, 6),
         std_magnitude=round(float(mag.std()), 6),
-        constant_modulus_ratio=round(
-            float(mag.std() / mean_mag) if mean_mag else 0.0, 6
+        constant_modulus_ratio=(
+            round(float(mag.std() / mean_mag), 6) if mean_mag > 0 else None
         ),
     )
     out["magnitude_histogram"] = _hist(mag, bins)
     out["phase_histogram"] = _hist(np.angle(z), bins)
     if clusters >= 1:
         centers = _kmeans_2d(z, clusters)
-        counts = np.array(
-            [int((_nearest_labels(z, centers) == j).sum()) for j in range(clusters)]
-        )
+        labels = _nearest_labels(z, centers)
+        counts = np.array([int((labels == j).sum()) for j in range(clusters)])
+        # evm before the keep/order reindex below: dropping empty clusters or
+        # resorting by phase never changes any point's nearest center, so this
+        # is exact either way (verified) - but `labels` is only valid as an
+        # index into `centers` in its current, pre-reindex form
+        assigned = centers[labels]
+        ref = float(np.sqrt((np.abs(assigned) ** 2).mean()))
+        err = float(np.sqrt((np.abs(z - assigned) ** 2).mean()))
+        out["evm"] = round(err / ref, 6) if ref > 0 else None
         keep = counts > 0
         centers, counts = centers[keep], counts[keep]
         order = np.argsort(np.angle(centers))
         centers, counts = centers[order], counts[order]
-        assigned = centers[_nearest_labels(z, centers)]
-        ref = float(np.sqrt((np.abs(assigned) ** 2).mean()))
-        err = float(np.sqrt((np.abs(z - assigned) ** 2).mean()))
-        out["evm"] = round(err / ref, 6) if ref > 0 else None
         out["clusters"] = [
             {
                 "real": round(float(c.real), 6),

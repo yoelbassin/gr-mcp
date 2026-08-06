@@ -204,16 +204,19 @@ def run_rx_tool(
     large for one run. A soft 'f' stream's sign convention depends on its
     level: bits-level soft floats are LLRs where bit 1 = NEGATIVE;
     symbols-level soft floats (the default level for 'f' input, and the
-    output of a path ending at a demod stage) are demod outputs where
-    POSITIVE slices to bit 1. A path may also end at a bare demod stage
-    instead of a bit-level one, landing on complex constellation symbols
-    (item_type "c", a .cf32 file) instead of bits or hard/soft symbols;
-    inspect it with stream_stats(item_type="c") — constant_modulus_ratio is
-    the robust check for whether the demod you picked actually matches the
-    signal (a real lock sits on one ring; a false lock, e.g. the wrong
-    modulation family, does not); clusters=K's EVM/cluster fit corroborates
-    once modulus says the lock is real. The result carries status, a
-    "stream" summary {path, item_type, items} to page with read_stream,
+    output of a path ending at a demod stage, e.g. bare fsk) are demod
+    outputs where POSITIVE slices to bit 1. A path may instead end at a bare
+    demod stage that lands on complex constellation symbols (item_type "c",
+    a .cf32 file) rather than soft floats — psk_demod, sample_symbols, and
+    the ofdm cell stages all land there; the final validate_modem trace
+    row's item_type says which a given spec produces. Inspect a "c" stream
+    with stream_stats(item_type="c") — its constant_modulus_ratio is the
+    robust false-lock check, read exactly as that tool documents (a single
+    ring means PSK/CPFSK; a few structured rings can mean a genuine QAM
+    lock, not a false one; only an erratic/drifting ratio means the demod
+    you picked doesn't match the signal). clusters=K's EVM/cluster fit
+    corroborates once modulus says the lock is real. The result carries
+    status, a "stream" summary {path, item_type, items} to page with read_stream,
     windows/marks (truncated to 512 entries when longer, with a *_total
     count and a *_path int64 sidecar holding the full list - page it with
     read_stream), per-block census, diagnostics, and "quality": a

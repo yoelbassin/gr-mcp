@@ -58,3 +58,13 @@ def test_stream_stats_complex_infers_from_suffix(tmp_path: Path) -> None:
     p = _write(tmp_path, z)
     s = stream_stats(p, item_type=None, clusters=0, bins=41)  # infer from .cf32
     assert s["item_type"] == "c"
+
+
+def test_stream_stats_complex_all_zero_ratio_is_none_not_a_perfect_ring(
+    tmp_path: Path,
+) -> None:
+    z = np.zeros(16, np.complex64)
+    p = _write(tmp_path, z)
+    s = stream_stats(p, item_type="c", clusters=0)
+    assert s["mean_magnitude"] == 0.0
+    assert s["constant_modulus_ratio"] is None
