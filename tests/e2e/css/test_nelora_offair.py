@@ -97,6 +97,18 @@ def test_sf10_bare_dechirp_reads_decoded_and_matches_labels(tmp_path: Path) -> N
 
 
 @pytest.mark.skipif(not _SF7.exists(), reason="NELoRa asset absent")
+@pytest.mark.parametrize("sf", [6, 8])
+def test_adjacent_sf_reads_no_signal(tmp_path: Path, sf: int) -> None:
+    # the hardest wrong-sf confusion: same 125 kHz bandwidth, so at sf+1 the
+    # reference slope matches EXACTLY and each window just holds two symbols
+    # (two half-energy tones) — dominance collapses either way, making the
+    # verdict a clean discriminator for an agent sweeping SF hypotheses
+    res = _decode(tmp_path, _SF7, sf=sf)
+    assert res.quality is not None
+    assert res.quality.verdict == "no_signal", res.quality
+
+
+@pytest.mark.skipif(not _SF7.exists(), reason="NELoRa asset absent")
 def test_survey_default_floor_reaches_sf7_symbol_rate() -> None:
     # the regression this gate pins: a fixed fs/1000 floor (1000 Hz) hid the
     # 976.56 Hz line entirely; the span-derived default must search below it
