@@ -20,12 +20,36 @@ if TYPE_CHECKING:
 
 class SyncWordStep(Step):
     conv: Literal["sync_word"] = "sync_word"
-    # exactly one of the two: sync = whole-byte pattern as hex; bits = a '0'/'1'
-    # string for non-byte-multiple sync words (the HARD-only QAM/CSS seams have
-    # no soft-lane workaround for those)
-    sync: str = ""
-    bits: str = ""
-    max_errors: StrictInt = Field(default=0, ge=0)
+    sync: str = Field(
+        default="",
+        description=(
+            "Byte-aligned sync word as an even-length HEX string, e.g. '9162' is "
+            "the 16-bit word 0x9162. These are BYTES, not bits: '10' means the byte "
+            "0x10, not the bit pair 1,0. Whole-byte patterns only; for any other "
+            "length use `bits`. Set exactly one of `sync` or `bits`."
+        ),
+    )
+    bits: str = Field(
+        default="",
+        description=(
+            "Sync word as a raw '0'/'1' BIT string in the demodulated bit domain, "
+            "e.g. '0101100011', for non-byte-multiple lengths. This is the exact "
+            "bit pattern the correlator matches. If your pattern is in symbols or "
+            "dibits (e.g. 4-level FSK symbols 0..3), map each symbol to its bits "
+            "first and pass the resulting 0/1 string here. Never pass a raw symbol "
+            "string: a digit run like '3133..' is accidentally valid hex, so `sync` "
+            "would silently accept it and match nothing. Set exactly one of `sync` "
+            "or `bits`."
+        ),
+    )
+    max_errors: StrictInt = Field(
+        default=0,
+        ge=0,
+        description=(
+            "Correlation tolerance in bit flips (Hamming distance); 0 = exact. The "
+            "sync word is found by correlation, not equality."
+        ),
+    )
 
     @model_validator(mode="after")
     def _pattern(self) -> "SyncWordStep":

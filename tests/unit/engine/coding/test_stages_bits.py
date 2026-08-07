@@ -20,6 +20,7 @@ from marconi.engine.coding.stages_bits import (
     Realign,
     RealignStep,
     SyncWord,
+    SyncWordStep,
 )
 from marconi.engine.stages.base import CodingStage, StageDirectionError
 from marconi.engine.types.enums import EmitMode
@@ -116,6 +117,17 @@ def test_sync_word_step_takes_exactly_one_pattern_form() -> None:
     for spec in ({}, {"sync": "7e", "bits": "1"}, {"bits": "012"}):
         with pytest.raises(Exception):
             stage.step_model.model_validate(spec)
+
+
+def test_sync_word_schema_documents_pattern_fields_for_the_agent() -> None:
+    # describe_stages surfaces model_json_schema to the driving agent, so the
+    # format of each pattern field (hex bytes vs '0'/'1' bits) and the dibit/
+    # symbol-string footgun — a digit run that is silently valid hex and matches
+    # nothing — must live in the field descriptions, not only in code comments.
+    props = SyncWordStep.model_json_schema()["properties"]
+    assert "hex" in props["sync"]["description"].lower()
+    bits_doc = props["bits"]["description"].lower()
+    assert "bit" in bits_doc and "symbol" in bits_doc
 
 
 def test_mark_frame_seeds_one_window_per_mark() -> None:
