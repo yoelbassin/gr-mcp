@@ -251,7 +251,6 @@ def lock_evidence(diagnostics: Sequence[Diagnostic]) -> list[QualityEvidence]:
 
 _SOFT_MIN_ITEMS = 1000
 _SOFT_SAMPLE_ITEMS = 65536
-_SOFT_SAMPLE_CHUNKS = 16
 
 # Measured on a real off-air 4-level FSK capture through a bare demod front
 # end: several real inter-burst noise gaps all read order=2, separation
@@ -299,19 +298,26 @@ _SOFT_ACTIVE_FRACTION = 0.35
 
 
 def _sample_soft(path: Path) -> np.ndarray:
-    """Evenly strided chunks across the WHOLE stream: a head-only sample
-    judges a capture with a noise lead on noise it never needed to decode."""
+    """The highest-power contiguous window of the demod stream, never a
+    head-only slice (a capture with a noise lead should be judged on the signal
+    it decoded, not the lead) and never strided chunks stitched together (which
+    break the consecutive decisions the whitening/level statistics rely on). A
+    coarse per-block power scan locates the window; it is then read contiguously."""
     total = path.stat().st_size // 4
     with path.open("rb") as f:
         if total <= _SOFT_SAMPLE_ITEMS:
             return np.fromfile(f, dtype=np.float32)
-        per = _SOFT_SAMPLE_ITEMS // _SOFT_SAMPLE_CHUNKS
-        starts = np.linspace(0, total - per, _SOFT_SAMPLE_CHUNKS).astype(np.int64)
-        parts = []
-        for s in starts:
-            f.seek(int(s) * 4)
-            parts.append(np.fromfile(f, dtype=np.float32, count=per))
-        return np.concatenate(parts)
+        nblocks = -(-total // _SOFT_SAMPLE_ITEMS)
+        powers = np.zeros(nblocks, dtype=np.float64)
+        for i in range(nblocks):
+            block = np.fromfile(f, dtype=np.float32, count=_SOFT_SAMPLE_ITEMS)
+            if block.size:
+                powers[i] = float(np.mean(block.astype(np.float64) ** 2))
+        start = min(
+            int(np.argmax(powers)) * _SOFT_SAMPLE_ITEMS, total - _SOFT_SAMPLE_ITEMS
+        )
+        f.seek(start * 4)
+        return np.fromfile(f, dtype=np.float32, count=_SOFT_SAMPLE_ITEMS)
 
 
 def _active_mask(x: np.ndarray) -> np.ndarray:

@@ -5,13 +5,30 @@ from pathlib import Path
 import numpy as np
 
 from marconi.engine.io.bitfile import write_llrs
-from marconi.engine.quality import soft_evidence
+from marconi.engine.quality import _SOFT_SAMPLE_ITEMS, _sample_soft, soft_evidence
 
 
 def _llr_file(tmp_path: Path, values: np.ndarray) -> Path:
     p = tmp_path / "llrs.f32"
     write_llrs(p, values.astype(np.float32))
     return p
+
+
+def test_sample_soft_reads_contiguous_active_window_over_budget(tmp_path: Path) -> None:
+    # A quiet lead longer than the sample budget, then a strong active block.
+    # _sample_soft must return ONE contiguous highest-power window on the active
+    # block -- not a head-only slice (would judge the quiet lead) and not
+    # strided chunks stitched together.
+    quiet = np.full(_SOFT_SAMPLE_ITEMS * 3, 0.02, np.float32)
+    active = np.tile([2.0, -2.0], _SOFT_SAMPLE_ITEMS // 2).astype(np.float32)
+    stream = np.concatenate([quiet, active, quiet])
+    got = _sample_soft(_llr_file(tmp_path, stream))
+    assert got.size == _SOFT_SAMPLE_ITEMS
+    assert float(np.mean(got.astype(np.float64) ** 2)) > 1.0  # on the active block
+    assert any(  # a genuine consecutive slice, not fragmented chunks
+        np.array_equal(got, stream[k : k + _SOFT_SAMPLE_ITEMS])
+        for k in range(0, stream.size - _SOFT_SAMPLE_ITEMS + 1, _SOFT_SAMPLE_ITEMS)
+    )
 
 
 def test_bimodal_llrs_are_positive(tmp_path: Path) -> None:
