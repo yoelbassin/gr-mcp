@@ -122,10 +122,29 @@ def _codebook_kw(step: "CodebookStep | SymbolMapStep") -> dict[str, Any]:
 
 class DescrambleStep(Step):
     conv: Literal["descramble"] = "descramble"
-    sequence: str = ""
-    lfsr_mask: StrictInt | None = None
-    lfsr_seed: StrictInt | None = None
-    lfsr_len: StrictInt | None = Field(default=None, ge=2, le=64)
+    sequence: str = Field(
+        default="",
+        description=(
+            "Additive de-whitening mask as a HEX string, unpacked MSB-first per "
+            "byte and XOR-tiled over the bit stream (restarting at each window). "
+            "A whitening sequence is bits: pack them into bytes and hex-encode "
+            "(np.packbits(bits).tobytes().hex()); reverse each byte's bits first "
+            "for an LSB-first protocol."
+        ),
+    )
+    lfsr_mask: StrictInt | None = Field(
+        default=None,
+        description="Fibonacci LFSR tap polynomial (bit i set = tap at x^i).",
+    )
+    lfsr_seed: StrictInt | None = Field(
+        default=None, description="Initial LFSR register contents (nonzero)."
+    )
+    lfsr_len: StrictInt | None = Field(
+        default=None,
+        ge=2,
+        le=64,
+        description="LFSR register width in bits; mask and seed must fit it.",
+    )
 
     @model_validator(mode="after")
     def _one_mode(self) -> "DescrambleStep":
@@ -149,6 +168,13 @@ class DescrambleStep(Step):
                     "lfsr_mask and lfsr_seed must be nonzero and fit lfsr_len",
                 )
         else:
+            if len(self.sequence) >= 16 and set(self.sequence) <= {"0", "1"}:
+                raise PydanticCustomError(
+                    "value_error",
+                    "sequence is a HEX mask (unpacked MSB-first per byte), but "
+                    "this is a 0/1 bit string; pack the bits into bytes and "
+                    "hex-encode them",
+                )
             try:
                 if not bytes.fromhex(self.sequence):
                     raise ValueError

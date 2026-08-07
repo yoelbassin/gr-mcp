@@ -10,7 +10,11 @@ from marconi.errors import register_error
 
 _SURVEY_SAMPLE_ITEMS = 1 << 20
 _SURVEY_SCAN_BLOCK = 1 << 16
-_SURVEY_MIN_ITEMS = 1 << 13
+# Floor low enough to characterize a single short burst (~1-2k samples): the
+# spectrum and inst-freq tone readout stay meaningful, and the symbol-rate
+# search self-limits via its resolution-derived floor. Below this a slice is
+# too small for even a coarse PSD.
+_SURVEY_MIN_ITEMS = 1 << 10
 _ITEMSIZE = np.dtype(np.complex64).itemsize
 _CHANNELIZE_TAPS_PER_PHASE = 8
 

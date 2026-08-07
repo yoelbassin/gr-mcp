@@ -20,6 +20,20 @@ def test_details_carry_schema_and_contracts() -> None:
     assert d["directions"] == ["rx", "tx"]
 
 
+def test_fsk_loop_bw_documents_open_loop_mode() -> None:
+    # the schema is the agent's only view of the stage, so the open-loop knob
+    # for short bursts must be discoverable there
+    (d,) = stage_details(["fsk"])
+    loop_bw = d["params_schema"]["properties"]["loop_bw"]
+    assert "open-loop" in loop_bw.get("description", "").lower()
+
+
+def test_descramble_sequence_documents_hex_format() -> None:
+    (d,) = stage_details(["descramble"])
+    sequence = d["params_schema"]["properties"]["sequence"]
+    assert "hex" in sequence.get("description", "").lower()
+
+
 def test_every_stage_detail_builds() -> None:
     details = stage_details(sorted(stage_registry()))
     assert len(details) == len(stage_registry())

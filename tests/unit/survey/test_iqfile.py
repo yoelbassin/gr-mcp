@@ -63,6 +63,16 @@ def test_too_short_raises(tmp_path: Path) -> None:
         sample_iq(p, 0, 0)
 
 
+def test_short_single_burst_is_accepted(tmp_path: Path) -> None:
+    # a lone ~1.5k-sample burst sits under the old floor but must survey, so one
+    # packet can be characterized without stitching in its idle neighbors
+    p = tmp_path / "burst.cf32"
+    _write(p, (np.arange(1500) + 1j).astype(np.complex64))
+    window, analyzed, span = sample_iq(p, 0, 0)
+    assert span == 1500
+    assert analyzed == 1500
+
+
 def test_negative_offset_raises(tmp_path: Path) -> None:
     p = tmp_path / "s.cf32"
     _write(p, np.ones(16, np.complex64))

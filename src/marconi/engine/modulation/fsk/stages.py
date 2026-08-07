@@ -17,7 +17,17 @@ from marconi.engine.types.step import Step
 class FskStep(Step):
     conv: Literal["fsk"] = "fsk"
     deviation: float
-    loop_bw: float = Field(default=0.045, ge=0)
+    loop_bw: float = Field(
+        default=0.045,
+        ge=0,
+        description=(
+            "Gardner symbol-timing loop bandwidth. 0 samples open-loop at the "
+            "nominal sps with no timing feedback — the mode short or bursty "
+            "packets need, since closed-loop timing rails on bursts under "
+            "~1000 symbols and recovers almost nothing. Use >0 to track clock "
+            "drift on long continuous signals."
+        ),
+    )
 
 
 class Fsk(DuplexStage[CompileContext, FskStep]):

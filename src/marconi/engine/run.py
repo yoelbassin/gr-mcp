@@ -28,7 +28,7 @@ from marconi.engine.io.bitfile import (
     write_llrs,
     write_symbols,
 )
-from marconi.engine.quality import QualityReport, assess_quality
+from marconi.engine.quality import QualityReport, Verdict, assess_quality
 from marconi.engine.stages.base import Stage
 from marconi.engine.types.descriptor import Descriptor
 from marconi.engine.types.enums import ItemType
@@ -271,14 +271,29 @@ _POLARITY_HINT = (
 )
 
 
+_FSK_OPEN_LOOP_HINT = (
+    "fsk ran closed-loop Gardner symbol timing (loop_bw>0), which rails on short "
+    "or bursty packets and recovers few clean symbols. If this capture is bursty "
+    "or the packets are short (under ~1000 symbols), retry with fsk "
+    '{"loop_bw": 0} — open-loop, fixed-rate sampling at the nominal sps.'
+)
+
+
 def _hints(
-    modem: Modem, registry: Mapping[str, Stage[Any, Any]], final: Descriptor
+    modem: Modem,
+    registry: Mapping[str, Stage[Any, Any]],
+    final: Descriptor,
+    verdict: Verdict = "decoded",
 ) -> list[str]:
     hints: list[str] = []
     if final.level in (Level.BITS, Level.SYMBOLS) and any(
         getattr(registry.get(s.conv), "polarity_ambiguous", False) for s in modem.path
     ):
         hints.append(_POLARITY_HINT)
+    if verdict != "decoded" and any(
+        s.conv == "fsk" and getattr(s, "loop_bw", 0.0) > 0.0 for s in modem.path
+    ):
+        hints.append(_FSK_OPEN_LOOP_HINT)
     return hints
 
 
@@ -421,15 +436,16 @@ def run_rx(
         if result.status != "ok":
             return result
         check_deadline()
+        quality = assess_quality(
+            registry=registry,
+            census=result.census,
+            diagnostics=result.diagnostics,
+            marks=result.marks,
+            soft_stream=_soft_stream_path(cp, result, seam, input_stream),
+        )
         return result.model_copy(
             update={
-                "quality": assess_quality(
-                    registry=registry,
-                    census=result.census,
-                    diagnostics=result.diagnostics,
-                    marks=result.marks,
-                    soft_stream=_soft_stream_path(cp, result, seam, input_stream),
-                ),
-                "hints": _hints(modem, registry, cp.final),
+                "quality": quality,
+                "hints": _hints(modem, registry, cp.final, quality.verdict),
             }
         )

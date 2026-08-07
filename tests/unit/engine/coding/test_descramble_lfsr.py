@@ -96,3 +96,18 @@ def test_sequence_mode_is_unchanged() -> None:
 def test_descramble_param_modes_are_exclusive(params: dict[str, object]) -> None:
     with pytest.raises(Exception):
         stage_registry()["descramble"].step_model.model_validate(params)
+
+
+def test_bit_string_sequence_is_rejected_as_a_likely_hex_mistake() -> None:
+    # a 0/1 bit string is valid hex, so it would silently misparse into the
+    # wrong mask; an obvious bit string is rejected with a hex-packing pointer
+    reg = stage_registry()
+    with pytest.raises(Exception, match="bit string"):
+        reg["descramble"].step_model.model_validate({"sequence": "1" * 64})
+
+
+def test_short_binary_hex_sequence_is_still_accepted() -> None:
+    # short all-0/1 values below the mistake threshold remain valid hex masks
+    reg = stage_registry()
+    step = reg["descramble"].step_model.model_validate({"sequence": "01"})
+    assert step.sequence == "01"
