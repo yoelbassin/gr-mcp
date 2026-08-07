@@ -270,6 +270,8 @@ def _soft_stream_path(
 ) -> Path | None:
     if result.symbolstream is not None and result.symbolstream.item_type == "f":
         return result.symbolstream.path
+    if cp.soft_seam is not None and cp.soft_seam.is_file():
+        return cp.soft_seam
     if cp.boundary.item_type is ItemType.F:
         if cp.gr is not None:
             return seam
@@ -301,12 +303,15 @@ def run_rx(
             source_io=source_io or {},
             sink_io={"path": str(seam)},
             name=modem.name,
+            quality_tap=True,
         )
         if cp.final.level is Level.IQ:
             raise CompileError(
                 "rx pipeline ends at IQ; run_rx extracts symbol/bit streams — end "
-                "the path with a demodulation stage (for conditioned-IQ output "
-                "use compile_modem and run the backend directly)"
+                "the path with a demodulation stage. To characterize a conditioned "
+                "sub-band pre-demod (the channelize-then-look workflow), use "
+                "survey(center_hz=..., decim=...) instead — it tunes and decimates "
+                "to one channel before measuring"
             )
         if cp.final.level is Level.AUDIO:
             raise CompileError(

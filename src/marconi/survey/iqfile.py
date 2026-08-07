@@ -4,6 +4,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import numpy as np
+from scipy.signal import firwin, upfirdn
 
 from marconi.errors import register_error
 
@@ -11,6 +12,7 @@ _SURVEY_SAMPLE_ITEMS = 1 << 20
 _SURVEY_SCAN_BLOCK = 1 << 16
 _SURVEY_MIN_ITEMS = 1 << 13
 _ITEMSIZE = np.dtype(np.complex64).itemsize
+_CHANNELIZE_TAPS_PER_PHASE = 8
 
 
 class CaptureTooShort(Exception):
@@ -67,6 +69,54 @@ def sample_iq(
         f.seek(start * _ITEMSIZE)
         window = np.fromfile(f, dtype=np.complex64, count=min(span, budget))
     return window, window.size, span
+
+
+def channelize_to_file(
+    src: Path,
+    dst: Path,
+    sample_rate: float,
+    *,
+    center_hz: float,
+    decim: int,
+    offset: int = 0,
+    length: int = 0,
+    bandwidth_hz: float | None = None,
+) -> tuple[int, float]:
+    """Stream a sub-band of ``src`` into ``dst`` as cf32: mix ``center_hz`` to DC,
+    low-pass, and decimate by ``decim`` (polyphase). Bounded memory — the raw slice
+    is read in blocks and only the decimated output is accumulated. Returns
+    (output_samples_written, output_sample_rate).
+
+    The mixer runs phase-continuous across blocks; the anti-alias FIR carries its
+    history across blocks (overlap-save), so the result is independent of the read
+    chunking. ``bandwidth_hz`` is the filter passband width (cutoff = bandwidth_hz/2,
+    matching the channelize stage); default passes most of the decimated band."""
+    if decim < 1:
+        raise ValueError(f"decim must be >= 1, got {decim}")
+    out_rate = sample_rate / decim
+    cutoff = (bandwidth_hz / 2.0) if bandwidth_hz is not None else 0.45 * out_rate
+    cutoff = min(cutoff, 0.5 * out_rate)
+    taps_per_phase = _CHANNELIZE_TAPS_PER_PHASE
+    numtaps = taps_per_phase * decim + 1  # numtaps-1 is a whole number of phases
+    h = firwin(numtaps, cutoff / (0.5 * sample_rate))
+    hist = np.zeros(numtaps - 1, dtype=np.complex128)
+    chunk = max((_SURVEY_SAMPLE_ITEMS // decim) * decim, decim)
+    g = 0
+    written = 0
+    with dst.open("wb") as out:
+        for block in iter_iq(src, offset, length, chunk=chunk):
+            idx = g + np.arange(block.size, dtype=np.float64)
+            frac = (center_hz / sample_rate) * idx
+            frac -= np.round(frac)  # keep phase precise across a long capture
+            mixed = block.astype(np.complex128) * np.exp(-2j * np.pi * frac)
+            seg = np.concatenate([hist, mixed])
+            z = upfirdn(h, seg, up=1, down=decim)
+            take = block.size // decim
+            z[taps_per_phase : taps_per_phase + take].astype(np.complex64).tofile(out)
+            written += take
+            hist = seg[-(numtaps - 1) :]
+            g += int(block.size)
+    return written, out_rate
 
 
 def iter_iq(

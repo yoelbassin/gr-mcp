@@ -59,6 +59,52 @@ def test_survey_ci16_dtype_path(tmp_path: Path) -> None:
     assert symbol_rate["candidates_hz"]
 
 
+def _two_tone_cf32(path: Path, fs: float, n: int) -> None:
+    t = np.arange(n) / fs
+    channel = 2.0 * np.exp(2j * np.pi * 30_000.0 * t)  # strong, at +30 kHz
+    interferer = np.exp(2j * np.pi * -25_000.0 * t)  # elsewhere in the band
+    (channel + interferer).astype(np.complex64).tofile(path)
+
+
+def test_survey_channelize_isolates_a_subband(tmp_path: Path) -> None:
+    fs, n = 96_000.0, 1 << 16
+    p = tmp_path / "wide.cf32"
+    _two_tone_cf32(p, fs, n)
+    wide = survey(str(p), fs)
+    ch = survey(str(p), fs, center_hz=30_000.0, decim=4)
+    wide_spec = cast(dict[str, float], wide["spectrum"])
+    ch_spec = cast(dict[str, float], ch["spectrum"])
+    # aggregate survey: dominant tone sits at its +30 kHz offset, not at DC
+    assert abs(wide_spec["peak_offset_hz"] - 30_000.0) < 2_000.0
+    # channelized survey: the +30 kHz tone is shifted to DC, interferer rejected
+    assert abs(ch_spec["peak_offset_hz"]) < 1_500.0
+    assert ch["sample_rate"] == fs / 4  # decimated rate is reported
+
+
+def test_survey_channelize_leaves_no_workspace_files(tmp_path: Path) -> None:
+    fs, n = 96_000.0, 1 << 16
+    p = tmp_path / "wide.cf32"
+    _two_tone_cf32(p, fs, n)
+    runs = tmp_path / "marconi-runs"
+    monkey_env = {"MARCONI_WORKSPACE": str(tmp_path)}
+    import os
+
+    os.environ.update(monkey_env)
+    try:
+        survey(str(p), fs, center_hz=30_000.0, decim=4)
+    finally:
+        os.environ.pop("MARCONI_WORKSPACE", None)
+    leftover = list(runs.glob("survey-*")) if runs.exists() else []
+    assert leftover == []
+
+
+def test_survey_rejects_bad_decim(tmp_path: Path) -> None:
+    p = tmp_path / "s.cf32"
+    _fsk4_cf32(p, 48_000.0, 2_400.0, 1_200.0, 8000)
+    with pytest.raises(ValueError):
+        survey(str(p), 48_000.0, decim=0)
+
+
 def test_survey_bursts_segments_are_capped(tmp_path: Path) -> None:
     p = tmp_path / "bursts.cf32"
     on_len, off_len, repeats = 200, 400, 600

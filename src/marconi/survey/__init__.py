@@ -1,4 +1,4 @@
-from marconi.survey.iqfile import CaptureTooShort
+from marconi.survey.iqfile import CaptureTooShort, channelize_to_file
 from marconi.survey.measure import (
     BurstStats,
     EnvelopeStats,
@@ -11,6 +11,7 @@ from marconi.survey.measure import (
 
 __all__ = [
     "survey_iq",
+    "channelize_to_file",
     "SurveyResult",
     "SpectrumStats",
     "EnvelopeStats",

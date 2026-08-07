@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shutil
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Literal, cast
@@ -36,7 +37,7 @@ from marconi.mcp.streams import (
 from marconi.mcp.streams import stream_stats as _compute_stats
 from marconi.mcp.vocab import ENVELOPE, stage_details, stage_index
 from marconi.mcp.workspace import new_run_dir
-from marconi.survey import survey_iq
+from marconi.survey import channelize_to_file, survey_iq
 
 _START_LEVELS = {"iq": Level.IQ, "symbols": Level.SYMBOLS, "bits": Level.BITS}
 _DEFAULT_LEVEL = {"c": "iq", "b": "bits", "s": "symbols", "f": "symbols"}
@@ -416,13 +417,28 @@ def survey(
     capture_samples: int = 0,
     min_symbol_rate: float | None = None,
     max_symbol_rate: float | None = None,
+    center_hz: float = 0.0,
+    decim: int = 1,
+    bandwidth_hz: float | None = None,
 ) -> dict[str, object]:
     """Characterize a raw-IQ capture — pure DSP measurements, no interpretation.
 
     Runs before you know the modem: the pre-demod counterpart to stream_stats.
     Reads a bounded slice (capture_offset/capture_samples in complex samples,
-    0 = to EOF; capture_dtype one of cf32/ci16/ci8/cu8, matching run_rx) and
-    returns five measurement blocks, all raw numbers for you to judge:
+    0 = to EOF; capture_dtype one of cf32/ci16/ci8/cu8, matching run_rx).
+
+    SUB-BAND: pass center_hz (sub-band offset from the capture centre) and/or
+    decim (>1) to characterize ONE channel of a wideband multi-signal capture
+    instead of the whole span. The slice is frequency-shifted so center_hz lands
+    at DC, low-passed, and decimated by decim BEFORE measurement, so every block
+    below then describes that channel alone — the pre-demod way to confirm a
+    channel is what you think before building a modem (there is no need to
+    channelize through run_rx first; run_rx has no conditioned-IQ output). The
+    reported sample_rate is the decimated rate (sample_rate/decim), and
+    min/max_symbol_rate scale to it. bandwidth_hz is the channel filter passband
+    width (default passes most of the decimated band); the aggregate whole-span
+    survey (the default, center_hz=0 decim=1) is unchanged. Returns five
+    measurement blocks, all raw numbers for you to judge:
     "spectrum" (two-sided PSD, energy-centroid offset, 99%-power occupied
     bandwidth, peak — read spectral asymmetry off this yourself), "envelope"
     (constant-envelope ratio + kurtosis — you decide FSK vs PSK vs QAM;
@@ -496,6 +512,8 @@ def survey(
     dominant signal in the slice; window in time for a multi-signal capture."""
     if capture_offset < 0 or capture_samples < 0:
         raise ValueError("capture_offset and capture_samples must be >= 0")
+    if decim < 1:
+        raise ValueError("decim must be >= 1")
     _require_file(Path(capture_path))
     src, offset, length = ensure_cf32(
         Path(capture_path),
@@ -503,14 +521,37 @@ def survey(
         offset=capture_offset,
         samples=capture_samples,
     )
-    result = survey_iq(
-        src,
-        sample_rate,
-        offset=offset,
-        length=length,
-        min_symbol_rate=min_symbol_rate,
-        max_symbol_rate=max_symbol_rate,
-    )
+    if center_hz != 0.0 or decim > 1:
+        run_dir = new_run_dir("survey")
+        try:
+            channel = run_dir / "channel.cf32"
+            _, out_rate = channelize_to_file(
+                src,
+                channel,
+                sample_rate,
+                center_hz=center_hz,
+                decim=decim,
+                offset=offset,
+                length=length,
+                bandwidth_hz=bandwidth_hz,
+            )
+            result = survey_iq(
+                channel,
+                out_rate,
+                min_symbol_rate=min_symbol_rate,
+                max_symbol_rate=max_symbol_rate,
+            )
+        finally:
+            shutil.rmtree(run_dir, ignore_errors=True)
+    else:
+        result = survey_iq(
+            src,
+            sample_rate,
+            offset=offset,
+            length=length,
+            min_symbol_rate=min_symbol_rate,
+            max_symbol_rate=max_symbol_rate,
+        )
     payload: dict[str, Any] = result.model_dump(mode="json")
     _cap_list(cast(dict, payload["bursts"]), "segments")
     return payload

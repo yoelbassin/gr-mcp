@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from marconi.engine.coding.builder import CodingBuilder
@@ -212,20 +213,30 @@ def _emit_gr_segment(
     source_io: Mapping[str, ParamValue],
     sink_io: Mapping[str, ParamValue],
     name: str,
+    soft_tap_path: Path | None = None,
 ) -> GrPipeline:
     n = len(steps)
     ctx = CompileContext(start, sample_rate, symbol_rate)
 
     if direction == "rx":
         ctx.chain(_source_kind(boundaries[0]), **dict(source_io))
+        soft_tail: str | None = None
         for i, step in enumerate(steps):
             stage = _resolve(step, registry)
             ctx.descriptor = boundaries[i]
             ctx.rate = rates[i]
             stage.emit_rx(ctx, step)
+            if boundaries[i + 1].item_type is ItemType.F:
+                soft_tail = ctx.tail
         ctx.descriptor = boundaries[n]
         ctx.rate = rates[n]
         ctx.chain(_sink_kind(boundaries[n]), **dict(sink_io))
+        # Quality tap: a bits-final path hard-slices a soft demod, so its final
+        # sink carries no decision confidence. Tap the last soft-symbol wire to a
+        # sidecar so the run can score the demod it actually produced.
+        if soft_tap_path is not None and soft_tail is not None:
+            tap = ctx.add("soft_bits_file_sink", path=str(soft_tap_path))
+            ctx.connect(soft_tail, tap)
     else:  # tx
         ctx.chain(_source_kind(boundaries[n]), **dict(source_io))
         for i in range(n - 1, -1, -1):
@@ -277,6 +288,9 @@ class CompiledPipeline:
     final: Descriptor
     boundaries: list[Descriptor]
     rates: list[float]
+    # sidecar the GR segment taps its last soft-symbol wire to, when an all-GR
+    # path hard-slices a soft demod to bits; feeds the quality soft evidence.
+    soft_seam: Path | None = None
 
 
 def compile_pipeline(
@@ -289,6 +303,7 @@ def compile_pipeline(
     source_io: Mapping[str, ParamValue],
     sink_io: Mapping[str, ParamValue],
     name: str = "pipeline",
+    quality_tap: bool = False,
 ) -> CompiledPipeline:
     if direction not in ("rx", "tx"):
         raise CompileError(f"direction must be 'rx' or 'tx', got {direction!r}")
@@ -300,6 +315,18 @@ def compile_pipeline(
         steps, registry, boundaries, rates, modem.symbol_rate, direction
     )
     _validate_probe_marks(steps, registry, boundaries, rates, k, direction)
+    # An all-GR path that hard-slices a soft demod to bits (no coding tail) leaves
+    # the demod's decision confidence unmeasurable at the final sink; tap the last
+    # soft-symbol wire to a sidecar the run scores instead of reading "uncertain".
+    soft_seam: Path | None = None
+    if (
+        quality_tap
+        and direction == "rx"
+        and k == len(steps)
+        and boundaries[-1].item_type is ItemType.B
+        and any(b.item_type is ItemType.F for b in boundaries[1:])
+    ):
+        soft_seam = Path(str(sink_io["path"])).with_name("soft_tap.f32")
     gr: GrPipeline | None = None
     if k or direction == "tx" or not steps:
         gr = _emit_gr_segment(
@@ -314,6 +341,7 @@ def compile_pipeline(
             source_io,
             sink_io,
             name,
+            soft_seam,
         )
     coding: CodingProgram | None = None
     if k < len(steps):
@@ -335,6 +363,7 @@ def compile_pipeline(
         final=boundaries[len(steps)],
         boundaries=boundaries,
         rates=rates,
+        soft_seam=soft_seam,
     )
 
 

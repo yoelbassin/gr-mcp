@@ -43,7 +43,10 @@ def test_clean_soft_run_is_decoded(tmp_path: Path) -> None:
     assert any(e.metric == "soft_confidence" for e in res.quality.evidence)
 
 
-def test_hard_path_with_no_evidence_is_uncertain(tmp_path: Path) -> None:
+def test_hard_slice_of_soft_demod_forwards_soft_confidence(tmp_path: Path) -> None:
+    # A bits-final path hard-slices the demod's soft symbols; the run taps that
+    # soft wire so the verdict matches the soft-terminal path instead of reading
+    # "uncertain" purely because the last stream is hard bits.
     iq = make_clean_capture(tmp_path)
     rx = Modem(symbol_rate=_SYM, path=[FskStep(deviation=_DEV), SliceStep()])
     workdir = tmp_path / "rx_hard"
@@ -57,9 +60,10 @@ def test_hard_path_with_no_evidence_is_uncertain(tmp_path: Path) -> None:
         source_io={"path": str(iq)},
     )
     assert res.status == "ok", res
+    assert res.bitstream is not None  # the delivered stream is still hard bits
     assert res.quality is not None
-    assert res.quality.verdict == "uncertain"
-    assert "no checkable evidence" in res.quality.rationale
+    assert res.quality.verdict == "decoded"
+    assert any(e.metric == "soft_confidence" for e in res.quality.evidence)
 
 
 def test_non_ok_result_has_no_quality(tmp_path: Path) -> None:
