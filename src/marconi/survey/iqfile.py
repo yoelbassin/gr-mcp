@@ -8,7 +8,7 @@ import numpy as np
 from marconi.errors import register_error
 
 _SURVEY_SAMPLE_ITEMS = 1 << 20
-_SURVEY_SAMPLE_CHUNKS = 16
+_SURVEY_SCAN_BLOCK = 1 << 16
 _SURVEY_MIN_ITEMS = 1 << 13
 _ITEMSIZE = np.dtype(np.complex64).itemsize
 
@@ -30,6 +30,29 @@ def slice_len(path: Path, offset: int, length: int) -> int:
     return avail if length == 0 else min(length, avail)
 
 
+def _most_active_start(path: Path, offset: int, span: int, budget: int) -> int:
+    """First-sample index of the highest-power contiguous ``budget``-sample
+    window in [offset, offset+span). A coarse per-block power scan (one block in
+    memory at a time) lets an over-budget read land on signal instead of a
+    leading idle gap, without stitching non-contiguous chunks into a signal that
+    was never contiguous."""
+    win = max(budget // _SURVEY_SCAN_BLOCK, 1)
+    nblocks = -(-span // _SURVEY_SCAN_BLOCK)
+    if nblocks <= win:
+        return offset
+    powers = np.zeros(nblocks, dtype=np.float64)
+    with path.open("rb") as f:
+        f.seek(offset * _ITEMSIZE)
+        for i in range(nblocks):
+            count = min(_SURVEY_SCAN_BLOCK, span - i * _SURVEY_SCAN_BLOCK)
+            block = np.fromfile(f, dtype=np.complex64, count=count)
+            if block.size:
+                powers[i] = float(np.mean(np.abs(block) ** 2))
+    csum = np.concatenate(([0.0], np.cumsum(powers)))
+    best = int(np.argmax(csum[win:] - csum[:-win]))
+    return min(offset + best * _SURVEY_SCAN_BLOCK, offset + span - budget)
+
+
 def sample_iq(
     path: Path, offset: int = 0, length: int = 0, budget: int = _SURVEY_SAMPLE_ITEMS
 ) -> tuple[np.ndarray, int, int]:
@@ -39,21 +62,11 @@ def sample_iq(
             f"{path.name}: slice of {span} complex samples is below the survey "
             f"floor of {_SURVEY_MIN_ITEMS}; widen capture_samples or the slice."
         )
+    start = offset if span <= budget else _most_active_start(path, offset, span, budget)
     with path.open("rb") as f:
-        if span <= budget:
-            f.seek(offset * _ITEMSIZE)
-            whole = np.fromfile(f, dtype=np.complex64, count=span)
-            return whole, whole.size, span
-        per = budget // _SURVEY_SAMPLE_CHUNKS
-        starts = offset + np.linspace(0, span - per, _SURVEY_SAMPLE_CHUNKS).astype(
-            np.int64
-        )
-        parts = []
-        for s in starts:
-            f.seek(int(s) * _ITEMSIZE)
-            parts.append(np.fromfile(f, dtype=np.complex64, count=per))
-    sample = np.concatenate(parts)
-    return sample, sample.size, span
+        f.seek(start * _ITEMSIZE)
+        window = np.fromfile(f, dtype=np.complex64, count=min(span, budget))
+    return window, window.size, span
 
 
 def iter_iq(
