@@ -226,7 +226,11 @@ def run_rx_tool(
     no_signal) with the evidence behind it. Treat only verdict "decoded" as
     trustworthy output; "uncertain" means the evidence was absent or
     conflicting — read
-    quality.rationale. timeout is a hard wall-clock cap on the entire call —
+    quality.rationale. A hard-decision demod that measures its own decision
+    dominance (dechirp's argmax over the dechirped spectrum) feeds quality
+    the same way a soft stream does, so a bare css path can earn "decoded"
+    — and reads no_signal when the spec's chirp geometry does not match the
+    capture. timeout is a hard wall-clock cap on the entire call —
     pre-scan, decode, coding, and quality-scoring all count against it, not
     just the GR pipeline — so a decode too large or slow to finish in time
     raises a [deadline_exceeded] error instead of running unbounded; window a

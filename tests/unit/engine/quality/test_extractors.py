@@ -4,6 +4,7 @@ from typing import Any
 
 from marconi.engine.backends.base import BlockCensus, Diagnostic
 from marconi.engine.quality import (
+    dominance_evidence,
     lock_evidence,
     marks_evidence,
     survival_evidence,
@@ -160,6 +161,54 @@ def test_tag_sync_never_scanned_is_untestable_not_negative() -> None:
 def test_unrelated_diagnostics_are_not_tag_sync_evidence() -> None:
     rows = [Diagnostic(block="b4", key="locks", count=2)]
     assert tag_sync_evidence(rows) == []
+
+
+def _dom_rows(
+    dominant: int, total: int, chance_micro: int = 150_000
+) -> list[Diagnostic]:
+    return [
+        Diagnostic(block="b9", key="dominant_symbols", count=dominant),
+        Diagnostic(block="b9", key="symbols_total", count=total),
+        Diagnostic(block="b9", key="dominance_chance_micro", count=chance_micro),
+    ]
+
+
+def test_dominance_majority_with_mass_is_positive() -> None:
+    ev = dominance_evidence(_dom_rows(78, 78))
+    assert [e.assessment for e in ev] == ["positive"]
+    assert ev[0].metric == "peak_dominance"
+    assert ev[0].value == 1.0
+
+
+def test_dominance_tiny_run_has_no_mass() -> None:
+    # 5/5 dominant at a 0.15 chance ceiling is only ~9.5 nats of surprise —
+    # a perfect fraction without statistical mass must not read as signal
+    assert dominance_evidence(_dom_rows(5, 5)) == []
+
+
+def test_dominance_near_chance_is_negative() -> None:
+    ev = dominance_evidence(_dom_rows(4, 100))
+    assert [e.assessment for e in ev] == ["negative"]
+
+
+def test_dominance_midband_is_silent() -> None:
+    # the deep-SNR edge (measured ~0.08-0.3 dominant near where symbol
+    # errors begin) must stay uncertain, never no_signal
+    assert dominance_evidence(_dom_rows(30, 100)) == []
+    assert dominance_evidence(_dom_rows(8, 100)) == []
+
+
+def test_dominance_negative_needs_mass() -> None:
+    assert dominance_evidence(_dom_rows(0, 4)) == []
+
+
+def test_dominance_without_total_is_untestable() -> None:
+    rows = [Diagnostic(block="b9", key="dominant_symbols", count=3)]
+    assert dominance_evidence(rows) == []
+
+
+def test_dominance_zero_symbols_is_untestable() -> None:
+    assert dominance_evidence(_dom_rows(0, 0)) == []
 
 
 def test_marks_positive_only() -> None:

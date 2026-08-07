@@ -249,6 +249,64 @@ def lock_evidence(diagnostics: Sequence[Diagnostic]) -> list[QualityEvidence]:
     return out
 
 
+# Peak dominance is the CSS analog of soft_confidence: the argmax over the
+# dechirped spectrum IS the symbol decision, and peak/median of that vector
+# measures how decisively each one was made. The deciding block reports its
+# own calibrated tallies and chance ceiling (decision.py holds the measured
+# floor); here only the run's fractions are judged, word_validity-style: a
+# positive needs a dominant majority plus Chernoff mass against the chance
+# ceiling, a negative a near-chance fraction over enough symbols. Like
+# soft_confidence this attests decision quality, not symbol identity.
+# Measured honest limits (pinned in the css quality tests): around -18 dB
+# (symbol errors just beginning) the dominant fraction falls to ~0.08 and
+# the run reads uncertain-to-negative, and the worst noise corner (32-bin
+# vector at critical sampling, 12% chance tail) reads uncertain rather than
+# no_signal — both fail conservative.
+_DOMINANCE_POSITIVE = 0.5
+_DOMINANCE_NEGATIVE = 0.05
+_DOMINANCE_CHANCE_FALLBACK = 0.15
+
+
+def dominance_evidence(diagnostics: Sequence[Diagnostic]) -> list[QualityEvidence]:
+    totals = {
+        d.block: d.count
+        for d in diagnostics
+        if d.key == "symbols_total" and d.count is not None
+    }
+    chances = {
+        d.block: d.count / 1e6
+        for d in diagnostics
+        if d.key == "dominance_chance_micro" and d.count is not None
+    }
+    out: list[QualityEvidence] = []
+    for d in diagnostics:
+        if d.key != "dominant_symbols" or d.count is None:
+            continue
+        total = totals.get(d.block)
+        if not total:
+            # the decider never saw a symbol: untestable, not absent
+            continue
+        chance = chances.get(d.block, _DOMINANCE_CHANCE_FALLBACK)
+        frac = d.count / total
+        if frac >= _DOMINANCE_POSITIVE and _word_excess_significant(
+            d.count, total, chance
+        ):
+            assessment: Assessment = "positive"
+        elif frac <= _DOMINANCE_NEGATIVE and total >= _WORD_NEGATIVE_MIN_WORDS:
+            assessment = "negative"
+        else:
+            continue
+        out.append(
+            QualityEvidence(
+                source=d.block,
+                metric="peak_dominance",
+                value=frac,
+                assessment=assessment,
+            )
+        )
+    return out
+
+
 _SOFT_MIN_ITEMS = 1000
 _SOFT_SAMPLE_ITEMS = 65536
 
@@ -416,6 +474,7 @@ def assess_quality(
         + survival_evidence(census, registry)
         + marks_evidence(marks)
         + lock_evidence(diagnostics)
+        + dominance_evidence(diagnostics)
         + soft_evidence(soft_stream)
     )
     verdict, rationale = verdict_from(evidence)
