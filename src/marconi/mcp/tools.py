@@ -220,10 +220,12 @@ def run_rx_tool(
     status, a "stream" summary {path, item_type, items} to page with read_stream,
     windows/marks (truncated to 512 entries when longer, with a *_total
     count and a *_path int64 sidecar holding the full list - page it with
-    read_stream), per-block census, diagnostics, and "quality": a
-    conservative verdict (decoded / uncertain / no_signal) with the evidence
-    behind it. Treat only verdict "decoded" as trustworthy output;
-    "uncertain" means the evidence was absent or conflicting — read
+    read_stream), per-block census, diagnostics, free-text "hints" (actionable
+    tips for THIS path, e.g. a coherent-demod bit-polarity-ambiguity retry
+    suggestion), and "quality": a conservative verdict (decoded / uncertain /
+    no_signal) with the evidence behind it. Treat only verdict "decoded" as
+    trustworthy output; "uncertain" means the evidence was absent or
+    conflicting — read
     quality.rationale. timeout is a hard wall-clock cap on the entire call —
     pre-scan, decode, coding, and quality-scoring all count against it, not
     just the GR pipeline — so a decode too large or slow to finish in time
@@ -507,7 +509,11 @@ def survey(
     from burst spacing — the TDMA cadence; segments is capped at 512
     entries, with a segments_total count when longer — survey writes no
     sidecar, so re-window with capture_offset/capture_samples to inspect a
-    busier span). It never
+    busier span. Each segment's [start, length] is in analyzed-stream samples;
+    "capture_scale" {offset_samples, decim} maps them back to the original
+    capture so you can re-decode one burst with a targeted slice —
+    capture_offset = offset_samples + start*decim, capture_samples =
+    length*decim). It never
     labels the modulation, never assembles or runs a spec, and characterizes the
     dominant signal in the slice; window in time for a multi-signal capture."""
     if capture_offset < 0 or capture_samples < 0:
@@ -553,7 +559,12 @@ def survey(
             max_symbol_rate=max_symbol_rate,
         )
     payload: dict[str, Any] = result.model_dump(mode="json")
-    _cap_list(cast(dict, payload["bursts"]), "segments")
+    bursts = cast(dict, payload["bursts"])
+    _cap_list(bursts, "segments")
+    # map segment [start, length] back to original capture samples so a burst can
+    # be re-decoded with a targeted slice: capture_offset = offset_samples +
+    # start*decim, capture_samples = length*decim.
+    bursts["capture_scale"] = {"offset_samples": offset, "decim": decim}
     return payload
 
 

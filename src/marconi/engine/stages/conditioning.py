@@ -32,6 +32,11 @@ class ChannelizeStep(Step):
         return self
 
 
+class TranslateStep(Step):
+    conv: Literal["translate"] = "translate"
+    center_hz: float  # the offset frequency shifted to DC (signed)
+
+
 class InvertStep(Step):
     conv: Literal["invert"] = "invert"
 
@@ -69,6 +74,24 @@ class Channelize(RxStage[CompileContext, ChannelizeStep]):
 
     def rate_factor(self, step: ChannelizeStep) -> float:
         return 1.0 / int(step.decim)
+
+
+class Translate(RxStage[CompileContext, TranslateStep]):
+    """Frequency-translate a sub-band to baseband: multiply by a complex rotator so
+    center_hz lands at DC (stock rotator_cc). PURE shift — no filtering and no
+    decimation, so |z| (amplitude) is preserved. For channel isolation (shift +
+    low-pass + decimate) use channelize instead; reach for translate when you only
+    need to MOVE the spectrum, e.g. to slide an AM/FM audio subcarrier down to DC
+    before an IQ demod. RX-only, IQ->IQ, rate unchanged."""
+
+    name = "translate"
+    from_level = Level.IQ
+    to_level = Level.IQ
+    family = "conditioning"
+    step_model = TranslateStep
+
+    def emit_rx(self, b: CompileContext, step: TranslateStep) -> None:
+        b.chain("rotator_cc", phase_inc=-2.0 * math.pi * step.center_hz / b.rate)
 
 
 class Invert(RxStage[CompileContext, InvertStep]):
@@ -458,6 +481,7 @@ class Analytic(RxStage[CompileContext, AnalyticStep]):
 
 CONDITIONING_STAGES: tuple[type[Stage[CompileContext, Any]], ...] = (
     Channelize,
+    Translate,
     Invert,
     Resample,
     ClockCorrect,

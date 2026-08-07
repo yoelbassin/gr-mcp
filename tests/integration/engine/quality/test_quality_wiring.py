@@ -64,6 +64,7 @@ def test_hard_slice_of_soft_demod_forwards_soft_confidence(tmp_path: Path) -> No
     assert res.quality is not None
     assert res.quality.verdict == "decoded"
     assert any(e.metric == "soft_confidence" for e in res.quality.evidence)
+    assert res.hints == []  # fsk discriminator has a fixed bit sense, no hint
 
 
 def test_non_ok_result_has_no_quality(tmp_path: Path) -> None:

@@ -81,6 +81,7 @@ from marconi.engine.stages.conditioning import (  # noqa: E402
     InvertStep,
     ResampleStep,
     SquelchStep,
+    TranslateStep,
 )
 from marconi.engine.stages.general import SliceStep  # noqa: E402
 from marconi.engine.stages.probes import BurstProbeStep  # noqa: E402
@@ -182,6 +183,7 @@ VALID_STEPS: dict[str, Step] = {
     "squelch": SquelchStep(threshold_db=-20.0),
     "symbol_map": SymbolMapStep(code_bits=2, data_bits=2, table=[0, 1, 2, 3]),
     "symbol_sync": SymbolSyncStep(sps=4),
+    "translate": TranslateStep(center_hz=1000.0),
     "sync_align": SyncAlignStep(access_code="10110111", frame_len=80),
     "sync_symbols": SyncSymbolsStep(pattern=[0, 1, 0, 1]),
     "sync_word": SyncWordStep(sync="ab12"),

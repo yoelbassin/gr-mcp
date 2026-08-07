@@ -66,6 +66,13 @@ class Stage(ABC, Generic[B, S]):
     # still passed through unchanged - validation counts, it never drops.
     validates_words: bool = False
 
+    # A coherent demod that recovers carrier phase only up to a rotational
+    # ambiguity (e.g. MSK's 180 deg), so its sliced bit polarity may be
+    # inverted. run_rx surfaces a hint to retry flipped when such a stage feeds
+    # a bit/symbol output. A frequency discriminator (fsk) has a fixed sense and
+    # is NOT tagged (its only flip is a spectrally mirrored capture -> invert).
+    polarity_ambiguous: bool = False
+
     # Seam invariant (issue 06): the wire item_type / decision-carrier a stage
     # accepts on input. The phy compiler checks them against the upstream
     # descriptor, so an ill-typed composition (e.g. hard bits into a soft-LLR

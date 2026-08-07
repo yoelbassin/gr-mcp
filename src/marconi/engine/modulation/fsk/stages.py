@@ -69,6 +69,7 @@ class Msk(RxStage[CompileContext, MskStep]):
     to_level = Level.SYMBOLS
     family = "fsk"
     min_input_sps = 2.0
+    polarity_ambiguous = True  # coherent h=0.5 detection: 180 deg phase ambiguity
     step_model = MskStep
 
     def emit_rx(self, b: CompileContext, step: MskStep) -> None:

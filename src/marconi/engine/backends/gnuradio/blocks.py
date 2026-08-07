@@ -317,6 +317,7 @@ GR_BLOCKS: dict[str, Callable[[_GrCtx, Params], Any]] = {
         _as_float(p["center"]),
         _as_float(p["rate"]),
     ),
+    "rotator_cc": lambda c, p: c.blocks.rotator_cc(_as_float(p["phase_inc"])),
     # Polyphase arbitrary resampler (rate=interp/decim). Kept over
     # rational_resampler_ccf because the same block also serves clock_correct's
     # irrational 1/(1+ppm) ratio, so one kind covers both — NOT because rational

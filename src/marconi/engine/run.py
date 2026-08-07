@@ -48,6 +48,7 @@ class PipelineResult(BaseModel):
     stalled_at: str | None = None
     error: str | None = None
     quality: QualityReport | None = None
+    hints: list[str] = []
 
     def diagnostic(self, block: str, key: str) -> Diagnostic | None:
         return find_diagnostic(self.diagnostics, block, key)
@@ -262,6 +263,25 @@ def _flag_empty_coding(result: PipelineResult) -> PipelineResult:
     )
 
 
+_POLARITY_HINT = (
+    "a coherent demod in this path (e.g. msk) recovers carrier phase only up to a "
+    "rotational ambiguity, so the bit polarity may be inverted; if a downstream "
+    'sync or CRC fails, retry with the bits flipped — append descramble {"sequence": '
+    '"ff"}, or prepend invert if the capture is spectrally mirrored.'
+)
+
+
+def _hints(
+    modem: Modem, registry: Mapping[str, Stage[Any, Any]], final: Descriptor
+) -> list[str]:
+    hints: list[str] = []
+    if final.level in (Level.BITS, Level.SYMBOLS) and any(
+        getattr(registry.get(s.conv), "polarity_ambiguous", False) for s in modem.path
+    ):
+        hints.append(_POLARITY_HINT)
+    return hints
+
+
 def _soft_stream_path(
     cp: CompiledPipeline,
     result: PipelineResult,
@@ -409,6 +429,7 @@ def run_rx(
                     diagnostics=result.diagnostics,
                     marks=result.marks,
                     soft_stream=_soft_stream_path(cp, result, seam, input_stream),
-                )
+                ),
+                "hints": _hints(modem, registry, cp.final),
             }
         )

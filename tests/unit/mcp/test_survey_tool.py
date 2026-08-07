@@ -98,6 +98,25 @@ def test_survey_channelize_leaves_no_workspace_files(tmp_path: Path) -> None:
     assert leftover == []
 
 
+def test_survey_reports_capture_scale_for_burst_targeting(tmp_path: Path) -> None:
+    fs, n = 96_000.0, 1 << 16
+    p = tmp_path / "wide.cf32"
+    _two_tone_cf32(p, fs, n)
+    # non-channelized survey over an offset slice: scale maps 1:1 from the offset
+    agg = survey(str(p), fs, capture_offset=1000)
+    assert cast(dict, agg["bursts"])["capture_scale"] == {
+        "offset_samples": 1000,
+        "decim": 1,
+    }
+    # channelized survey: segment indices are at the decimated rate, so decim
+    # scales them back to original capture samples
+    ch = survey(str(p), fs, center_hz=30_000.0, decim=4, capture_offset=1000)
+    assert cast(dict, ch["bursts"])["capture_scale"] == {
+        "offset_samples": 1000,
+        "decim": 4,
+    }
+
+
 def test_survey_rejects_bad_decim(tmp_path: Path) -> None:
     p = tmp_path / "s.cf32"
     _fsk4_cf32(p, 48_000.0, 2_400.0, 1_200.0, 8000)
