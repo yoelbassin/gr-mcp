@@ -4,14 +4,18 @@ import numpy as np
 import pytest
 
 from marconi.survey.measure import (
+    _SURVEY_CLOCK_CHUNKS,
     _SURVEY_COMB_DAMPING,
+    _SURVEY_RATE_FLOOR_BINS,
     _bursts,
     _damp_harmonics,
+    _default_rate_floor,
     _envelope,
     _fundamental_below,
     _inst_freq,
     _spectrum,
     _symbol_rate,
+    survey_iq,
 )
 
 
@@ -127,6 +131,46 @@ def test_envelope_detects_rectangular_ook() -> None:
     assert _envelope(x).const_envelope_ratio > _envelope(const).const_envelope_ratio
 
 
+def test_default_rate_floor_tracks_span() -> None:
+    # a longer analyzed span resolves finer clock lines, so its default floor
+    # sits lower; the floor is a few bins of the chunked clock spectrum
+    fs = 1_000_000.0
+    short, long_ = _default_rate_floor(1 << 13, fs), _default_rate_floor(1 << 20, fs)
+    assert long_ < short
+    per = (1 << 20) // _SURVEY_CLOCK_CHUNKS
+    assert long_ == pytest.approx(_SURVEY_RATE_FLOOR_BINS * fs / per)
+
+
+def test_survey_default_floor_finds_rate_below_permille_ratio(
+    tmp_path: Path,
+) -> None:
+    # 40 baud at 48 ksps sits below the old fixed sample_rate/1000 floor
+    # (48 Hz) but well above what this span resolves — the default search
+    # must include it
+    np.random.seed(4)
+    fs, rate = 48_000.0, 40.0
+    x = _fsk(fs, rate, 2_000.0, 110, np.array([-1.0, 1.0]), smooth_frac=0.2)
+    p = tmp_path / "slow.cf32"
+    x.tofile(p)
+    s = survey_iq(p, fs).symbol_rate
+    assert s.search_lo_hz < rate < s.search_hi_hz
+    assert s.clock_resolution_hz > 0.0
+    assert min(abs(c - rate) for c in s.candidates_hz) < 1.5 * s.clock_resolution_hz
+
+
+def test_survey_small_max_rate_clamps_default_floor(tmp_path: Path) -> None:
+    # an explicit max below the derived floor must clamp the default lo, not
+    # reject the search
+    np.random.seed(5)
+    x = (np.random.randn(1 << 13) + 1j * np.random.randn(1 << 13)).astype(np.complex64)
+    p = tmp_path / "short.cf32"
+    x.tofile(p)
+    fs = 48_000.0
+    assert _default_rate_floor(1 << 13, fs) > 8.0
+    s = survey_iq(p, fs, max_symbol_rate=8.0).symbol_rate
+    assert 0.0 < s.search_lo_hz < 8.0
+
+
 def test_symbol_rate_pure_noise_is_honest() -> None:
     np.random.seed(2)
     fs = 48_000.0
@@ -206,6 +250,21 @@ def test_comb_suppression_damps_majority_harmonic_pool() -> None:
     damped = _damp_harmonics(targets, strengths, fundamental, bin_hz)
     assert np.allclose(damped[:3], strengths[:3] * _SURVEY_COMB_DAMPING)
     assert damped[3] == strengths[3]
+
+
+def test_comb_hunt_rejects_bin_scale_fundamental() -> None:
+    # a "fundamental" only ~3 bins wide has comb spacing inside the +/-2-bin
+    # match tolerance: adjacent orders overlap, the mask saturates, and every
+    # line in the band reads as a harmonic — such a fundamental must never be
+    # hunted (the NELoRa sf7 regression: a 601 Hz 3-bin line wiped the true
+    # 1002 Hz candidate as its "order 2")
+    bin_hz = 200.0
+    g0 = 3.0 * bin_hz
+    freqs = np.arange(1, 60) * bin_hz
+    mag = np.ones(freqs.size)
+    mag[2] = 50.0  # the 3-bin line
+    targets = np.array([2 * g0, 3 * g0, 4 * g0, 5 * g0])
+    assert _fundamental_below(freqs, mag, 1_000.0, targets, bin_hz) is None
 
 
 def test_comb_suppression_does_not_fire_without_a_majority() -> None:

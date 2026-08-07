@@ -82,13 +82,22 @@ def _envelope(x: np.ndarray) -> EnvelopeStats:
 _SURVEY_IFREQ_BINS = 65
 _SURVEY_RATE_K = 5
 _SURVEY_CLOCK_CHUNKS = 16
+_SURVEY_RATE_FLOOR_BINS = 3.0
+# Burst/TDMA cadence fundamentals are hunted below this ratio of the sample
+# rate even when the resolution-derived search floor reaches further down: the
+# comb damping must keep seeing slot-cadence fundamentals as fundamentals, not
+# as rate candidates crowding the pool.
+_SURVEY_CADENCE_HUNT_RATIO = 1000.0
 _SURVEY_RATE_POOL_K = 2 * _SURVEY_RATE_K
 _SURVEY_ACTIVE_FRACTION = 0.3
 _SURVEY_FUNDAMENTAL_POOL = 20
 _SURVEY_COMB_ORDER_CAP = 20
 _SURVEY_COMB_MIN_ORDER = 2
 _SURVEY_COMB_REL_TOL = 0.02
-_SURVEY_COMB_FLOOR_BINS = 1.5
+# A hunted fundamental must span comfortably more than the +/-2-bin match
+# tolerance below, or adjacent comb orders overlap and the mask saturates —
+# a ~3-bin "fundamental" reads every peak in the band as its harmonic.
+_SURVEY_COMB_FLOOR_BINS = 5.0
 _SURVEY_COMB_TOL_FLOOR_BINS = 2.0
 _SURVEY_COMB_MAJORITY = 0.5
 _SURVEY_COMB_DAMPING = 0.05
@@ -114,6 +123,7 @@ class SymbolRateStats(BaseModel):
     eye_openness: list[float]
     search_lo_hz: float
     search_hi_hz: float
+    clock_resolution_hz: float
 
 
 def _clock_spectrum(
@@ -130,7 +140,7 @@ def _clock_spectrum(
 
 
 def _peaks_in_band(
-    freqs: np.ndarray, mag: np.ndarray, lo: float, hi: float, k: int
+    freqs: np.ndarray, mag: np.ndarray, lo: float, hi: float, k: int | None
 ) -> tuple[np.ndarray, np.ndarray]:
     band = (freqs >= lo) & (freqs <= hi)
     fb, mb = freqs[band], mag[band]
@@ -245,27 +255,43 @@ def _symbol_rate(
     fa, ma = _clock_spectrum(ya, sample_rate, _SURVEY_CLOCK_CHUNKS)
     fg, mg = _clock_spectrum(yf, sample_rate, _SURVEY_CLOCK_CHUNKS)
     norm = max(float(ma.max(initial=0.0)), float(mg.max(initial=0.0)), 1e-20)
-    ca, sa = _peaks_in_band(fa, ma, lo, hi, _SURVEY_RATE_POOL_K)
-    cg, sg = _peaks_in_band(fg, mg, lo, hi, _SURVEY_RATE_POOL_K)
+    # every in-band peak enters; ranking happens on DAMPED strength (a raw-
+    # magnitude pool cut first would let comb harmonics — about to be damped
+    # to nothing — crowd real low-frequency lines out of the pool)
+    ca, sa = _peaks_in_band(fa, ma, lo, hi, None)
+    cg, sg = _peaks_in_band(fg, mg, lo, hi, None)
 
     dfa = fa[1] - fa[0] if fa.size > 1 else 1.0
     dfg = fg[1] - fg[0] if fg.size > 1 else 1.0
-    sa = _damp_harmonics(ca, sa, _fundamental_below(fa, ma, lo, ca, dfa), dfa)
-    sg = _damp_harmonics(cg, sg, _fundamental_below(fg, mg, lo, cg, dfg), dfg)
+    # the fundamental hunt keeps the bounded strongest-raw pool as its comb
+    # targets: its majority rule is meaningless against every minor peak
+    pool_a = ca[np.argsort(sa)[::-1][:_SURVEY_RATE_POOL_K]]
+    pool_g = cg[np.argsort(sg)[::-1][:_SURVEY_RATE_POOL_K]]
+    hunt_hi = max(lo, sample_rate / _SURVEY_CADENCE_HUNT_RATIO)
+    sa = _damp_harmonics(ca, sa, _fundamental_below(fa, ma, hunt_hi, pool_a, dfa), dfa)
+    sg = _damp_harmonics(cg, sg, _fundamental_below(fg, mg, hunt_hi, pool_g, dfg), dfg)
 
     cand = np.concatenate([ca, cg])
     strg = np.concatenate([sa, sg]) / norm
-    tol = max((hi - lo) * 0.01, sample_rate / max(x.size, 1))
+    # dedup at the scale a line can actually smear (its own 2%, the comb
+    # tolerance, floored at two clock bins) — a band-proportional tolerance
+    # over a wide default search swallows distinct low-frequency lines into
+    # their 2x harmonics
+    tol_floor = 2.0 * max(float(dfa), float(dfg))
     merged_f: list[float] = []
     merged_s: list[float] = []
     for i in np.argsort(strg)[::-1]:
         f_ = float(cand[i])
-        if all(abs(f_ - m) > tol for m in merged_f):
+        if all(
+            abs(f_ - m) > max(_SURVEY_COMB_REL_TOL * m, tol_floor) for m in merged_f
+        ):
             merged_f.append(f_)
             merged_s.append(float(strg[i]))
+        if len(merged_f) == _SURVEY_RATE_K:
+            break
 
-    candidates = merged_f[:_SURVEY_RATE_K]
-    strengths = merged_s[:_SURVEY_RATE_K]
+    candidates = merged_f
+    strengths = merged_s
     eyes = [_eye_openness(dphi, active_pairs, sample_rate, r) for r in candidates]
     candidates, strengths, eyes = _rerank_by_eye(candidates, strengths, eyes)
     return SymbolRateStats(
@@ -274,6 +300,7 @@ def _symbol_rate(
         eye_openness=eyes,
         search_lo_hz=lo,
         search_hi_hz=hi,
+        clock_resolution_hz=float(dfa),
     )
 
 
@@ -401,6 +428,16 @@ class SurveyResult(BaseModel):
     bursts: BurstStats
 
 
+def _default_rate_floor(n_samples: int, sample_rate: float) -> float:
+    """The finest rate the chunked clock spectrum resolves with margin: a line
+    below a few of its bins is indistinguishable from DC leakage, so searching
+    there by default would rank noise. Anything above is fair game — a fixed
+    ratio floor (the old sample_rate/1000) hid real sub-floor rates that a
+    long capture resolves cleanly."""
+    per = max(n_samples // _SURVEY_CLOCK_CHUNKS, 1)
+    return _SURVEY_RATE_FLOOR_BINS * sample_rate / per
+
+
 def survey_iq(
     path: Path,
     sample_rate: float,
@@ -410,11 +447,14 @@ def survey_iq(
     min_symbol_rate: float | None = None,
     max_symbol_rate: float | None = None,
 ) -> SurveyResult:
-    lo = min_symbol_rate if min_symbol_rate is not None else sample_rate / 1000
+    x, analyzed, span = sample_iq(path, offset, length)
     hi = max_symbol_rate if max_symbol_rate is not None else sample_rate / 2
+    if min_symbol_rate is not None:
+        lo = min_symbol_rate
+    else:
+        lo = min(_default_rate_floor(x.size, sample_rate), hi / 2)
     if not 0 < lo < hi:
         raise ValueError("require 0 < min_symbol_rate < max_symbol_rate")
-    x, analyzed, span = sample_iq(path, offset, length)
     return SurveyResult(
         sample_rate=sample_rate,
         span_samples=span,

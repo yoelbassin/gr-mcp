@@ -485,7 +485,14 @@ def survey(
     the estimate is least reliable for amplitude-null signals such as
     OOK/ASK with a carrier offset, and for short windows spanning only a few
     burst/TDMA cycles — prefer widening the window for bursty
-    signals; narrow with min_symbol_rate/max_symbol_rate), "inst_freq"
+    signals; narrow with min_symbol_rate/max_symbol_rate. The search band is
+    reported as search_lo_hz/search_hi_hz: the default floor is what the
+    analyzed span can actually resolve (a few clock-spectrum bins), so a
+    longer slice searches lower by default, and clock_resolution_hz is that
+    spectrum's bin width — candidates_hz values are quantized to it, so a
+    candidate within one resolution bin of your hypothesis is a match, and a
+    rate you expect below search_lo_hz needs an explicit min_symbol_rate),
+    "inst_freq"
     (instantaneous-frequency histogram, tone peaks_hz, and spread_hz —
     active-gated like envelope. peaks_hz only tells you the tone order when
     tones fully resolve: at low samples-per-symbol, closely-spaced M-ary FSK
