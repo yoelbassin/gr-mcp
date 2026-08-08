@@ -445,8 +445,12 @@ def survey(
     width (default passes most of the decimated band); the aggregate whole-span
     survey (the default, center_hz=0 decim=1) is unchanged. Returns five
     measurement blocks, all raw numbers for you to judge:
-    "spectrum" (two-sided PSD, energy-centroid offset, 99%-power occupied
-    bandwidth, peak — read spectral asymmetry off this yourself), "envelope"
+    "spectrum" (a coarse two-sided PSD in psd_db — a shape to eyeball for
+    extra carriers/sub-bands, kept small on purpose; bin i sits at
+    freq_start_hz + i*freq_step_hz, so the axis is reconstructed, never
+    shipped as a redundant ramp — plus energy-centroid offset, 99%-power
+    occupied bandwidth, and peak; read spectral asymmetry off these
+    yourself), "envelope"
     (constant-envelope ratio + kurtosis — you decide FSK vs PSK vs QAM;
     computed on a power-smoothed active portion of the window, gated at
     burst timescale (a windowed power envelope above a fraction of its own
@@ -497,7 +501,8 @@ def survey(
     candidate within one resolution bin of your hypothesis is a match, and a
     rate you expect below search_lo_hz needs an explicit min_symbol_rate),
     "inst_freq"
-    (instantaneous-frequency histogram, tone peaks_hz, and spread_hz —
+    (instantaneous-frequency histogram counts (bin i center =
+    hist_start_hz + i*hist_step_hz), tone peaks_hz, and spread_hz —
     active-gated like envelope. peaks_hz only tells you the tone order when
     tones fully resolve: at low samples-per-symbol, closely-spaced M-ary FSK
     tones smear into one blurred lobe, so a LOW peak count does not mean

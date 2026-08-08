@@ -11,7 +11,10 @@ from marconi.levels import fit_levels
 from marconi.survey.iqfile import iter_iq, sample_iq
 
 _SURVEY_NPERSEG = 4096
-_MAX_INLINE = 512
+# Agent-facing arrays stay small: a coarse PSD conveys the spectral shape, and
+# the frequency axis is a uniform ramp reconstructed from start+step, never
+# shipped as hundreds of derivable floats.
+_SPECTRUM_BINS = 64
 
 
 class EnvelopeStats(BaseModel):
@@ -22,8 +25,9 @@ class EnvelopeStats(BaseModel):
 
 
 class SpectrumStats(BaseModel):
-    freqs_hz: list[float]
     psd_db: list[float]
+    freq_start_hz: float
+    freq_step_hz: float
     center_offset_hz: float
     peak_offset_hz: float
     occupied_bw_hz: float
@@ -52,16 +56,18 @@ def _spectrum(x: np.ndarray, sample_rate: float) -> SpectrumStats:
     cum = np.cumsum(pxx) / total
     lo = float(f[min(int(np.searchsorted(cum, 0.005)), f.size - 1)])
     hi = float(f[min(int(np.searchsorted(cum, 0.995)), f.size - 1)])
-    fd = _downsample(f, _MAX_INLINE)
-    pd = 10.0 * np.log10(np.maximum(_downsample(pxx, _MAX_INLINE), 1e-20))
+    fd = _downsample(f, _SPECTRUM_BINS)
+    pd = 10.0 * np.log10(np.maximum(_downsample(pxx, _SPECTRUM_BINS), 1e-20))
+    step = float(fd[1] - fd[0]) if fd.size > 1 else 0.0
     return SpectrumStats(
-        freqs_hz=[float(v) for v in fd],
-        psd_db=[float(v) for v in pd],
-        center_offset_hz=centroid,
-        peak_offset_hz=peak,
-        occupied_bw_hz=hi - lo,
-        occupied_lo_hz=lo,
-        occupied_hi_hz=hi,
+        psd_db=[round(float(v), 1) for v in pd],
+        freq_start_hz=round(float(fd[0]), 1) if fd.size else 0.0,
+        freq_step_hz=round(step, 1),
+        center_offset_hz=round(centroid, 1),
+        peak_offset_hz=round(peak, 1),
+        occupied_bw_hz=round(hi - lo, 1),
+        occupied_lo_hz=round(lo, 1),
+        occupied_hi_hz=round(hi, 1),
     )
 
 
@@ -111,8 +117,9 @@ _HARMONIC_FRAC = 0.6
 
 
 class InstFreqStats(BaseModel):
-    hist_centers_hz: list[float]
     hist_counts: list[int]
+    hist_start_hz: float
+    hist_step_hz: float
     peaks_hz: list[float]
     spread_hz: float
 
@@ -313,14 +320,16 @@ def _inst_freq(x: np.ndarray, sample_rate: float) -> InstFreqStats:
         hi = lo + 1.0
     counts, edges = np.histogram(f, bins=_SURVEY_IFREQ_BINS, range=(lo, hi))
     centers = (edges[:-1] + edges[1:]) / 2
+    step = float(edges[1] - edges[0]) if edges.size > 1 else 0.0
     prom = max(float(counts.max()) * 0.05, 1.0)
     padded = np.concatenate(([0], counts, [0]))
     idx, _ = find_peaks(padded, prominence=prom, distance=2)
     return InstFreqStats(
-        hist_centers_hz=[float(v) for v in centers],
         hist_counts=[int(v) for v in counts],
-        peaks_hz=[float(centers[i - 1]) for i in idx],
-        spread_hz=spread,
+        hist_start_hz=round(float(centers[0]), 1) if centers.size else 0.0,
+        hist_step_hz=round(step, 1),
+        peaks_hz=[round(float(centers[i - 1]), 1) for i in idx],
+        spread_hz=round(spread, 1),
     )
 
 

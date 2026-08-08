@@ -29,7 +29,8 @@ def test_spectrum_locates_offset_tone() -> None:
     assert abs(s.peak_offset_hz - f0) < 200.0
     assert abs(s.center_offset_hz - f0) < 500.0
     assert s.occupied_bw_hz < fs / 4
-    assert len(s.freqs_hz) == len(s.psd_db) <= 512
+    assert len(s.psd_db) <= 64
+    assert s.freq_step_hz > 0.0 and np.isfinite(s.freq_start_hz)
 
 
 def test_spectrum_zero_power_input() -> None:
@@ -37,7 +38,8 @@ def test_spectrum_zero_power_input() -> None:
     s = _spectrum(x, 48_000.0)
     assert s.occupied_bw_hz >= 0.0
     assert np.isfinite(s.occupied_lo_hz) and np.isfinite(s.occupied_hi_hz)
-    assert len(s.freqs_hz) == len(s.psd_db) <= 512
+    assert len(s.psd_db) <= 64
+    assert np.isfinite(s.freq_start_hz) and np.isfinite(s.freq_step_hz)
 
 
 def test_envelope_separates_constant_from_varying_amplitude() -> None:
@@ -291,7 +293,8 @@ def test_inst_freq_finds_four_fsk_tones() -> None:
     expected = [-4500.0, -1500.0, 1500.0, 4500.0]
     for got, want in zip(sorted(s.peaks_hz), expected):
         assert abs(got - want) < 200.0, (sorted(s.peaks_hz), expected)
-    assert len(s.hist_centers_hz) == len(s.hist_counts) == 65
+    assert len(s.hist_counts) == 65
+    assert s.hist_step_hz > 0.0 and np.isfinite(s.hist_start_hz)
     assert s.spread_hz > dev
 
 
@@ -330,7 +333,7 @@ def test_inst_freq_spread_is_wide_for_a_noisy_tone_not_just_fsk() -> None:
 def test_inst_freq_all_zero_input_is_safe() -> None:
     s = _inst_freq(np.zeros(4096, dtype=np.complex64), 48_000.0)
     assert s.spread_hz == 0.0
-    assert len(s.hist_centers_hz) == len(s.hist_counts) == 65
+    assert len(s.hist_counts) == 65
 
 
 def test_envelope_and_inst_freq_agree_whole_file_vs_single_burst() -> None:
