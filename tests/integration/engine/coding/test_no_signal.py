@@ -46,9 +46,7 @@ from e2e.pocsag.test_pocsag_offair import (
     _pocsag_modem,
 )
 from e2e.pocsag.test_pocsag_offair import _word as _pocsag_word
-from e2e.rds.test_rds_offair import _codec_modem as _rds_codec_modem
-from e2e.rds.test_rds_offair import _decode_groups as _rds_decode_groups
-from helpers import bitops, crc, framing
+from helpers import bitops, crc, framing, rds
 from integration.engine.coding.test_lora_golden import (
     _FRAME_BODY_LEN as _LORA_FRAME_LEN,
 )
@@ -181,7 +179,7 @@ def _decode_dab(bits: np.ndarray, windows: list[int]) -> int:
 
 
 def _decode_rds(bits: np.ndarray, _windows: list[int]) -> int:
-    return _rds_decode_groups(bits)[0]
+    return rds.decode_groups(bits)[0]
 
 
 def _compositions() -> dict[str, tuple[Callable[[], Modem], Descriptor, _Decoder]]:
@@ -192,7 +190,7 @@ def _compositions() -> dict[str, tuple[Callable[[], Modem], Descriptor, _Decoder
         "dmr": (lambda: _coding_tail(_dmr_modem()), SOFT_SYMBOLS, _decode_dmr),
         "lora": (_lora_golden_modem, BITS, _decode_lora),
         "pocsag": (lambda: _coding_tail(_pocsag_modem()), BITS, _decode_pocsag),
-        "rds": (lambda: _rds_codec_modem(0), BITS, _decode_rds),
+        "rds": (lambda: rds.codec_modem(0), BITS, _decode_rds),
     }
 
 

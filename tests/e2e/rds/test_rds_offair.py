@@ -24,35 +24,21 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import numpy as np
 import pytest
+from helpers import rds
 
 from marconi.engine.backends.gnuradio.runner import ensure_worker_warm
-from marconi.engine.coding.stages_bits import (
-    CodebookStep,
-    DifferentialStep,
-    RealignStep,
-)
 from marconi.engine.io.bitfile import read_bits
-from marconi.engine.modulation.psk.stages import PskDemapStep, PskDemodStep
 from marconi.engine.run import run_rx
-from marconi.engine.stages.conditioning import (
-    AgcStep,
-    AnalyticStep,
-    ChannelizeStep,
-    FmDemodStep,
-    ResampleStep,
-)
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Descriptor
-from marconi.engine.types.enums import AgcMode, ItemType, PskOrder
+from marconi.engine.types.enums import ItemType
 from marconi.engine.types.levels import Level
-from marconi.engine.types.models import Bitstream, Modem
+from marconi.engine.types.models import Bitstream
 
 IQ = Descriptor(Level.IQ, ItemType.C)
 BITS = Descriptor(Level.BITS, ItemType.B)
 RATE = 250_000.0
-SYMBOL_RATE = 2375.0  # biphase symbols; data runs at half this
 _CAPTURE = (
     Path(__file__).resolve().parents[3]
     / "artifacts"
@@ -61,83 +47,8 @@ _CAPTURE = (
     / "fm_rds_250k_1Msamples.iq"
 )
 
-# RDS datasheet constants (caller data): checkword generator and the offset
-# word each block position XORs onto its checkword.
-G_POLY = 0b10110111001
-OFFSETS = {0x0FC: "A", 0x198: "B", 0x168: "C", 0x350: "C'", 0x1B4: "D"}
-
 MIN_VALID_BLOCKS = 120  # measured 180; margin for scheduler nondeterminism
 STATION_PS = "Upliftin"
-
-
-def _phy_modem() -> Modem:
-    return Modem(
-        name="rds_rx",
-        symbol_rate=SYMBOL_RATE,
-        path=[
-            FmDemodStep(deviation=75_000.0),
-            AnalyticStep(),
-            ChannelizeStep(decim=5, bandwidth_hz=4800.0, center_hz=57_000.0),
-            ResampleStep(interpolation=19, decimation=50),
-            AgcStep(mode=AgcMode.POWER),
-            PskDemodStep(order=PskOrder.BPSK, alpha=1.0),
-            PskDemapStep(order=PskOrder.BPSK),
-        ],
-    )
-
-
-def _codec_modem(bit_offset: int) -> Modem:
-    return Modem(
-        name="rds_codec",
-        symbol_rate=1.0,
-        path=[
-            RealignStep(bit_offset=bit_offset),
-            CodebookStep(code_bits=2, data_bits=1, table=[1, 2]),
-            DifferentialStep(),
-        ],
-    )
-
-
-def _crc10(info16: int) -> int:
-    v = info16 << 10
-    for i in range(15, -1, -1):
-        if v & (1 << (i + 10)):
-            v ^= G_POLY << i
-    return v & 0x3FF
-
-
-def _decode_groups(bits: np.ndarray) -> tuple[int, str]:
-    """Group-sync the bit stream on checkword-valid A/B/C/D block sequences;
-    return (valid block count, PS name assembled from 0A/0B groups)."""
-    if bits.size < 104:
-        return 0, ""
-    vals = np.zeros(bits.size - 25, np.int64)
-    for i in range(26):
-        vals = (vals << 1) | bits[i : i + vals.size]
-
-    def block_type(v: int) -> str | None:
-        return OFFSETS.get((v & 0x3FF) ^ _crc10(v >> 10))
-
-    types = [block_type(int(v)) for v in vals]
-    n_valid, ps, i = 0, ["_"] * 8, 0
-    while i < len(types) - 78:
-        if (
-            types[i] == "A"
-            and types[i + 26] == "B"
-            and types[i + 52] in ("C", "C'")
-            and types[i + 78] == "D"
-        ):
-            b, d = int(vals[i + 26]) >> 10, int(vals[i + 78]) >> 10
-            n_valid += 4
-            if (b >> 12) == 0:
-                seg = b & 0x3
-                hi, lo = d >> 8, d & 0xFF
-                ps[2 * seg] = chr(hi) if 32 <= hi < 127 else "?"
-                ps[2 * seg + 1] = chr(lo) if 32 <= lo < 127 else "?"
-            i += 104
-        else:
-            i += 1
-    return n_valid, "".join(ps)
 
 
 @pytest.mark.skipif(
@@ -147,7 +58,7 @@ def _decode_groups(bits: np.ndarray) -> tuple[int, str]:
 def test_rds_offair(tmp_path: Path) -> None:
     ensure_worker_warm()
     res = run_rx(
-        _phy_modem(),
+        rds.phy_modem(),
         stage_registry(),
         sample_rate=RATE,
         start=IQ,
@@ -162,7 +73,7 @@ def test_rds_offair(tmp_path: Path) -> None:
     results = []
     for off in (0, 1):
         res2 = run_rx(
-            _codec_modem(off),
+            rds.codec_modem(off),
             stage_registry(),
             sample_rate=1.0,
             start=BITS,
@@ -171,7 +82,7 @@ def test_rds_offair(tmp_path: Path) -> None:
         )
         assert res2.status == "ok", res2
         assert res2.bitstream is not None
-        results.append(_decode_groups(read_bits(res2.bitstream.path)))
+        results.append(rds.decode_groups(read_bits(res2.bitstream.path)))
 
     n_valid, ps = max(results)
     assert n_valid >= MIN_VALID_BLOCKS, f"{n_valid} checkword-valid blocks: {results}"
