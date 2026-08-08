@@ -40,6 +40,15 @@ class OokEnvelope(DuplexStage[CompileContext, OokEnvelopeStep]):
     general Slice for the SYMBOLS<->BITS decision."""
 
     name = "ook_envelope"
+    description = (
+        "Non-coherent OOK/PPM envelope demod, IQ<->SYMBOLS, whose amplitude "
+        "contract is conditional on loop_bw. Closed-loop (loop_bw>0) needs "
+        "peak_unity or rms_unity input - pair it with an agc. Open-loop "
+        "(loop_bw=0) is amplitude-agnostic and must run WITHOUT an agc stage: "
+        "the per-burst sampler normalizes each burst itself, and a "
+        "sliding-window agc steps its gain mid-burst on pulsed signals and "
+        "corrupts fixed-threshold slicing."
+    )
     from_level = Level.IQ
     to_level = Level.SYMBOLS
     family = "ook"

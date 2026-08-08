@@ -10,6 +10,16 @@ def test_registered_with_ook_family() -> None:
     assert stage_registry()["ook_envelope"].family == "ook"
 
 
+def test_description_states_conditional_agc_contract() -> None:
+    # accepts_amplitude alone reads [peak_unity, rms_unity] unconditionally; the
+    # description is what tells the agent that contract only holds closed-loop,
+    # and that open-loop must carry NO agc.
+    desc = stage_registry()["ook_envelope"].description
+    assert "agc" in desc.lower(), desc
+    assert "open-loop" in desc.lower(), desc
+    assert len(desc) > 40
+
+
 def test_descriptor_is_soft_float_symbols() -> None:
     out = OokEnvelope().out_descriptor(
         Descriptor(Level.IQ, ItemType.C), OokEnvelopeStep()

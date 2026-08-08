@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from marconi.engine.modulation.fsk.stages import FskStep, MskStep
 from marconi.engine.modulation.ook.stages import OokEnvelopeStep
-from marconi.engine.run import _hints, composition_warnings
+from marconi.engine.run import _OOK_AGC_REMOVE_HINT, _hints, composition_warnings
+from marconi.engine.stages.conditioning import AgcStep
 from marconi.engine.stages.general import SliceStep
 from marconi.engine.stages.registry import stage_registry, step_models
 from marconi.engine.types.descriptor import Descriptor
@@ -77,6 +78,34 @@ def test_no_ook_hint_when_open_loop_or_decoded() -> None:
     assert not any(
         "ook_envelope" in h for h in _hints(closed, stage_registry(), BITS, "decoded")
     )
+
+
+def test_remove_agc_hint_for_open_loop_ook_with_agc_in_path() -> None:
+    open_with_agc = Modem(
+        symbol_rate=2400.0,
+        path=[AgcStep(), OokEnvelopeStep(loop_bw=0.0), SliceStep()],
+    )
+    present = _hints(open_with_agc, stage_registry(), BITS, verdict="uncertain")
+    assert _OOK_AGC_REMOVE_HINT in present
+    assert all(s in _OOK_AGC_REMOVE_HINT for s in ("ook_envelope", "agc", "remove"))
+
+    # open-loop with NO agc: nothing to remove, the hint stays silent
+    open_no_agc = Modem(
+        symbol_rate=2400.0, path=[OokEnvelopeStep(loop_bw=0.0), SliceStep()]
+    )
+    assert _OOK_AGC_REMOVE_HINT not in _hints(
+        open_no_agc, stage_registry(), BITS, verdict="uncertain"
+    )
+
+    # closed-loop + agc is the CORRECT pairing: the remove-agc hint must stay
+    # silent, and the existing open-loop-retry hint governs the closed-loop case
+    closed_with_agc = Modem(
+        symbol_rate=2400.0,
+        path=[AgcStep(), OokEnvelopeStep(loop_bw=0.045), SliceStep()],
+    )
+    closed_hints = _hints(closed_with_agc, stage_registry(), BITS, verdict="uncertain")
+    assert _OOK_AGC_REMOVE_HINT not in closed_hints
+    assert any("ook_envelope" in h and "open-loop" in h.lower() for h in closed_hints)
 
 
 def test_seeder_after_seeder_warns() -> None:

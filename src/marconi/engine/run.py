@@ -287,6 +287,13 @@ _OOK_OPEN_LOOP_HINT = (
     "slicing; open-loop normalizes each burst internally instead."
 )
 
+_OOK_AGC_REMOVE_HINT = (
+    "ook_envelope is running open-loop (amplitude-agnostic, per-burst "
+    "normalized) but the path still contains an agc stage - remove it; a "
+    "sliding-window agc steps its gain mid-burst on pulsed signals and "
+    "corrupts the chips downstream."
+)
+
 
 def composition_warnings(
     modem: Modem, registry: Mapping[str, Stage[Any, Any]]
@@ -334,6 +341,15 @@ def _hints(
         for s in modem.path
     ):
         hints.append(_OOK_OPEN_LOOP_HINT)
+    if (
+        verdict != "decoded"
+        and any(
+            s.conv == "ook_envelope" and getattr(s, "loop_bw", 0.0) == 0.0
+            for s in modem.path
+        )
+        and any(s.conv == "agc" for s in modem.path)
+    ):
+        hints.append(_OOK_AGC_REMOVE_HINT)
     return hints
 
 
