@@ -138,7 +138,13 @@ def _probe_device(
         import SoapySDR
     except ImportError:
         return None
-    if not SoapySDR.Device.enumerate(device):
+    try:
+        found = SoapySDR.Device.enumerate(device)
+    except Exception as e:
+        raise CaptureError(
+            f"failed to enumerate SDR devices (device={device!r}): {e}"
+        ) from e
+    if not found:
         raise CaptureError(
             f"no SDR device found (device={device!r}) — is one plugged in, "
             "with its Soapy driver module installed?"
