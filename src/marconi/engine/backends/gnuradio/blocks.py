@@ -209,6 +209,23 @@ def _agc2(c: _GrCtx, p: Params) -> Any:
     return blk
 
 
+def _soapy_source(c: _GrCtx, p: Params) -> Any:
+    from gnuradio import soapy
+
+    src = soapy.source(str(p.get("device", "")), "fc32", 1, "", "", [""], [""])
+    src.set_sample_rate(0, _as_float(p["sample_rate"]))
+    ppm = _as_float(p.get("ppm", 0.0))
+    if ppm:
+        src.set_frequency_correction(0, ppm)
+    src.set_frequency(0, _as_float(p["center_hz"]))
+    if bool(p.get("agc", True)):
+        src.set_gain_mode(0, True)
+    else:
+        src.set_gain_mode(0, False)
+        src.set_gain(0, _as_float(p["gain_db"]))
+    return src
+
+
 # kind -> (ctx, params) -> live GR block. The ONLY GR-aware vocabulary in phy.
 GR_BLOCKS: dict[str, Callable[[_GrCtx, Params], Any]] = {
     # offset/length are in items; length 0 = to EOF (stock file_source
@@ -222,6 +239,13 @@ GR_BLOCKS: dict[str, Callable[[_GrCtx, Params], Any]] = {
     ),
     "iq_file_sink": lambda c, p: c.blocks.file_sink(
         c.gr.sizeof_gr_complex, str(p["path"]), False
+    ),
+    "soapy_source": _soapy_source,
+    "iq_skiphead": lambda c, p: c.blocks.skiphead(
+        c.gr.sizeof_gr_complex, _as_int(p["num_items"])
+    ),
+    "iq_head": lambda c, p: c.blocks.head(
+        c.gr.sizeof_gr_complex, _as_int(p["num_items"])
     ),
     "bits_file_source": lambda c, p: c.blocks.file_source(
         c.gr.sizeof_char,
