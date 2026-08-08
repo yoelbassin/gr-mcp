@@ -310,6 +310,62 @@ def test_native_sps_one_deterministic_across_runs() -> None:
     assert a.shape == b.shape and bool(np.array_equal(a, b))
 
 
+@pytest.mark.parametrize("sps", [1, 2])
+def test_output_grid_is_globally_continuous(sps: int) -> None:
+    # The emission grid is ONE global chip index that never resets at a burst
+    # boundary, so the total chip count depends only on the input length, not
+    # on how many bursts split it: exactly input_len // stride, with zero
+    # per-burst slack. (The per-burst grid this replaced re-emitted a pre-pad
+    # lead and re-anchored the cursor every flush, inserting ~1 chip per burst
+    # boundary - this asserts that insertion is gone.)
+    rng = np.random.default_rng(1234)
+    parts = [_noise(3000, rng)]
+    for phase in (0, 1, 0):
+        parts.append(_ppm_burst("10110010" * 6, sps, phase))
+        parts.append(_noise(2500, rng))
+    env = np.concatenate(parts).astype(np.float32)
+    # pad the trailing idle so every input sample is processed (no sub-block
+    # _pending remainder) and the last burst has confirmed complete (no
+    # withheld tail): both preconditions for an exact input_len // stride count
+    total = ((env.size // _FLOOR_BLOCK) + 1) * _FLOOR_BLOCK
+    env = np.concatenate([env, _noise(total - env.size, rng)]).astype(np.float32)
+    assert env.size % _FLOOR_BLOCK == 0
+    out = _run_block(env, float(sps))
+    assert len(out) == env.size // sps
+
+
+def test_frame_straddling_burst_boundary_survives() -> None:
+    # One logical chip sequence whose interior quiet run (longer than the fall
+    # confirmation) makes the detector split it into TWO bursts. On the old
+    # per-burst grid the second burst re-anchors (pre-pad prepend + cursor
+    # reset) and the chip-pair grid slips mid-sequence; on the global continuous
+    # grid both halves stay at their exact positions, so the whole sequence -
+    # the two halves plus the EXACT number of idle chips the gap decimates to -
+    # comes back contiguous. Models the real off-air frame lost at 6/7.
+    rng = np.random.default_rng(2025)
+    sps = 2
+    a_bits, b_bits = "10110010" * 4, "11001010" * 4  # both start pulse-first
+    gap = 128  # samples; > fall_run (64) so the detector splits into two bursts
+    frame = np.concatenate(
+        [
+            _ppm_burst(a_bits, sps, 0),
+            np.zeros(gap, np.float32),
+            _ppm_burst(b_bits, sps, 0),
+        ]
+    )
+    env = np.concatenate([_noise(2048, rng), frame, _noise(4096, rng)])
+    total = ((env.size // _FLOOR_BLOCK) + 1) * _FLOOR_BLOCK
+    env = np.concatenate([env, _noise(total - env.size, rng)]).astype(np.float32)
+    blk = make_burst_sampler(FAKE_GR, sps=float(sps))
+    out = drive(blk, env, chunk=env.size, out_dtype=np.float32)
+    assert blk.diagnostics["bursts_flushed"] == 2
+    hard = (out > 0.5).astype(np.uint8)
+    found = "".join(map(str, hard))
+    want = _chip_string(a_bits) + "0" * (gap // sps) + _chip_string(b_bits)
+    assert want in found, "chip sequence slipped at the burst boundary"
+    assert len(out) == env.size // sps  # global continuity: no insertion
+
+
 def test_real_scheduler_runs_to_completion_without_deadlock() -> None:
     # FAKE_GR/drive is a hand-rolled approximation of the forecast/EOF
     # contract; this drives the same block through the actual GR C++

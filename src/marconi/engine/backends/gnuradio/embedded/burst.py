@@ -17,12 +17,20 @@ the off-air acceptance gates.
 Determinism: processing is chunk-independent (fixed internal blocks, no
 feedback loop, no volk in-block), so identical input yields identical
 chips - the adaptive loop this replaces was the suite's nondeterminism
-amplifier. The block withholds an unfinished burst tail at EOF (suite
-convention: sims pad). Every emitted chip is normalized (per burst against
-its own grid values, per idle span against the tracked floor) before it
-leaves the block, so downstream fixed-threshold slicing is independent of
-whatever gain an upstream stage was at - the open-loop path is AGC-free by
-design and normalizes internally instead."""
+amplifier. Decimation runs on ONE global chip grid: chip k draws from input
+sample round(k*stride) (plus the burst's phase offset), a monotonic index
+that never resets at a burst boundary, so the emitted count is exactly
+input_len // stride with no per-burst slack. Only two things vary per burst -
+the sampling PHASE (which sub-sample within each chip window is taken,
+variance-max acquired) and the NORMALIZATION scale; the chip index stays
+global, which is what stops a burst boundary from inserting a chip and
+slipping the downstream chip-pair grid mid-frame. The block withholds an
+unfinished burst tail at EOF (suite convention: sims pad). Every emitted chip
+is normalized (a burst's chips against their own 95th-percentile grid level,
+an idle chip against the tracked floor) before it leaves the block, so
+downstream fixed-threshold slicing is independent of whatever gain an upstream
+stage was at - the open-loop path is AGC-free by design and normalizes
+internally instead."""
 
 from __future__ import annotations
 
@@ -52,7 +60,6 @@ _FALL_SMOOTH_CHIPS = 4  # trailing moving-average width applied before the
 # noise (per-sample calm probability < 1 raised to a large power is ~0) even
 # though the noise floor itself is genuinely low - smoothing first is what
 # makes a long sustained-fall confirmation achievable at all
-_PAD_CHIPS = 2  # pre/post pad kept around each burst
 _MAX_BURST_CHIPS = 4096  # cap: beyond this, commit phase from the first cap
 _NORM_FLOOR_RATIO = 16.0  # emitted-value normalization reference (own
 # constant, not tied to _RISE_RATIO: measured on a real off-air capture that
@@ -97,7 +104,6 @@ def make_burst_sampler(gr: Any, *, sps: float) -> Any:
         raise ValueError(f"burst_sampler needs sps >= 1, got {sps}")
     stride = float(sps)
     phases = int(math.ceil(stride))
-    pad = _PAD_CHIPS * phases
     rise_run = _RISE_CHIPS * phases
     fall_run = _FALL_CHIPS * phases
     fall_smooth = _FALL_SMOOTH_CHIPS * phases
@@ -111,10 +117,12 @@ def make_burst_sampler(gr: Any, *, sps: float) -> Any:
             self._out = OutQueue(np.float32)
             self._pending = np.empty(0, np.float32)  # < _FLOOR_BLOCK carryover
             self._floor = 0.0
-            self._idle_tail = np.empty(0, np.float32)  # pre-pad ring
-            self._grid = 0.0  # fractional cursor into the idle span
+            self._abs = 0  # absolute index of the next input sample to classify
+            self._k = 0  # next global chip index; its base is round(k*stride)
             self._burst: list[np.ndarray] = []
             self._burst_len = 0
+            self._burst_start = 0  # absolute sample index this burst began at
+            self._burst_floor = 0.0  # floor at burst start (idle-reference term)
             self._in_burst = False
             self._quiet = 0
             self.diagnostics = {"bursts_flushed": 0}
@@ -145,25 +153,28 @@ def make_burst_sampler(gr: Any, *, sps: float) -> Any:
             self._floor += rate * (med - self._floor)
             active = block > _RISE_RATIO * self._floor
             calm = _trailing_mean(block, fall_smooth) < _FALL_RATIO * self._floor
+            base = self._abs
+            n = len(block)
             i = 0
-            while i < len(block):
+            while i < n:
                 if not self._in_burst:
                     rises = _sustained_runs(active[i:], rise_run)
                     if len(rises) == 0:
-                        self._emit_idle(block[i:])
-                        return
+                        self._emit_idle(block, base, n)
+                        break
                     start = i + int(rises[0])
-                    self._emit_idle(block[i:start])
-                    lead = self._idle_tail[-pad:] if pad else self._idle_tail[:0]
-                    self._burst = [lead.copy(), np.empty(0, np.float32)]
-                    self._burst_len = len(lead)
+                    self._emit_idle(block, base, start)
+                    self._burst = []
+                    self._burst_len = 0
+                    self._burst_start = base + start
+                    self._burst_floor = self._floor
                     self._in_burst = True
                     self._quiet = 0
                     i = start
                     continue
                 # in burst: scan for sustained calm
                 j = i
-                while j < len(block):
+                while j < n:
                     self._quiet = self._quiet + 1 if calm[j] else 0
                     j += 1
                     if self._quiet >= fall_run:
@@ -172,48 +183,60 @@ def make_burst_sampler(gr: Any, *, sps: float) -> Any:
                 self._burst_len += j - i
                 i = j
                 if self._quiet >= fall_run or self._burst_len >= max_burst:
-                    self._flush_burst()
+                    self._flush_burst(base + j)
+            self._abs = base + n
 
-        def _emit_idle(self, span: np.ndarray) -> None:
-            if len(span):
-                self._idle_tail = np.concatenate([self._idle_tail, span])[
-                    -max(pad, 1) :
-                ]
-                n = len(span)
-                picks = []
-                g = self._grid
-                while g < n:
-                    picks.append(int(g))
-                    g += stride
-                self._grid = g - n
-                if picks:
-                    picked = span[np.asarray(picks, np.int64)]
-                    idle_scale = _NORM_FLOOR_RATIO * self._floor
-                    self._out.push(picked / idle_scale)
+        def _emit_idle(self, block: np.ndarray, base: int, hi: int) -> None:
+            # Emit every global chip whose base position round(k*stride) lands
+            # in [current cursor, base+hi) - the idle default scale, phase 0.
+            limit = base + hi
+            picks: list[int] = []
+            while True:
+                b = int(round(self._k * stride))
+                if b >= limit:
+                    break
+                picks.append(b - base)
+                self._k += 1
+            if picks:
+                idx = np.asarray(picks, np.int64)
+                self._out.push(block[idx] / (_NORM_FLOOR_RATIO * self._floor))
 
-        def _flush_burst(self) -> None:
-            seg = np.concatenate(self._burst)
-            self._burst, self._burst_len = [], 0
+        def _flush_burst(self, end: int) -> None:
+            seg = (
+                np.concatenate(self._burst) if self._burst else np.empty(0, np.float32)
+            )
+            s = self._burst_start
+            self._burst = []
+            self._burst_len = 0
             self._in_burst = False
             self._quiet = 0
-            best_phase, best_var = 0, -1.0
-            k = np.arange(int(len(seg) // stride) + 1)
-            for phi in range(phases):
-                idx = phi + np.round(k * stride).astype(np.int64)
-                idx = idx[idx < len(seg)]
-                if len(idx) < 4:
-                    continue
-                v = float(np.var(seg[idx]))
-                if v > best_var:
-                    best_phase, best_var = phi, v
-            idx = best_phase + np.round(k * stride).astype(np.int64)
-            idx = idx[idx < len(seg)]
+            self.diagnostics["bursts_flushed"] += 1
+            length = len(seg)
+            # Global chips this burst owns: base round(k*stride) in [s, end).
+            # The count is fixed by s/end (never by the phase below), so no
+            # burst boundary can insert or drop a chip on the global grid.
+            locals_: list[int] = []
+            while True:
+                b = int(round(self._k * stride))
+                if b >= end:
+                    break
+                locals_.append(b - s)
+                self._k += 1
+            if not locals_:
+                return
+            local = np.asarray(locals_, np.int64)
+            best_phase = 0
+            if phases > 1 and len(local) >= 4:
+                best_var = -1.0
+                for phi in range(phases):
+                    idx = np.minimum(local + phi, length - 1)
+                    v = float(np.var(seg[idx]))
+                    if v > best_var:
+                        best_phase, best_var = phi, v
+            idx = np.minimum(local + best_phase, length - 1)
             grid_vals = seg[idx]
             p95 = float(np.percentile(grid_vals, 95)) if len(grid_vals) else 0.0
-            burst_scale = max(p95, _NORM_FLOOR_RATIO * self._floor)
+            burst_scale = max(p95, _NORM_FLOOR_RATIO * self._burst_floor)
             self._out.push(grid_vals / burst_scale)
-            self._grid = 0.0
-            self._idle_tail = self._idle_tail[:0]
-            self.diagnostics["bursts_flushed"] += 1
 
     return _BurstSampler()
