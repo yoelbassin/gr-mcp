@@ -32,9 +32,10 @@ class QualityReport(BaseModel):
 # Detection-tier metrics prove a signal is PRESENT (energy/preamble events),
 # not that the decode is right: a chirp detector firing on real chirps says
 # nothing about the symbols decoded after it. Only decode-tier positives
-# (sync matches, word validity, soft confidence, coherent lock) reach
-# "decoded"; detection alone stays uncertain.
-_DETECTION_METRICS = frozenset({"burst_marks"})
+# (sync matches, word validity, bits-level soft confidence, coherent lock)
+# reach "decoded"; detection alone -- a burst mark, or a bare demod's
+# per-symbol soft eye (soft_eye) -- stays uncertain.
+_DETECTION_METRICS = frozenset({"burst_marks", "soft_eye"})
 
 
 def verdict_from(evidence: Sequence[QualityEvidence]) -> tuple[Verdict, str]:
@@ -396,7 +397,33 @@ def _active_mask(x: np.ndarray) -> np.ndarray:
     return power > threshold
 
 
-def soft_evidence(path: Path | None) -> list[QualityEvidence]:
+def _emit_soft(
+    value: float, assessment: Assessment, decode_grade: bool
+) -> list[QualityEvidence]:
+    """A bits-level LLR carries a per-bit confidence, so its cleanliness can
+    certify OR reject a decode (metric soft_confidence, decode tier). A
+    symbols-level demod tap (a bare fsk/msk front end) is a per-symbol eye: it
+    attests signal-PRESENT only. It cannot certify the bits -- a mistimed
+    matched filter emits a clean eye of wrong symbols (measured: msk on a real
+    GMSK capture scores a cleaner eye than the correct fsk decode) -- nor assert
+    their ABSENCE -- a correct discriminator decode of a bursty capture reads
+    below the noise floor. So it rides the detection tier (metric soft_eye) and
+    never contributes a negative."""
+    if assessment == "negative" and not decode_grade:
+        return []
+    return [
+        QualityEvidence(
+            source="soft_stream",
+            metric="soft_confidence" if decode_grade else "soft_eye",
+            value=value,
+            assessment=assessment,
+        )
+    ]
+
+
+def soft_evidence(
+    path: Path | None, *, decode_grade: bool = True
+) -> list[QualityEvidence]:
     if path is None or not path.is_file():
         return []
     x = _sample_soft(path)
@@ -405,27 +432,13 @@ def soft_evidence(path: Path | None) -> list[QualityEvidence]:
         return []
     active = _active_mask(x)
     if not active.any():
-        return [
-            QualityEvidence(
-                source="soft_stream",
-                metric="soft_confidence",
-                value=0.0,
-                assessment="negative",
-            )
-        ]
+        return _emit_soft(0.0, "negative", decode_grade)
     xa = x[active]
     if xa.size < _SOFT_MIN_ITEMS:
         return []
     fit = fit_levels(xa)
     if fit.order > 2 and fit.separation >= _SOFT_MULTILEVEL_SEPARATION:
-        return [
-            QualityEvidence(
-                source="soft_stream",
-                metric="soft_confidence",
-                value=float(min(fit.separation, 1e6)),
-                assessment="positive",
-            )
-        ]
+        return _emit_soft(float(min(fit.separation, 1e6)), "positive", decode_grade)
     mag = np.abs(xa)
     spread = float(mag.std())
     mean = float(mag.mean())
@@ -450,14 +463,7 @@ def soft_evidence(path: Path | None) -> list[QualityEvidence]:
         assessment = "negative"
     else:
         return []
-    return [
-        QualityEvidence(
-            source="soft_stream",
-            metric="soft_confidence",
-            value=float(min(ratio, 1e6)),
-            assessment=assessment,
-        )
-    ]
+    return _emit_soft(float(min(ratio, 1e6)), assessment, decode_grade)
 
 
 def assess_quality(
@@ -467,6 +473,7 @@ def assess_quality(
     diagnostics: Sequence[Diagnostic],
     marks: Sequence[int],
     soft_stream: Path | None,
+    soft_decode_grade: bool = True,
 ) -> QualityReport:
     evidence = (
         sync_evidence(census, registry)
@@ -475,7 +482,7 @@ def assess_quality(
         + marks_evidence(marks)
         + lock_evidence(diagnostics)
         + dominance_evidence(diagnostics)
-        + soft_evidence(soft_stream)
+        + soft_evidence(soft_stream, decode_grade=soft_decode_grade)
     )
     verdict, rationale = verdict_from(evidence)
     return QualityReport(verdict=verdict, evidence=evidence, rationale=rationale)

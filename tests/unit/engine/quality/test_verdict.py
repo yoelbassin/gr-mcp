@@ -45,3 +45,11 @@ def test_detection_plus_decode_grade_positive_is_decoded() -> None:
         [_ev("positive", metric="burst_marks"), _ev("positive", metric="sync_matches")]
     )
     assert verdict == "decoded"
+
+
+def test_bare_demod_soft_eye_alone_is_not_decoded() -> None:
+    # a bare demod's per-symbol eye attests signal-present, not a validated
+    # decode: soft_eye is detection-tier, so it stays "uncertain" on its own
+    verdict, rationale = verdict_from([_ev("positive", metric="soft_eye")])
+    assert verdict == "uncertain"
+    assert "detection only" in rationale

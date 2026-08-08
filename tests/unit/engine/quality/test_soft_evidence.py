@@ -149,3 +149,43 @@ def test_four_level_noise_blob_is_not_positive(tmp_path: Path) -> None:
     blob = np.random.default_rng(1).normal(0.0, 1.0, 6000).astype(np.float32)
     ev = soft_evidence(_llr_file(tmp_path, blob))
     assert not any(e.assessment == "positive" for e in ev)
+
+
+def test_symbols_level_clean_eye_is_detection_grade(tmp_path: Path) -> None:
+    # a bare demod's per-symbol eye (decode_grade=False): a clean stream reads
+    # signal-PRESENT under the detection-tier metric soft_eye, never the
+    # decode-tier soft_confidence -- a clean eye does not validate the bits (a
+    # mistimed matched filter emits a clean eye of wrong symbols)
+    rng = np.random.default_rng(0)
+    signs = rng.choice([-2.0, 2.0], size=4000)
+    ev = soft_evidence(
+        _llr_file(tmp_path, signs + rng.normal(0, 0.3, 4000)), decode_grade=False
+    )
+    assert [(e.metric, e.assessment) for e in ev] == [("soft_eye", "positive")]
+
+
+def test_symbols_level_multilevel_eye_is_detection_grade(tmp_path: Path) -> None:
+    # the 4-FSK bare front end (DMR): a clean M-ary eye is signal-present, but
+    # from a bare demod tap it is detection-grade, not a decoded certification
+    rng = np.random.default_rng(0)
+    syms = rng.choice([-3.0, -1.0, 1.0, 3.0], size=6000).astype(np.float32)
+    syms += rng.normal(0.0, 0.08, syms.size).astype(np.float32)
+    ev = soft_evidence(_llr_file(tmp_path, syms), decode_grade=False)
+    assert [(e.metric, e.assessment) for e in ev] == [("soft_eye", "positive")]
+
+
+def test_symbols_level_noise_is_suppressed_not_negative(tmp_path: Path) -> None:
+    # a per-symbol demod eye cannot assert signal-ABSENT: a correct discriminator
+    # decode of a bursty capture reads below the noise floor, so a low-ratio
+    # symbols-level stream yields no evidence (falls to "uncertain"), never the
+    # "no_signal"-driving negative that a bits-level LLR earns here
+    rng = np.random.default_rng(1)
+    ev = soft_evidence(
+        _llr_file(tmp_path, rng.normal(0, 1.0, 4000)), decode_grade=False
+    )
+    assert ev == []
+
+
+def test_symbols_level_all_zero_is_suppressed_not_negative(tmp_path: Path) -> None:
+    ev = soft_evidence(_llr_file(tmp_path, np.zeros(4000)), decode_grade=False)
+    assert ev == []
