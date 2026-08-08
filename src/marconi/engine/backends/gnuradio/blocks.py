@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from marconi.engine.backends.base import BackendError
+from marconi.engine.backends.gnuradio.embedded.burst import make_burst_sampler
 from marconi.engine.backends.gnuradio.embedded.chirp import (
     chirp_prefix,
     dechirp_ref,
@@ -296,6 +297,7 @@ GR_BLOCKS: dict[str, Callable[[_GrCtx, Params], Any]] = {
         loop_pole=_as_float(p.get("loop_pole", 0.52)),
         mf_oversample=_as_int(p.get("mf_oversample", 12)),
     ),
+    "burst_sampler": lambda c, p: make_burst_sampler(c.gr, sps=_as_float(p["sps"])),
     "symbol_sync_ff": lambda c, p: c.digital.symbol_sync_ff(
         c.digital.TED_GARDNER,
         _as_float(p["sps"]),
