@@ -1,11 +1,15 @@
 """Chain-level coverage for ook_envelope's open-loop (loop_bw=0) wiring: the
 compiled RX chain must route complex_to_mag through burst_sampler instead of
 the closed-loop symbol_sync_ff, so each burst's own timing phase is recovered
-instead of one phase frozen for the whole capture. Reuses the compiled-chain
-harness tests/unit/engine/modulation/psk/test_dqpsk_stages.py exercises
-(run_rx over synthetic IQ written to a tmp_path) and the _ppm_burst-style
-synthetic construction tests/unit/engine/backends/test_burst_block.py uses
-for the block's own FAKE_GR-driven coverage."""
+instead of one phase frozen for the whole capture. Open-loop is AGC-free (a
+sliding-window agc steps its gain mid-burst on pulsed signals and defeats
+burst_sampler's fixed-threshold detection/slicing; burst_sampler normalizes
+each burst internally instead) - only the closed-loop structural test still
+pairs ook_envelope with agc. Reuses the compiled-chain harness
+tests/unit/engine/modulation/psk/test_dqpsk_stages.py exercises (run_rx over
+synthetic IQ written to a tmp_path) and the _ppm_burst-style synthetic
+construction tests/unit/engine/backends/test_burst_block.py uses for the
+block's own FAKE_GR-driven coverage."""
 
 from __future__ import annotations
 
@@ -26,6 +30,7 @@ from marconi.engine.types.descriptor import Descriptor
 from marconi.engine.types.enums import ItemType
 from marconi.engine.types.levels import Level
 from marconi.engine.types.models import Modem
+from marconi.engine.types.step import Step
 
 IQ = Descriptor(Level.IQ, ItemType.C)
 _SPS = 2
@@ -35,13 +40,12 @@ _PAYLOAD = "10110010" * 8
 _PHASES = (0, 1, 0, 1)  # adversarial: the winning phase alternates per burst
 _SEED = 23
 
-# Lead/trail padding sized empirically, not decoratively: feedforward_agc_cc's
-# lookahead window under-produces near the edges of a short, finite capture
-# (measured: a file only a few multiples of the AGC window long silently
-# loses whole bursts near the end, independent of burst_sampler's own
-# correctness). Generous lead/trail keep the AGC clear of that GNU Radio
-# scheduling artifact while the tighter inter-burst gap is what actually
-# exercises the frozen-vs-per-burst timing-phase difference.
+# Lead/trail padding sized generously so the floor has settled before the
+# first burst and the last burst's tail confirmation has room to complete;
+# the tighter inter-burst gap is what actually exercises the
+# frozen-vs-per-burst timing-phase difference. (No longer working around
+# feedforward_agc_cc's lookahead under-producing near a short capture's
+# edges - the open-loop path carries no agc stage at all.)
 _LEAD = 20_000
 _GAP = 2_500
 _TRAIL = 20_000
@@ -75,14 +79,14 @@ def _synthetic_capture() -> np.ndarray:
 
 
 def _modem(loop_bw: float) -> Modem:
-    return Modem(
-        symbol_rate=_SYMBOL_RATE,
-        path=[
-            AgcStep(window_symbols=4096.0),
-            OokEnvelopeStep(loop_bw=loop_bw),
-            SliceStep(),
-        ],
-    )
+    # closed-loop (loop_bw>0) still needs an upstream amplitude convention;
+    # open-loop (loop_bw=0) is AGC-free by design (burst_sampler normalizes
+    # internally), so the path carries no agc stage at all
+    path: list[Step] = []
+    if loop_bw > 0.0:
+        path.append(AgcStep(window_symbols=4096.0))
+    path += [OokEnvelopeStep(loop_bw=loop_bw), SliceStep()]
+    return Modem(symbol_rate=_SYMBOL_RATE, path=path)
 
 
 def _run_open_loop(workdir: Path, capture: Path) -> np.ndarray:
@@ -137,6 +141,7 @@ def test_closed_loop_chain_is_unchanged() -> None:
     kinds = [b.kind for b in pipe.blocks]
     assert "symbol_sync_ff" in kinds
     assert "burst_sampler" not in kinds
+    assert "feedforward_agc_cc" in kinds  # closed-loop still pairs with agc
 
 
 def test_open_loop_chain_routes_through_burst_sampler() -> None:
@@ -150,6 +155,7 @@ def test_open_loop_chain_routes_through_burst_sampler() -> None:
         sink_io={"path": "out.bits"},
     )
     kinds = [b.kind for b in pipe.blocks]
+    assert "feedforward_agc_cc" not in kinds  # AGC-free: open-loop normalizes itself
     start = kinds.index("complex_to_mag")
     end = kinds.index("binary_slicer")
     assert kinds[start:end] == [

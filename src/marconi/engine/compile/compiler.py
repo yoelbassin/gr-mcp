@@ -111,13 +111,14 @@ def _validate_descriptors(
                 f"stage '{step.conv}' accepts {stage.accepts_carrier.value} "
                 f"carrier but '{producer}' produces {in_desc.carrier.value}"
             )
+        required_amplitude = stage.accepts_amplitude_for(step)
         if (
             direction == "rx"
-            and stage.accepts_amplitude is not None
-            and in_desc.amplitude not in stage.accepts_amplitude
+            and required_amplitude is not None
+            and in_desc.amplitude not in required_amplitude
         ):
-            wanted = ", ".join(sorted(a.value for a in stage.accepts_amplitude))
-            modes = agc_modes_for(stage.accepts_amplitude)
+            wanted = ", ".join(sorted(a.value for a in required_amplitude))
+            modes = agc_modes_for(required_amplitude)
             mode_hint = " or ".join(f"mode='{m}'" for m in modes)
             fix = (
                 f"insert an 'agc' stage ({mode_hint}) after any "

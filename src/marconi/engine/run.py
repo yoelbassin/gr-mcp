@@ -281,9 +281,10 @@ _FSK_OPEN_LOOP_HINT = (
 _OOK_OPEN_LOOP_HINT = (
     "ook_envelope ran closed-loop Gardner symbol timing (loop_bw>0), which "
     "rails on bursty/pulsed environments and decodes nothing. Retry with "
-    'ook_envelope {"loop_bw": 0} - open-loop per-burst sampling - and give '
-    "any agc a burst-scale window (window_symbols >= 1024): small windows "
-    "normalize noise-only stretches to full scale and bury the pulses."
+    'ook_envelope {"loop_bw": 0} - open-loop per-burst sampling, which needs '
+    "NO agc: remove any agc stage from the path. A sliding-window agc steps "
+    "its gain mid-burst on pulsed signals and defeats fixed-threshold "
+    "slicing; open-loop normalizes each burst internally instead."
 )
 
 

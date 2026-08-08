@@ -18,7 +18,11 @@ Determinism: processing is chunk-independent (fixed internal blocks, no
 feedback loop, no volk in-block), so identical input yields identical
 chips - the adaptive loop this replaces was the suite's nondeterminism
 amplifier. The block withholds an unfinished burst tail at EOF (suite
-convention: sims pad)."""
+convention: sims pad). Every emitted chip is normalized (per burst against
+its own grid values, per idle span against the tracked floor) before it
+leaves the block, so downstream fixed-threshold slicing is independent of
+whatever gain an upstream stage was at - the open-loop path is AGC-free by
+design and normalizes internally instead."""
 
 from __future__ import annotations
 
@@ -50,6 +54,17 @@ _FALL_SMOOTH_CHIPS = 4  # trailing moving-average width applied before the
 # makes a long sustained-fall confirmation achievable at all
 _PAD_CHIPS = 2  # pre/post pad kept around each burst
 _MAX_BURST_CHIPS = 4096  # cap: beyond this, commit phase from the first cap
+_NORM_FLOOR_RATIO = 16.0  # emitted-value normalization reference (own
+# constant, not tied to _RISE_RATIO: measured on a real off-air capture that
+# real background noise's own P95 can reach ~7-12x floor and its tail as far
+# as ~26-29x, well past _RISE_RATIO's 4x detection bar - a normalization
+# floor that close to the detection bar amplifies exactly those noise-
+# triggered false detections up past the downstream 0.5 slicing point,
+# defeating the point of normalizing at all. A burst's grid values divide by
+# their own 95th percentile (floored at this ratio, so a pathological
+# near-silent burst - or one dominated by a noise-scale P95 - cannot divide
+# down to noise level); an idle span's by this ratio directly. Every
+# emitted chip lands independent of whatever gain an upstream stage was at.
 
 
 def _sustained_runs(mask: np.ndarray, run: int) -> np.ndarray:
@@ -172,7 +187,9 @@ def make_burst_sampler(gr: Any, *, sps: float) -> Any:
                     g += stride
                 self._grid = g - n
                 if picks:
-                    self._out.push(span[np.asarray(picks, np.int64)])
+                    picked = span[np.asarray(picks, np.int64)]
+                    idle_scale = _NORM_FLOOR_RATIO * self._floor
+                    self._out.push(picked / idle_scale)
 
         def _flush_burst(self) -> None:
             seg = np.concatenate(self._burst)
@@ -191,7 +208,10 @@ def make_burst_sampler(gr: Any, *, sps: float) -> Any:
                     best_phase, best_var = phi, v
             idx = best_phase + np.round(k * stride).astype(np.int64)
             idx = idx[idx < len(seg)]
-            self._out.push(seg[idx])
+            grid_vals = seg[idx]
+            p95 = float(np.percentile(grid_vals, 95)) if len(grid_vals) else 0.0
+            burst_scale = max(p95, _NORM_FLOOR_RATIO * self._floor)
+            self._out.push(grid_vals / burst_scale)
             self._grid = 0.0
             self._idle_tail = self._idle_tail[:0]
             self.diagnostics["bursts_flushed"] += 1

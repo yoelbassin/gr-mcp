@@ -60,6 +60,20 @@ def _ppm_burst_weak_head(
     return np.repeat(arr * scale, sps)
 
 
+def _ppm_burst_ramped(
+    bits: str, sps: int, low_amp: float, high_amp: float
+) -> np.ndarray:
+    # models a sliding-window agc stepping its gain mid-burst (measured on a
+    # live capture: 1.9-2.3x within one ~120us frame as strong content enters
+    # or exits the look-ahead) - a linear ramp across the chip sequence, not
+    # a step, since the mechanism being modeled is continuous gain tracking
+    chips = []
+    for b in bits:
+        chips += [1, 0] if b == "1" else [0, 1]
+    ramp = np.linspace(low_amp, high_amp, len(chips)).astype(np.float32)
+    return np.repeat(np.asarray(chips, np.float32) * ramp, sps)
+
+
 def test_per_burst_phase_recovery() -> None:
     rng = np.random.default_rng(7)
     sps = 2
@@ -154,6 +168,46 @@ def test_weak_leading_pulses_are_recovered() -> None:
     want = _chip_string(bits)
     found = "".join(map(str, hard))
     assert found.count(want) == 1, f"head not fully recovered: {found.count(want)}"
+
+
+def test_amplitude_immune_across_bursts_and_within_a_ramping_burst() -> None:
+    # Round-3 finding on a live capture: burst_sampler is AGC-free by design
+    # (no upstream stage establishes a shared amplitude reference), and the
+    # sliding-window agc it replaces was independently found to step its own
+    # gain mid-burst on pulsed signals (measured 1.9-2.3x within one ~120us
+    # frame) - a fixed downstream slicing threshold cannot survive either
+    # condition, only per-burst normalization can. Two bursts here sit at
+    # baseline amplitudes 5x apart (no consistent global reference between
+    # them, unlike a shared-gain AGC would provide), and one of the two ALSO
+    # carries a linear gain ramp across its own duration (modeling exactly
+    # what the sliding-window agc used to do to a single frame) - both must
+    # still recover their exact chip pattern. Amplitudes are ratios to the
+    # noise level, no protocol reference.
+    noise_level = 0.05
+    rng = np.random.default_rng(59)
+    bits_ramped, bits_steady = "10110010" * 8, "01101001" * 8
+    ramped = _ppm_burst_ramped(
+        bits_ramped,
+        2,
+        low_amp=noise_level * 8.0,
+        high_amp=noise_level * 14.0,
+    )
+    steady = _ppm_burst(bits_steady, 2, phase=0, amp=noise_level * 55.0)
+    # steady's amplitude is ~5x ramped's midpoint ((8+14)/2 * 5 == 55)
+    env = np.concatenate(
+        [
+            _noise(3000, rng, noise_level),
+            ramped,
+            _noise(3000, rng, noise_level),
+            steady,
+            _noise(3000, rng, noise_level),
+        ]
+    )
+    out = _run_block(env, 2.0)
+    hard = (out > 0.5).astype(np.uint8)
+    found = "".join(map(str, hard))
+    assert _chip_string(bits_ramped) in found
+    assert _chip_string(bits_steady) in found
 
 
 def test_unfinished_burst_withheld_at_eof() -> None:

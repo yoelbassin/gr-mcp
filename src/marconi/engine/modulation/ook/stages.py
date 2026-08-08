@@ -23,7 +23,10 @@ class OokEnvelopeStep(Step):
             "per burst (variance-max), deterministic, recommended for bursty "
             "or pulsed OOK/PPM. >0 = continuous Gardner loop for sustained "
             "OOK; measured to rail on burst environments (chip rate 2.2-2.8x "
-            "off nominal), decoding nothing."
+            "off nominal), decoding nothing. Open-loop needs no agc stage: "
+            "the sampler normalizes each burst internally, and a sliding-"
+            "window agc would step its gain mid-burst and defeat fixed-"
+            "threshold slicing."
         ),
     )
 
@@ -46,6 +49,16 @@ class OokEnvelope(DuplexStage[CompileContext, OokEnvelopeStep]):
     accepts_amplitude = frozenset({Amplitude.PEAK_UNITY, Amplitude.RMS_UNITY})
     min_input_sps = 2.0
     step_model = OokEnvelopeStep
+
+    def accepts_amplitude_for(
+        self, step: OokEnvelopeStep
+    ) -> frozenset[Amplitude] | None:
+        # open-loop (loop_bw=0) routes through burst_sampler, which
+        # normalizes every emitted chip itself - scale-invariant input,
+        # unlike the closed-loop Gardner path which still needs the class
+        # default (a fixed slicing threshold against an un-normalized
+        # envelope is meaningless)
+        return None if step.loop_bw == 0.0 else self.accepts_amplitude
 
     def emit_rx(self, b: CompileContext, step: OokEnvelopeStep) -> None:
         b.chain("complex_to_mag")

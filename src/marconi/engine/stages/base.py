@@ -138,6 +138,16 @@ class Stage(ABC, Generic[B, S]):
         instead of emitting wrong-width garbage bits."""
         return None
 
+    def accepts_amplitude_for(self, step: S) -> frozenset[Amplitude] | None:
+        """The amplitude statistics this stage requires for this specific
+        step config, or None if scale-invariant for it - defaults to the
+        class-level accepts_amplitude. Override when a stage's requirement
+        varies by its own step (e.g. an alternate RX path that normalizes
+        internally and needs no upstream amplitude convention at all). The
+        compiler consults this method, never the bare attribute, so a
+        step-conditional requirement is expressed in one place."""
+        return self.accepts_amplitude
+
     def validate_input(self, in_desc: Descriptor, step: S) -> str | None:
         """A stage-specific input check the declarative attributes cannot
         express; a returned message fails the compile."""
