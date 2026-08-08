@@ -60,10 +60,30 @@ class _Establishes(RxStage[CompileContext, _EstablishesStep]):
         )
 
 
+class _NeedsPeakStep(Step):
+    conv: Literal["needs_peak"] = "needs_peak"
+
+
+class _NeedsPeak(DuplexStage[CompileContext, _NeedsPeakStep]):
+    name = "needs_peak"
+    from_level = Level.IQ
+    to_level = Level.SYMBOLS
+    family = "test"
+    accepts_amplitude = frozenset({Amplitude.PEAK_UNITY})
+    step_model = _NeedsPeakStep
+
+    def emit_rx(self, b: CompileContext, step: _NeedsPeakStep) -> None:
+        b.chain("complex_to_mag")
+
+    def emit_tx(self, b: CompileContext, step: _NeedsPeakStep) -> None:
+        b.chain("float_to_complex")
+
+
 def _registry() -> dict:
     reg = dict(stage_registry())
     reg["needs_normalized"] = _NeedsNormalized()
     reg["establishes"] = _Establishes()
+    reg["needs_peak"] = _NeedsPeak()
     return reg
 
 
@@ -82,9 +102,12 @@ def _compile(path: list[Step], direction: str = "rx"):
 def test_missing_amplitude_establishment_fails_at_compile() -> None:
     with pytest.raises(CompileError) as exc:
         _compile([_NeedsNormalizedStep()])
-    assert "needs_normalized" in str(exc.value)
-    assert "normalized" in str(exc.value)
-    assert "unknown" in str(exc.value)
+    msg = str(exc.value)
+    assert "needs_normalized" in msg
+    assert "normalized" in msg
+    assert "unknown" in msg
+    assert "mode='power'" in msg
+    assert "selects the statistic" not in msg
 
 
 def test_established_amplitude_satisfies_the_requirement() -> None:
@@ -93,6 +116,16 @@ def test_established_amplitude_satisfies_the_requirement() -> None:
 
 def test_amplitude_check_does_not_apply_to_tx() -> None:
     _compile([_NeedsNormalizedStep()], direction="tx")
+
+
+def test_wrong_statistic_names_the_corrective_mode() -> None:
+    with pytest.raises(CompileError) as exc:
+        _compile([_EstablishesStep(), _NeedsPeakStep()])
+    msg = str(exc.value)
+    assert "peak_unity" in msg
+    assert "rms_unity" in msg
+    assert "mode='feedforward'" in msg
+    assert "selects the statistic" not in msg
 
 
 def test_amplitude_requiring_stages_declare_measured_statistics() -> None:

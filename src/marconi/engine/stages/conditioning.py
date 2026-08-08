@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from typing import Any, Literal
 
 from pydantic import Field, StrictInt, model_validator
@@ -271,6 +271,12 @@ _MODE_AMPLITUDE: dict[str, Amplitude] = {
     "feedback": Amplitude.MEAN_MAG_UNITY,
     "power": Amplitude.RMS_UNITY,
 }
+
+_AMPLITUDE_MODE: dict[Amplitude, str] = {v: k for k, v in _MODE_AMPLITUDE.items()}
+
+
+def agc_modes_for(amplitudes: Iterable[Amplitude]) -> list[str]:
+    return sorted({m for a in amplitudes if (m := _AMPLITUDE_MODE.get(a)) is not None})
 
 
 class Agc(RxStage[CompileContext, AgcStep]):

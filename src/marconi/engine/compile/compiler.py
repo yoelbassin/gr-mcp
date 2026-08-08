@@ -16,6 +16,7 @@ from marconi.engine.stages.base import (
     Stage,
     validate_path,
 )
+from marconi.engine.stages.conditioning import agc_modes_for
 from marconi.engine.types.descriptor import Amplitude, Descriptor
 from marconi.engine.types.enums import ItemType
 from marconi.engine.types.models import Modem, ValidationIssue
@@ -116,15 +117,18 @@ def _validate_descriptors(
             and in_desc.amplitude not in stage.accepts_amplitude
         ):
             wanted = ", ".join(sorted(a.value for a in stage.accepts_amplitude))
+            modes = agc_modes_for(stage.accepts_amplitude)
+            mode_hint = " or ".join(f"mode='{m}'" for m in modes)
             fix = (
-                "insert an 'agc' stage after any channelization or resampling"
+                f"insert an 'agc' stage ({mode_hint}) after any "
+                "channelization or resampling"
                 if in_desc.amplitude is Amplitude.UNKNOWN
-                else f"'{producer}' normalizes the wrong statistic — change its mode"
+                else f"set the upstream 'agc' to {mode_hint}"
             )
             raise CompileError(
                 f"stage '{step.conv}' requires input amplitude normalized to "
                 f"{wanted} but '{producer}' produces {in_desc.amplitude.value}; "
-                f"{fix} (the agc stage's `mode` selects the statistic)"
+                f"{fix}"
             )
         required_order = stage.required_input_order(step)
         if (
