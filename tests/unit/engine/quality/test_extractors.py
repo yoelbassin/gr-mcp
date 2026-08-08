@@ -44,7 +44,8 @@ def test_sync_hits_at_chance_level_are_not_evidence() -> None:
 
 
 def test_sync_hits_well_above_chance_floor_are_positive() -> None:
-    rows = [_row("sync_word", windows_out=400, chance_windows=234.4)]
+    # well above chance means >3x ratio to filter structured interference
+    rows = [_row("sync_word", windows_out=704, chance_windows=234.4)]
     ev = sync_evidence(rows, stage_registry())
     assert [e.assessment for e in ev] == ["positive"]
 

@@ -70,8 +70,11 @@ def verdict_from(evidence: Sequence[QualityEvidence]) -> tuple[Verdict, str]:
 # error-tolerant sync words raise the bar on their own; a 32-bit sync keeps
 # expecting ~0 so a single hit still counts. Chance is modeled on UNIFORM
 # bits: a degenerate low-entropy stream against a matching low-entropy sync
-# word can still exceed the floor.
+# word can still exceed the floor — measured live (1090 MHz impulsive RFI):
+# 332 found vs 136 chance is 16 sigma yet 100% garbage, so a positive must
+# also clear a 3x chance RATIO, which structured interference does not.
 _SYNC_CHANCE_SIGMA = 5.0
+_SYNC_CHANCE_RATIO = 3.0
 
 _WORD_VALIDITY_POSITIVE = 0.5
 _WORD_VALIDITY_NEGATIVE = 0.1
@@ -112,9 +115,11 @@ def _sync_assessment(found: int, expected: float) -> Assessment | None:
     than random bits would match, so it proves nothing either way."""
     if found == 0:
         return "negative"
-    if found > expected + _SYNC_CHANCE_SIGMA * math.sqrt(expected):
-        return "positive"
-    return None
+    if found <= expected + _SYNC_CHANCE_SIGMA * math.sqrt(expected):
+        return None
+    if found < _SYNC_CHANCE_RATIO * expected:
+        return None
+    return "positive"
 
 
 def sync_evidence(
