@@ -14,7 +14,18 @@ from marconi.engine.types.step import Step
 
 class OokEnvelopeStep(Step):
     conv: Literal["ook_envelope"] = "ook_envelope"
-    loop_bw: float = Field(default=0.045, ge=0)
+    loop_bw: float = Field(
+        default=0.045,
+        ge=0,
+        description=(
+            "Symbol-timing loop bandwidth. 0 = open-loop per-burst sampling: "
+            "fixed nominal-rate grid with the decimation phase re-acquired "
+            "per burst (variance-max), deterministic, recommended for bursty "
+            "or pulsed OOK/PPM. >0 = continuous Gardner loop for sustained "
+            "OOK; measured to rail on burst environments (chip rate 2.2-2.8x "
+            "off nominal), decoding nothing."
+        ),
+    )
 
 
 class OokEnvelope(DuplexStage[CompileContext, OokEnvelopeStep]):

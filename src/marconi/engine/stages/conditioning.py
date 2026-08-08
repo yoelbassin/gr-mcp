@@ -181,7 +181,16 @@ class AgcStep(Step):
     conv: Literal["agc"] = "agc"
     mode: AgcMode = AgcMode.FEEDFORWARD
     reference: float = 1.0
-    window_symbols: float = 16.0
+    window_symbols: float = Field(
+        default=16.0,
+        description=(
+            "Feedforward/power normalization window, in symbols. For bursty "
+            "signals it must exceed the burst-repetition scale (e.g. 1024): "
+            "small windows normalize noise-only stretches to full scale, "
+            "erasing the on/off contrast a downstream slicer needs (measured: "
+            "ones-fraction 0.335 vs 0.018 on live 1090 MHz)."
+        ),
+    )
     attack_symbols: float = 1.0
     decay_symbols: float = 16.0
     max_gain: float = 0.0
@@ -304,8 +313,23 @@ class Agc(RxStage[CompileContext, AgcStep]):
 
 class SquelchStep(Step):
     conv: Literal["squelch"] = "squelch"
-    threshold_db: float
-    alpha_symbols: float = 1.0  # power-estimate time constant
+    threshold_db: float = Field(
+        description=(
+            "Absolute gate threshold in dB relative to unity-RMS input power "
+            "(requires rms_unity amplitude), applied to an IIR-averaged power "
+            "estimate; samples below it are zeroed, not dropped."
+        )
+    )
+    alpha_symbols: float = Field(
+        default=1.0,
+        description=(
+            "Averaging time constant of the power estimate, in symbols. Too "
+            "fast gates OOK/PPM frame bodies off mid-burst; marginal-SNR PPM "
+            "(~50% duty, pulses 2-4x noise) cannot be squelch-framed at ANY "
+            "alpha (measured 0-6/400 full-body holds) - prefer ook_envelope "
+            "loop_bw=0, which detects bursts itself."
+        ),
+    )
     ramp_symbols: float = 0.0  # cosine edge, suppresses the switching transient
 
     @model_validator(mode="after")
