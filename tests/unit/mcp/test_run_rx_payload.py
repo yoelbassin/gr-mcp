@@ -6,14 +6,15 @@ from typing import cast
 import numpy as np
 import pytest
 
-from marconi.mcp.tools import read_stream, run_rx_tool
+from marconi.mcp.tools import run_rx_tool
 
 
 def test_long_window_lists_are_truncated_with_totals(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # a segment step over a long stream yields thousands of windows; the tool
-    # payload must stay bounded for the LLM context and report the true count
+    # a segment step over a long stream yields thousands of windows;
+    # when they form a perfect arithmetic ramp, the tool compresses to {key}_ramp
+    # and ships no sidecar; irregular long lists still use truncation + sidecar
     monkeypatch.setenv("MARCONI_WORKSPACE", str(tmp_path))
     bits = np.random.default_rng(0).integers(0, 2, 60_000).astype(np.uint8)
     src = tmp_path / "in.u8"
@@ -25,17 +26,16 @@ def test_long_window_lists_are_truncated_with_totals(
         input_item_type="b",
     )
     assert out["status"] == "ok"
-    assert len(cast(list[int], out["windows"])) == 512
+    # uniform tiling → ramp compression: empty inline list, ramp formula
+    assert cast(list[int], out["windows"]) == []
     assert out["windows_total"] == 7500
-    # the entries past the cap must stay reachable: full list in an int64
-    # sidecar, pageable through read_stream
-    sidecar = Path(cast(str, out["windows_path"]))
-    full = np.fromfile(sidecar, np.int64)
-    assert full.size == 7500
-    assert full[:512].tolist() == cast(list[int], out["windows"])
-    page = read_stream(str(sidecar), offset=7000, count=500)
-    assert page["count"] == 500
-    assert cast(list[int], page["values"])[0] == int(full[7000])
+    assert "windows_ramp" in out
+    ramp = cast(dict[str, int], out["windows_ramp"])
+    assert ramp["count"] == 7500
+    assert ramp["stride"] == 8
+    assert ramp["start"] == 0
+    # no sidecar for a ramp: it's fully derivable from the formula
+    assert "windows_path" not in out
 
 
 def test_capture_slice_params_reject_input_path_mode(

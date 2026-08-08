@@ -177,11 +177,31 @@ def validate_modem(
 
 
 _MAX_INLINE_LIST = 512
+_RAMP_MIN_LEN = 64
+
+
+def _as_ramp(seq: list[Any]) -> dict[str, int] | None:
+    if len(seq) <= _RAMP_MIN_LEN or not all(isinstance(v, int) for v in seq):
+        return None
+    stride = seq[1] - seq[0]
+    arr = np.asarray(seq, np.int64)
+    if not bool(np.all(np.diff(arr) == stride)):
+        return None
+    return {"start": int(seq[0]), "stride": int(stride), "count": len(seq)}
 
 
 def _cap_list(container: dict[str, Any], key: str, sidecar: Path | None = None) -> None:
     seq = container.get(key)
-    if isinstance(seq, list) and len(seq) > _MAX_INLINE_LIST:
+    if not isinstance(seq, list):
+        return
+    ramp = _as_ramp(seq)
+    if ramp is not None:
+        # a uniform tiling is fully derivable: ship the formula, not the list
+        container[f"{key}_total"] = ramp["count"]
+        container[f"{key}_ramp"] = ramp
+        container[key] = []
+        return
+    if len(seq) > _MAX_INLINE_LIST:
         container[f"{key}_total"] = len(seq)
         if sidecar is not None:
             # the full list must stay reachable: entries past the cap have no
@@ -227,9 +247,11 @@ def run_rx_tool(
     you picked doesn't match the signal). clusters=K's EVM/cluster fit
     corroborates once modulus says the lock is real. The result carries
     status, a "stream" summary {path, item_type, items} to page with read_stream,
-    windows/marks (truncated to 512 entries when longer, with a *_total
-    count and a *_path int64 sidecar holding the full list - page it with
-    read_stream), per-block census, diagnostics, free-text "hints" (actionable
+    windows/marks (an exact arithmetic tiling collapses to {key}_ramp =
+    {start, stride, count} with an empty inline list; other lists over 512
+    entries truncate inline with a *_total count and a *_path int64 sidecar
+    holding the full list - page it with read_stream), per-block census,
+    diagnostics, free-text "hints" (actionable
     tips for THIS path, e.g. a coherent-demod bit-polarity-ambiguity retry
     suggestion), and "quality": a conservative verdict (decoded / uncertain /
     no_signal) with the evidence behind it. Treat only verdict "decoded" as
