@@ -188,7 +188,11 @@ class AgcStep(Step):
             "signals it must exceed the burst-repetition scale (e.g. 1024): "
             "small windows normalize noise-only stretches to full scale, "
             "erasing the on/off contrast a downstream slicer needs (measured: "
-            "ones-fraction 0.335 vs 0.018 on live 1090 MHz)."
+            "ones-fraction 0.335 vs 0.018 on live 1090 MHz). For bursty/pulsed "
+            "OOK specifically, prefer ook_envelope(loop_bw=0), which detects and "
+            "normalizes each burst internally and needs no agc; the large-window "
+            "guidance here applies when an agc IS used (continuous signals / "
+            "closed-loop)."
         ),
     )
     attack_symbols: float = 1.0

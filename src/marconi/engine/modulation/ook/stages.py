@@ -50,7 +50,10 @@ class OokEnvelope(DuplexStage[CompileContext, OokEnvelopeStep]):
         "(loop_bw=0) is amplitude-agnostic and must run WITHOUT an agc stage: "
         "the per-burst sampler normalizes each burst itself, and a "
         "sliding-window agc steps its gain mid-burst on pulsed signals and "
-        "corrupts fixed-threshold slicing."
+        "corrupts fixed-threshold slicing. The accepts_amplitude and "
+        "min_input_sps fields shown in describe_stages are closed-loop "
+        "defaults; the open-loop path (loop_bw=0) overrides both to "
+        "amplitude-agnostic and sps>=1."
     )
     from_level = Level.IQ
     to_level = Level.SYMBOLS
