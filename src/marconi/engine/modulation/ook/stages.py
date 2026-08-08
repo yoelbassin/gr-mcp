@@ -29,10 +29,12 @@ class OokEnvelopeStep(Step):
 
 
 class OokEnvelope(DuplexStage[CompileContext, OokEnvelopeStep]):
-    """Non-coherent OOK envelope, IQ<->SYMBOLS. RX: magnitude -> centre to +/-1
-    -> Gardner symbol timing (one soft float per symbol; CFO-immune by
-    construction). TX: invert the centring, upsample, embed as the real part.
-    Pairs with the general Slice for the SYMBOLS<->BITS decision."""
+    """Non-coherent OOK envelope, IQ<->SYMBOLS. RX: magnitude, then either a
+    per-burst open-loop sampler followed by centring to +/-1 (loop_bw=0) or
+    centring to +/-1 followed by closed-loop Gardner symbol timing (loop_bw>0)
+    - one soft float per symbol either way, CFO-immune by construction. TX:
+    invert the centring, upsample, embed as the real part. Pairs with the
+    general Slice for the SYMBOLS<->BITS decision."""
 
     name = "ook_envelope"
     from_level = Level.IQ
@@ -47,6 +49,11 @@ class OokEnvelope(DuplexStage[CompileContext, OokEnvelopeStep]):
 
     def emit_rx(self, b: CompileContext, step: OokEnvelopeStep) -> None:
         b.chain("complex_to_mag")
+        if step.loop_bw == 0.0:
+            b.chain("burst_sampler", sps=b.sps)
+            b.chain("multiply_const_ff", value=2.0)
+            b.chain("add_const_ff", value=-1.0)
+            return
         b.chain("multiply_const_ff", value=2.0)
         b.chain("add_const_ff", value=-1.0)
         b.chain("symbol_sync_ff", sps=b.sps, loop_bw=step.loop_bw)
