@@ -38,7 +38,16 @@ _FLOOR_DOWN = 1.0 / 4.0  # faster fall: never let a burst inflate the floor
 _RISE_RATIO = 4.0  # burst starts above 4x floor ...
 _RISE_CHIPS = 1  # ... sustained this many chips (rejects single-sample spikes)
 _FALL_RATIO = 2.0  # and ends below 2x floor ...
-_FALL_CHIPS = 4  # ... sustained this many chips (> longest in-burst calm run)
+_FALL_CHIPS = 32  # ... sustained this many chips: must clear the longest
+# quiet run still INTERIOR to one transmission (structured burst-mode
+# signals can carry a quiet stretch several symbols wide inside a single
+# burst), while staying far under real inter-burst spacing
+_FALL_SMOOTH_CHIPS = 4  # trailing moving-average width applied before the
+# fall test only: a run this long tested sample-by-sample against raw,
+# noisy envelope values is statistically unreachable by ordinary background
+# noise (per-sample calm probability < 1 raised to a large power is ~0) even
+# though the noise floor itself is genuinely low - smoothing first is what
+# makes a long sustained-fall confirmation achievable at all
 _PAD_CHIPS = 2  # pre/post pad kept around each burst
 _MAX_BURST_CHIPS = 4096  # cap: beyond this, commit phase from the first cap
 
@@ -57,6 +66,17 @@ def _sustained_runs(mask: np.ndarray, run: int) -> np.ndarray:
     return np.flatnonzero(window >= run)
 
 
+def _trailing_mean(block: np.ndarray, window: int) -> np.ndarray:
+    """Trailing moving average, same length as `block` (front-padded with
+    `block[0]` so the first few samples of each fixed-size processing block
+    do not see a false dip toward zero from implicit zero-padding)."""
+    if window <= 1:
+        return block
+    kernel = np.full(window, 1.0 / window, dtype=np.float64)
+    padded = np.concatenate([np.full(window - 1, block[0], dtype=np.float64), block])
+    return np.convolve(padded, kernel, mode="valid")
+
+
 def make_burst_sampler(gr: Any, *, sps: float) -> Any:
     if sps < 2.0:
         raise ValueError(f"burst_sampler needs sps >= 2, got {sps}")
@@ -65,6 +85,7 @@ def make_burst_sampler(gr: Any, *, sps: float) -> Any:
     pad = _PAD_CHIPS * phases
     rise_run = _RISE_CHIPS * phases
     fall_run = _FALL_CHIPS * phases
+    fall_smooth = _FALL_SMOOTH_CHIPS * phases
     max_burst = _MAX_BURST_CHIPS * phases
 
     class _BurstSampler(gr.basic_block):
@@ -108,7 +129,7 @@ def make_burst_sampler(gr: Any, *, sps: float) -> Any:
             rate = _FLOOR_UP if med > self._floor else _FLOOR_DOWN
             self._floor += rate * (med - self._floor)
             active = block > _RISE_RATIO * self._floor
-            calm = block < _FALL_RATIO * self._floor
+            calm = _trailing_mean(block, fall_smooth) < _FALL_RATIO * self._floor
             i = 0
             while i < len(block):
                 if not self._in_burst:

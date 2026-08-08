@@ -41,6 +41,10 @@ def _noise(n: int, rng: np.random.Generator, level: float = 0.05) -> np.ndarray:
     return np.abs(rng.normal(0.0, level, n)).astype(np.float32)
 
 
+def _chip_string(bits: str) -> str:
+    return "".join("10" if b == "1" else "01" for b in bits)
+
+
 def test_per_burst_phase_recovery() -> None:
     rng = np.random.default_rng(7)
     sps = 2
@@ -53,7 +57,7 @@ def test_per_burst_phase_recovery() -> None:
     # each burst's chips must slice back to the transmitted chip pattern:
     # find each burst in the output by amplitude and compare the chip string
     hard = (out > 0.5).astype(np.uint8)
-    want = "".join("10" if b == "1" else "01" for b in bits)
+    want = _chip_string(bits)
     found = "".join(map(str, hard))
     assert (
         found.count(want) == 4
@@ -61,19 +65,41 @@ def test_per_burst_phase_recovery() -> None:
 
 
 def test_single_burst_is_not_fragmented() -> None:
-    # regression: the burst's OWN modulation transitions must never trip the
-    # sustained-calm end-of-burst confirmation early. A PPM bit stream has
+    # regression (two escapes so far, both against this same test's payload):
+    # (1) the burst's OWN chip-junction transitions must never trip the
+    # sustained-calm end-of-burst confirmation - a PPM bit stream has
     # legitimate 2-chip low runs at bit junctions (e.g. a "1" bit's trailing
     # chip abutting a "0" bit's leading chip); a fall-run shorter than that
     # chops one burst into many low-sample, phase-unreliable flushes even
     # though the exact chip pattern can still (fragilely) reassemble on a
-    # noiseless synthetic - this pins the mechanism, not just the output.
+    # noiseless synthetic. (2) a real off-air capture then showed a
+    # STRUCTURAL interior quiet run inside a single transmission (preamble-
+    # scale, measured >=6 symbols/12 samples at sps=2) that a fall-run only
+    # just past the chip-junction case (old: 4 chips) still fragmented on -
+    # this is why the payload below now embeds a 12-symbol interior quiet
+    # run explicitly, not just ordinary chip-junction gaps, and asserts
+    # exact recovery spanning it, not just a flush count.
     rng = np.random.default_rng(9)
-    bits = "10110010" * 8
-    env = np.concatenate([_noise(2000, rng), _ppm_burst(bits, 2, 0), _noise(2000, rng)])
-    blk = make_burst_sampler(FAKE_GR, sps=2.0)
-    drive(blk, env, chunk=env.size, out_dtype=np.float32)
+    sps = 2
+    lead_bits, trail_bits = "10110010" * 4, "01001101" * 4
+    gap_symbols = 12
+    burst = np.concatenate(
+        [
+            _ppm_burst(lead_bits, sps, 0),
+            np.zeros(gap_symbols * sps, np.float32),
+            _ppm_burst(trail_bits, sps, 0),
+        ]
+    )
+    env = np.concatenate([_noise(2000, rng), burst, _noise(2000, rng)])
+    blk = make_burst_sampler(FAKE_GR, sps=float(sps))
+    out = drive(blk, env, chunk=env.size, out_dtype=np.float32)
     assert blk.diagnostics["bursts_flushed"] == 1
+
+    # the block emits ~1 item per symbol (decimated), so a 12-symbol raw gap
+    # is 12 output zeros, not 12*sps
+    want = _chip_string(lead_bits) + "0" * gap_symbols + _chip_string(trail_bits)
+    hard = (out > 0.5).astype(np.uint8)
+    assert want in "".join(map(str, hard))
 
 
 def test_unfinished_burst_withheld_at_eof() -> None:
@@ -92,7 +118,7 @@ def test_unfinished_burst_withheld_at_eof() -> None:
     blk = make_burst_sampler(FAKE_GR, sps=2.0)
     out = drive(blk, env, chunk=env.size, out_dtype=np.float32)
     assert blk.diagnostics["bursts_flushed"] == 0
-    want = "".join("10" if b == "1" else "01" for b in bits)
+    want = _chip_string(bits)
     hard = (out > 0.5).astype(np.uint8)
     assert want not in "".join(map(str, hard))
 
@@ -170,5 +196,5 @@ def test_real_scheduler_runs_to_completion_without_deadlock() -> None:
     tb.run()
     out = np.asarray(snk.data(), np.float32)
     hard = (out > 0.5).astype(np.uint8)
-    want = "".join("10" if b == "1" else "01" for b in bits)
+    want = _chip_string(bits)
     assert want in "".join(map(str, hard))
