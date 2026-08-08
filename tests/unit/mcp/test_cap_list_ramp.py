@@ -2,10 +2,11 @@
 literal entries burns agent context for zero information."""
 
 from pathlib import Path
+from typing import cast
 
 import numpy as np
 
-from marconi.mcp.tools import _cap_list
+from marconi.mcp.tools import _cap_list, read_stream
 
 
 def test_ramp_compresses_without_sidecar(tmp_path: Path) -> None:
@@ -23,7 +24,14 @@ def test_irregular_long_list_keeps_sidecar_behavior(tmp_path: Path) -> None:
     _cap_list(payload, "windows", tmp_path / "windows.i64")
     assert payload["windows"] == vals[:512]
     assert payload["windows_total"] == 601
-    assert np.fromfile(tmp_path / "windows.i64", np.int64).tolist() == vals
+    # full list preserved in sidecar for non-ramp long lists
+    full = np.fromfile(tmp_path / "windows.i64", np.int64).tolist()
+    assert full == vals
+    # sidecar must be pageable via read_stream (agent context budget mgmt)
+    page = read_stream(str(tmp_path / "windows.i64"), offset=550, count=51)
+    assert page["count"] == 51
+    assert cast(list[int], page["values"])[0] == vals[550]
+    assert page["total_items"] == 601
 
 
 def test_short_lists_untouched(tmp_path: Path) -> None:

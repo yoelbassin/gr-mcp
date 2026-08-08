@@ -9,7 +9,7 @@ import pytest
 from marconi.mcp.tools import run_rx_tool
 
 
-def test_long_window_lists_are_truncated_with_totals(
+def test_uniform_window_tiling_compresses_to_ramp(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # a segment step over a long stream yields thousands of windows;
