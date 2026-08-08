@@ -12,6 +12,7 @@ from marconi.survey import survey_iq
 
 pytestmark = [
     pytest.mark.hardware,
+    pytest.mark.xdist_group("sdr"),
     pytest.mark.skipif(not sdr_present(), reason="no SDR attached"),
 ]
 

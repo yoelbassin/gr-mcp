@@ -17,7 +17,8 @@ matches count as valid, and groups of type 0A/0B carry the station's 8-char
 Program Service name. The capture (PySDR's fm_rds_250k_1Msamples.iq, 4 s @
 250 ksps) decodes 180 valid blocks with PS "Upliftin" — matched independently
 by a numpy reference decode. Checkword math, offset words, and PS field
-layout are protocol-datasheet work and live here, not in the product.
+layout are protocol-datasheet work and live in tests/helpers/rds.py, not in
+the product.
 """
 
 from __future__ import annotations

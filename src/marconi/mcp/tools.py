@@ -620,15 +620,22 @@ def capture_tool(
     re-capture only when you want fresh RF. Captures persist under
     ./marconi-runs/ until you remove them."""
     run_dir = new_run_dir("capture")
-    result = capture_iq(
-        run_dir / "iq.cf32",
-        center_hz=center_hz,
-        sample_rate=sample_rate,
-        duration_s=duration_s,
-        gain_db=gain_db,
-        ppm=ppm,
-        device=device,
-    )
+    try:
+        result = capture_iq(
+            run_dir / "iq.cf32",
+            center_hz=center_hz,
+            sample_rate=sample_rate,
+            duration_s=duration_s,
+            gain_db=gain_db,
+            ppm=ppm,
+            device=device,
+        )
+    except Exception:
+        try:
+            run_dir.rmdir()
+        except OSError:
+            pass
+        raise
     return result.model_dump(mode="json")
 
 

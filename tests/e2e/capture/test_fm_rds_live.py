@@ -24,6 +24,7 @@ MIN_LIVE_BLOCKS = 16
 
 pytestmark = [
     pytest.mark.hardware,
+    pytest.mark.xdist_group("sdr"),
     pytest.mark.skipif(not sdr_present(), reason="no SDR attached"),
     pytest.mark.skipif(
         not _FM_HZ,

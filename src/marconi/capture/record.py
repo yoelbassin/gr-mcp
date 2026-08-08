@@ -79,7 +79,9 @@ def _reconcile(
 
 
 def _levels(path: Path) -> CaptureLevels:
-    data = np.memmap(path, dtype=np.complex64, mode="r")
+    data = np.memmap(
+        path, dtype=np.complex64, mode="r", shape=(path.stat().st_size // 8,)
+    )
     stride = max(1, data.size // _LEVELS_MAX_SAMPLES)
     z = np.asarray(data[::stride])
     rms = float(np.sqrt(np.mean(np.abs(z) ** 2)))
