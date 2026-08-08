@@ -100,9 +100,19 @@ def check_codebook_sizing(
 
 class CodebookStep(Step):
     conv: Literal["codebook"] = "codebook"
-    code_bits: StrictInt = Field(ge=1)
-    data_bits: StrictInt = Field(ge=1)
-    table: list[int]
+    code_bits: StrictInt = Field(
+        ge=1,
+        description="Width in bits of each input codeword (2 for a "
+        "bi-phase/Manchester chip pair, 6 for a 3-of-6 symbol).",
+    )
+    data_bits: StrictInt = Field(
+        ge=1, description="Bits of data each codeword decodes to (1 for Manchester)."
+    )
+    table: list[int] = Field(
+        description="Codeword for each data value, indexed by that value: "
+        "table[d] is the code_bits-wide codeword for data d. Manchester is "
+        "[1, 2] (data 0 -> 01, data 1 -> 10).",
+    )
     decode: DecodeMode = DecodeMode.EXACT
 
     @model_validator(mode="after")
@@ -246,6 +256,11 @@ class Segment(CodingStage[SegmentStep]):
 
 class Codebook(CodingStage[CodebookStep]):
     name = "codebook"
+    description = (
+        "Fixed-width line/block code: map each code_bits-wide input codeword to "
+        "a data_bits value via table. Expresses a bi-phase/Manchester pair "
+        "decode (code_bits=2, table=[1,2]), 3-of-6, and PPM chip-pairs."
+    )
     from_level = Level.BITS
     to_level = Level.BITS
     family = "coding"
@@ -323,6 +338,11 @@ class BlockCodeStep(Step):
 
 class BlockCode(CodingStage[BlockCodeStep]):
     name = "block_code"
+    description = (
+        "Linear block FEC over a (code_bits, data_bits) code: syndrome-decode "
+        "each stride against parity_masks, correcting up to `correct` bit "
+        "errors, and tally how many words checked out (signal evidence)."
+    )
     from_level = Level.BITS
     to_level = Level.BITS
     family = "coding"
@@ -360,6 +380,11 @@ class PermuteStep(Step):
 
 class Permute(CodingStage[PermuteStep]):
     name = "permute"
+    description = (
+        "Block (de)interleaver: reorder each block of bits by the perm index "
+        "list (output position i takes input perm[i]); undoes a matrix/"
+        "convolutional interleaver when perm is its inverse map."
+    )
     from_level = Level.BITS
     to_level = Level.BITS
     family = "coding"
@@ -378,6 +403,11 @@ class RealignStep(Step):
 
 class Realign(CodingStage[RealignStep]):
     name = "realign"
+    description = (
+        "Drop bit_offset leading bits to re-phase a stream before a "
+        "fixed-width block decode — e.g. selecting which of the two pair "
+        "phases a bi-phase/Manchester codebook consumes."
+    )
     from_level = Level.BITS
     to_level = Level.BITS
     family = "coding"

@@ -53,6 +53,12 @@ class Stage(ABC, Generic[B, S]):
     directions: frozenset[str] = frozenset({"rx", "tx"})
     step_model: type[S]
 
+    # One agent-facing line naming what the stage is FOR, surfaced by
+    # describe_stages. Populate it only when the name alone does not carry the
+    # use — a generic mechanism (line code, interleaver, bit re-phaser) an
+    # operator must map their datasheet concept onto. Empty = self-explanatory.
+    description: str = ""
+
     # Establishes burst windows on the coding carrier (PHY sync, not framing).
     seeds_windows: bool = False
 

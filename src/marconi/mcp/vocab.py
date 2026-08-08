@@ -37,13 +37,16 @@ ENVELOPE: dict[str, object] = {
 
 
 def _index_entry(stage: Stage[Any, Any]) -> dict[str, Any]:
-    return {
+    entry: dict[str, Any] = {
         "name": stage.name,
         "family": stage.family,
         "from_level": stage.from_level.value,
         "to_level": stage.to_level.value,
         "directions": sorted(stage.directions),
     }
+    if stage.description:
+        entry["description"] = stage.description
+    return entry
 
 
 def stage_index() -> list[dict[str, Any]]:
