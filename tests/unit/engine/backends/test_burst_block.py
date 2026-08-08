@@ -45,6 +45,21 @@ def _chip_string(bits: str) -> str:
     return "".join("10" if b == "1" else "01" for b in bits)
 
 
+def _ppm_burst_weak_head(
+    bits: str, sps: int, weak_chips: int, weak_amp: float, full_amp: float = 1.0
+) -> np.ndarray:
+    # models a real pulse's own filter/AGC rise time: the burst's leading
+    # weak_chips chips are measurably weaker than the rest (weak_amp), not
+    # absent - a "0" chip stays 0 regardless of which amplitude multiplies it
+    chips = []
+    for b in bits:
+        chips += [1, 0] if b == "1" else [0, 1]
+    arr = np.asarray(chips, np.float32)
+    scale = np.full(len(arr), full_amp, np.float32)
+    scale[:weak_chips] = weak_amp
+    return np.repeat(arr * scale, sps)
+
+
 def test_per_burst_phase_recovery() -> None:
     rng = np.random.default_rng(7)
     sps = 2
@@ -100,6 +115,45 @@ def test_single_burst_is_not_fragmented() -> None:
     want = _chip_string(lead_bits) + "0" * gap_symbols + _chip_string(trail_bits)
     hard = (out > 0.5).astype(np.uint8)
     assert want in "".join(map(str, hard))
+
+
+def test_weak_leading_pulses_are_recovered() -> None:
+    # A real pulse's own filter/AGC rise time can leave a burst's leading
+    # chips measurably weaker than its steady-state body, even once the
+    # receiver has locked on. Controlled reproduction of a live-capture
+    # "head lost" read traced it to this: once rise-detection has locked
+    # (fires on chip 0 here - the leading amplitude is far above the rise
+    # threshold, just below full strength), burst_sampler preserves the
+    # EXACT raw envelope value at every chip position, including the weak
+    # ones; a hard-decision readout of a too-weak chip against ANY receiver
+    # is a channel/SNR limit, not a phase or grid error. Amplitudes are
+    # expressed as ratios to the noise level, not absolute values.
+    noise_level = 0.05
+    weak_ratio = 12.0  # comfortably above the 4x-floor rise threshold ...
+    full_ratio = 20.0  # ... but well below the steady-state body
+    rng = np.random.default_rng(43)
+    bits = "10110010" * 8
+    burst = _ppm_burst_weak_head(
+        bits,
+        2,
+        weak_chips=8,
+        weak_amp=noise_level * weak_ratio,
+        full_amp=noise_level * full_ratio,
+    )
+    # noise-only false-positive flushes are an accepted, already-measured
+    # residual (see test_output_rate_is_nominal's tolerance) and orthogonal
+    # to what this test targets, so it checks content recovery directly
+    # rather than an exact flush count
+    env = np.concatenate(
+        [_noise(3000, rng, noise_level), burst, _noise(3000, rng, noise_level)]
+    )
+    blk = make_burst_sampler(FAKE_GR, sps=2.0)
+    out = drive(blk, env, chunk=env.size, out_dtype=np.float32)
+
+    hard = (out > 0.5).astype(np.uint8)
+    want = _chip_string(bits)
+    found = "".join(map(str, hard))
+    assert found.count(want) == 1, f"head not fully recovered: {found.count(want)}"
 
 
 def test_unfinished_burst_withheld_at_eof() -> None:
