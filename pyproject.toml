@@ -52,3 +52,6 @@ disallow_untyped_defs = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+markers = [
+    "hardware: exercises a physically attached SDR (auto-skipped when none present)",
+]

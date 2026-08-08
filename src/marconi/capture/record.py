@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 import numpy as np
 from pydantic import BaseModel
 
+from marconi.engine.backends.gnuradio.runner import GnuRadioBackend
 from marconi.engine.compile.ir import GrBlock, GrConnection, GrPipeline
 from marconi.engine.types.params import ParamValue
 from marconi.errors import register_error
@@ -127,4 +128,87 @@ def build_capture_pipeline(
             GrConnection(src_block="settle", dst_block="bound"),
             GrConnection(src_block="bound", dst_block="sink"),
         ],
+    )
+
+
+def _probe_device(
+    device: str, sample_rate: float, center_hz: float, ppm: float
+) -> tuple[float, float] | None:
+    try:
+        import SoapySDR
+    except ImportError:
+        return None
+    if not SoapySDR.Device.enumerate(device):
+        raise CaptureError(
+            f"no SDR device found (device={device!r}) — is one plugged in, "
+            "with its Soapy driver module installed?"
+        )
+    try:
+        dev: Any = SoapySDR.Device(device)
+    except Exception as e:
+        raise CaptureError(f"failed to open SDR (device={device!r}): {e}") from e
+    try:
+        rx = SoapySDR.SOAPY_SDR_RX
+        dev.setSampleRate(rx, 0, sample_rate)
+        if ppm:
+            dev.setFrequencyCorrection(rx, 0, ppm)
+        dev.setFrequency(rx, 0, center_hz)
+        return float(dev.getSampleRate(rx, 0)), float(dev.getFrequency(rx, 0))
+    except CaptureError:
+        raise
+    except Exception as e:
+        raise CaptureError(f"device refused tune/rate: {e}") from e
+    finally:
+        dev.close()
+
+
+def capture_iq(
+    out_path: Path,
+    *,
+    center_hz: float,
+    sample_rate: float = 2.048e6,
+    duration_s: float = 5.0,
+    gain_db: float | None = None,
+    ppm: float = 0.0,
+    device: str = "",
+) -> CaptureResult:
+    if sample_rate <= 0:
+        raise ValueError("sample_rate must be > 0")
+    if not 0 < duration_s <= _MAX_DURATION_S:
+        raise ValueError(f"duration_s must be in (0, {_MAX_DURATION_S:g}]")
+    probe = _probe_device(device, sample_rate, center_hz, ppm)
+    rate, freq, warnings = _reconcile(sample_rate, center_hz, probe)
+    pipeline = build_capture_pipeline(
+        out_path=out_path,
+        device=device,
+        sample_rate=sample_rate,
+        center_hz=center_hz,
+        gain_db=gain_db,
+        ppm=ppm,
+        settle_samples=round(_SETTLE_S * rate),
+        num_samples=round(duration_s * rate),
+    )
+    result = GnuRadioBackend().run_pipeline(
+        pipeline, timeout=_SETTLE_S + duration_s + _TIMEOUT_MARGIN_S
+    )
+    num_samples = out_path.stat().st_size // 8 if out_path.is_file() else 0
+    if num_samples == 0:
+        raise CaptureError(
+            f"capture produced no samples: {result.error or result.status}"
+        )
+    status: Literal["ok", "error", "timeout"] = (
+        "ok"
+        if result.status == "ok"
+        else ("timeout" if result.status == "timeout" else "error")
+    )
+    return CaptureResult(
+        status=status,
+        path=str(out_path),
+        sample_rate=rate,
+        center_hz=freq,
+        num_samples=num_samples,
+        duration_s=round(num_samples / rate, 3),
+        levels=_levels(out_path),
+        warnings=warnings,
+        error=result.error,
     )

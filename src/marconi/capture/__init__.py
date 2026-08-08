@@ -1,3 +1,8 @@
-from marconi.capture.record import CaptureError, CaptureLevels, CaptureResult
+from marconi.capture.record import (
+    CaptureError,
+    CaptureLevels,
+    CaptureResult,
+    capture_iq,
+)
 
-__all__ = ["CaptureError", "CaptureLevels", "CaptureResult"]
+__all__ = ["capture_iq", "CaptureError", "CaptureLevels", "CaptureResult"]
