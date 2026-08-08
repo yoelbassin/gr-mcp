@@ -198,6 +198,13 @@ class DescrambleStep(Step):
 
 class SyncWord(CodingStage[SyncWordStep]):
     name = "sync_word"
+    description = (
+        "Find a bit pattern by correlation and MARK a window at each match "
+        "(cursor at payload start); the stream passes through unchanged. "
+        "Window-scoped coding stages (codebook/block_code/permute/descramble) "
+        "restart their stride at each window. A later window-seeding stage "
+        "(segment/mark_frame) OVERWRITES these windows."
+    )
     from_level = Level.BITS
     to_level = Level.BITS
     seeds_windows = True
@@ -223,6 +230,10 @@ class MarkFrameStep(Step):
 
 class MarkFrame(CodingStage[MarkFrameStep]):
     name = "mark_frame"
+    description = (
+        "Seed one window per burst mark at offset_bits - bridges burst-detector "
+        "marks into the window model for window-scoped coding stages."
+    )
     from_level = Level.BITS
     to_level = Level.BITS
     seeds_windows = True
@@ -242,6 +253,13 @@ class SegmentStep(Step):
 
 class Segment(CodingStage[SegmentStep]):
     name = "segment"
+    description = (
+        "Re-tile the stream into fixed frame_body_len windows from position 0, "
+        "DISCARDING any windows a prior stage seeded. Correct after a gating "
+        "stage (sync_align); after a marking stage (sync_word) it destroys the "
+        "marks - let window-scoped coding stages consume sync_word's windows "
+        "directly instead."
+    )
     from_level = Level.BITS
     to_level = Level.BITS
     seeds_windows = True

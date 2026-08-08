@@ -171,6 +171,12 @@ class SyncAlign(RxStage[CompileContext, SyncAlignStep]):
     the correlator's convention (bit 1 positive) and back."""
 
     name = "sync_align"
+    description = (
+        "Correlate an access code on the soft bit stream and GATE: keep "
+        "exactly frame_len items after each hit, drop everything else. Output "
+        "is a contiguous stream of frame bodies with no windows - follow with "
+        "segment to re-tile it for window-scoped coding stages."
+    )
     from_level = Level.BITS
     to_level = Level.BITS
     family = "coding"
