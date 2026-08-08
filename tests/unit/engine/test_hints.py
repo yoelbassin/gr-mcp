@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from marconi.engine.modulation.fsk.stages import FskStep, MskStep
+from marconi.engine.modulation.ook.stages import OokEnvelopeStep
 from marconi.engine.run import _hints
 from marconi.engine.stages.general import SliceStep
 from marconi.engine.stages.registry import stage_registry
@@ -48,3 +49,27 @@ def test_hints_silent_when_fsk_decoded_or_already_open_loop() -> None:
     # a decoded run needs no retry; an already-open-loop run has none to offer
     assert _hints(closed, stage_registry(), BITS, "decoded") == []
     assert _hints(open_loop, stage_registry(), BITS, "no_signal") == []
+
+
+def test_ook_closed_loop_hint_on_undecoded() -> None:
+    modem = Modem(
+        symbol_rate=2400.0, path=[OokEnvelopeStep(loop_bw=0.045), SliceStep()]
+    )
+    hints = _hints(modem, stage_registry(), BITS, verdict="uncertain")
+    assert any("ook_envelope" in h and "open-loop" in h.lower() for h in hints)
+
+
+def test_no_ook_hint_when_open_loop_or_decoded() -> None:
+    open_loop = Modem(
+        symbol_rate=2400.0, path=[OokEnvelopeStep(loop_bw=0.0), SliceStep()]
+    )
+    assert not any(
+        "ook_envelope" in h
+        for h in _hints(open_loop, stage_registry(), BITS, "uncertain")
+    )
+    closed = Modem(
+        symbol_rate=2400.0, path=[OokEnvelopeStep(loop_bw=0.045), SliceStep()]
+    )
+    assert not any(
+        "ook_envelope" in h for h in _hints(closed, stage_registry(), BITS, "decoded")
+    )

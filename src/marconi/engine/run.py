@@ -278,6 +278,14 @@ _FSK_OPEN_LOOP_HINT = (
     '{"loop_bw": 0} — open-loop, fixed-rate sampling at the nominal sps.'
 )
 
+_OOK_OPEN_LOOP_HINT = (
+    "ook_envelope ran closed-loop Gardner symbol timing (loop_bw>0), which "
+    "rails on bursty/pulsed environments and decodes nothing. Retry with "
+    'ook_envelope {"loop_bw": 0} - open-loop per-burst sampling - and give '
+    "any agc a burst-scale window (window_symbols >= 1024): small windows "
+    "normalize noise-only stretches to full scale and bury the pulses."
+)
+
 
 def _hints(
     modem: Modem,
@@ -294,6 +302,11 @@ def _hints(
         s.conv == "fsk" and getattr(s, "loop_bw", 0.0) > 0.0 for s in modem.path
     ):
         hints.append(_FSK_OPEN_LOOP_HINT)
+    if verdict != "decoded" and any(
+        s.conv == "ook_envelope" and getattr(s, "loop_bw", 0.0) > 0.0
+        for s in modem.path
+    ):
+        hints.append(_OOK_OPEN_LOOP_HINT)
     return hints
 
 
