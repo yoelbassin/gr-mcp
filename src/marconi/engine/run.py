@@ -287,13 +287,39 @@ _OOK_OPEN_LOOP_HINT = (
 )
 
 
+def composition_warnings(
+    modem: Modem, registry: Mapping[str, Stage[Any, Any]]
+) -> list[str]:
+    """Spec-shape smells that compile fine but silently do the wrong thing.
+    Today exactly one rule: a window-seeding stage after another seeder
+    discards the earlier stage's windows (measured trap: sync_word -> segment
+    re-tiled from 0 and the sync marks vanished)."""
+    warnings: list[str] = []
+    prior_seeder: str | None = None
+    for s in modem.path:
+        stage = registry.get(s.conv)
+        if stage is None or not stage.seeds_windows:
+            continue
+        if prior_seeder is not None:
+            warnings.append(
+                f"'{s.conv}' seeds windows AFTER '{prior_seeder}' already did: "
+                f"the earlier windows are DISCARDED and '{s.conv}' re-seeds from "
+                "stream position 0. If you meant to frame at each sync hit, "
+                "either drop the second seeder (window-scoped coding stages "
+                "consume the sync windows directly) or gate the stream first "
+                "with sync_align and then re-tile with segment."
+            )
+        prior_seeder = s.conv
+    return warnings
+
+
 def _hints(
     modem: Modem,
     registry: Mapping[str, Stage[Any, Any]],
     final: Descriptor,
     verdict: Verdict = "decoded",
 ) -> list[str]:
-    hints: list[str] = []
+    hints: list[str] = list(composition_warnings(modem, registry))
     if final.level in (Level.BITS, Level.SYMBOLS) and any(
         getattr(registry.get(s.conv), "polarity_ambiguous", False) for s in modem.path
     ):

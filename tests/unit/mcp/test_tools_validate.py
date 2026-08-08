@@ -65,6 +65,31 @@ def test_sub_nyquist_rate_is_structured_error() -> None:
     )
 
 
+def test_validate_modem_reports_seeder_shadow_warning() -> None:
+    spec = {
+        "symbol_rate": 1000.0,
+        "path": [
+            {"conv": "sync_word", "bits": "10100001"},
+            {"conv": "segment", "frame_body_len": 224},
+        ],
+    }
+    out = validate_modem(
+        spec, sample_rate=8000.0, input_item_type="b", input_level="bits"
+    )
+    assert out["valid"] is True
+    warnings = cast(list[str], out["warnings"])
+    assert any("segment" in w for w in warnings)
+
+
+def test_validate_modem_warnings_empty_on_clean_spec() -> None:
+    spec = {"symbol_rate": 1000.0, "path": [{"conv": "sync_word", "bits": "1010"}]}
+    out = validate_modem(
+        spec, sample_rate=8000.0, input_item_type="b", input_level="bits"
+    )
+    assert out["valid"] is True
+    assert out["warnings"] == []
+
+
 def test_describe_index_and_filters() -> None:
     idx = describe_stages()
     stages = cast(list[dict[str, object]], idx["stages"])

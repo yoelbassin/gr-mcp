@@ -2,15 +2,19 @@ from __future__ import annotations
 
 from marconi.engine.modulation.fsk.stages import FskStep, MskStep
 from marconi.engine.modulation.ook.stages import OokEnvelopeStep
-from marconi.engine.run import _hints
+from marconi.engine.run import _hints, composition_warnings
 from marconi.engine.stages.general import SliceStep
-from marconi.engine.stages.registry import stage_registry
+from marconi.engine.stages.registry import stage_registry, step_models
 from marconi.engine.types.descriptor import Descriptor
 from marconi.engine.types.enums import ItemType
 from marconi.engine.types.levels import Level
 from marconi.engine.types.models import Modem
 
 BITS = Descriptor(Level.BITS, ItemType.B)
+
+
+def _modem(path: list[dict[str, object]]) -> Modem:
+    return Modem.from_spec({"symbol_rate": 1000.0, "path": path}, step_models())
 
 
 def test_msk_stage_is_tagged_polarity_ambiguous() -> None:
@@ -72,4 +76,45 @@ def test_no_ook_hint_when_open_loop_or_decoded() -> None:
     )
     assert not any(
         "ook_envelope" in h for h in _hints(closed, stage_registry(), BITS, "decoded")
+    )
+
+
+def test_seeder_after_seeder_warns() -> None:
+    modem = _modem(
+        [
+            {"conv": "sync_word", "bits": "10100001"},
+            {"conv": "segment", "frame_body_len": 224},
+            {"conv": "codebook", "code_bits": 2, "data_bits": 1, "table": [1, 2]},
+        ]
+    )
+    warnings = composition_warnings(modem, stage_registry())
+    assert len(warnings) == 1
+    assert "segment" in warnings[0] and "sync_word" in warnings[0]
+    assert "discard" in warnings[0].lower()
+
+
+def test_single_seeder_and_gated_reseed_do_not_warn() -> None:
+    assert (
+        composition_warnings(
+            _modem([{"conv": "sync_word", "bits": "10100001"}]), stage_registry()
+        )
+        == []
+    )
+    # sync_align GATES (seeds_windows=False) then segment re-tiles: the blessed combo
+    assert (
+        composition_warnings(
+            _modem(
+                [
+                    {
+                        "conv": "sync_align",
+                        "access_code": "10100001",
+                        "frame_len": 224,
+                    },
+                    {"conv": "harden"},
+                    {"conv": "segment", "frame_body_len": 224},
+                ]
+            ),
+            stage_registry(),
+        )
+        == []
     )

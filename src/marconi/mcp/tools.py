@@ -17,7 +17,7 @@ from marconi.engine.compile.compiler import (
     compile_pipeline,
 )
 from marconi.engine.deadline import set_deadline
-from marconi.engine.run import PipelineResult
+from marconi.engine.run import PipelineResult, composition_warnings
 from marconi.engine.run import run_rx as engine_run_rx
 from marconi.engine.stages.base import SpecValidationError
 from marconi.engine.stages.registry import stage_registry, step_models
@@ -141,7 +141,11 @@ def validate_modem(
     {"valid": false, "errors": [...]} with structured compile errors: a
     failing spec is a normal result here, not an exception. direction is
     "rx" (decode) or "tx" (generate); input_item_type/input_level describe
-    the entry stream (defaults: complex IQ)."""
+    the entry stream (defaults: complex IQ).
+
+    A "warnings" list flags compositions that compile but silently misbehave
+    (e.g. a window-seeding stage discarding an earlier seeder's windows) -
+    fix or knowingly ignore."""
     start = _start_descriptor(input_item_type, input_level)
     try:
         modem = Modem.from_spec(spec, step_models())
@@ -165,7 +169,11 @@ def validate_modem(
     except (CompileError, ValidationError, ValueError) as exc:
         code, message = classify_error(exc)
         return {"valid": False, "errors": [{"code": code, "message": message}]}
-    return {"valid": True, "trace": _trace_rows(modem, cp)}
+    return {
+        "valid": True,
+        "trace": _trace_rows(modem, cp),
+        "warnings": composition_warnings(modem, stage_registry()),
+    }
 
 
 _MAX_INLINE_LIST = 512
