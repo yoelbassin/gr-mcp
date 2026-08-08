@@ -20,6 +20,7 @@ async def test_all_tools_are_registered() -> None:
         "read_stream",
         "stream_stats",
         "survey",
+        "capture",
     }
 
 

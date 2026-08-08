@@ -8,6 +8,7 @@ from typing import Any, Literal, cast
 import numpy as np
 from pydantic import ValidationError
 
+from marconi.capture import capture_iq
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend
 from marconi.engine.compile.compiler import (
     CompiledPipeline,
@@ -584,6 +585,53 @@ def survey(
     return payload
 
 
+def capture_tool(
+    center_hz: float,
+    sample_rate: float = 2.048e6,
+    duration_s: float = 5.0,
+    gain_db: float | None = None,
+    ppm: float = 0.0,
+    device: str = "",
+) -> dict[str, object]:
+    """Record a bounded raw-IQ capture from an attached SDR into a .cf32
+    file — the live-hardware entry to the survey → validate_modem → run_rx
+    loop.
+
+    Tunes the first SoapySDR-enumerated device (pass
+    device="driver=rtlsdr,serial=..." to pick among several), applies gain
+    (gain_db None = hardware AGC) and ppm frequency correction, discards a
+    short settle transient, and records duration_s seconds (max 300) at
+    sample_rate into a fresh file under ./marconi-runs/. Returns the file
+    path plus DEVICE-READBACK metadata: the returned sample_rate and
+    center_hz are what the hardware actually delivered, not what was
+    requested — always carry the RETURNED values into survey/run_rx. A
+    warnings entry flags any divergence; a requested frequency the device
+    cannot place inside the captured span raises instead of warning.
+    "levels" is capture-chain health, not signal analysis: rms near zero
+    means gain too low or no antenna; clip_fraction > 0 (samples at >= 0.99
+    full scale) means lower gain_db; dc_offset is the usual SDR center
+    spike — prefer surveying/channelizing a sub-band away from DC rather
+    than on it. Signal characterization (modulation, symbol rate, bursts)
+    is survey's job on the returned path. The capture is raw: no DC
+    removal, no filtering, no resampling — conditioning belongs in the
+    modem spec. status "error"/"timeout" with a path present means a
+    partial capture; the samples up to the failure are real and usable.
+    Iterate on ONE capture while forming hypotheses (same bits every run);
+    re-capture only when you want fresh RF. Captures persist under
+    ./marconi-runs/ until you remove them."""
+    run_dir = new_run_dir("capture")
+    result = capture_iq(
+        run_dir / "iq.cf32",
+        center_hz=center_hz,
+        sample_rate=sample_rate,
+        duration_s=duration_s,
+        gain_db=gain_db,
+        ppm=ppm,
+        device=device,
+    )
+    return result.model_dump(mode="json")
+
+
 TOOLS: dict[str, Callable[..., object]] = {
     "describe_stages": tool_error_boundary(describe_stages),
     "validate_modem": tool_error_boundary(validate_modem),
@@ -592,4 +640,5 @@ TOOLS: dict[str, Callable[..., object]] = {
     "read_stream": tool_error_boundary(read_stream),
     "stream_stats": tool_error_boundary(stream_stats),
     "survey": tool_error_boundary(survey),
+    "capture": tool_error_boundary(capture_tool),
 }
