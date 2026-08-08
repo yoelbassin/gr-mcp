@@ -148,6 +148,17 @@ class Stage(ABC, Generic[B, S]):
         step-conditional requirement is expressed in one place."""
         return self.accepts_amplitude
 
+    def min_input_sps_for(self, step: S) -> float | None:
+        """The minimum samples-per-symbol this step config's timing recovery
+        needs, or None if it does not recover symbol timing for it - defaults
+        to the class-level min_input_sps. Override when a stage's requirement
+        varies by its own step (e.g. an alternate RX path that re-acquires
+        timing per burst instead of running one continuous loop, so the sps
+        floor drops). The compiler consults this method, never the bare
+        attribute, so a step-conditional requirement is expressed in one
+        place."""
+        return self.min_input_sps
+
     def validate_input(self, in_desc: Descriptor, step: S) -> str | None:
         """A stage-specific input check the declarative attributes cannot
         express; a returned message fails the compile."""

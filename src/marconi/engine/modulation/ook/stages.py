@@ -26,7 +26,10 @@ class OokEnvelopeStep(Step):
             "off nominal), decoding nothing. Open-loop needs no agc stage: "
             "the sampler normalizes each burst internally, and a sliding-"
             "window agc would step its gain mid-burst and defeat fixed-"
-            "threshold slicing."
+            "threshold slicing. Open-loop also runs at sps>=1 (closed-loop "
+            "still needs sps>=2), so a capture already at the symbol rate "
+            "decodes with no resample stage - avoiding the anti-imaging "
+            "low-pass that smears short pulses."
         ),
     )
 
@@ -68,6 +71,13 @@ class OokEnvelope(DuplexStage[CompileContext, OokEnvelopeStep]):
         # default (a fixed slicing threshold against an un-normalized
         # envelope is meaningless)
         return None if step.loop_bw == 0.0 else self.accepts_amplitude
+
+    def min_input_sps_for(self, step: OokEnvelopeStep) -> float | None:
+        # open-loop (loop_bw=0) routes through burst_sampler, which
+        # re-acquires its sampling phase per burst instead of running a
+        # continuous timing loop - well-formed down to native sps=1 (the
+        # closed-loop Gardner path below still needs the class default 2.0)
+        return 1.0 if step.loop_bw == 0.0 else self.min_input_sps
 
     def emit_rx(self, b: CompileContext, step: OokEnvelopeStep) -> None:
         b.chain("complex_to_mag")

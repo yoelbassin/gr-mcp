@@ -276,9 +276,38 @@ def test_eof_pending_remainder_bounded() -> None:
     assert 0 <= blk._pending.size < _FLOOR_BLOCK
 
 
-def test_rejects_sub_two_sps() -> None:
+def test_rejects_sub_one_sps() -> None:
     with pytest.raises(ValueError):
-        make_burst_sampler(FAKE_GR, sps=1.5)
+        make_burst_sampler(FAKE_GR, sps=0.5)
+
+
+def test_construction_accepts_native_sps_one() -> None:
+    make_burst_sampler(FAKE_GR, sps=1.0)
+
+
+def test_native_sps_one_recovers_burst_chip_pattern() -> None:
+    # stride=1.0, phases=1: the variance-max phase loop runs a single phase
+    # and round(k*1.0) is the identity, so the block detects and normalizes
+    # without decimating - this is the DSP claim under test, proven through
+    # the real block, not just a non-raising construction.
+    rng = np.random.default_rng(101)
+    bits = "10110010" * 8
+    burst = _ppm_burst(bits, 1, 0)
+    env = np.concatenate([_noise(3000, rng), burst, _noise(3000, rng)])
+    out = _run_block(env, 1.0)
+    hard = (out > 0.5).astype(np.uint8)
+    want = _chip_string(bits)
+    assert want in "".join(map(str, hard))
+
+
+def test_native_sps_one_deterministic_across_runs() -> None:
+    rng = np.random.default_rng(103)
+    env = np.concatenate(
+        [_noise(5000, rng), _ppm_burst("1100" * 16, 1, 0), _noise(5000, rng)]
+    )
+    a = _run_block(env, 1.0)
+    b = _run_block(env, 1.0)
+    assert a.shape == b.shape and bool(np.array_equal(a, b))
 
 
 def test_real_scheduler_runs_to_completion_without_deadlock() -> None:

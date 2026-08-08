@@ -14,6 +14,7 @@ block's own FAKE_GR-driven coverage."""
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any, cast
 
 import numpy as np
 from helpers._dsp import channel
@@ -31,6 +32,7 @@ from marconi.engine.types.enums import ItemType
 from marconi.engine.types.levels import Level
 from marconi.engine.types.models import Modem
 from marconi.engine.types.step import Step
+from marconi.mcp.tools import validate_modem
 
 IQ = Descriptor(Level.IQ, ItemType.C)
 _SPS = 2
@@ -168,3 +170,35 @@ def test_open_loop_chain_routes_through_burst_sampler() -> None:
     add = next(b for b in pipe.blocks if b.kind == "add_const_ff")
     assert mul.params["value"] == 2.0
     assert add.params["value"] == -1.0
+
+
+def _spec(loop_bw: float) -> dict[str, Any]:
+    # closed-loop (loop_bw>0) still needs an upstream amplitude convention
+    # (see _modem above); open-loop carries no agc stage at all, so building
+    # both cases from one helper keeps the amplitude gate from masking the
+    # sps gate this test targets
+    path: list[dict[str, Any]] = []
+    if loop_bw > 0.0:
+        path.append({"conv": "agc", "window_symbols": 4096.0})
+    path += [{"conv": "ook_envelope", "loop_bw": loop_bw}, {"conv": "slice"}]
+    return {"symbol_rate": _SYMBOL_RATE, "path": path}
+
+
+def test_open_loop_valid_at_native_sps_one() -> None:
+    # the seam under test: burst_sampler re-acquires timing per burst, so
+    # open-loop needs no oversampling margin above the symbol rate itself
+    out = validate_modem(_spec(0.0), sample_rate=_SYMBOL_RATE)
+    assert out["valid"] is True, out
+
+
+def test_closed_loop_invalid_at_native_sps_one() -> None:
+    # unchanged: the continuous Gardner loop still needs its 2 sps floor
+    out = validate_modem(_spec(0.045), sample_rate=_SYMBOL_RATE)
+    assert out["valid"] is False
+    errors = cast(list[dict[str, object]], out["errors"])
+    assert any("samples per symbol" in cast(str, e["message"]) for e in errors), errors
+
+
+def test_open_loop_still_valid_at_sps_two() -> None:
+    out = validate_modem(_spec(0.0), sample_rate=_SAMPLE_RATE)
+    assert out["valid"] is True, out

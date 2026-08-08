@@ -93,8 +93,8 @@ def _trailing_mean(block: np.ndarray, window: int) -> np.ndarray:
 
 
 def make_burst_sampler(gr: Any, *, sps: float) -> Any:
-    if sps < 2.0:
-        raise ValueError(f"burst_sampler needs sps >= 2, got {sps}")
+    if sps < 1.0:
+        raise ValueError(f"burst_sampler needs sps >= 1, got {sps}")
     stride = float(sps)
     phases = int(math.ceil(stride))
     pad = _PAD_CHIPS * phases
