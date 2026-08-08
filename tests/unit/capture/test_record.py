@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 
 from marconi.capture import CaptureError
-from marconi.capture.record import _levels, _reconcile
+from marconi.capture.record import _levels, _reconcile, build_capture_pipeline
 from marconi.errors import classify_error
 
 
@@ -68,3 +68,53 @@ def test_levels_zero_mean_tone_has_no_dc(tmp_path: Path) -> None:
     assert lv.rms == pytest.approx(0.7, abs=1e-3)
     assert lv.dc_offset == pytest.approx(0.0, abs=1e-3)
     assert lv.clip_fraction == 0.0
+
+
+def test_pipeline_shape_agc(tmp_path: Path) -> None:
+    p = build_capture_pipeline(
+        out_path=tmp_path / "iq.cf32",
+        device="",
+        sample_rate=2.048e6,
+        center_hz=100e6,
+        gain_db=None,
+        ppm=0.0,
+        settle_samples=409600,
+        num_samples=10240000,
+    )
+    assert [b.kind for b in p.blocks] == [
+        "soapy_source",
+        "iq_skiphead",
+        "iq_head",
+        "iq_file_sink",
+    ]
+    src = p.block("src")
+    assert src.params["agc"] is True
+    assert "gain_db" not in src.params
+    assert src.params["sample_rate"] == 2.048e6
+    assert src.params["center_hz"] == 100e6
+    assert p.block("settle").params["num_items"] == 409600
+    assert p.block("bound").params["num_items"] == 10240000
+    assert p.block("sink").params["path"] == str(tmp_path / "iq.cf32")
+    assert [(c.src_block, c.dst_block) for c in p.connections] == [
+        ("src", "settle"),
+        ("settle", "bound"),
+        ("bound", "sink"),
+    ]
+
+
+def test_pipeline_manual_gain_and_ppm(tmp_path: Path) -> None:
+    p = build_capture_pipeline(
+        out_path=tmp_path / "iq.cf32",
+        device="driver=rtlsdr",
+        sample_rate=1.024e6,
+        center_hz=433.92e6,
+        gain_db=28.0,
+        ppm=2.5,
+        settle_samples=204800,
+        num_samples=1024000,
+    )
+    src = p.block("src")
+    assert src.params["agc"] is False
+    assert src.params["gain_db"] == 28.0
+    assert src.params["ppm"] == 2.5
+    assert src.params["device"] == "driver=rtlsdr"

@@ -6,6 +6,8 @@ from typing import Literal
 import numpy as np
 from pydantic import BaseModel
 
+from marconi.engine.compile.ir import GrBlock, GrConnection, GrPipeline
+from marconi.engine.types.params import ParamValue
 from marconi.errors import register_error
 
 _SETTLE_S = 0.2
@@ -86,4 +88,43 @@ def _levels(path: Path) -> CaptureLevels:
         rms=round(rms, 4),
         dc_offset=round(dc, 4),
         clip_fraction=round(float(np.mean(clipped)), 4),
+    )
+
+
+def build_capture_pipeline(
+    *,
+    out_path: Path,
+    device: str,
+    sample_rate: float,
+    center_hz: float,
+    gain_db: float | None,
+    ppm: float,
+    settle_samples: int,
+    num_samples: int,
+) -> GrPipeline:
+    source_params: dict[str, ParamValue] = {
+        "device": device,
+        "sample_rate": sample_rate,
+        "center_hz": center_hz,
+        "ppm": ppm,
+        "agc": gain_db is None,
+    }
+    if gain_db is not None:
+        source_params["gain_db"] = gain_db
+    return GrPipeline(
+        name="capture",
+        sample_rate=sample_rate,
+        blocks=[
+            GrBlock(id="src", kind="soapy_source", params=source_params),
+            GrBlock(
+                id="settle", kind="iq_skiphead", params={"num_items": settle_samples}
+            ),
+            GrBlock(id="bound", kind="iq_head", params={"num_items": num_samples}),
+            GrBlock(id="sink", kind="iq_file_sink", params={"path": str(out_path)}),
+        ],
+        connections=[
+            GrConnection(src_block="src", dst_block="settle"),
+            GrConnection(src_block="settle", dst_block="bound"),
+            GrConnection(src_block="bound", dst_block="sink"),
+        ],
     )
