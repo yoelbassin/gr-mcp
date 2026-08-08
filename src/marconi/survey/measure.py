@@ -43,6 +43,16 @@ def _downsample(a: np.ndarray, cap: int) -> np.ndarray:
     return trimmed.reshape(-1, groups).mean(axis=1)
 
 
+def _sig(x: float, figs: int = 4) -> float:
+    # Round a scale-spanning dimensionless value to `figs` significant figures:
+    # keeps a small std and an O(1) ratio equally readable, and never rounds a
+    # positive to zero (unlike a fixed decimal place). Hz values round to 0.1
+    # instead — an absolute grid the agent matches candidates against.
+    if not np.isfinite(x) or x == 0.0:
+        return float(x)
+    return float(round(x, figs - 1 - int(np.floor(np.log10(abs(x))))))
+
+
 def _spectrum(x: np.ndarray, sample_rate: float) -> SpectrumStats:
     nperseg = int(min(_SURVEY_NPERSEG, x.size))
     f, pxx = welch(
@@ -78,10 +88,10 @@ def _envelope(x: np.ndarray) -> EnvelopeStats:
     std = float(a.std())
     kurt = float(((a - mean) ** 4).mean() / std**4 - 3.0) if std > 0 else 0.0
     return EnvelopeStats(
-        const_envelope_ratio=std / mean if mean > 0 else 0.0,
-        amplitude_kurtosis=kurt,
-        mean_amplitude=mean,
-        std_amplitude=std,
+        const_envelope_ratio=_sig(std / mean) if mean > 0 else 0.0,
+        amplitude_kurtosis=_sig(kurt),
+        mean_amplitude=_sig(mean),
+        std_amplitude=_sig(std),
     )
 
 
@@ -302,12 +312,12 @@ def _symbol_rate(
     eyes = [_eye_openness(dphi, active_pairs, sample_rate, r) for r in candidates]
     candidates, strengths, eyes = _rerank_by_eye(candidates, strengths, eyes)
     return SymbolRateStats(
-        candidates_hz=candidates,
-        strengths=strengths,
-        eye_openness=eyes,
-        search_lo_hz=lo,
-        search_hi_hz=hi,
-        clock_resolution_hz=float(dfa),
+        candidates_hz=[round(c, 1) for c in candidates],
+        strengths=[_sig(s) for s in strengths],
+        eye_openness=[_sig(e) for e in eyes],
+        search_lo_hz=round(lo, 1),
+        search_hi_hz=round(hi, 1),
+        clock_resolution_hz=round(float(dfa), 1),
     )
 
 
@@ -420,7 +430,7 @@ def _bursts(sample_x: np.ndarray, path: Path, offset: int, length: int) -> Burst
     dom = int(np.median(deltas)) if deltas.size else None
     return BurstStats(
         count=len(segs),
-        duty_cycle=active_total / pos if pos else 0.0,
+        duty_cycle=_sig(active_total / pos) if pos else 0.0,
         dominant_period_samples=dom,
         segments=segs,
     )
