@@ -171,3 +171,30 @@ def test_flushes_a_long_continuous_region_without_finality() -> None:
     z = sym[1:] * np.conj(sym[:-1])
     r4 = _r4(z)
     assert r4 > 0.9, r4
+
+
+def test_gates_a_gap_larger_than_one_detection_block() -> None:
+    # A per-block peak (the regression this guards) recomputes its
+    # threshold from each _FLOOR_BLOCK (1024-sample) chunk alone - a gap
+    # this long (well over 2 full chunks) has chunks that are ENTIRELY
+    # noise, whose own top decile that same per-block peak would read as
+    # "active". A persistent peak instead compares each chunk against what
+    # signal has actually looked like recently, so a pure-noise chunk deep
+    # inside a real gap correctly reads idle.
+    gap = 320  # symbols; 320*8=2560 samples, over 2 full _FLOOR_BLOCK chunks
+    length = 80
+    iq = _bursty(nbursts=2, L=length, gap=gap, sto=0.37, sfo_ppm=25.0, snr=25)
+    mf = np.convolve(iq.astype(complex), _RRC, "same").astype(np.complex64)
+    blk = make_oerder_meyr(FAKE_GR, sps=_BURST_SPS, window=64)
+    blk.eof_probe = _finality_probe(mf.size)
+    sym = drive(blk, mf, chunk=mf.size, out_dtype=np.complex64)
+
+    # Well inside the gap, clear of both burst edges' RRC spillover.
+    gap_region = sym[length + 50 : length + gap - 50]
+    assert gap_region.size > 0
+    max_gap_amp = float(np.max(np.abs(gap_region)))
+    assert max_gap_amp == 0.0, max_gap_amp  # idle emits a literal zero
+
+    z = sym[1:] * np.conj(sym[:-1])
+    r4 = _r4(z)
+    assert r4 > 0.9, r4

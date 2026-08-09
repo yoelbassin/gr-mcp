@@ -18,9 +18,10 @@ dodge it, since a window boundary is not a burst boundary. The fix - proven
 in `.superpowers/sdd/2026-08-09-open-loop-complex-timing/task-2-rework-
 prototype.py` - is per-burst framing: detect each burst on |x|^2 (the same
 rise/fall-vs-a-tracked-reference control flow `burst_sampler` uses for OOK's
-raw envelope, adapted to PSK's power - see `_activity_mask` below for why
-the reference is peak-relative per block rather than an EMA floor), buffer
-it, and estimate ONE tau over the burst's EDGE-EXCLUDED interior (drop the
+raw envelope, adapted to PSK's power - see `_update_peak` below for why the
+reference is a persistent, asymmetric-EMA-tracked peak rather than a per-
+block statistic or a floor), buffer it, and estimate ONE tau over the
+burst's EDGE-EXCLUDED interior (drop the
 first/last `span` symbols, the RRC transient) before cubic-resampling the
 whole burst at that tau. Symbols land on a global grid at m*stride (mirrors
 `burst_sampler._k`) that never resets at a burst boundary, with idle/gap
@@ -33,6 +34,16 @@ follows `burst_sampler`: fixed-size internal blocks, no feedback loop, no
 volk in-block, so identical input yields identical output regardless of how
 the caller chunks it. The block withholds an unfinished burst tail at EOF
 (suite convention: sims pad).
+
+Idle emission is gated RELATIVE TO A TRACKED SIGNAL-LEVEL PEAK (see
+`_update_peak`), not an unconditional guarantee: a genuine gap between real
+bursts is correctly read as idle and emits zero, but a capture that carries
+no real signal at ALL - pure noise, cover to cover - is not detected as
+silence, because a constant-envelope signal and constant-envelope noise are
+locally identical in power; telling them apart needs clock-line detection,
+out of scope here. That input is processed into garbage symbols instead,
+which is the downstream quality layer's job to flag as no-signal - this
+block never manufactures a false decode by mistaking noise for zero.
 
 A burst-only fall trigger has a blind spot: a CONTINUOUS transmission is
 one active region that never falls, and in a ratio-1 engine chain (this
@@ -95,14 +106,25 @@ def resample_symbols(
 
 
 _FLOOR_BLOCK = 1024  # fixed detection granularity (chunk-independent)
-_THRESH_FRAC = 0.25  # active threshold, as a fraction of the block's own
-# peak reference - matches the validated prototype's per_burst threshold
-# (0.25 * the median of the block's top decile). A reference relative to
-# the block's OWN peak - rather than an absolute multiple of a slowly-
-# tracked floor - is what makes detection work identically whether the
-# block is mostly idle (a real gap) or wall-to-wall signal (a continuous
-# transmission): an EMA floor bootstrapped from an all-active block reads
-# as "the floor", leaving no headroom to ever call anything a burst.
+_THRESH_FRAC = 0.25  # active threshold, as a fraction of the TRACKED PEAK
+# (see _update_peak) - matches the validated prototype's per_burst
+# threshold (0.25 * the median of the block's top decile), just against a
+# peak that persists across blocks instead of being recomputed from each
+# block alone. A PER-BLOCK peak was tried first and is wrong: a gap longer
+# than one _FLOOR_BLOCK (or any pure-noise stretch) has its own top decile
+# too, so a threshold relative to THAT reads the gap's own noise as
+# "active" - verified, pure AWGN false-triggers a burst in ~100% of blocks
+# under a per-block peak. This matters for the block's actual use case:
+# real inter-burst gaps in a bursty PSK capture are routinely longer than
+# one block.
+_PEAK_RISE = 1.0 / 8.0  # _peak EMA rate when a block's own high-power level
+# exceeds the tracked peak - fast, so a burst's true level is captured in
+# essentially one block rather than many
+_PEAK_DECAY = 1.0 / 64.0  # ... when it's below - slow, so the peak
+# SURVIVES a gap (or any pure-noise stretch) instead of collapsing toward
+# that block's own level; a continuous signal, whose blocks never read
+# below the peak, never decays it at all and stays classified active
+# throughout
 _SMOOTH_SYMS = 1  # activity-envelope smoothing width, one symbol (matches
 # the prototype's uniform_filter1d(p, SPS))
 _RISE_SYMS = 1  # sustained-active symbols to confirm a burst START
@@ -126,12 +148,14 @@ _MIN_INTERIOR_SYMS = 2  # tau-estimation interior shorter than this falls
 # back to the whole burst
 
 
-def _activity_mask(power: np.ndarray, smooth_w: int) -> np.ndarray:
-    smoothed = _trailing_mean(power, smooth_w)
+def _block_peak(smoothed: np.ndarray) -> float:
     p90 = float(np.percentile(smoothed, 90))
     top = smoothed[smoothed > p90]
-    peak_ref = float(np.median(top)) if top.size else p90
-    return smoothed > _THRESH_FRAC * peak_ref
+    return float(np.median(top)) if top.size else p90
+
+
+def _activity_mask(smoothed: np.ndarray, peak: float) -> np.ndarray:
+    return smoothed > _THRESH_FRAC * peak
 
 
 def make_oerder_meyr(gr: Any, *, sps: float, window: int = 64, span: int = 11) -> Any:
@@ -168,6 +192,7 @@ def make_oerder_meyr(gr: Any, *, sps: float, window: int = 64, span: int = 11) -
             self._burst_start = 0  # absolute sample index this burst began at
             self._in_burst = False
             self._quiet = 0
+            self._peak = 0.0  # persistent tracked signal-level peak
             self.eof_probe: Any = None  # set by build wiring; None => no flush
             self._eof_done = False
             self.diagnostics = {
@@ -218,15 +243,25 @@ def make_oerder_meyr(gr: Any, *, sps: float, window: int = 64, span: int = 11) -
                 self._process_block(self._pending)
                 self._pending = np.empty(0, np.complex64)
             if self._in_burst:
-                self.diagnostics["bursts_truncated_at_eof"] += 1
-                self._flush_burst(self._abs)
+                if self._flush_burst(self._abs):
+                    self.diagnostics["bursts_truncated_at_eof"] += 1
                 self._in_burst = False
+
+        def _update_peak(self, smoothed: np.ndarray) -> float:
+            blk_hi = _block_peak(smoothed)
+            if self._peak == 0.0:
+                self._peak = blk_hi
+            else:
+                rate = _PEAK_RISE if blk_hi > self._peak else _PEAK_DECAY
+                self._peak += rate * (blk_hi - self._peak)
+            return self._peak
 
         def _process_block(self, block: np.ndarray) -> None:
             power = (
                 block.real.astype(np.float64) ** 2 + block.imag.astype(np.float64) ** 2
             )
-            active = _activity_mask(power, smooth_w)
+            smoothed = _trailing_mean(power, smooth_w)
+            active = _activity_mask(smoothed, self._update_peak(smoothed))
             base = self._abs
             n = len(block)
             i = 0
@@ -260,8 +295,8 @@ def make_oerder_meyr(gr: Any, *, sps: float, window: int = 64, span: int = 11) -
                     # the next one from here, WITHOUT going back through
                     # rise detection - a fresh chunk of the same region, not
                     # a new region.
-                    self.diagnostics["regions_capped"] += 1
-                    self._flush_burst(base + j)
+                    if self._flush_burst(base + j):
+                        self.diagnostics["regions_capped"] += 1
                     self._start_burst(base + j)
             self._abs = base + n
 
@@ -291,6 +326,10 @@ def make_oerder_meyr(gr: Any, *, sps: float, window: int = 64, span: int = 11) -
             # that pollutes any downstream statistic spanning a burst
             # boundary (e.g. a differential decode straddling idle). Zero is
             # also the cleanest possible "magnitude-gated downstream" value.
+            # Whether a span COUNTS as idle in the first place is decided by
+            # the caller's persistent-peak-gated activity mask (_update_peak
+            # / _activity_mask), not by anything here - this only fires once
+            # that gate has already said "nothing real is happening".
             bases = self._advance_grid(base + hi)
             if bases.size:
                 self._out.push(np.zeros(bases.size, np.complex64))
@@ -300,22 +339,26 @@ def make_oerder_meyr(gr: Any, *, sps: float, window: int = 64, span: int = 11) -
             interior = seg[lo:hi] if hi - lo >= min_interior else seg
             return estimate_tau(interior, stride)
 
-        def _flush_burst(self, end: int) -> None:
-            """Commit whatever's buffered as one tau-estimated chunk. Purely
-            a commit: it does NOT touch _in_burst/_quiet - the caller owns
-            that transition, since a flush can mean either "this region just
+        def _flush_burst(self, end: int) -> bool:
+            """Commit whatever's buffered as one tau-estimated chunk, and
+            report whether there was anything to commit. Purely a commit: it
+            does NOT touch _in_burst/_quiet - the caller owns that
+            transition, since a flush can mean either "this region just
             ended" (exit burst mode) or "this region is still going, just
-            capped" (start a fresh chunk immediately, same region)."""
+            capped" (start a fresh chunk immediately, same region). The
+            bool return lets a caller avoid counting an empty commit (e.g. a
+            cap that landed exactly on the last sample, immediately
+            restarted, then found nothing buffered at EOF) as a real flush."""
             seg = (
                 np.concatenate(self._burst)
                 if self._burst
                 else np.empty(0, np.complex64)
             )
             s = self._burst_start
-            self.diagnostics["bursts_flushed"] += 1
             bases = self._advance_grid(end)
             if bases.size == 0 or seg.size == 0:
-                return
+                return False
+            self.diagnostics["bursts_flushed"] += 1
             tau = self._burst_tau(seg)
             # tau is the offset (in [-0.5, 0.5) symbols) from LOCAL INDEX 0 of
             # seg to the nearest true symbol peak - the whole comb of peaks is
@@ -329,5 +372,6 @@ def make_oerder_meyr(gr: Any, *, sps: float, window: int = 64, span: int = 11) -
             instants = instant0 + np.arange(bases.size, dtype=np.float64) * stride
             sym = _cubic(seg.astype(np.complex128), instants).astype(np.complex64)
             self._out.push(sym)
+            return True
 
     return _OerderMeyr()
