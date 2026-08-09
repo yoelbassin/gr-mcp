@@ -88,3 +88,60 @@ def test_no_flush_without_a_finality_probe() -> None:
     out = drive(blk, x.astype(np.complex64), chunk=x.size, out_dtype=np.complex64)
     # a full window is withheld at EOF when finality is unknown (sim-pad rule)
     assert out.size <= x.size // 8
+
+
+_BURST_SPS = 8
+_RRC = _rrc(_BURST_SPS)
+
+
+def _r4(z: np.ndarray) -> float:
+    z = z[np.abs(z) > np.median(np.abs(z))]
+    return 0.0 if z.size < 8 else float(abs(np.mean(np.exp(1j * 4 * np.angle(z)))))
+
+
+def _bursty(
+    nbursts: int,
+    L: int,
+    gap: int,
+    sto: float,
+    sfo_ppm: float,
+    snr: float,
+    seed: int = 11,
+) -> np.ndarray:
+    rng = np.random.default_rng(seed)
+    seq: list[complex] = []
+    for _ in range(nbursts):
+        k = rng.integers(0, 4, L)
+        seq.extend(np.exp(1j * np.cumsum(k) * (np.pi / 2)).tolist())
+        seq.extend([0j] * gap)
+    up = np.zeros(len(seq) * _BURST_SPS, complex)
+    up[::_BURST_SPS] = np.asarray(seq)
+    x = np.convolve(up, _RRC, "same")
+    n = np.arange(x.size)
+    warped = n * (1 + sfo_ppm * 1e-6) + sto
+    xw = np.interp(warped, n, x.real) + 1j * np.interp(warped, n, x.imag)
+    pw = np.mean(np.abs(xw[np.abs(xw) > 1e-6]) ** 2)
+    noise = np.sqrt(pw / 10 ** (snr / 10) / 2) * (
+        rng.standard_normal(xw.size) + 1j * rng.standard_normal(xw.size)
+    )
+    return (xw + noise).astype(np.complex64)
+
+
+def _burst_recovery_r4(nbursts: int, length: int, gap: int) -> float:
+    iq = _bursty(nbursts=nbursts, L=length, gap=gap, sto=0.37, sfo_ppm=25.0, snr=25)
+    mf = np.convolve(iq.astype(complex), _RRC, "same").astype(np.complex64)
+    blk = make_oerder_meyr(FAKE_GR, sps=_BURST_SPS, window=64)
+    blk.eof_probe = _finality_probe(mf.size)
+    sym = drive(blk, mf, chunk=mf.size, out_dtype=np.complex64)
+    z = sym[1:] * np.conj(sym[:-1])
+    return _r4(z)
+
+
+def test_recovers_short_bursts() -> None:
+    r4 = _burst_recovery_r4(nbursts=60, length=80, gap=120)
+    assert r4 > 0.9, r4  # fixed-window block scored 0.78 here; per-burst ~0.99
+
+
+def test_recovers_shorter_bursts() -> None:
+    r4 = _burst_recovery_r4(nbursts=60, length=40, gap=80)
+    assert r4 > 0.9, r4  # fixed-window block scored 0.65 here; per-burst ~0.955

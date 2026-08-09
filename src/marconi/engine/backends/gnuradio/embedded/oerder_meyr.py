@@ -4,14 +4,36 @@ resampling, for the same class of problem `burst.py` solves for OOK/PPM -
 a bursty/short signal that never gives a tracking LOOP time to converge.
 Stock `symbol_sync_cc`/`pfb_clock_sync_ccf` are second-order loops: they
 settle over many symbols and rail (mistrack) before a short burst ends. The
-Oerder & Meyr estimator has no settling time - one FFT-line phase per block
-- so it fits bursts a loop cannot. `estimate_tau`/`resample_symbols` are the
-pure-numpy estimator and interpolator (this module's functions above);
-`make_oerder_meyr` below streams them: a global symbol grid at m*sps
-(mirrors `burst_sampler._k`) so window boundaries never insert or drop a
-symbol, a fresh tau per window of `window` symbols (tracks slow SFO across
-windows), and no in-block volk or feedback loop, so identical input yields
-identical output regardless of how the caller chunks it."""
+Oerder & Meyr estimator has no settling time - one FFT-line phase per burst
+- so it fits bursts a loop cannot. `estimate_tau`/`_cubic` are the pure-
+numpy estimator and interpolator (this module's functions above);
+`make_oerder_meyr` below streams them.
+
+A single tau per FIXED WINDOW (the shipped-then-reworked design) under-
+recovers short bursts: measured R4 (constellation cleanliness) was 0.65 at
+40-symbol bursts and 0.78 at 80-symbol bursts, flat regardless of window
+size, because the RRC matched filter's ~`span`-symbol transient at every
+burst EDGE biases any burst-spanning tau estimate - no fixed window can
+dodge it, since a window boundary is not a burst boundary. The fix - proven
+in `.superpowers/sdd/2026-08-09-open-loop-complex-timing/task-2-rework-
+prototype.py` - is per-burst framing: detect each burst on |x|^2 (the same
+rise/fall-vs-a-tracked-reference control flow `burst_sampler` uses for OOK's
+raw envelope, adapted to PSK's power - see `_activity_mask` below for why
+the reference is peak-relative per block rather than an EMA floor), buffer
+it, and estimate ONE tau over the burst's EDGE-EXCLUDED interior (drop the
+first/last `span` symbols, the RRC transient) before cubic-resampling the
+whole burst at that tau. Symbols land on a global grid at m*stride (mirrors
+`burst_sampler._k`) that never resets at a burst boundary, with idle/gap
+spans emitting a literal zero per grid position (unlike burst_sampler's
+scaled-noise idle chip - see `_emit_idle` for why a complex symbol stream
+wants an unambiguous "nothing here" rather than a small-but-nonzero,
+random-phase sample) - so the emitted count stays exactly input_len //
+stride and a burst boundary can never insert or drop a symbol. Determinism
+follows
+`burst_sampler`: fixed-size internal blocks, no feedback loop, no volk in-
+block, so identical input yields identical output regardless of how the
+caller chunks it. The block withholds an unfinished burst tail at EOF (suite
+convention: sims pad)."""
 
 from __future__ import annotations
 
@@ -19,6 +41,10 @@ from typing import Any
 
 import numpy as np
 
+from marconi.engine.backends.gnuradio.embedded.burst import (
+    _sustained_runs,
+    _trailing_mean,
+)
 from marconi.engine.backends.gnuradio.embedded.lifecycle import (
     OutQueue,
     forecast_drain,
@@ -56,14 +82,54 @@ def resample_symbols(
     return _cubic(samples.astype(np.complex128), instants).astype(np.complex64)
 
 
-def make_oerder_meyr(gr: Any, *, sps: float, window: int = 64) -> Any:
+_FLOOR_BLOCK = 1024  # fixed detection granularity (chunk-independent)
+_THRESH_FRAC = 0.25  # active threshold, as a fraction of the block's own
+# peak reference - matches the validated prototype's per_burst threshold
+# (0.25 * the median of the block's top decile). A reference relative to
+# the block's OWN peak - rather than an absolute multiple of a slowly-
+# tracked floor - is what makes detection work identically whether the
+# block is mostly idle (a real gap) or wall-to-wall signal (a continuous
+# transmission): an EMA floor bootstrapped from an all-active block reads
+# as "the floor", leaving no headroom to ever call anything a burst.
+_SMOOTH_SYMS = 1  # activity-envelope smoothing width, one symbol (matches
+# the prototype's uniform_filter1d(p, SPS))
+_RISE_SYMS = 1  # sustained-active symbols to confirm a burst START
+_FALL_SYMS = 2  # sustained-INactive symbols to confirm a burst END - short,
+# because PSK's matched-filtered envelope (unlike OOK's on/off chips) never
+# holds a legitimate in-burst dip this long; keeping it short also keeps
+# the noise tail folded into a flushed burst well inside the `span`-symbol
+# edge exclusion the tau estimate drops, and out of the burst's resampled
+# output (see _emit_idle for why that tail matters beyond the tau estimate)
+_MAX_BURST_SYMS = 1 << 15  # cap: beyond this, commit tau from what's
+# buffered so far and continue as a fresh burst
+_MIN_INTERIOR_SYMS = 2  # tau-estimation interior shorter than this falls
+# back to the whole burst
+
+
+def _activity_mask(power: np.ndarray, smooth_w: int) -> np.ndarray:
+    smoothed = _trailing_mean(power, smooth_w)
+    p90 = float(np.percentile(smoothed, 90))
+    top = smoothed[smoothed > p90]
+    peak_ref = float(np.median(top)) if top.size else p90
+    return smoothed > _THRESH_FRAC * peak_ref
+
+
+def make_oerder_meyr(gr: Any, *, sps: float, window: int = 64, span: int = 11) -> Any:
     if sps < 1.0:
         raise ValueError(f"oerder_meyr needs sps >= 1, got {sps}")
     if window < 1:
         raise ValueError(f"oerder_meyr needs window >= 1, got {window}")
+    if span < 1:
+        raise ValueError(f"oerder_meyr needs span >= 1, got {span}")
     stride = int(round(sps))
-    win_syms = int(window)
-    margin = 2 * stride  # retained trailing/leading history for the cubic
+    edge = span * stride
+    min_interior = _MIN_INTERIOR_SYMS * stride
+    smooth_w = _SMOOTH_SYMS * stride
+    rise_run = _RISE_SYMS * stride
+    fall_run = _FALL_SYMS * stride
+    max_burst = _MAX_BURST_SYMS * stride
+    # `window` is unused now that one tau is estimated per burst rather than
+    # per fixed window; kept as a parameter for call-site/API stability.
 
     class _OerderMeyr(gr.basic_block):
         def __init__(self) -> None:
@@ -74,12 +140,17 @@ def make_oerder_meyr(gr: Any, *, sps: float, window: int = 64) -> Any:
                 out_sig=[np.complex64],
             )
             self._out = OutQueue(np.complex64)
-            self._pending = np.empty(0, np.complex64)
-            self._abs = 0  # absolute sample index of self._pending[0]
-            self._m = 0  # next global symbol index to emit; always a
-            # multiple of win_syms outside of _flush_tail
+            self._pending = np.empty(0, np.complex64)  # < _FLOOR_BLOCK carryover
+            self._abs = 0  # absolute index of the next input sample to classify
+            self._m = 0  # next global symbol index; its base is round(m*stride)
+            self._burst: list[np.ndarray] = []
+            self._burst_len = 0
+            self._burst_start = 0  # absolute sample index this burst began at
+            self._in_burst = False
+            self._quiet = 0
             self.eof_probe: Any = None  # set by build wiring; None => no flush
             self._eof_done = False
+            self.diagnostics = {"bursts_flushed": 0, "bursts_truncated_at_eof": 0}
 
         def forecast(self, noutput_items: int, ninputs: int) -> list[int]:
             return forecast_drain(self._out.pending, ninputs)
@@ -91,7 +162,12 @@ def make_oerder_meyr(gr: Any, *, sps: float, window: int = 64) -> Any:
                     [self._pending, np.asarray(inp, np.complex64)]
                 )
                 self.consume(0, len(inp))
-                self._process_ready()
+                while len(self._pending) >= _FLOOR_BLOCK:
+                    block, self._pending = (
+                        self._pending[:_FLOOR_BLOCK],
+                        self._pending[_FLOOR_BLOCK:],
+                    )
+                    self._process_block(block)
             if not self._eof_done and self._eof_final():
                 self._eof_done = True
                 self._flush_tail()
@@ -100,9 +176,9 @@ def make_oerder_meyr(gr: Any, *, sps: float, window: int = 64) -> Any:
         def _eof_final(self) -> bool:
             """Mirrors burst_sampler._eof_final: true only once every input
             sample this block will ever see has been consumed (source-
-            relative count proven by the probe), so the withheld tail
-            window is safe to commit. Without expected_items the sim-pad
-            withhold stands - see test_no_flush_without_a_finality_probe."""
+            relative count proven by the probe), so the withheld tail is
+            safe to commit. Without expected_items the sim-pad withhold
+            stands - see test_no_flush_without_a_finality_probe."""
             p = self.eof_probe
             return (
                 p is not None
@@ -110,56 +186,108 @@ def make_oerder_meyr(gr: Any, *, sps: float, window: int = 64) -> Any:
                 and int(self.nitems_read(0)) >= p.expected_items
             )
 
-        def _process_ready(self) -> None:
-            # Global symbol grid: window w covers symbols [m, m+win_syms) at
-            # nominal samples [m*stride, (m+win_syms)*stride) - fixed by m
-            # alone, so no chunk boundary can ever insert or drop a symbol.
-            available = self._abs + self._pending.size
-            while True:
-                start_abs = self._m * stride
-                end_abs = start_abs + win_syms * stride
-                if end_abs + margin > available:
-                    break
-                self._emit_window(start_abs, end_abs, available)
-            self._trim(self._m * stride - margin)
-
-        def _emit_window(self, start_abs: int, end_abs: int, available: int) -> None:
-            raw = self._pending[start_abs - self._abs : end_abs - self._abs]
-            tau = estimate_tau(raw, stride)
-            buf_lo = max(self._abs, start_abs - margin)
-            buf_hi = min(available, end_abs + margin)
-            buf = self._pending[buf_lo - self._abs : buf_hi - self._abs]
-            sym = resample_symbols(buf, stride, tau, start=float(start_abs - buf_lo))
-            self._out.push(sym[:win_syms])
-            self._m += win_syms
-
-        def _trim(self, keep_from_abs: int) -> None:
-            keep_from_abs = max(keep_from_abs, self._abs)
-            drop = keep_from_abs - self._abs
-            if drop > 0:
-                self._pending = self._pending[drop:]
-                self._abs += drop
-
         def _flush_tail(self) -> None:
-            """At true EOF, commit whatever symbols the retained tail still
-            holds - a window that streaming withheld only for lack of
-            trailing margin, plus any final partial window - as one
-            tau-estimated block (bursts-style _flush_tail)."""
-            total_abs = self._abs + self._pending.size
-            start_abs = self._m * stride
-            remaining = (total_abs - start_abs) // stride
-            if remaining > 0:
-                end_abs = start_abs + remaining * stride
-                raw = self._pending[start_abs - self._abs : end_abs - self._abs]
-                tau = estimate_tau(raw, stride)
-                buf_lo = max(self._abs, start_abs - margin)
-                buf = self._pending[buf_lo - self._abs :]
-                sym = resample_symbols(
-                    buf, stride, tau, start=float(start_abs - buf_lo)
-                )
-                self._out.push(sym[:remaining])
-                self._m += remaining
-            self._pending = np.empty(0, np.complex64)
-            self._abs = total_abs
+            """At true EOF, drain the withheld tail a real (unpadded)
+            capture leaves behind: process the sub-block _pending remainder,
+            then commit any burst still open (bursts-style _flush_tail)."""
+            if len(self._pending):
+                self._process_block(self._pending)
+                self._pending = np.empty(0, np.complex64)
+            if self._in_burst:
+                self.diagnostics["bursts_truncated_at_eof"] += 1
+                self._flush_burst(self._abs)
+
+        def _process_block(self, block: np.ndarray) -> None:
+            power = (
+                block.real.astype(np.float64) ** 2 + block.imag.astype(np.float64) ** 2
+            )
+            active = _activity_mask(power, smooth_w)
+            base = self._abs
+            n = len(block)
+            i = 0
+            while i < n:
+                if not self._in_burst:
+                    rises = _sustained_runs(active[i:], rise_run)
+                    if len(rises) == 0:
+                        self._emit_idle(base, n)
+                        break
+                    start = i + int(rises[0])
+                    self._emit_idle(base, start)
+                    self._burst = []
+                    self._burst_len = 0
+                    self._burst_start = base + start
+                    self._in_burst = True
+                    self._quiet = 0
+                    i = start
+                    continue
+                j = i
+                while j < n:
+                    self._quiet = self._quiet + 1 if not active[j] else 0
+                    j += 1
+                    if self._quiet >= fall_run:
+                        break
+                self._burst.append(block[i:j])
+                self._burst_len += j - i
+                i = j
+                if self._quiet >= fall_run or self._burst_len >= max_burst:
+                    self._flush_burst(base + j)
+            self._abs = base + n
+
+        def _advance_grid(self, limit: int) -> np.ndarray:
+            # Absolute base positions round(m*stride) for every global
+            # symbol m owned up to (not including) `limit`, advancing self._m
+            # past them - the global grid never resets at a burst boundary.
+            a = limit - self._m * stride
+            if a <= 0:
+                return np.empty(0, np.int64)
+            count = (a + stride - 1) // stride
+            bases = (self._m + np.arange(count, dtype=np.int64)) * stride
+            self._m += int(count)
+            return bases
+
+        def _emit_idle(self, base: int, hi: int) -> None:
+            # Literal zero, not a raw noisy sample: a zero can never be
+            # mistaken for a real constellation point downstream, whereas a
+            # small-but-nonzero noise sample still carries a random PHASE
+            # that pollutes any downstream statistic spanning a burst
+            # boundary (e.g. a differential decode straddling idle). Zero is
+            # also the cleanest possible "magnitude-gated downstream" value.
+            bases = self._advance_grid(base + hi)
+            if bases.size:
+                self._out.push(np.zeros(bases.size, np.complex64))
+
+        def _burst_tau(self, seg: np.ndarray) -> float:
+            lo, hi = edge, seg.size - edge
+            interior = seg[lo:hi] if hi - lo >= min_interior else seg
+            return estimate_tau(interior, stride)
+
+        def _flush_burst(self, end: int) -> None:
+            seg = (
+                np.concatenate(self._burst)
+                if self._burst
+                else np.empty(0, np.complex64)
+            )
+            s = self._burst_start
+            self._burst = []
+            self._burst_len = 0
+            self._in_burst = False
+            self._quiet = 0
+            self.diagnostics["bursts_flushed"] += 1
+            bases = self._advance_grid(end)
+            if bases.size == 0 or seg.size == 0:
+                return
+            tau = self._burst_tau(seg)
+            # tau is the offset (in [-0.5, 0.5) symbols) from LOCAL INDEX 0 of
+            # seg to the nearest true symbol peak - the whole comb of peaks is
+            # {(n + tau)*stride : n integer}. bases[0]-s is this burst's first
+            # owned GLOBAL symbol's nominal (untimed) local offset, which
+            # generally isn't itself a multiple of stride (a burst start
+            # rarely lands on the global grid), so it must be snapped to the
+            # nearest comb point rather than just added to tau*stride.
+            n0 = round(float(bases[0] - s) / stride - tau)
+            instant0 = (n0 + tau) * stride
+            instants = instant0 + np.arange(bases.size, dtype=np.float64) * stride
+            sym = _cubic(seg.astype(np.complex128), instants).astype(np.complex64)
+            self._out.push(sym)
 
     return _OerderMeyr()
