@@ -16,6 +16,8 @@ _MAX_DURATION_S = 300.0
 _TIMEOUT_MARGIN_S = 30.0
 _LEVELS_MAX_SAMPLES = 1 << 22
 _CLIP_THRESHOLD = 0.99
+_CLIP_WARN_FRACTION = 0.01
+_RMS_DEAD = 1e-3
 
 
 class CaptureError(Exception):
@@ -92,6 +94,21 @@ def _levels(path: Path) -> CaptureLevels:
         dc_offset=round(dc, 4),
         clip_fraction=round(float(np.mean(clipped)), 4),
     )
+
+
+def _level_warnings(levels: CaptureLevels) -> list[str]:
+    warnings: list[str] = []
+    if levels.clip_fraction > _CLIP_WARN_FRACTION:
+        warnings.append(
+            f"clip_fraction {levels.clip_fraction:g}: capture is railing at full "
+            "scale and distorting — lower gain_db (or set it, if on hardware AGC)"
+        )
+    if levels.rms < _RMS_DEAD:
+        warnings.append(
+            f"rms {levels.rms:g} near zero: no signal reaching the ADC — raise "
+            "gain_db or check the antenna/frequency"
+        )
+    return warnings
 
 
 def build_capture_pipeline(
@@ -209,6 +226,7 @@ def capture_iq(
         if result.status == "ok"
         else ("timeout" if result.status == "timeout" else "error")
     )
+    levels = _levels(out_path)
     return CaptureResult(
         status=status,
         path=str(out_path),
@@ -216,7 +234,7 @@ def capture_iq(
         center_hz=freq,
         num_samples=num_samples,
         duration_s=round(num_samples / rate, 3),
-        levels=_levels(out_path),
-        warnings=warnings,
+        levels=levels,
+        warnings=[*warnings, *_level_warnings(levels)],
         error=result.error,
     )

@@ -180,6 +180,7 @@ def test_symbol_rate_pure_noise_is_honest() -> None:
     s = _symbol_rate(x, fs, fs / 1000, fs / 2)
     assert len(s.candidates_hz) == len(s.strengths)
     assert len(s.strengths) < 2 or s.strengths[1] > 0.5 * s.strengths[0]
+    assert s.eye_confirmed is False
 
 
 @pytest.fixture
@@ -217,6 +218,14 @@ def test_symbol_rate_reranks_true_baud_above_spurious_line(
     assert stats.eye_openness  # populated, aligned to candidates
     assert len(stats.eye_openness) == len(stats.candidates_hz)
     assert abs(stats.candidates_hz[0] - true_baud) / true_baud < 0.05
+
+
+def test_eye_confirmed_true_when_a_clean_eye_clears(
+    _synth_fsk_capture: tuple[np.ndarray, float, float],
+) -> None:
+    x, fs, _ = _synth_fsk_capture
+    stats = _symbol_rate(x, fs, lo=fs / 1000, hi=fs / 2)
+    assert stats.eye_confirmed is True
 
 
 def test_symbol_rate_prefers_fundamental_over_harmonic(

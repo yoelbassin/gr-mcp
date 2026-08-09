@@ -138,6 +138,7 @@ class SymbolRateStats(BaseModel):
     candidates_hz: list[float]
     strengths: list[float]
     eye_openness: list[float]
+    eye_confirmed: bool
     search_lo_hz: float
     search_hi_hz: float
     clock_resolution_hz: float
@@ -240,11 +241,19 @@ def _damp_harmonics(
     return np.where(mask, strengths * _SURVEY_COMB_DAMPING, strengths)
 
 
+def _eye_cleared(eyes: list[float]) -> bool:
+    # A candidate's eye "clears" only above the measured smear ceiling, so this
+    # is the single source for both the re-rank trigger and the caller-facing
+    # eye_confirmed flag — when False, candidates_hz is strength-ranked only and
+    # untrustworthy for constant-envelope/pulse-shaped (GMSK/C4FM) signals.
+    return bool(eyes) and max(eyes) >= _CLEAR_EYE
+
+
 def _rerank_by_eye(
     candidates: list[float], strengths: list[float], eyes: list[float]
 ) -> tuple[list[float], list[float], list[float]]:
     order = list(range(len(candidates)))
-    if eyes and max(eyes) >= _CLEAR_EYE:
+    if _eye_cleared(eyes):
         thresh = _HARMONIC_FRAC * max(eyes)
         strong = [i for i in order if eyes[i] >= thresh]
         primary = min(strong, key=lambda i: candidates[i])
@@ -315,6 +324,7 @@ def _symbol_rate(
         candidates_hz=[round(c, 1) for c in candidates],
         strengths=[_sig(s) for s in strengths],
         eye_openness=[_sig(e) for e in eyes],
+        eye_confirmed=_eye_cleared(eyes),
         search_lo_hz=round(lo, 1),
         search_hi_hz=round(hi, 1),
         clock_resolution_hz=round(float(dfa), 1),

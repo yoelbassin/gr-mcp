@@ -6,7 +6,13 @@ import numpy as np
 import pytest
 
 from marconi.capture import CaptureError
-from marconi.capture.record import _levels, _reconcile, build_capture_pipeline
+from marconi.capture.record import (
+    CaptureLevels,
+    _level_warnings,
+    _levels,
+    _reconcile,
+    build_capture_pipeline,
+)
 from marconi.errors import classify_error
 
 
@@ -41,6 +47,21 @@ def test_reconcile_no_bindings_falls_back_to_requested() -> None:
     rate, freq, warnings = _reconcile(2.048e6, 100e6, None)
     assert (rate, freq) == (2.048e6, 100e6)
     assert len(warnings) == 1 and "unverified" in warnings[0]
+
+
+def test_level_warnings_flag_heavy_clipping() -> None:
+    w = _level_warnings(CaptureLevels(rms=0.8, dc_offset=0.0, clip_fraction=0.33))
+    assert len(w) == 1 and "clip" in w[0].lower()
+
+
+def test_level_warnings_flag_dead_rms() -> None:
+    w = _level_warnings(CaptureLevels(rms=0.0001, dc_offset=0.0, clip_fraction=0.0))
+    assert len(w) == 1 and "rms" in w[0].lower()
+
+
+def test_level_warnings_silent_on_healthy_capture() -> None:
+    healthy = CaptureLevels(rms=0.12, dc_offset=0.0, clip_fraction=0.0)
+    assert _level_warnings(healthy) == []
 
 
 def _write_cf32(path: Path, z: np.ndarray) -> Path:

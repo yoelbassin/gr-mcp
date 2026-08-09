@@ -510,8 +510,12 @@ def survey(
     (preferring the lower rate when more than one does, since a harmonic's
     eye can look clean too), falling back to the strength order when no eye
     clearly opens — so strengths[0] is not guaranteed to be the largest
-    strengths value. eye_openness is a clean-eye diagnostic, not an
-    authoritative rate finder: on noisy or pulse-shaped real off-air signals
+    strengths value. The boolean eye_confirmed reports which regime you are
+    in: true when a candidate's eye cleared and candidates_hz[0] is
+    eye-corroborated, false when none did and candidates_hz is strength-ranked
+    only (verify by demodulating — the usual case for constant-envelope /
+    pulse-shaped GMSK/C4FM signals). eye_openness is a clean-eye diagnostic,
+    not an authoritative rate finder: on noisy or pulse-shaped real off-air signals
     the eye can fail to clear its floor even at the true rate, in which case
     every candidate stays in cyclostationary-strength order, and that order
     is NOT trustworthy for constant-envelope/FSK-family signals — strengths
@@ -639,7 +643,8 @@ def capture_tool(
     cannot place inside the captured span raises instead of warning.
     "levels" is capture-chain health, not signal analysis: rms near zero
     means gain too low or no antenna; clip_fraction > 0 (samples at >= 0.99
-    full scale) means lower gain_db; dc_offset is the usual SDR center
+    full scale) means lower gain_db (a clearly railing or dead capture also
+    adds a warnings entry); dc_offset is the usual SDR center
     spike — prefer surveying/channelizing a sub-band away from DC rather
     than on it. Signal characterization (modulation, symbol rate, bursts)
     is survey's job on the returned path. The capture is raw: no DC
