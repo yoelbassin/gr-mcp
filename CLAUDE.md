@@ -52,6 +52,10 @@ If a new protocol needs to be added or checked for support, we can
 do it as a new test, constructing it using the Marconi API.
 - **Don't re-implement the wheel, base on existing implementations.**
 
+When reasoning, brainstorming and planning, always choose whats best long term, with
+the product and users in mind. Don't be afraid to do a bigger refactor, a bit more work,
+if it will benefit the product in the long run. Question every design decision, but alwayes
+think it through.
 
 
 ### Typing
