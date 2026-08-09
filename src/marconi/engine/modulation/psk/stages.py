@@ -18,7 +18,20 @@ class SymbolSyncStep(Step):
     conv: Literal["symbol_sync"] = "symbol_sync"
     sps: StrictInt  # explicit: rate_factor (1/sps) must be params-derivable
     alpha: float = 0.35
-    loop_bw: float = 0.045
+    loop_bw: float = Field(
+        default=0.045,
+        ge=0,
+        description=(
+            "Symbol-timing loop bandwidth. 0 = OPEN-LOOP feedforward timing "
+            "(Oerder-Meyr): a per-window |x|^2 clock-line phase estimate "
+            "resampled to one sample per symbol, no loop - for bursty or short "
+            "PSK where a Gardner loop cannot converge before the payload (the "
+            "reverse-engineering case, with no known preamble to burn on "
+            "acquisition). Open-loop requires sps>=4 (the |x|^2 line collapses "
+            "toward Nyquist at sps=2); the closed loop needs sps>=2. >0 = "
+            "continuous Gardner loop for sustained signals."
+        ),
+    )
     span: StrictInt = 11
 
     @model_validator(mode="after")
@@ -29,24 +42,33 @@ class SymbolSyncStep(Step):
             )
         if not 0.0 < self.alpha <= 1.0:
             raise PydanticCustomError("value_error", "alpha must be in (0, 1]")
-        if self.loop_bw < 0.0:
-            raise PydanticCustomError("value_error", "loop_bw must be > 0")
         if self.span < 1:
             raise PydanticCustomError("value_error", "span must be >= 1")
         return self
 
 
 class SymbolSync(RxStage[CompileContext, SymbolSyncStep]):
-    """Symbol-timing recovery, IQ->IQ: RRC matched filter + Gardner symbol_sync,
-    decimating an oversampled stream to one sample per symbol. This is
-    psk_demod's timing half split out, so a 1-sps seam opens where an equalizer
-    (or any per-symbol conditioning) can sit before carrier recovery. Unlike
-    psk_demod -- which hides its sps decimation inside the IQ->SYMBOLS level
-    change -- this stays at IQ and decimates honestly: rate_factor is 1/sps and
+    """Symbol-timing recovery, IQ->IQ: RRC matched filter, decimating an
+    oversampled stream to one sample per symbol, followed by either a
+    closed-loop Gardner symbol_sync (loop_bw>0) or open-loop feedforward
+    (Oerder-Meyr) timing (loop_bw=0). This is psk_demod's timing half split
+    out, so a 1-sps seam opens where an equalizer (or any per-symbol
+    conditioning) can sit before carrier recovery. Unlike psk_demod -- which
+    hides its sps decimation inside the IQ->SYMBOLS level change -- this
+    stays at IQ and decimates honestly: rate_factor is 1/sps and
     required_input_rate makes the explicit sps agree with the delivered rate.
     RX-only; output amplitude is UNKNOWN (the filters rescale)."""
 
     name = "symbol_sync"
+    description = (
+        "Symbol-timing recovery, IQ->IQ (RRC matched filter + timing). "
+        "loop_bw>0 uses a closed-loop Gardner symbol_sync; loop_bw=0 uses "
+        "open-loop feedforward (Oerder-Meyr) timing for bursty/short PSK. The "
+        "min_input_sps shown in describe_stages is the closed-loop default "
+        "(2); the open-loop path (loop_bw=0) requires sps>=4. The amplitude "
+        "contract (normalized input, via an upstream agc) is unchanged across "
+        "both modes."
+    )
     from_level = Level.IQ
     to_level = Level.IQ
     family = "psk"
