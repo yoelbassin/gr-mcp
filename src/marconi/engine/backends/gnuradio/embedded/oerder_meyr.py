@@ -250,7 +250,7 @@ def make_oerder_meyr(gr: Any, *, sps: float, window: int = 64, span: int = 11) -
         def _update_peak(self, smoothed: np.ndarray) -> float:
             blk_hi = _block_peak(smoothed)
             if self._peak == 0.0:
-                self._peak = blk_hi
+                self._peak = blk_hi if blk_hi > 0.0 else 1e-9
             else:
                 rate = _PEAK_RISE if blk_hi > self._peak else _PEAK_DECAY
                 self._peak += rate * (blk_hi - self._peak)

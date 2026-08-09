@@ -25,18 +25,14 @@ def _rrc(sps: int, span: int = 11, beta: float = 0.35) -> np.ndarray:
 
 def _bursty_dqpsk(
     nb: int, L: int, G: int, sto: float, sfo_ppm: float, snr: float, seed: int
-) -> tuple[np.ndarray, list, list]:
+) -> np.ndarray:
     rng = np.random.default_rng(seed)
     H = _rrc(SPS)
-    seq, pos, dib, p = [], [], [], 0
+    seq: list = []
     for _ in range(nb):
         k = rng.integers(0, 4, L)
         seq.extend(np.exp(1j * np.cumsum(k) * (np.pi / 2)).tolist())
-        pos.append(list(range(p, p + L)))
-        dib.append(k[1:].copy())
-        p += L
         seq.extend([0j] * G)
-        p += G
     up = np.zeros(len(seq) * SPS, complex)
     up[::SPS] = np.asarray(seq)
     x = np.convolve(up, H, "same")
@@ -49,7 +45,7 @@ def _bursty_dqpsk(
     x = x + np.sqrt(pw / 10 ** (snr / 10) / 2) * (
         rng.standard_normal(x.size) + 1j * rng.standard_normal(x.size)
     )
-    return x.astype(np.complex64), pos, dib
+    return x.astype(np.complex64)
 
 
 def _r4(z: np.ndarray) -> float:
@@ -81,7 +77,7 @@ def _decode(iq: np.ndarray, tmp: Path) -> np.ndarray:
 
 
 def test_open_loop_recovers_short_bursts(tmp_path: Path) -> None:
-    iq, _, _ = _bursty_dqpsk(60, 80, 120, sto=0.37, sfo_ppm=25.0, snr=25, seed=11)
+    iq = _bursty_dqpsk(60, 80, 120, sto=0.37, sfo_ppm=25.0, snr=25, seed=11)
     z = _decode(iq, tmp_path)
     assert _r4(z) > 0.9, _r4(z)  # spike: Gardner ~0.68 here; oracle ~0.998
 
@@ -91,7 +87,7 @@ def test_open_loop_recovers_continuous(tmp_path: Path) -> None:
     # cap-flush even though the engine's ratio-1 chain gives no finality probe.
     # z is already the differential_demod output; R4 measures its constellation
     # cleanliness directly (do NOT differentiate it again).
-    iq, _, _ = _bursty_dqpsk(1, 2000, 0, sto=0.29, sfo_ppm=10.0, snr=25, seed=12)
+    iq = _bursty_dqpsk(1, 2000, 0, sto=0.29, sfo_ppm=10.0, snr=25, seed=12)
     z = _decode(iq, tmp_path)
     assert z.size > 1000, z.size  # not withheld-forever (regressed to 0 once)
     assert _r4(z) > 0.95, _r4(z)  # matches the perfect-timing oracle (~0.996)

@@ -23,7 +23,8 @@ class SymbolSyncStep(Step):
         ge=0,
         description=(
             "Symbol-timing loop bandwidth. 0 = OPEN-LOOP feedforward timing "
-            "(Oerder-Meyr): a per-window |x|^2 clock-line phase estimate "
+            "(Oerder-Meyr): a per-burst |x|^2 clock-line phase estimate "
+            "(excluding the matched-filter transient at each burst edge) "
             "resampled to one sample per symbol, no loop - for bursty or short "
             "PSK where a Gardner loop cannot converge before the payload (the "
             "reverse-engineering case, with no known preamble to burn on "
@@ -60,6 +61,7 @@ class SymbolSync(RxStage[CompileContext, SymbolSyncStep]):
     RX-only; output amplitude is UNKNOWN (the filters rescale)."""
 
     name = "symbol_sync"
+    min_input_sps = 2.0
     description = (
         "Symbol-timing recovery, IQ->IQ (RRC matched filter + timing). "
         "loop_bw>0 uses a closed-loop Gardner symbol_sync; loop_bw=0 uses "
@@ -88,7 +90,7 @@ class SymbolSync(RxStage[CompileContext, SymbolSyncStep]):
             span=step.span,
         )
         if step.loop_bw == 0.0:
-            b.chain("oerder_meyr_timing", sps=step.sps)
+            b.chain("oerder_meyr_timing", sps=step.sps, span=step.span)
         else:
             b.chain("symbol_sync_cc", sps=step.sps, loop_bw=step.loop_bw)
 
