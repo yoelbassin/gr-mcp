@@ -29,7 +29,7 @@ class SymbolSyncStep(Step):
             )
         if not 0.0 < self.alpha <= 1.0:
             raise PydanticCustomError("value_error", "alpha must be in (0, 1]")
-        if self.loop_bw <= 0.0:
+        if self.loop_bw < 0.0:
             raise PydanticCustomError("value_error", "loop_bw must be > 0")
         if self.span < 1:
             raise PydanticCustomError("value_error", "span must be >= 1")
@@ -65,7 +65,10 @@ class SymbolSync(RxStage[CompileContext, SymbolSyncStep]):
             alpha=step.alpha,
             span=step.span,
         )
-        b.chain("symbol_sync_cc", sps=step.sps, loop_bw=step.loop_bw)
+        if step.loop_bw == 0.0:
+            b.chain("oerder_meyr_timing", sps=step.sps)
+        else:
+            b.chain("symbol_sync_cc", sps=step.sps, loop_bw=step.loop_bw)
 
     def rate_factor(self, step: SymbolSyncStep) -> float:
         return 1.0 / int(step.sps)
@@ -74,6 +77,9 @@ class SymbolSync(RxStage[CompileContext, SymbolSyncStep]):
         self, step: SymbolSyncStep, symbol_rate: float
     ) -> float | None:
         return int(step.sps) * symbol_rate
+
+    def min_input_sps_for(self, step: SymbolSyncStep) -> float | None:
+        return 4.0 if step.loop_bw == 0.0 else None
 
 
 class SampleSymbolsStep(Step):

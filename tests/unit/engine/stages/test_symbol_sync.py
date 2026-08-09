@@ -164,7 +164,7 @@ def test_symbol_sync_requires_a_known_scale() -> None:
 
 def test_symbol_sync_rejects_invalid_params() -> None:
     model = stage_registry()["symbol_sync"].step_model
-    for bad in ({"sps": 1}, {"sps": 4, "alpha": 0.0}, {"sps": 4, "loop_bw": 0.0}):
+    for bad in ({"sps": 1}, {"sps": 4, "alpha": 0.0}, {"sps": 4, "loop_bw": -0.01}):
         with pytest.raises(ValidationError):
             model.model_validate(bad)
 

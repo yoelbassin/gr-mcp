@@ -19,6 +19,7 @@ from marconi.engine.backends.gnuradio.embedded.decision import make_peak_decisio
 from marconi.engine.backends.gnuradio.embedded.framing import make_tag_gate
 from marconi.engine.backends.gnuradio.embedded.ldpc import make_ldpc_decoder
 from marconi.engine.backends.gnuradio.embedded.msk import make_msk_demod
+from marconi.engine.backends.gnuradio.embedded.oerder_meyr import make_oerder_meyr
 from marconi.engine.backends.gnuradio.embedded.ofdm import make_ofdm_frame_sync
 from marconi.engine.backends.gnuradio.embedded.pilot_lattice import (
     make_pilot_lattice_equalizer,
@@ -298,6 +299,9 @@ GR_BLOCKS: dict[str, Callable[[_GrCtx, Params], Any]] = {
         mf_oversample=_as_int(p.get("mf_oversample", 12)),
     ),
     "burst_sampler": lambda c, p: make_burst_sampler(c.gr, sps=_as_float(p["sps"])),
+    "oerder_meyr_timing": lambda c, p: make_oerder_meyr(
+        c.gr, sps=_as_float(p["sps"]), window=_as_int(p.get("window", 64))
+    ),
     "symbol_sync_ff": lambda c, p: c.digital.symbol_sync_ff(
         c.digital.TED_GARDNER,
         _as_float(p["sps"]),
