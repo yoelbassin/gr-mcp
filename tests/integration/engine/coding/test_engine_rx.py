@@ -8,7 +8,6 @@ from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_work
 from marconi.engine.coding.stages_bits import SyncWordStep
 from marconi.engine.coding.stages_symbols import SymbolMapStep, SyncSymbolsStep
 from marconi.engine.compile.compiler import (
-    CompileError,
     compile_modem,
     compile_pipeline,
 )
@@ -286,19 +285,25 @@ def test_marks_split_acquisition_harvest_from_coding_state(tmp_path: Path) -> No
     assert res.symbolstream.marks == [2]
 
 
-def test_iq_terminal_pipeline_is_rejected_before_running(tmp_path: Path) -> None:
+def test_iq_terminal_pipeline_returns_conditioned_iq(tmp_path: Path) -> None:
+    # an IQ-final path (no demod) is now a first-class conditioning result: the
+    # run returns the conditioned sub-band itself as a complex ("c") stream, to
+    # feed back into survey/stream_stats or the caller's own soft work.
     iq = tmp_path / "in.cf32"
-    np.zeros(8, np.complex64).tofile(iq)
+    np.ones(64, np.complex64).tofile(iq)
     modem = Modem(symbol_rate=1.0, path=[InvertStep()])
-    with pytest.raises(CompileError, match="IQ"):
-        run_rx(
-            modem,
-            stage_registry(),
-            sample_rate=8.0,
-            start=Descriptor(Level.IQ, ItemType.C),
-            workdir=tmp_path,
-            source_io={"path": str(iq)},
-        )
+    res = run_rx(
+        modem,
+        stage_registry(),
+        sample_rate=8.0,
+        start=Descriptor(Level.IQ, ItemType.C),
+        workdir=tmp_path,
+        source_io={"path": str(iq)},
+    )
+    assert res.status == "ok"
+    assert res.symbolstream is not None
+    assert res.symbolstream.item_type == "c"
+    assert res.symbolstream.num_symbols == 64
 
 
 def test_nonfinite_iq_source_is_an_error_before_the_gr_run(tmp_path: Path) -> None:

@@ -42,6 +42,23 @@ def _io_kinds(desc: Descriptor) -> tuple[str | None, str]:
     return _IO_BLOCKS[desc.item_type]
 
 
+_TRACE_SUFFIX: dict[ItemType, str] = {
+    ItemType.C: ".cf32",
+    ItemType.F: ".f32",
+    ItemType.S: ".i16",
+    ItemType.B: ".u8",
+}
+
+
+def trace_sink_path(
+    trace_dir: Path, index: int, conv: str, item_type: ItemType
+) -> Path:
+    """Where the trace tap for GR stage `index` (named `conv`, item_type per its
+    output boundary) writes. Shared by the compiler that emits the tap and the
+    runner that harvests it, so the two never disagree on the filename."""
+    return trace_dir / f"stage_{index}_{conv}{_TRACE_SUFFIX[item_type]}"
+
+
 def _source_kind(desc: Descriptor) -> str:
     src, _ = _io_kinds(desc)
     if src is None:
@@ -220,6 +237,7 @@ def _emit_gr_segment(
     sink_io: Mapping[str, ParamValue],
     name: str,
     soft_tap_path: Path | None = None,
+    trace_dir: Path | None = None,
 ) -> GrPipeline:
     n = len(steps)
     ctx = CompileContext(start, sample_rate, symbol_rate)
@@ -234,6 +252,13 @@ def _emit_gr_segment(
             stage.emit_rx(ctx, step)
             if boundaries[i + 1].item_type is ItemType.F:
                 soft_tail = ctx.tail
+            if trace_dir is not None and ctx.tail is not None:
+                out = boundaries[i + 1]
+                tap = ctx.add(
+                    _sink_kind(out),
+                    path=str(trace_sink_path(trace_dir, i, step.conv, out.item_type)),
+                )
+                ctx.connect(ctx.tail, tap)
         ctx.descriptor = boundaries[n]
         ctx.rate = rates[n]
         ctx.chain(_sink_kind(boundaries[n]), **dict(sink_io))
@@ -297,6 +322,9 @@ class CompiledPipeline:
     # sidecar the GR segment taps its last soft-symbol wire to, when an all-GR
     # path hard-slices a soft demod to bits; feeds the quality soft evidence.
     soft_seam: Path | None = None
+    # count of GR-segment stages (the coding split index); the trace taps cover
+    # exactly modem.path[:gr_steps], so the runner harvests them by this bound.
+    gr_steps: int = 0
 
 
 def compile_pipeline(
@@ -310,6 +338,7 @@ def compile_pipeline(
     sink_io: Mapping[str, ParamValue],
     name: str = "pipeline",
     quality_tap: bool = False,
+    trace_dir: Path | None = None,
 ) -> CompiledPipeline:
     if direction not in ("rx", "tx"):
         raise CompileError(f"direction must be 'rx' or 'tx', got {direction!r}")
@@ -348,6 +377,7 @@ def compile_pipeline(
             sink_io,
             name,
             soft_seam,
+            trace_dir,
         )
     coding: CodingProgram | None = None
     if k < len(steps):
@@ -370,6 +400,7 @@ def compile_pipeline(
         boundaries=boundaries,
         rates=rates,
         soft_seam=soft_seam,
+        gr_steps=k,
     )
 
 

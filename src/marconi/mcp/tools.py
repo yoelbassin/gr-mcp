@@ -112,6 +112,38 @@ def _soft_summary(result: PipelineResult) -> dict[str, object] | None:
     }
 
 
+_TRACE_STAT_KEYS: dict[str, tuple[str, ...]] = {
+    "c": ("mean_magnitude", "std_magnitude", "constant_modulus_ratio"),
+    "f": ("min", "max", "mean", "std"),
+    "s": ("min", "max", "mean", "std"),
+    "b": ("ones_fraction",),
+}
+
+
+def _trace_payload(result: PipelineResult) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    for st in result.trace:
+        row: dict[str, object] = {
+            "after": st.after,
+            "level": st.level,
+            "item_type": st.item_type,
+            "sample_rate": round(st.sample_rate, 3),
+            "path": st.path,
+            "items": st.items,
+        }
+        keys = _TRACE_STAT_KEYS.get(st.item_type)
+        if st.items and keys:
+            try:
+                full = _compute_stats(Path(st.path), item_type=st.item_type, clusters=0)
+            except (ValueError, FileNotFoundError):
+                full = {}
+            stat = {k: full[k] for k in keys if full.get(k) is not None}
+            if stat:
+                row["stats"] = stat
+        rows.append(row)
+    return rows
+
+
 def _stream_summary(result: PipelineResult) -> dict[str, object] | None:
     if result.bitstream is not None:
         return {
@@ -245,6 +277,7 @@ def run_rx_tool(
     input_path: str | None = None,
     input_item_type: str | None = None,
     input_level: str | None = None,
+    trace: bool = False,
     timeout: float = 180.0,
 ) -> dict[str, object]:
     """Decode: run a modem spec over an IQ capture (or an existing bit/symbol
@@ -267,6 +300,26 @@ def run_rx_tool(
     a "c" stream with stream_stats(item_type="c") and read its
     constant_modulus_ratio exactly as that tool documents — it, not EVM, is
     the false-lock check.
+
+    A path may also end BEFORE any demod, at conditioned IQ (level "iq", the
+    same "c" .cf32 wire) — e.g. channelize->agc with no demod stage. The
+    result "stream" is then the conditioned sub-band itself, to feed back into
+    survey (characterize the cleaned channel), stream_stats, or your own soft
+    work; this is how you extract a specific multi-stage conditioning chain
+    that survey's plain center_hz/decim cannot reproduce.
+
+    trace=True taps EVERY GR-segment stage's output to its own sidecar and
+    returns a "trace" list — one row per stage {after "conv[i]", level,
+    item_type, sample_rate, path, items, and a compact "stats" (c:
+    mean_magnitude/constant_modulus_ratio, f/s: min/max/mean/std, b:
+    ones_fraction)} — so one run shows WHERE a path breaks (a constellation
+    gone from ring to points at the demod, an eye closed after a resample)
+    instead of rebuilding truncated specs. Each row's path pages with
+    read_stream/stream_stats like any stream. Coding-tail stages (post-demod
+    descramble/deinterleave/FEC) are not tapped — the per-block census already
+    reports their item counts. The taps are full-length: trace a windowed
+    burst (capture_offset/capture_samples), not a whole multi-second capture,
+    or the sidecars grow large.
 
     The result omits null-valued fields throughout (a census row lists only
     the ports/measures its block has); "stream" and "soft_stream" alone stay
@@ -334,6 +387,7 @@ def run_rx_tool(
                 start=_start_descriptor("c", None),
                 workdir=run_dir,
                 source_io=source_io,
+                trace=trace,
                 timeout=timeout,
             )
     else:
@@ -346,6 +400,7 @@ def run_rx_tool(
             start=_start_descriptor(input_item_type, input_level),
             workdir=run_dir,
             input_stream=_input_stream(Path(cast(str, input_path)), input_item_type),
+            trace=trace,
             timeout=timeout,
         )
     # null-valued fields are omitted product-wide (a census row lists only the
@@ -359,6 +414,9 @@ def run_rx_tool(
     for diag in payload.get("diagnostics", []):
         if isinstance(diag, dict):
             _cap_list(diag, "marks")
+    payload.pop("trace", None)  # replace the model's raw trace with the enriched one
+    if result.trace:
+        payload["trace"] = _trace_payload(result)
     payload["stream"] = _stream_summary(result)
     payload["soft_stream"] = _soft_summary(result)
     return payload
@@ -510,10 +568,11 @@ def survey(
     center_hz lands at DC, low-passed (bandwidth_hz sets the passband,
     default most of the decimated band), and decimated BEFORE measurement,
     so every block below describes that channel alone — the pre-demod way to
-    confirm a channel before building a modem (run_rx has no conditioned-IQ
-    output to survey instead). The reported sample_rate is the decimated
-    rate; min/max_symbol_rate scale to it. The whole-span default
-    (center_hz=0, decim=1) is unchanged.
+    confirm a channel before building a modem. (For a conditioning chain
+    richer than one center/decim — channelize->invert->agc, say — end a
+    run_rx path at conditioned IQ and survey the "c" stream it returns.) The
+    reported sample_rate is the decimated rate; min/max_symbol_rate scale to
+    it. The whole-span default (center_hz=0, decim=1) is unchanged.
 
     Returns five measurement blocks, all raw numbers for you to judge:
 

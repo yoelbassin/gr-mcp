@@ -19,6 +19,7 @@ from marconi.engine.compile.compiler import (
     CompiledPipeline,
     CompileError,
     compile_pipeline,
+    trace_sink_path,
 )
 from marconi.engine.deadline import check_deadline, remaining, set_deadline
 from marconi.engine.io.bitfile import (
@@ -37,6 +38,19 @@ from marconi.engine.types.models import Bitstream, Modem, Softstream, Symbolstre
 from marconi.engine.types.params import ParamValue
 
 
+class TraceStage(BaseModel):
+    """One GR-segment stage's runtime output, tapped when run_rx(trace=True).
+    `after` is the stage label (conv[index]); path is the sidecar the tap wrote,
+    inspectable with read_stream/stream_stats exactly like any output stream."""
+
+    after: str
+    level: str
+    item_type: str
+    sample_rate: float
+    path: str
+    items: int
+
+
 class PipelineResult(BaseModel):
     status: Literal["ok", "error", "timeout", "empty"]
     bitstream: Bitstream | None = None
@@ -46,6 +60,7 @@ class PipelineResult(BaseModel):
     marks: list[int] = []
     census: list[BlockCensus] = []
     diagnostics: list[Diagnostic] = []
+    trace: list[TraceStage] = []
     stalled_at: str | None = None
     error: str | None = None
     quality: QualityReport | None = None
@@ -53,6 +68,32 @@ class PipelineResult(BaseModel):
 
     def diagnostic(self, block: str, key: str) -> Diagnostic | None:
         return find_diagnostic(self.diagnostics, block, key)
+
+
+_TRACE_ITEM_BYTES: dict[str, int] = {"c": 8, "f": 4, "s": 2, "b": 1}
+
+
+def _harvest_trace(
+    modem: Modem, cp: CompiledPipeline, trace_dir: Path
+) -> list[TraceStage]:
+    rows: list[TraceStage] = []
+    for i in range(cp.gr_steps):
+        conv = modem.path[i].conv
+        out = cp.boundaries[i + 1]
+        it = out.item_type.value
+        path = trace_sink_path(trace_dir, i, conv, out.item_type)
+        size = path.stat().st_size if path.is_file() else 0
+        rows.append(
+            TraceStage(
+                after=f"{conv}[{i}]",
+                level=out.level.value,
+                item_type=it,
+                sample_rate=cp.rates[i + 1],
+                path=str(path),
+                items=size // _TRACE_ITEM_BYTES[it],
+            )
+        )
+    return rows
 
 
 def _harvest_marks(diagnostics: Sequence[Diagnostic]) -> list[int]:
@@ -399,10 +440,15 @@ def run_rx(
     source_io: Mapping[str, ParamValue] | None = None,
     input_stream: Bitstream | Symbolstream | None = None,
     backend: Backend | None = None,
+    trace: bool = False,
     timeout: float = 180.0,
 ) -> PipelineResult:
     with set_deadline(timeout):
         seam = workdir / "seam.dat"
+        trace_dir: Path | None = None
+        if trace:
+            trace_dir = workdir / "trace"
+            trace_dir.mkdir(parents=True, exist_ok=True)
         cp = compile_pipeline(
             modem,
             registry,
@@ -413,15 +459,8 @@ def run_rx(
             sink_io={"path": str(seam)},
             name=modem.name,
             quality_tap=True,
+            trace_dir=trace_dir,
         )
-        if cp.final.level is Level.IQ:
-            raise CompileError(
-                "rx pipeline ends at IQ; run_rx extracts symbol/bit streams — end "
-                "the path with a demodulation stage. To characterize a conditioned "
-                "sub-band pre-demod (the channelize-then-look workflow), use "
-                "survey(center_hz=..., decim=...) instead — it tunes and decimates "
-                "to one channel before measuring"
-            )
         if cp.final.level is Level.AUDIO:
             raise CompileError(
                 "rx pipeline ends at AUDIO; run_rx extracts symbol/bit streams — "
@@ -475,6 +514,7 @@ def run_rx(
                     return flagged
         census: list[BlockCensus] = []
         diagnostics: list[Diagnostic] = []
+        trace_rows: list[TraceStage] = []
         marks: list[int] = []
         entry_path = seam
         if cp.gr is not None:
@@ -485,6 +525,8 @@ def run_rx(
             check_deadline()
             r = backend.run_pipeline(cp.gr, timeout=remaining())
             census, diagnostics = list(r.census), list(r.diagnostics)
+            if trace_dir is not None:
+                trace_rows = _harvest_trace(modem, cp, trace_dir)
             if r.status != "ok":
                 return PipelineResult(
                     status=r.status,
@@ -492,6 +534,7 @@ def run_rx(
                     stalled_at=r.stalled_at,
                     census=census,
                     diagnostics=diagnostics,
+                    trace=trace_rows,
                 )
             marks = _harvest_marks(diagnostics)
         if input_stream is not None:
@@ -524,5 +567,6 @@ def run_rx(
                 "softstream": soft,
                 "quality": quality,
                 "hints": _hints(modem, registry, cp.final, quality.verdict),
+                "trace": trace_rows,
             }
         )

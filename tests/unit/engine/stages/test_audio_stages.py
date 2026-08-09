@@ -101,22 +101,29 @@ def test_run_rx_rejects_audio_final(tmp_path) -> None:
         )
 
 
-def test_run_rx_iq_final_points_to_survey(tmp_path) -> None:
-    # a conditioned-IQ terminal has no symbol/bit output; the error routes the
-    # agent to survey's sub-band characterization instead of a dead end
+def test_run_rx_accepts_conditioned_iq_final(tmp_path) -> None:
+    # a conditioned-IQ terminal (channelize, no demod) now returns the cleaned
+    # sub-band as a complex ("c") stream to survey/inspect further, instead of
+    # a dead-end compile reject that pushed the agent back to survey.
     modem = Modem(
         symbol_rate=1200.0,
         path=[ChannelizeStep(decim=2, bandwidth_hz=8000.0, center_hz=10000.0)],
     )
-    with pytest.raises(CompileError, match="survey"):
-        run_rx(
-            modem,
-            stage_registry(),
-            sample_rate=48000.0,
-            start=IQ,
-            workdir=tmp_path,
-            source_io={"path": str(tmp_path / "in.cf32")},
-        )
+    cap = tmp_path / "in.cf32"
+    n = 8192
+    np.exp(1j * 2 * np.pi * 0.1 * np.arange(n)).astype(np.complex64).tofile(cap)
+    r = run_rx(
+        modem,
+        stage_registry(),
+        sample_rate=48000.0,
+        start=IQ,
+        workdir=tmp_path,
+        source_io={"path": str(cap)},
+    )
+    assert r.status == "ok", r
+    assert r.symbolstream is not None
+    assert r.symbolstream.item_type == "c"
+    assert r.symbolstream.path.suffix == ".cf32"
 
 
 def test_run_rx_accepts_complex_symbol_final(tmp_path) -> None:
