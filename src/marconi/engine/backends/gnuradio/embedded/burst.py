@@ -125,7 +125,9 @@ def make_burst_sampler(gr: Any, *, sps: float) -> Any:
             self._burst_floor = 0.0  # floor at burst start (idle-reference term)
             self._in_burst = False
             self._quiet = 0
-            self.diagnostics = {"bursts_flushed": 0}
+            self.eof_probe: Any = None  # set by build wiring; None => no flush
+            self._eof_done = False
+            self.diagnostics = {"bursts_flushed": 0, "bursts_truncated_at_eof": 0}
 
         def forecast(self, noutput_items: int, ninputs: int) -> list[int]:
             return forecast_drain(self._out.pending, ninputs)
@@ -143,7 +145,39 @@ def make_burst_sampler(gr: Any, *, sps: float) -> Any:
                         self._pending[_FLOOR_BLOCK:],
                     )
                     self._process_block(block)
+            if not self._eof_done and self._eof_final():
+                self._eof_done = True
+                self._flush_tail()
             return self._out.drain(output_items[0])
+
+        def _eof_final(self) -> bool:
+            """True only once every input sample this block will ever get has
+            been read (source-relative count proven by the probe). Unlike
+            exhausted(), this needs no straggler grace: nitems_read reaching the
+            propagated total means _pending already holds the whole capture, so
+            processing its <_FLOOR_BLOCK tail and committing an open burst's
+            per-burst phase is safe. Without expected_items (unknown rate / a
+            live source) it never fires and the sim-pad withhold stands."""
+            p = self.eof_probe
+            return (
+                p is not None
+                and p.expected_items is not None
+                and int(self.nitems_read(0)) >= p.expected_items
+            )
+
+        def _flush_tail(self) -> None:
+            """At true EOF, drain the withheld tail a real (unpadded) capture
+            leaves behind: process the sub-block _pending remainder, then commit
+            any burst still open. A burst whose calm tail landed in that
+            remainder ends normally here (its own fall-detection fires); one the
+            capture truncated mid-transmission is committed from what arrived and
+            counted, so it surfaces instead of vanishing as noise chips."""
+            if len(self._pending):
+                self._process_block(self._pending)
+                self._pending = np.empty(0, np.float32)
+            if self._in_burst:
+                self.diagnostics["bursts_truncated_at_eof"] += 1
+                self._flush_burst(self._abs)
 
         def _process_block(self, block: np.ndarray) -> None:
             med = float(np.median(block))

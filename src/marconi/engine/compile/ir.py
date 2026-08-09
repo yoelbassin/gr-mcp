@@ -12,6 +12,12 @@ class GrBlock(BaseModel):
     id: str
     kind: str
     params: dict[str, ParamValue] = {}
+    # Rate of the stream entering this block, from the compiler's rate model
+    # (stage-input granularity). Consumed by the EOF-probe wiring to size a
+    # downstream buffering block's finality; None when the compiler did not
+    # annotate it. Advisory only — a wrong value can never force a premature
+    # flush, only fall back to the withhold-at-EOF default.
+    sample_rate: float | None = None
 
 
 class GrConnection(BaseModel):

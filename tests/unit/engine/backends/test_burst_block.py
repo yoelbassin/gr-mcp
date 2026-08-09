@@ -8,6 +8,8 @@ Gardner loop railed on. Fractional STO is injected via the phase argument
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import numpy as np
 import pytest
 from helpers._fakegr import FAKE_GR, drive
@@ -229,6 +231,70 @@ def test_unfinished_burst_withheld_at_eof() -> None:
     want = _chip_string(bits)
     hard = (out > 0.5).astype(np.uint8)
     assert want not in "".join(map(str, hard))
+
+
+def _finality_probe(total: int) -> SimpleNamespace:
+    # what the build wiring hands a channelized burst_sampler: a probe whose
+    # expected_items equals every input sample this block will read, so
+    # nitems_read reaching it proves the whole (unpadded) capture is in hand.
+    return SimpleNamespace(expected_items=total, exhausted=lambda: True)
+
+
+def test_eof_flush_recovers_burst_whose_calm_tail_is_in_the_remainder() -> None:
+    # The real fob failure: a burst ends, but its confirming calm run lands in
+    # the trailing sub-_FLOOR_BLOCK remainder the block never processes, so the
+    # burst stays open and is withheld at EOF (see the withheld test below for
+    # the no-probe case). With a finality probe wired, _flush_tail processes
+    # that remainder, the fall-detection fires normally, and the burst flushes
+    # WHOLE - a natural flush, not a truncation.
+    rng = np.random.default_rng(71)
+    sps = 2
+    bits = "10110010" * 8  # 128 chips -> 256 samples
+    burst = _ppm_burst(bits, sps, 0)
+    prefix = _noise(894, rng)  # push the burst across the 1024 boundary
+    tail = _noise(250, rng)  # calm run (>fall_run) sitting in the remainder
+    env = np.concatenate([prefix, burst, tail]).astype(np.float32)
+    assert env.size % _FLOOR_BLOCK != 0  # a genuine sub-block remainder exists
+    blk = make_burst_sampler(FAKE_GR, sps=float(sps))
+    blk.eof_probe = _finality_probe(env.size)
+    out = drive(blk, env, chunk=env.size, out_dtype=np.float32)
+    assert blk.diagnostics["bursts_flushed"] == 1
+    assert blk.diagnostics["bursts_truncated_at_eof"] == 0
+    hard = "".join(map(str, (out > 0.5).astype(np.uint8)))
+    assert _chip_string(bits) in hard, "burst not recovered from the EOF remainder"
+
+
+def test_eof_flush_commits_a_truncated_burst_with_a_diagnostic() -> None:
+    # A capture that truly ends mid-transmission (no calm tail to confirm the
+    # burst complete): at proven finality the block commits what arrived rather
+    # than dropping it as noise, and flags it so the run can surface the cut.
+    # Same layout as test_unfinished_burst_withheld_at_eof, but WITH a probe.
+    rng = np.random.default_rng(31)
+    bits = "1011" * 4
+    burst = _ppm_burst(bits, 2, 0)
+    env = np.concatenate([_noise(_FLOOR_BLOCK - burst.size, rng), burst])
+    assert env.size == _FLOOR_BLOCK
+    blk = make_burst_sampler(FAKE_GR, sps=2.0)
+    blk.eof_probe = _finality_probe(env.size)
+    out = drive(blk, env, chunk=env.size, out_dtype=np.float32)
+    assert blk.diagnostics["bursts_truncated_at_eof"] == 1
+    hard = "".join(map(str, (out > 0.5).astype(np.uint8)))
+    assert _chip_string(bits) in hard
+
+
+def test_no_flush_without_a_finality_probe() -> None:
+    # The flush is gated on a wired probe: without one (unknown rate, a live
+    # source) the sim-pad withhold stands unchanged, so every FAKE_GR test above
+    # that omits eof_probe keeps its original behavior.
+    rng = np.random.default_rng(31)
+    bits = "1011" * 4
+    burst = _ppm_burst(bits, 2, 0)
+    env = np.concatenate([_noise(_FLOOR_BLOCK - burst.size, rng), burst])
+    blk = make_burst_sampler(FAKE_GR, sps=2.0)  # no eof_probe assigned
+    out = drive(blk, env, chunk=env.size, out_dtype=np.float32)
+    assert blk.diagnostics["bursts_truncated_at_eof"] == 0
+    hard = "".join(map(str, (out > 0.5).astype(np.uint8)))
+    assert _chip_string(bits) not in hard
 
 
 def test_deterministic_across_runs() -> None:

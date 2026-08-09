@@ -52,7 +52,9 @@ class CompileContext:
 
     def add(self, kind: str, **params: ParamValue) -> str:
         block_id = self._new_id(kind)
-        self._blocks.append(GrBlock(id=block_id, kind=kind, params=dict(params)))
+        self._blocks.append(
+            GrBlock(id=block_id, kind=kind, params=dict(params), sample_rate=self.rate)
+        )
         return block_id
 
     def connect(self, src: str, dst: str, src_port: int = 0, dst_port: int = 0) -> None:
