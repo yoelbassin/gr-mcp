@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Literal
 
 import numpy as np
 from pydantic import BaseModel
@@ -35,35 +36,35 @@ class SpectrumStats(BaseModel):
     occupied_hi_hz: float
 
 
+class PhaseConcentration(BaseModel):
+    order_2: float
+    order_4: float
+    order_8: float
+
+
 class CarrierStats(BaseModel):
     offset_hz: float
     psk_order: int | None
-    phase_concentration: dict[int, float]
-    method: str
+    phase_concentration: PhaseConcentration
+    method: Literal["mpsk", "spectral_centroid"]
     off_center: bool
+    offset_ambiguous: bool
 
 
-# M-th-power carrier/phase analysis. Phase-only x^M collapses an order-M PSK
-# alphabet to a spectral line at M x the carrier offset; the score is that
-# line's peak-to-mean power divided by ln(N) — the max of N chi-square bins
-# under pure noise is ~ln(N)*mean, so the score hugs ~1 for noise at any length
-# and runs into the hundreds-plus for a real line.
-#
-# The trap the naive "smallest M over threshold" falls into: x^2 concentrates
-# for ANY signal carrying a residual carrier — OOK, narrowband FSK, GMSK all
-# square to a strong order-2 line (measured on real off-air captures: scores of
-# ~50-300, far above any fixed floor). So order-2 is never CLAIMED; instead a
-# higher order is claimed only when its line JUMPS out of the one below it
-# (score[M] >> score[M/2]) — a genuine QPSK/8-PSK signature (measured jumps
-# 260-430x) that OOK/FSK never show (their scores DECREASE past M=2). BPSK is
-# left to the caller: a strong order-2 concentration with a constant envelope
-# is BPSK, with an amplitude-modulated envelope is OOK/ASK — envelope decides.
+# M-th-power phase-fold analysis: raising phase-only z to the m-th power
+# collapses an order-m alphabet to a spectral line at m*offset. See the survey()
+# MCP docstring for the full rationale (the jump rule, the QAM confound, order 2).
 _MPSK_ORDERS = (2, 4, 8)
 _MPSK_CONC_THRESH = 25.0
 _MPSK_JUMP = 10.0
+# Centroid distance from a dealiased candidate (in units of sample_rate / m)
+# beyond which the offset is too ambiguous to disambiguate — fallback to centroid.
+_DEALIAS_AMBIGUOUS_FRAC = 0.35
 # Off the analyzed band's centre by a meaningful fraction of the occupied
 # bandwidth: the default demod (carrier at DC) will miss, so surface it.
 _OFF_CENTER_FRAC = 0.15
+# Cap the record length for carrier M-th-power FFT analysis.
+_CARRIER_MAX_SAMPLES = 1 << 20
 
 
 def _downsample(a: np.ndarray, cap: int) -> np.ndarray:
@@ -72,6 +73,25 @@ def _downsample(a: np.ndarray, cap: int) -> np.ndarray:
     groups = -(-a.size // cap)
     trimmed = a[: (a.size // groups) * groups]
     return trimmed.reshape(-1, groups).mean(axis=1)
+
+
+def _interp_peak_hz(p: np.ndarray, peak: int, sample_rate: float) -> float:
+    n = p.size
+    a, b, c = float(p[(peak - 1) % n]), float(p[peak]), float(p[(peak + 1) % n])
+    denom = a - 2.0 * b + c
+    delta = 0.5 * (a - c) / denom if denom != 0.0 else 0.0
+    delta = float(np.clip(delta, -0.5, 0.5))
+    freq = float(np.fft.fftfreq(n, d=1.0 / sample_rate)[peak])
+    return freq + delta * (sample_rate / n)
+
+
+def _dealias_offset(
+    line_hz: float, m: int, sample_rate: float, coarse_hz: float
+) -> float:
+    base = line_hz / m
+    step = sample_rate / m
+    k = round((coarse_hz - base) / step)
+    return base + k * step
 
 
 def _sig(x: float, figs: int = 4) -> float:
@@ -112,30 +132,37 @@ def _spectrum(x: np.ndarray, sample_rate: float) -> SpectrumStats:
     )
 
 
-def _mpsk_line(z: np.ndarray, sample_rate: float, m: int) -> tuple[float, float]:
-    """(score, offset_hz) for the m-th-power carrier line of phase-only z. The
+def _bounded(x: np.ndarray) -> np.ndarray:
+    return x[:_CARRIER_MAX_SAMPLES] if x.size > _CARRIER_MAX_SAMPLES else x
+
+
+def _mpsk_line(
+    z: np.ndarray, sample_rate: float, m: int, dof: int
+) -> tuple[float, float]:
+    """(score, line_hz) for the m-th-power carrier line of phase-only z. The
     line sits at m x the carrier offset (at DC for a zero-offset carrier, so DC
-    is never special-cased); score is the ln(N)-normalized peak-to-mean of the
-    x^m power spectrum."""
+    is never special-cased); score is the dof-normalized peak-to-mean of the
+    x^m power spectrum. line_hz is the raw interpolated frequency, not divided."""
     spec = np.fft.fft(z**m)
     p = spec.real**2 + spec.imag**2
     peak = int(np.argmax(p))
     mean = float(p.mean()) or 1e-20
-    score = (float(p[peak]) / mean) / np.log(max(p.size, 2))
-    freq = float(np.fft.fftfreq(z.size, d=1.0 / sample_rate)[peak])
-    return score, freq / m
+    score = (float(p[peak]) / mean) / np.log(max(dof, 2))
+    return score, _interp_peak_hz(p, peak, sample_rate)
 
 
 def _carrier(
     x: np.ndarray, sample_rate: float, occupied_bw_hz: float, centroid_hz: float
 ) -> CarrierStats:
-    active = _slot_active_mask(x, _SURVEY_ACTIVE_FRACTION, _SURVEY_BURST_WINDOW)
-    xa = _gate(x, active)
-    z = xa / np.maximum(np.abs(xa), 1e-12)
+    xb = _bounded(x)
+    active = _slot_active_mask(xb, _SURVEY_ACTIVE_FRACTION, _SURVEY_BURST_WINDOW)
+    dof = int(active.sum()) or xb.size
+    xd = xb - _active_mean(xb, active)
+    z = (xd / np.maximum(np.abs(xd), 1e-12)) * active
     scores: dict[int, float] = {}
-    offsets: dict[int, float] = {}
+    lines: dict[int, float] = {}
     for m in _MPSK_ORDERS:
-        scores[m], offsets[m] = _mpsk_line(z, sample_rate, m)
+        scores[m], lines[m] = _mpsk_line(z, sample_rate, m, dof)
     order = next(
         (
             m
@@ -145,17 +172,26 @@ def _carrier(
         ),
         None,
     )
+    ambiguous = False
     if order is not None:
-        offset, method = offsets[order], f"mpsk_x{order}"
+        offset = _dealias_offset(lines[order], order, sample_rate, centroid_hz)
+        if abs(centroid_hz - offset) / (sample_rate / order) > _DEALIAS_AMBIGUOUS_FRAC:
+            offset, ambiguous = centroid_hz, True
     else:
-        offset, method = centroid_hz, "spectral_centroid"
+        offset = centroid_hz
+    method: Literal["mpsk", "spectral_centroid"] = (
+        "mpsk" if order is not None and not ambiguous else "spectral_centroid"
+    )
     off_center = occupied_bw_hz > 0 and abs(offset) > _OFF_CENTER_FRAC * occupied_bw_hz
     return CarrierStats(
         offset_hz=round(offset, 1),
         psk_order=order,
-        phase_concentration={m: _sig(scores[m]) for m in _MPSK_ORDERS},
+        phase_concentration=PhaseConcentration(
+            order_2=_sig(scores[2]), order_4=_sig(scores[4]), order_8=_sig(scores[8])
+        ),
         method=method,
         off_center=off_center,
+        offset_ambiguous=ambiguous,
     )
 
 
@@ -278,6 +314,11 @@ def _slot_active_pairs(x: np.ndarray, fraction: float, window: int) -> np.ndarra
 def _gate(values: np.ndarray, keep: np.ndarray) -> np.ndarray:
     gated = values[keep]
     return gated if gated.size else values
+
+
+def _active_mean(x: np.ndarray, active: np.ndarray) -> complex:
+    sel = x[active]
+    return complex(sel.mean()) if sel.size else 0j
 
 
 def _comb_harmonic_mask(

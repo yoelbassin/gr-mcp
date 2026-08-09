@@ -46,10 +46,51 @@ def _narrowband_fsk(snr_db: float = 15.0) -> np.ndarray:
     return _noisy(np.exp(1j * phase), _FOFF, snr_db)
 
 
+def _psk_seeded(order: int, snr_db: float, foff: float, seed: int) -> np.ndarray:
+    g = np.random.default_rng(seed)
+    k = g.integers(0, order, _NSYM)
+    x = _upsample(np.exp(1j * 2 * np.pi * k / order))
+    x = x * np.exp(1j * 2 * np.pi * foff / _FS * np.arange(x.size))
+    p = float(np.mean(np.abs(x) ** 2))
+    npow = p / (10 ** (snr_db / 10))
+    n = np.sqrt(npow / 2) * (g.standard_normal(x.size) + 1j * g.standard_normal(x.size))
+    return (x + n).astype(np.complex64)
+
+
+def _qam(levels: np.ndarray, snr_db: float, foff: float, seed: int) -> np.ndarray:
+    g = np.random.default_rng(seed)
+    k = levels.size
+    sym = levels[g.integers(0, k, _NSYM)] + 1j * levels[g.integers(0, k, _NSYM)]
+    sym = sym / np.sqrt(np.mean(np.abs(sym) ** 2))
+    x = _upsample(sym) * np.exp(
+        1j * 2 * np.pi * foff / _FS * np.arange(sym.size * _SPS)
+    )
+    p = float(np.mean(np.abs(x) ** 2))
+    npow = p / (10 ** (snr_db / 10))
+    n = np.sqrt(npow / 2) * (g.standard_normal(x.size) + 1j * g.standard_normal(x.size))
+    return (x + n).astype(np.complex64)
+
+
+def _bursty_psk(
+    order: int, duty: float, foff: float, snr_db: float = 18.0
+) -> np.ndarray:
+    period = 4000
+    g = np.random.default_rng(5)
+    k = g.integers(0, order, _NSYM)
+    x = _upsample(np.exp(1j * 2 * np.pi * k / order))
+    x = x * np.exp(1j * 2 * np.pi * foff / _FS * np.arange(x.size))
+    on = (np.arange(x.size) % period) < int(duty * period)
+    x = x * on
+    p = float(np.mean(np.abs(x[on]) ** 2))
+    npow = p / (10 ** (snr_db / 10))
+    n = np.sqrt(npow / 2) * (g.standard_normal(x.size) + 1j * g.standard_normal(x.size))
+    return (x + n).astype(np.complex64)
+
+
 def test_qpsk_reads_order_4_with_precise_offset() -> None:
     c = _carrier(_psk(4), _FS, 30_000.0, _FOFF)
     assert c.psk_order == 4
-    assert c.method == "mpsk_x4"
+    assert c.method == "mpsk"
     assert abs(c.offset_hz - _FOFF) < 500.0
 
 
@@ -65,14 +106,14 @@ def test_bpsk_abstains_but_surfaces_the_order_2_line() -> None:
     # envelope block (constant envelope => BPSK, amplitude-modulated => OOK).
     c = _carrier(_psk(2), _FS, 30_000.0, _FOFF)
     assert c.psk_order is None
-    assert c.phase_concentration[2] > c.phase_concentration[4]
-    assert c.phase_concentration[2] >= 25.0
+    assert c.phase_concentration.order_2 > c.phase_concentration.order_4
+    assert c.phase_concentration.order_2 >= 25.0
 
 
 def test_narrowband_fsk_is_not_mislabeled_bpsk() -> None:
     c = _carrier(_narrowband_fsk(), _FS, 30_000.0, 0.0)
     assert c.psk_order is None  # order-2 line present, but no jump at 4/8
-    assert c.phase_concentration[2] >= c.phase_concentration[4]
+    assert c.phase_concentration.order_2 >= c.phase_concentration.order_4
 
 
 def test_low_snr_8psk_reads_none_not_a_false_lock() -> None:
@@ -87,7 +128,8 @@ def test_noise_has_no_carrier() -> None:
     )
     c = _carrier(noise, _FS, 30_000.0, 0.0)
     assert c.psk_order is None
-    assert all(v < 5.0 for v in c.phase_concentration.values())
+    pc = c.phase_concentration
+    assert pc.order_2 < 5.0 and pc.order_4 < 5.0 and pc.order_8 < 5.0
 
 
 def test_off_center_flags_a_large_offset() -> None:
@@ -95,3 +137,78 @@ def test_off_center_flags_a_large_offset() -> None:
     off = _carrier(_psk(4, foff=37_000.0), _FS, 40_000.0, 37_000.0)
     assert on.off_center is False
     assert off.off_center is True
+
+
+def test_dc_spike_does_not_defeat_order_detection() -> None:
+    # LO leakage (universal on RTL-SDR) squares into a strong order-2 line;
+    # without DC removal it blanks the order-4 claim.
+    x = _psk(4)
+    dc = 3.0 * np.sqrt(np.mean(np.abs(x) ** 2))
+    c = _carrier((x + dc).astype(np.complex64), _FS, 30_000.0, _FOFF)
+    assert c.psk_order == 4
+
+
+def test_large_offset_8psk_reports_true_offset_not_alias() -> None:
+    for foff in (70_000.0, 90_000.0):
+        c = _carrier(_psk(8, foff=foff), _FS, 30_000.0, foff)
+        assert c.psk_order == 8
+        assert abs(c.offset_hz - foff) < 500.0, (foff, c.offset_hz)
+
+
+def test_offset_at_fs_over_8_is_not_reported_as_centered() -> None:
+    foff = _FS / 8  # 8*foff == fs -> old code aliased the line to DC
+    c = _carrier(_psk(8, foff=foff), _FS, 40_000.0, foff)
+    assert abs(c.offset_hz - foff) < 1000.0, c.offset_hz
+    assert c.off_center is True
+
+
+def test_ambiguous_offset_falls_back_to_centroid() -> None:
+    # centroid sits halfway between two M-th-power candidates -> can't
+    # disambiguate; report the centroid and flag it rather than guess.
+    step = _FS / 8
+    c = _carrier(_psk(8, foff=37_000.0), _FS, 200_000.0, 37_000.0 + step / 2)
+    assert c.offset_ambiguous is True
+    assert c.method == "spectral_centroid"
+
+
+def test_bounded_truncates_to_cap() -> None:
+    from marconi.survey.measure import _CARRIER_MAX_SAMPLES, _bounded
+
+    big = np.ones(_CARRIER_MAX_SAMPLES + 123, dtype=np.complex64)
+    assert _bounded(big).size == _CARRIER_MAX_SAMPLES
+    small = np.ones(1000, dtype=np.complex64)
+    assert _bounded(small).size == 1000
+
+
+def test_qpsk_detected_across_snr_and_seeds() -> None:
+    for seed in (1, 2, 3):
+        for snr in (8.0, 12.0):
+            c = _carrier(_psk_seeded(4, snr, _FOFF, seed), _FS, 30_000.0, _FOFF)
+            assert c.psk_order == 4, (seed, snr, c.psk_order)
+
+
+def test_square_qam_shares_the_order_4_line() -> None:
+    # 16-QAM has QPSK's 4-fold phase symmetry; the M-th-power cannot separate
+    # them, so a strong order-4 line is expected. The envelope block (amplitude
+    # kurtosis) is what disambiguates PSK from QAM — NOT this block.
+    c = _carrier(
+        _qam(np.array([-3.0, -1.0, 1.0, 3.0]), 20.0, _FOFF, 1),
+        _FS,
+        30_000.0,
+        _FOFF,
+    )
+    assert c.phase_concentration.order_4 >= 25.0
+
+
+def test_64qam_shares_the_order_4_line() -> None:
+    # 64-QAM has the same 4-fold phase symmetry as 16-QAM and QPSK; with a
+    # correct (masked) time base its order-4 line is genuine, not a splice
+    # artifact. The envelope block disambiguates PSK from QAM, not this block.
+    c = _carrier(_qam(np.arange(-7.0, 8.0, 2.0), 25.0, _FOFF, 1), _FS, 30_000.0, _FOFF)
+    assert c.phase_concentration.order_4 >= 25.0
+
+
+def test_bursty_offset_precision() -> None:
+    c = _carrier(_bursty_psk(4, 0.05, 37_000.0), _FS, 30_000.0, 37_000.0)
+    assert c.psk_order == 4
+    assert abs(c.offset_hz - 37_000.0) < 150.0, c.offset_hz
