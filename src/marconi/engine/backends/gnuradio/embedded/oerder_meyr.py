@@ -29,11 +29,23 @@ scaled-noise idle chip - see `_emit_idle` for why a complex symbol stream
 wants an unambiguous "nothing here" rather than a small-but-nonzero,
 random-phase sample) - so the emitted count stays exactly input_len //
 stride and a burst boundary can never insert or drop a symbol. Determinism
-follows
-`burst_sampler`: fixed-size internal blocks, no feedback loop, no volk in-
-block, so identical input yields identical output regardless of how the
-caller chunks it. The block withholds an unfinished burst tail at EOF (suite
-convention: sims pad)."""
+follows `burst_sampler`: fixed-size internal blocks, no feedback loop, no
+volk in-block, so identical input yields identical output regardless of how
+the caller chunks it. The block withholds an unfinished burst tail at EOF
+(suite convention: sims pad).
+
+A burst-only fall trigger has a blind spot: a CONTINUOUS transmission is
+one active region that never falls, and in a ratio-1 engine chain (this
+block's rate matches its neighbors, so the graph's file source feeds it
+only indirectly) there is no `expected_items` either - nothing ever tells
+the block the region is done, so it withholds forever and emits nothing.
+`_MAX_REGION_SYMS` closes this the same way `burst_sampler._MAX_BURST_CHIPS`
+bounds a pathological OOK burst: once a region has been buffering active
+samples this long with no fall, commit its buffered tau now and keep
+accumulating a fresh chunk from there - same region, same `_in_burst`, no
+re-detection. The cap sits far above real burst lengths so it only ever
+fires on long/continuous signals, never splits an actual burst, and each
+capped chunk gets its own tau, which incidentally tracks slow SFO too."""
 
 from __future__ import annotations
 
@@ -100,8 +112,16 @@ _FALL_SYMS = 2  # sustained-INactive symbols to confirm a burst END - short,
 # the noise tail folded into a flushed burst well inside the `span`-symbol
 # edge exclusion the tau estimate drops, and out of the burst's resampled
 # output (see _emit_idle for why that tail matters beyond the tau estimate)
-_MAX_BURST_SYMS = 1 << 15  # cap: beyond this, commit tau from what's
-# buffered so far and continue as a fresh burst
+_MAX_REGION_SYMS = 512  # cap: an active region (burst OR a long/continuous
+# signal that never falls) this long commits its buffered tau NOW and keeps
+# accumulating a fresh chunk from there - mirrors burst_sampler's
+# _MAX_BURST_CHIPS, but the driving case here isn't a pathological burst,
+# it's an ordinary CONTINUOUS transmission: with no fall and no finality
+# probe (a ratio-1 engine chain gives the block no expected_items), a
+# region that never caps would buffer - and withhold - forever. Must stay
+# well above real burst lengths (tens-low-hundreds of symbols) so normal
+# bursts still flush on FALL, never on the cap; each capped chunk gets its
+# own tau, which incidentally also tracks slow SFO across a long capture
 _MIN_INTERIOR_SYMS = 2  # tau-estimation interior shorter than this falls
 # back to the whole burst
 
@@ -127,7 +147,7 @@ def make_oerder_meyr(gr: Any, *, sps: float, window: int = 64, span: int = 11) -
     smooth_w = _SMOOTH_SYMS * stride
     rise_run = _RISE_SYMS * stride
     fall_run = _FALL_SYMS * stride
-    max_burst = _MAX_BURST_SYMS * stride
+    max_region = _MAX_REGION_SYMS * stride
     # `window` is unused now that one tau is estimated per burst rather than
     # per fixed window; kept as a parameter for call-site/API stability.
 
@@ -150,7 +170,11 @@ def make_oerder_meyr(gr: Any, *, sps: float, window: int = 64, span: int = 11) -
             self._quiet = 0
             self.eof_probe: Any = None  # set by build wiring; None => no flush
             self._eof_done = False
-            self.diagnostics = {"bursts_flushed": 0, "bursts_truncated_at_eof": 0}
+            self.diagnostics = {
+                "bursts_flushed": 0,
+                "bursts_truncated_at_eof": 0,
+                "regions_capped": 0,
+            }
 
         def forecast(self, noutput_items: int, ninputs: int) -> list[int]:
             return forecast_drain(self._out.pending, ninputs)
@@ -196,6 +220,7 @@ def make_oerder_meyr(gr: Any, *, sps: float, window: int = 64, span: int = 11) -
             if self._in_burst:
                 self.diagnostics["bursts_truncated_at_eof"] += 1
                 self._flush_burst(self._abs)
+                self._in_burst = False
 
         def _process_block(self, block: np.ndarray) -> None:
             power = (
@@ -213,11 +238,7 @@ def make_oerder_meyr(gr: Any, *, sps: float, window: int = 64, span: int = 11) -
                         break
                     start = i + int(rises[0])
                     self._emit_idle(base, start)
-                    self._burst = []
-                    self._burst_len = 0
-                    self._burst_start = base + start
-                    self._in_burst = True
-                    self._quiet = 0
+                    self._start_burst(base + start)
                     i = start
                     continue
                 j = i
@@ -229,9 +250,27 @@ def make_oerder_meyr(gr: Any, *, sps: float, window: int = 64, span: int = 11) -
                 self._burst.append(block[i:j])
                 self._burst_len += j - i
                 i = j
-                if self._quiet >= fall_run or self._burst_len >= max_burst:
+                if self._quiet >= fall_run:
                     self._flush_burst(base + j)
+                    self._in_burst = False
+                elif self._burst_len >= max_region:
+                    # Still active - just too long to keep buffering (an
+                    # ordinary burst never gets here; only a long/continuous
+                    # region does). Commit this chunk and immediately start
+                    # the next one from here, WITHOUT going back through
+                    # rise detection - a fresh chunk of the same region, not
+                    # a new region.
+                    self.diagnostics["regions_capped"] += 1
+                    self._flush_burst(base + j)
+                    self._start_burst(base + j)
             self._abs = base + n
+
+        def _start_burst(self, start_abs: int) -> None:
+            self._burst = []
+            self._burst_len = 0
+            self._burst_start = start_abs
+            self._in_burst = True
+            self._quiet = 0
 
         def _advance_grid(self, limit: int) -> np.ndarray:
             # Absolute base positions round(m*stride) for every global
@@ -262,16 +301,17 @@ def make_oerder_meyr(gr: Any, *, sps: float, window: int = 64, span: int = 11) -
             return estimate_tau(interior, stride)
 
         def _flush_burst(self, end: int) -> None:
+            """Commit whatever's buffered as one tau-estimated chunk. Purely
+            a commit: it does NOT touch _in_burst/_quiet - the caller owns
+            that transition, since a flush can mean either "this region just
+            ended" (exit burst mode) or "this region is still going, just
+            capped" (start a fresh chunk immediately, same region)."""
             seg = (
                 np.concatenate(self._burst)
                 if self._burst
                 else np.empty(0, np.complex64)
             )
             s = self._burst_start
-            self._burst = []
-            self._burst_len = 0
-            self._in_burst = False
-            self._quiet = 0
             self.diagnostics["bursts_flushed"] += 1
             bases = self._advance_grid(end)
             if bases.size == 0 or seg.size == 0:

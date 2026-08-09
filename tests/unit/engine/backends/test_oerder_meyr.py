@@ -6,6 +6,7 @@ import numpy as np
 from helpers._fakegr import FAKE_GR, drive
 
 from marconi.engine.backends.gnuradio.embedded.oerder_meyr import (
+    _MAX_REGION_SYMS,
     estimate_tau,
     make_oerder_meyr,
     resample_symbols,
@@ -145,3 +146,28 @@ def test_recovers_short_bursts() -> None:
 def test_recovers_shorter_bursts() -> None:
     r4 = _burst_recovery_r4(nbursts=60, length=40, gap=80)
     assert r4 > 0.9, r4  # fixed-window block scored 0.65 here; per-burst ~0.955
+
+
+def test_flushes_a_long_continuous_region_without_finality() -> None:
+    # A continuous (no-gap) signal is ONE active region that never falls.
+    # In a ratio-1 engine chain the block also never gets an eof_probe with
+    # expected_items (nothing downstream tells it the region ended), so
+    # burst-only fall-or-finality flushing withholds it forever - this is
+    # the regression the max_region cap fixes: it must flush on LENGTH too.
+    iq = _bursty(nbursts=1, L=2000, gap=0, sto=0.37, sfo_ppm=25.0, snr=25)
+    mf = np.convolve(iq.astype(complex), _RRC, "same").astype(np.complex64)
+    blk = make_oerder_meyr(FAKE_GR, sps=_BURST_SPS, window=64)
+    blk.eof_probe = None  # no finality ever arrives
+    sym = drive(blk, mf, chunk=677, out_dtype=np.complex64)  # odd, multi-chunk
+
+    nsym = mf.size // _BURST_SPS
+    # Only the final not-yet-capped tail (< one region's worth of symbols)
+    # may stay withheld without finality - same sim-pad withhold convention
+    # as test_no_flush_without_a_finality_probe, just bounded by the cap
+    # instead of a whole burst.
+    assert sym.size >= nsym - _MAX_REGION_SYMS, sym.size
+    assert sym.size > 0
+
+    z = sym[1:] * np.conj(sym[:-1])
+    r4 = _r4(z)
+    assert r4 > 0.9, r4
