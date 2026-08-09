@@ -581,25 +581,24 @@ def survey(
     offset, 99%-power occupied bandwidth, and peak; eyeball extra
     carriers/sub-bands and spectral asymmetry yourself.
 
-    "carrier" — carrier offset + phase-order evidence from M-th-power analysis.
-    offset_hz is the carrier's offset from the slice centre and method says how
-    it was found: "mpsk_x{M}" (a clean order-M PSK line, precise) or
-    "spectral_centroid" (the energy centroid, the robust fallback). off_center
-    is true when that offset is a large fraction of the occupied bandwidth — the
-    signal sits off-channel, so a demod that assumes a carrier at DC will miss:
-    re-run survey/run_rx with center_hz=offset_hz (or a shift/fll stage) to
-    correct it. (A known tuning error becomes ppm: offset_hz / tuned_hz * 1e6.)
-    psk_order is 4 or 8 when the order-M phase line JUMPS out of the one below
-    it — a genuine QPSK/8-PSK signature; it is null otherwise, INCLUDING for
-    BPSK, because squaring turns ANY carrier-bearing signal (OOK, narrowband
-    FSK, GMSK) into an order-2 line, so order 2 is never claimed on its own.
-    phase_concentration is the raw evidence: the ln(N)-normalized strength of
-    the order-2/4/8 lines (keyed by M). Read it with the envelope block — a
-    strong order-2 value that DECREASES for higher M is a bare carrier: constant
-    envelope makes it BPSK, an amplitude-modulated envelope makes it OOK/ASK; a
-    value that jumps UP at M=4 or 8 is that PSK order. Values near ~1 at every M
-    mean no phase-coherent carrier (noise, or a signal too weak to lock — the
-    honest reading for a low-SNR PSK the M-th power cannot pull out).
+    "carrier" — carrier offset + phase-fold evidence from M-th-power analysis.
+    offset_hz is the carrier's offset from the slice centre; method is "mpsk" (a
+    clean order-M line, de-aliased against the spectrum centroid and
+    interpolated) or "spectral_centroid" (the robust fallback). offset_ambiguous
+    is true when the M-fold offset candidates could not be told apart and the
+    centroid was reported instead. off_center is true when the offset is a large
+    fraction of the occupied bandwidth — the signal sits off-channel, so a demod
+    that assumes a carrier at DC will miss: re-run with center_hz=offset_hz (a
+    known tuning error becomes ppm = offset_hz / tuned_hz * 1e6).
+    psk_order (4 or 8, else null) is an M-fold PHASE-SYMMETRY line, not a
+    modulation label: QPSK/8-PSK AND a square QAM/APSK of that order share it,
+    and the M-th-power cannot separate them — read it WITH the envelope block
+    (unimodal amplitude / low kurtosis => PSK; multimodal => QAM). Order 2 is
+    never claimed alone: squaring turns ANY carrier-bearing signal (OOK, FSK,
+    GMSK) into an order-2 line, so a strong order-2 with constant envelope is
+    BPSK, amplitude-modulated is OOK/ASK. phase_concentration is the raw
+    ln(N)-normalized order-2/4/8 strengths (order_2/order_4/order_8); ~1 at every
+    order means no phase-coherent carrier (noise, or too weak to lock).
 
     "envelope" — constant-envelope ratio + kurtosis; you decide FSK vs PSK
     vs QAM. Computed on a power-smoothed active portion gated at burst

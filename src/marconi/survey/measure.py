@@ -51,21 +51,9 @@ class CarrierStats(BaseModel):
     offset_ambiguous: bool
 
 
-# M-th-power carrier/phase analysis. Phase-only x^M collapses an order-M PSK
-# alphabet to a spectral line at M x the carrier offset; the score is that
-# line's peak-to-mean power divided by ln(N) — the max of N chi-square bins
-# under pure noise is ~ln(N)*mean, so the score hugs ~1 for noise at any length
-# and runs into the hundreds-plus for a real line.
-#
-# The trap the naive "smallest M over threshold" falls into: x^2 concentrates
-# for ANY signal carrying a residual carrier — OOK, narrowband FSK, GMSK all
-# square to a strong order-2 line (measured on real off-air captures: scores of
-# ~50-300, far above any fixed floor). So order-2 is never CLAIMED; instead a
-# higher order is claimed only when its line JUMPS out of the one below it
-# (score[M] >> score[M/2]) — a genuine QPSK/8-PSK signature (measured jumps
-# 260-430x) that OOK/FSK never show (their scores DECREASE past M=2). BPSK is
-# left to the caller: a strong order-2 concentration with a constant envelope
-# is BPSK, with an amplitude-modulated envelope is OOK/ASK — envelope decides.
+# M-th-power phase-fold analysis: raising phase-only z to the m-th power
+# collapses an order-m alphabet to a spectral line at m*offset. See the survey()
+# MCP docstring for the full rationale (the jump rule, the QAM confound, order 2).
 _MPSK_ORDERS = (2, 4, 8)
 _MPSK_CONC_THRESH = 25.0
 _MPSK_JUMP = 10.0
