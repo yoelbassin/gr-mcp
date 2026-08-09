@@ -75,6 +75,8 @@ _DEALIAS_AMBIGUOUS_FRAC = 0.35
 # Off the analyzed band's centre by a meaningful fraction of the occupied
 # bandwidth: the default demod (carrier at DC) will miss, so surface it.
 _OFF_CENTER_FRAC = 0.15
+# Cap the record length for carrier M-th-power FFT analysis.
+_CARRIER_MAX_SAMPLES = 1 << 20
 
 
 def _downsample(a: np.ndarray, cap: int) -> np.ndarray:
@@ -142,6 +144,10 @@ def _spectrum(x: np.ndarray, sample_rate: float) -> SpectrumStats:
     )
 
 
+def _bounded(x: np.ndarray) -> np.ndarray:
+    return x[:_CARRIER_MAX_SAMPLES] if x.size > _CARRIER_MAX_SAMPLES else x
+
+
 def _mpsk_line(
     z: np.ndarray, sample_rate: float, m: int, dof: int
 ) -> tuple[float, float]:
@@ -160,8 +166,9 @@ def _mpsk_line(
 def _carrier(
     x: np.ndarray, sample_rate: float, occupied_bw_hz: float, centroid_hz: float
 ) -> CarrierStats:
-    active = _slot_active_mask(x, _SURVEY_ACTIVE_FRACTION, _SURVEY_BURST_WINDOW)
-    xa = _gate(x, active) - _active_mean(x, active)
+    xb = _bounded(x)
+    active = _slot_active_mask(xb, _SURVEY_ACTIVE_FRACTION, _SURVEY_BURST_WINDOW)
+    xa = _gate(xb, active) - _active_mean(xb, active)
     z = xa / np.maximum(np.abs(xa), 1e-12)
     scores: dict[int, float] = {}
     lines: dict[int, float] = {}

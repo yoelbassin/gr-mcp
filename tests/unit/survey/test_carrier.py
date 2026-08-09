@@ -128,3 +128,12 @@ def test_ambiguous_offset_falls_back_to_centroid() -> None:
     c = _carrier(_psk(8, foff=37_000.0), _FS, 200_000.0, 37_000.0 + step / 2)
     assert c.offset_ambiguous is True
     assert c.method == "spectral_centroid"
+
+
+def test_bounded_truncates_to_cap() -> None:
+    from marconi.survey.measure import _CARRIER_MAX_SAMPLES, _bounded
+
+    big = np.ones(_CARRIER_MAX_SAMPLES + 123, dtype=np.complex64)
+    assert _bounded(big).size == _CARRIER_MAX_SAMPLES
+    small = np.ones(1000, dtype=np.complex64)
+    assert _bounded(small).size == 1000
