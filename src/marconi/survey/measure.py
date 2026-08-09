@@ -138,7 +138,7 @@ def _carrier(
     x: np.ndarray, sample_rate: float, occupied_bw_hz: float, centroid_hz: float
 ) -> CarrierStats:
     active = _slot_active_mask(x, _SURVEY_ACTIVE_FRACTION, _SURVEY_BURST_WINDOW)
-    xa = _gate(x, active)
+    xa = _gate(x, active) - _active_mean(x, active)
     z = xa / np.maximum(np.abs(xa), 1e-12)
     scores: dict[int, float] = {}
     offsets: dict[int, float] = {}
@@ -292,6 +292,11 @@ def _slot_active_pairs(x: np.ndarray, fraction: float, window: int) -> np.ndarra
 def _gate(values: np.ndarray, keep: np.ndarray) -> np.ndarray:
     gated = values[keep]
     return gated if gated.size else values
+
+
+def _active_mean(x: np.ndarray, active: np.ndarray) -> complex:
+    sel = x[active]
+    return complex(sel.mean()) if sel.size else 0j
 
 
 def _comb_harmonic_mask(

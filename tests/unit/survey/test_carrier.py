@@ -96,3 +96,12 @@ def test_off_center_flags_a_large_offset() -> None:
     off = _carrier(_psk(4, foff=37_000.0), _FS, 40_000.0, 37_000.0)
     assert on.off_center is False
     assert off.off_center is True
+
+
+def test_dc_spike_does_not_defeat_order_detection() -> None:
+    # LO leakage (universal on RTL-SDR) squares into a strong order-2 line;
+    # without DC removal it blanks the order-4 claim.
+    x = _psk(4)
+    dc = 3.0 * np.sqrt(np.mean(np.abs(x) ** 2))
+    c = _carrier((x + dc).astype(np.complex64), _FS, 30_000.0, _FOFF)
+    assert c.psk_order == 4
