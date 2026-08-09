@@ -302,7 +302,6 @@ GR_BLOCKS: dict[str, Callable[[_GrCtx, Params], Any]] = {
     "oerder_meyr_timing": lambda c, p: make_oerder_meyr(
         c.gr,
         sps=_as_float(p["sps"]),
-        window=_as_int(p.get("window", 64)),
         span=_as_int(p.get("span", 11)),
     ),
     "symbol_sync_ff": lambda c, p: c.digital.symbol_sync_ff(
