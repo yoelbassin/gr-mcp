@@ -28,7 +28,8 @@ class SymbolSyncStep(Step):
             "resampled to one sample per symbol, no loop - for bursty or short "
             "PSK where a Gardner loop cannot converge before the payload (the "
             "reverse-engineering case, with no known preamble to burn on "
-            "acquisition). Open-loop requires sps>=4 (the |x|^2 line collapses "
+            "acquisition; expect ~1 degraded-or-zeroed symbol at each burst "
+            "edge). Open-loop requires sps>=4 (the |x|^2 line collapses "
             "toward Nyquist at sps=2); the closed loop needs sps>=2. >0 = "
             "continuous Gardner loop for sustained signals."
         ),
@@ -65,11 +66,10 @@ class SymbolSync(RxStage[CompileContext, SymbolSyncStep]):
     description = (
         "Symbol-timing recovery, IQ->IQ (RRC matched filter + timing). "
         "loop_bw>0 uses a closed-loop Gardner symbol_sync; loop_bw=0 uses "
-        "open-loop feedforward (Oerder-Meyr) timing for bursty/short PSK. The "
-        "min_input_sps shown in describe_stages is the closed-loop default "
-        "(2); the open-loop path (loop_bw=0) requires sps>=4. The amplitude "
-        "contract (normalized input, via an upstream agc) is unchanged across "
-        "both modes."
+        "open-loop feedforward (Oerder-Meyr) timing for bursty/short PSK. "
+        "min_input_sps is conditional on loop_bw (compile-enforced): 2 "
+        "closed-loop, 4 open-loop. The amplitude contract (normalized "
+        "input, via an upstream agc) is unchanged across both modes."
     )
     from_level = Level.IQ
     to_level = Level.IQ
