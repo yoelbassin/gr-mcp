@@ -105,3 +105,26 @@ def test_dc_spike_does_not_defeat_order_detection() -> None:
     dc = 3.0 * np.sqrt(np.mean(np.abs(x) ** 2))
     c = _carrier((x + dc).astype(np.complex64), _FS, 30_000.0, _FOFF)
     assert c.psk_order == 4
+
+
+def test_large_offset_8psk_reports_true_offset_not_alias() -> None:
+    for foff in (70_000.0, 90_000.0):
+        c = _carrier(_psk(8, foff=foff), _FS, 30_000.0, foff)
+        assert c.psk_order == 8
+        assert abs(c.offset_hz - foff) < 500.0, (foff, c.offset_hz)
+
+
+def test_offset_at_fs_over_8_is_not_reported_as_centered() -> None:
+    foff = _FS / 8  # 8*foff == fs -> old code aliased the line to DC
+    c = _carrier(_psk(8, foff=foff), _FS, 40_000.0, foff)
+    assert abs(c.offset_hz - foff) < 1000.0, c.offset_hz
+    assert c.off_center is True
+
+
+def test_ambiguous_offset_falls_back_to_centroid() -> None:
+    # centroid sits halfway between two M-th-power candidates -> can't
+    # disambiguate; report the centroid and flag it rather than guess.
+    step = _FS / 8
+    c = _carrier(_psk(8, foff=37_000.0), _FS, 200_000.0, 37_000.0 + step / 2)
+    assert c.offset_ambiguous is True
+    assert c.method == "spectral_centroid"
