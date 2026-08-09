@@ -47,6 +47,17 @@ class SoftBitstream(BaseModel):
     symbol_rate: float | None = None
 
 
+class Softstream(BaseModel):
+    """The soft float32 stream a decode exposes for soft-decision work, wherever
+    it lives: a demod tap sidecar, a soft coding seam, or the terminal stream
+    itself. Sign follows level: symbols-level values slice POSITIVE to bit 1,
+    bits-level values are LLRs where bit 1 is NEGATIVE."""
+
+    path: Path
+    num_items: int = Field(ge=0)
+    level: Literal["symbols", "bits"]
+
+
 class Symbolstream(BaseModel):
     """Values at the SYMBOLS rung: hard int16 symbol indices for "s", soft
     float32 symbol values for "f", complex64 constellation points for "c",

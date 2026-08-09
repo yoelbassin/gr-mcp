@@ -28,6 +28,27 @@ def test_tx_rx_roundtrip_ber0(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     page = read_stream(cast(str, stream["path"]), offset=0, count=4096)
     decoded = cast(str, page["bits"])
     assert bits in decoded or decoded in bits or _aligned_equal(bits, decoded)
+    # the demod tap feeding the slicer is surfaced for soft-decision work
+    soft = cast(dict[str, object], rx["soft_stream"])
+    assert soft["item_type"] == "f"
+    assert soft["level"] == "symbols"
+    assert soft["bit1_sign"] == "positive"
+    assert cast(int, soft["items"]) > 0
+    soft_path = Path(cast(str, soft["path"]))
+    assert soft_path.is_file()
+    values = np.fromfile(soft_path, np.float32)
+    assert values.size == soft["items"]
+    # symbols-level convention: positive slices to bit 1
+    assert (
+        np.mean(
+            (values > 0)
+            == (
+                np.frombuffer(cast(str, page["bits"])[: values.size].encode(), np.uint8)
+                == ord("1")
+            )
+        )
+        > 0.9
+    )
 
 
 def _aligned_equal(tx_bits: str, rx_bits: str, max_shift: int = 64) -> bool:
@@ -41,6 +62,34 @@ def _aligned_equal(tx_bits: str, rx_bits: str, max_shift: int = 64) -> bool:
         or np.array_equal(rx_arr[:n], tx_arr[s : s + n])
         for s in range(max_shift)
     )
+
+
+def test_soft_terminal_path_is_its_own_soft_stream(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("MARCONI_WORKSPACE", str(tmp_path))
+    rng = np.random.default_rng(7)
+    bits = "".join("01"[b] for b in rng.integers(0, 2, 512))
+    tx = run_tx_tool(_TXRX, sample_rate=4.0, bits=bits)
+    assert tx["status"] == "ok", tx
+    rx = run_rx_tool(
+        {
+            "symbol_rate": 1.0,
+            "path": [
+                {"conv": "fsk", "deviation": 1.0},
+                {"conv": "mfsk_soft_demap", "levels": [-1.0, 1.0]},
+            ],
+        },
+        sample_rate=4.0,
+        capture_path=cast(str, tx["iq_path"]),
+    )
+    assert rx["status"] == "ok", rx
+    stream = cast(dict[str, object], rx["stream"])
+    soft = cast(dict[str, object], rx["soft_stream"])
+    assert soft["path"] == stream["path"]
+    assert soft["items"] == stream["items"]
+    assert soft["level"] == "bits"
+    assert soft["bit1_sign"] == "negative"
 
 
 def test_css_symbols_stream_pages_with_i16_suffix_inference(

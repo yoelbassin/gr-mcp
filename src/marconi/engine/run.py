@@ -33,7 +33,7 @@ from marconi.engine.stages.base import Stage
 from marconi.engine.types.descriptor import Descriptor
 from marconi.engine.types.enums import ItemType
 from marconi.engine.types.levels import Level
-from marconi.engine.types.models import Bitstream, Modem, Symbolstream
+from marconi.engine.types.models import Bitstream, Modem, Softstream, Symbolstream
 from marconi.engine.types.params import ParamValue
 
 
@@ -41,6 +41,7 @@ class PipelineResult(BaseModel):
     status: Literal["ok", "error", "timeout", "empty"]
     bitstream: Bitstream | None = None
     symbolstream: Symbolstream | None = None
+    softstream: Softstream | None = None
     windows: list[int] = []
     marks: list[int] = []
     census: list[BlockCensus] = []
@@ -353,31 +354,38 @@ def _hints(
     return hints
 
 
+def _soft_file(path: Path, level: Level | None) -> Softstream:
+    return Softstream(
+        path=path,
+        num_items=path.stat().st_size // 4 if path.is_file() else 0,
+        level="bits" if level is Level.BITS else "symbols",
+    )
+
+
 def _soft_tap(
     cp: CompiledPipeline,
     result: PipelineResult,
     seam: Path,
     input_stream: Bitstream | Symbolstream | None,
-) -> tuple[Path, bool] | None:
-    """The soft stream to score, paired with its decode-grade. Decode-grade is
-    True only for a bits-level LLR stream (a soft-demap output), whose magnitude
-    is a per-bit confidence that can certify or reject a decode. A symbols-level
-    demod tap (a bare fsk/msk front end) is a per-symbol eye -- signal-present
-    evidence only (see marconi.engine.quality._emit_soft)."""
+) -> Softstream | None:
+    """The soft stream to score and surface, tagged with its level. A bits-level
+    LLR stream (a soft-demap output) is decode-grade: its magnitude is a per-bit
+    confidence that can certify or reject a decode. A symbols-level demod tap (a
+    bare fsk/msk front end) is a per-symbol eye -- signal-present evidence only
+    (see marconi.engine.quality._emit_soft)."""
     if result.symbolstream is not None and result.symbolstream.item_type == "f":
-        return result.symbolstream.path, cp.final.level is Level.BITS
+        return _soft_file(result.symbolstream.path, cp.final.level)
     if cp.soft_seam is not None and cp.soft_seam.is_file():
         tapped_level = next(
             (b.level for b in reversed(cp.boundaries[1:]) if b.item_type is ItemType.F),
             None,
         )
-        return cp.soft_seam, tapped_level is Level.BITS
+        return _soft_file(cp.soft_seam, tapped_level)
     if cp.boundary.item_type is ItemType.F:
-        decode_grade = cp.boundary.level is Level.BITS
         if cp.gr is not None:
-            return seam, decode_grade
+            return _soft_file(seam, cp.boundary.level)
         if input_stream is not None:
-            return input_stream.path, decode_grade
+            return _soft_file(input_stream.path, cp.boundary.level)
     return None
 
 
@@ -508,11 +516,12 @@ def run_rx(
             census=result.census,
             diagnostics=result.diagnostics,
             marks=result.marks,
-            soft_stream=soft[0] if soft is not None else None,
-            soft_decode_grade=soft[1] if soft is not None else True,
+            soft_stream=soft.path if soft is not None else None,
+            soft_decode_grade=soft.level == "bits" if soft is not None else True,
         )
         return result.model_copy(
             update={
+                "softstream": soft,
                 "quality": quality,
                 "hints": _hints(modem, registry, cp.final, quality.verdict),
             }

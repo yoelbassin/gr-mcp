@@ -87,6 +87,21 @@ def _input_stream(path: Path, item_type: str) -> Bitstream | Symbolstream:
     )
 
 
+_SOFT_BIT1_SIGN = {"symbols": "positive", "bits": "negative"}
+
+
+def _soft_summary(result: PipelineResult) -> dict[str, object] | None:
+    if result.softstream is None:
+        return None
+    return {
+        "path": str(result.softstream.path),
+        "item_type": "f",
+        "items": result.softstream.num_items,
+        "level": result.softstream.level,
+        "bit1_sign": _SOFT_BIT1_SIGN[result.softstream.level],
+    }
+
+
 def _stream_summary(result: PipelineResult) -> dict[str, object] | None:
     if result.bitstream is not None:
         return {
@@ -247,6 +262,16 @@ def run_rx_tool(
     you picked doesn't match the signal). clusters=K's EVM/cluster fit
     corroborates once modulus says the lock is real. The result carries
     status, a "stream" summary {path, item_type, items} to page with read_stream,
+    a "soft_stream" summary {path, item_type "f", items, level, bit1_sign}
+    naming the soft float stream this decode exposes — the demod tap or soft
+    seam the quality layer scored; when the path itself ends soft it names the
+    same file as "stream", and it is null when the run produced no soft stream
+    (e.g. a hard-bit coding-only run). Page it with read_stream (pass
+    item_type "f" for a suffix-less path) for your own soft-decision work —
+    PPM/Manchester pair comparisons, soft correlation, confidence-weighted
+    CRC repair; bit1_sign restates the sign convention for its level
+    (symbols-level demod outputs slice POSITIVE to bit 1; bits-level LLRs
+    mark bit 1 NEGATIVE),
     windows/marks (an exact arithmetic tiling collapses to {key}_ramp =
     {start, stride, count} with an empty inline list; other lists over 512
     entries truncate inline with a *_total count and a *_path int64 sidecar
@@ -317,12 +342,14 @@ def run_rx_tool(
             timeout=timeout,
         )
     payload: dict[str, Any] = result.model_dump(mode="json")
+    payload.pop("softstream", None)
     _cap_list(payload, "windows", run_dir / "windows.i64")
     _cap_list(payload, "marks", run_dir / "marks.i64")
     for diag in payload.get("diagnostics", []):
         if isinstance(diag, dict):
             _cap_list(diag, "marks")
     payload["stream"] = _stream_summary(result)
+    payload["soft_stream"] = _soft_summary(result)
     return payload
 
 
