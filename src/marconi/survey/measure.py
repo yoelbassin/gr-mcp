@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Literal
 
 import numpy as np
 from pydantic import BaseModel
@@ -35,12 +36,19 @@ class SpectrumStats(BaseModel):
     occupied_hi_hz: float
 
 
+class PhaseConcentration(BaseModel):
+    order_2: float
+    order_4: float
+    order_8: float
+
+
 class CarrierStats(BaseModel):
     offset_hz: float
     psk_order: int | None
-    phase_concentration: dict[int, float]
-    method: str
+    phase_concentration: PhaseConcentration
+    method: Literal["mpsk", "spectral_centroid"]
     off_center: bool
+    offset_ambiguous: bool
 
 
 # M-th-power carrier/phase analysis. Phase-only x^M collapses an order-M PSK
@@ -146,16 +154,22 @@ def _carrier(
         None,
     )
     if order is not None:
-        offset, method = offsets[order], f"mpsk_x{order}"
+        offset = offsets[order]
     else:
-        offset, method = centroid_hz, "spectral_centroid"
+        offset = centroid_hz
+    method: Literal["mpsk", "spectral_centroid"] = (
+        "mpsk" if order is not None else "spectral_centroid"
+    )
     off_center = occupied_bw_hz > 0 and abs(offset) > _OFF_CENTER_FRAC * occupied_bw_hz
     return CarrierStats(
         offset_hz=round(offset, 1),
         psk_order=order,
-        phase_concentration={m: _sig(scores[m]) for m in _MPSK_ORDERS},
+        phase_concentration=PhaseConcentration(
+            order_2=_sig(scores[2]), order_4=_sig(scores[4]), order_8=_sig(scores[8])
+        ),
         method=method,
         off_center=off_center,
+        offset_ambiguous=False,
     )
 
 

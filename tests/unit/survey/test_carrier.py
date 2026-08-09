@@ -49,7 +49,7 @@ def _narrowband_fsk(snr_db: float = 15.0) -> np.ndarray:
 def test_qpsk_reads_order_4_with_precise_offset() -> None:
     c = _carrier(_psk(4), _FS, 30_000.0, _FOFF)
     assert c.psk_order == 4
-    assert c.method == "mpsk_x4"
+    assert c.method == "mpsk"
     assert abs(c.offset_hz - _FOFF) < 500.0
 
 
@@ -65,14 +65,14 @@ def test_bpsk_abstains_but_surfaces_the_order_2_line() -> None:
     # envelope block (constant envelope => BPSK, amplitude-modulated => OOK).
     c = _carrier(_psk(2), _FS, 30_000.0, _FOFF)
     assert c.psk_order is None
-    assert c.phase_concentration[2] > c.phase_concentration[4]
-    assert c.phase_concentration[2] >= 25.0
+    assert c.phase_concentration.order_2 > c.phase_concentration.order_4
+    assert c.phase_concentration.order_2 >= 25.0
 
 
 def test_narrowband_fsk_is_not_mislabeled_bpsk() -> None:
     c = _carrier(_narrowband_fsk(), _FS, 30_000.0, 0.0)
     assert c.psk_order is None  # order-2 line present, but no jump at 4/8
-    assert c.phase_concentration[2] >= c.phase_concentration[4]
+    assert c.phase_concentration.order_2 >= c.phase_concentration.order_4
 
 
 def test_low_snr_8psk_reads_none_not_a_false_lock() -> None:
@@ -87,7 +87,8 @@ def test_noise_has_no_carrier() -> None:
     )
     c = _carrier(noise, _FS, 30_000.0, 0.0)
     assert c.psk_order is None
-    assert all(v < 5.0 for v in c.phase_concentration.values())
+    pc = c.phase_concentration
+    assert pc.order_2 < 5.0 and pc.order_4 < 5.0 and pc.order_8 < 5.0
 
 
 def test_off_center_flags_a_large_offset() -> None:
