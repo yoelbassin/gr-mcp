@@ -590,15 +590,15 @@ def survey(
     fraction of the occupied bandwidth — the signal sits off-channel, so a demod
     that assumes a carrier at DC will miss: re-run with center_hz=offset_hz (a
     known tuning error becomes ppm = offset_hz / tuned_hz * 1e6).
-    psk_order (4 or 8, else null) is an M-fold PHASE-SYMMETRY line, not a
-    modulation label: QPSK/8-PSK AND a square QAM/APSK of that order share it,
-    and the M-th-power cannot separate them — read it WITH the envelope block
-    (unimodal amplitude / low kurtosis => PSK; multimodal => QAM). Order 2 is
-    never claimed alone: squaring turns ANY carrier-bearing signal (OOK, FSK,
-    GMSK) into an order-2 line, so a strong order-2 with constant envelope is
-    BPSK, amplitude-modulated is OOK/ASK. phase_concentration is the raw
-    ln(N)-normalized order-2/4/8 strengths (order_2/order_4/order_8); ~1 at every
-    order means no phase-coherent carrier (noise, or too weak to lock).
+    psk_order (4 or 8, else null) is an M-fold PHASE-SYMMETRY line, claimed when its
+    score jumps clear of the order below it, not a modulation label: QPSK/8-PSK AND a
+    square QAM/APSK of that order share it, and the M-th-power cannot separate them —
+    read it WITH the envelope block (unimodal amplitude / low kurtosis => PSK;
+    multimodal => QAM). Order 2 is never claimed alone: squaring turns ANY
+    carrier-bearing signal (OOK, FSK, GMSK) into an order-2 line, so a strong order-2
+    with constant envelope is BPSK, amplitude-modulated is OOK/ASK. phase_concentration
+    is the raw ln(N)-normalized order-2/4/8 strengths (order_2/order_4/order_8); ~1 at
+    every order means no phase-coherent carrier (noise, or too weak to lock).
 
     "envelope" — constant-envelope ratio + kurtosis; you decide FSK vs PSK
     vs QAM. Computed on a power-smoothed active portion gated at burst
