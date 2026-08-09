@@ -92,10 +92,11 @@ def test_validate_modem_warnings_empty_on_clean_spec() -> None:
 
 def test_describe_index_and_filters() -> None:
     idx = describe_stages()
-    stages = cast(list[dict[str, object]], idx["stages"])
-    assert any(e["name"] == "fsk" for e in stages)
+    stages = cast(dict[str, list[dict[str, object]]], idx["stages"])
+    assert any(e["name"] == "fsk" for e in stages["fsk"])
     assert "envelope" in idx
     one = describe_stages(stage="fsk")
+    assert "envelope" not in one
     one_stages = cast(list[dict[str, object]], one["stages"])
     params_schema = cast(dict[str, object], one_stages[0]["params_schema"])
     properties = cast(dict[str, object], params_schema["properties"])

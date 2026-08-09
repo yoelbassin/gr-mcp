@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import cast
 
 import numpy as np
 import pytest
@@ -39,10 +40,11 @@ def test_histogram_length_and_totals(tmp_path: Path) -> None:
         clusters=0,
         bins=32,
     )
-    hist = out["histogram"]
-    assert len(hist) == 32  # type: ignore[arg-type]
-    counts = [h["count"] for h in hist]  # type: ignore[attr-defined]
+    hist = cast(dict[str, object], out["histogram"])
+    counts = cast(list[int], hist["counts"])
+    assert len(counts) == 32
     assert sum(counts) == out["sampled_items"]
+    assert cast(float, hist["step"]) > 0
     assert "centers" not in out
 
 

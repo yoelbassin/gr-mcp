@@ -6,18 +6,20 @@ from marconi.mcp.vocab import ENVELOPE, stage_details, stage_index
 
 def test_index_covers_every_registry_stage() -> None:
     index = stage_index()
-    assert {e["name"] for e in index} == set(stage_registry())
-    entry = next(e for e in index if e["name"] == "fsk")
-    assert entry["family"] == "fsk"
-    assert entry["from_level"] == "iq"
-    assert set(entry) >= {"name", "family", "from_level", "to_level", "directions"}
+    names = {e["name"] for rows in index.values() for e in rows}
+    assert names == set(stage_registry())
+    assert set(index) == {s.family for s in stage_registry().values()}
+    entry = next(e for e in index["fsk"] if e["name"] == "fsk")
+    assert entry["levels"] == "iq>symbols"
+    assert set(entry) >= {"name", "levels", "dir"}
 
 
 def test_details_carry_schema_and_contracts() -> None:
     (d,) = stage_details(["fsk"])
     assert d["params_schema"]["properties"]["deviation"]
     assert "min_input_sps" in d
-    assert d["directions"] == ["rx", "tx"]
+    assert d["dir"] == "rx,tx"
+    assert d["family"] == "fsk"
 
 
 def test_fsk_loop_bw_documents_open_loop_mode() -> None:

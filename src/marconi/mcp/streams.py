@@ -15,6 +15,10 @@ _MAX_INLINE_BITS = 1_048_576
 _MAX_PAGE_ITEMS = 65536
 _CHUNK_ITEMS = 1 << 20
 
+# default page sizes hold a default call near a few KB of JSON regardless of
+# how many chars one rendered item costs; an explicit count still pages more
+_DEFAULT_PAGE_ITEMS = {"b": 4096, "s": 2048, "f": 1024, "l": 1024, "c": 256}
+
 _STATS_SAMPLE_ITEMS = 65536
 _STATS_SAMPLE_CHUNKS = 16
 _STATS_MAX_CLUSTERS = 16
@@ -72,12 +76,14 @@ def _resolve_item_type(path: Path, item_type: str | None) -> str:
 
 
 def render_page(
-    path: Path, *, offset: int, count: int, item_type: str | None
+    path: Path, *, offset: int, count: int | None, item_type: str | None
 ) -> dict[str, object]:
     if offset < 0:
         raise ValueError(f"offset must be >= 0, got {offset}")
     _require_file(path)
     kind = _resolve_item_type(path, item_type)
+    if count is None:
+        count = _DEFAULT_PAGE_ITEMS[kind]
     dtype = np.dtype(_ITEM_DTYPES[kind])
     total = path.stat().st_size // dtype.itemsize
     count = max(0, min(count, _MAX_PAGE_ITEMS, total - offset))
@@ -180,16 +186,18 @@ def _sample_stream(path: Path, dtype: np.dtype) -> tuple[np.ndarray, int, bool]:
     return np.concatenate(parts), total, True
 
 
-def _hist(x: np.ndarray, bins: int) -> list[dict[str, float | int]]:
+def _hist(x: np.ndarray, bins: int) -> dict[str, object]:
     lo, hi = (float(v) for v in np.percentile(x, [0.5, 99.5]))
     if hi <= lo:
         hi = lo + 1.0
     edges = np.linspace(lo, hi, bins + 1)
     counts, _ = np.histogram(np.clip(x, lo, hi), bins=edges)
-    mids = (edges[:-1] + edges[1:]) / 2.0
-    return [
-        {"center": round(float(c), 6), "count": int(n)} for c, n in zip(mids, counts)
-    ]
+    # bin i's center is start + i*step: the axis is derivable, never shipped
+    return {
+        "start": round(float((edges[0] + edges[1]) / 2.0), 6),
+        "step": round(float(edges[1] - edges[0]), 6),
+        "counts": [int(n) for n in counts],
+    }
 
 
 def _nearest_labels(values: np.ndarray, centers: np.ndarray) -> np.ndarray:
@@ -260,15 +268,7 @@ def stream_stats(
         mean=round(float(x.mean()), 6),
         std=round(float(x.std()), 6),
     )
-    lo, hi = (float(v) for v in np.percentile(x, [0.5, 99.5]))
-    if hi <= lo:
-        hi = lo + 1.0
-    edges = np.linspace(lo, hi, bins + 1)
-    counts, _ = np.histogram(np.clip(x, lo, hi), bins=edges)
-    mids = (edges[:-1] + edges[1:]) / 2.0
-    out["histogram"] = [
-        {"center": round(float(c), 6), "count": int(n)} for c, n in zip(mids, counts)
-    ]
+    out["histogram"] = _hist(x, bins)
     if clusters >= 1:
         centers = kmeans_1d(x, clusters)
         labels = _nearest_labels(x, centers)

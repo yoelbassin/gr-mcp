@@ -36,7 +36,7 @@ from marconi.mcp.streams import (
     render_page,
 )
 from marconi.mcp.streams import stream_stats as _compute_stats
-from marconi.mcp.vocab import ENVELOPE, stage_details, stage_index
+from marconi.mcp.vocab import ENVELOPE, family_names, stage_details, stage_index
 from marconi.mcp.workspace import new_run_dir
 from marconi.survey import channelize_to_file, survey_iq
 
@@ -58,7 +58,7 @@ def _start_descriptor(item_type: str, level: str | None) -> Descriptor:
 
 def _trace_rows(modem: Modem, cp: CompiledPipeline) -> list[dict[str, object]]:
     labels = ["<start>"] + [f"{s.conv}[{i}]" for i, s in enumerate(modem.path)]
-    return [
+    rows = [
         {
             "after": label,
             "level": desc.level.value,
@@ -71,6 +71,7 @@ def _trace_rows(modem: Modem, cp: CompiledPipeline) -> list[dict[str, object]]:
         }
         for label, desc, rate in zip(labels, cp.boundaries, cp.rates)
     ]
+    return [{k: v for k, v in row.items() if v is not None} for row in rows]
 
 
 def _input_stream(path: Path, item_type: str) -> Bitstream | Symbolstream:
@@ -88,6 +89,15 @@ def _input_stream(path: Path, item_type: str) -> Bitstream | Symbolstream:
 
 
 _SOFT_BIT1_SIGN = {"symbols": "positive", "bits": "negative"}
+
+
+def _slim_census(rows: list[Any]) -> None:
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        kind = row.get("kind")
+        if isinstance(kind, str) and str(row.get("block", "")).startswith(kind):
+            del row["kind"]
 
 
 def _soft_summary(result: PipelineResult) -> dict[str, object] | None:
@@ -123,21 +133,19 @@ def describe_stages(
 ) -> dict[str, object]:
     """Marconi's stage vocabulary, generated live from the engine registry.
 
-    With no arguments: a compact index of every stage (name, family, levels,
-    directions) plus the modem-spec envelope and the level/item-type primer.
-    Pass stage=<name> or family=<name> for full per-stage detail: input
-    contracts (item type, carrier, amplitude, minimum samples-per-symbol) and
-    the JSON schema of the stage's spec parameters. Compose a modem spec as
-    {"symbol_rate": <float>, "path": [{"conv": <stage name>, ...params}]};
-    check it with validate_modem before running."""
+    With no arguments: a compact index of every stage grouped by family —
+    each row {name, levels: "<from>><to>", dir: "rx"/"tx"/"rx,tx",
+    description?} — plus the modem-spec envelope and the level/item-type
+    primer (index call only). Pass stage=<name> or family=<name> for full
+    per-stage detail: input contracts (item type, carrier, amplitude,
+    minimum samples-per-symbol) and the JSON schema of the stage's spec
+    parameters. Compose a modem spec as {"symbol_rate": <float>, "path":
+    [{"conv": <stage name>, ...params}]}; check it with validate_modem
+    before running."""
     if stage is not None:
-        return {"stages": stage_details([stage]), "envelope": ENVELOPE}
+        return {"stages": stage_details([stage])}
     if family is not None:
-        names = [str(e["name"]) for e in stage_index() if e["family"] == family]
-        if not names:
-            fams = sorted({str(e["family"]) for e in stage_index()})
-            raise ValueError(f"unknown family {family!r}; known: {fams}")
-        return {"stages": stage_details(names), "envelope": ENVELOPE}
+        return {"stages": stage_details(family_names(family))}
     return {"stages": stage_index(), "envelope": ENVELOPE}
 
 
@@ -152,7 +160,8 @@ def validate_modem(
 
     Returns {"valid": true, "trace": [...]} where each trace row shows the
     stream after each stage (level, item type, carrier hardness, amplitude
-    statistic, symbol-alphabet order, frame length, sample rate), or
+    statistic, symbol-alphabet order, frame length, sample rate; null
+    fields are omitted), or
     {"valid": false, "errors": [...]} with structured compile errors: a
     failing spec is a normal result here, not an exception. direction is
     "rx" (decode) or "tx" (generate); input_item_type/input_level describe
@@ -242,59 +251,57 @@ def run_rx_tool(
     stream for coding-only paths) and return the full pipeline result.
 
     Pass exactly one of capture_path (raw IQ; capture_dtype one of
-    cf32/ci16/ci8/cu8, converted once per capture into a shared cache if not
-    cf32) or input_path (+ input_item_type b/s/f and optionally input_level).
+    cf32/ci16/ci8/cu8, non-cf32 converted once per capture into a shared
+    cache) or input_path (+ input_item_type b/s/f, optional input_level).
     capture_offset/capture_samples (complex samples; 0 samples = to EOF)
-    decode a bounded slice while streaming - the answer to a capture too
-    large for one run. A soft 'f' stream's sign convention depends on its
-    level: bits-level soft floats are LLRs where bit 1 = NEGATIVE;
-    symbols-level soft floats (the default level for 'f' input, and the
-    output of a path ending at a demod stage, e.g. bare fsk) are demod
-    outputs where POSITIVE slices to bit 1. A path may instead end at a bare
-    demod stage that lands on complex constellation symbols (item_type "c",
-    a .cf32 file) rather than soft floats — psk_demod, sample_symbols, and
-    the ofdm cell stages all land there; the final validate_modem trace
-    row's item_type says which a given spec produces. Inspect a "c" stream
-    with stream_stats(item_type="c") — its constant_modulus_ratio is the
-    robust false-lock check, read exactly as that tool documents (a single
-    ring means PSK/CPFSK; a few structured rings can mean a genuine QAM
-    lock, not a false one; only an erratic/drifting ratio means the demod
-    you picked doesn't match the signal). clusters=K's EVM/cluster fit
-    corroborates once modulus says the lock is real. The result carries
-    status, a "stream" summary {path, item_type, items} to page with read_stream,
-    a "soft_stream" summary {path, item_type "f", items, level, bit1_sign}
-    naming the soft float stream this decode exposes — the demod tap or soft
-    seam the quality layer scored; when the path itself ends soft it names the
-    same file as "stream", and it is null when the run produced no soft stream
-    (e.g. a hard-bit coding-only run). Page it with read_stream (pass
-    item_type "f" for a suffix-less path) for your own soft-decision work —
-    PPM/Manchester pair comparisons, soft correlation, confidence-weighted
-    CRC repair; bit1_sign restates the sign convention for its level
-    (symbols-level demod outputs slice POSITIVE to bit 1; bits-level LLRs
-    mark bit 1 NEGATIVE),
-    windows/marks (an exact arithmetic tiling collapses to {key}_ramp =
-    {start, stride, count} with an empty inline list; other lists over 512
-    entries truncate inline with a *_total count and a *_path int64 sidecar
-    holding the full list - page it with read_stream), per-block census,
-    diagnostics, free-text "hints" (actionable
-    tips for THIS path, e.g. a coherent-demod bit-polarity-ambiguity retry
-    suggestion), and "quality": a conservative verdict (decoded / uncertain /
-    no_signal) with the evidence behind it. Treat only verdict "decoded" as
-    trustworthy output; "uncertain" means the evidence was absent or
-    conflicting — read
-    quality.rationale. A hard-decision demod that measures its own decision
-    dominance (dechirp's argmax over the dechirped spectrum) feeds quality
-    the same way a soft stream does, so a bare css path can earn "decoded"
-    — and reads no_signal when the spec's chirp geometry does not match the
-    capture. timeout is a hard wall-clock cap on the entire call —
-    pre-scan, decode, coding, and quality-scoring all count against it, not
-    just the GR pipeline — so a decode too large or slow to finish in time
-    raises a [deadline_exceeded] error instead of running unbounded; window a
-    large capture with capture_offset/capture_samples rather than only
-    raising timeout (an exception: a deadline landing specifically while the
-    GR pipeline itself is mid-run instead returns status="timeout" normally,
-    not a raised error). Output streams live under ./marconi-runs/ and are
-    not auto-cleaned; page with read_stream (or summarize with stream_stats)
+    decode a bounded slice while streaming — the answer to a capture too
+    large for one run.
+
+    A soft 'f' stream's sign convention is per level: bits-level floats are
+    LLRs where bit 1 = NEGATIVE; symbols-level floats (the default level for
+    'f' input, and the output of a path ending at a demod stage, e.g. bare
+    fsk) slice POSITIVE to bit 1. A path may instead end at complex
+    constellation symbols (item_type "c", a .cf32 file — psk_demod,
+    sample_symbols, and the ofdm cell stages land there); the final
+    validate_modem trace row's item_type says which a spec produces. Inspect
+    a "c" stream with stream_stats(item_type="c") and read its
+    constant_modulus_ratio exactly as that tool documents — it, not EVM, is
+    the false-lock check.
+
+    The result omits null-valued fields throughout (a census row lists only
+    the ports/measures its block has); "stream" and "soft_stream" alone stay
+    explicit when null. It carries: status; "stream" {path, item_type,
+    items} — page it with read_stream; "soft_stream" {path, item_type "f",
+    items, level, bit1_sign} — the demod tap or soft seam the quality layer
+    scored, for your own soft-decision work (PPM/Manchester pair
+    comparisons, soft correlation, confidence-weighted CRC repair; pass
+    item_type "f" to read_stream for a suffix-less path; bit1_sign restates
+    the sign convention for its level). When the path itself ends soft,
+    soft_stream names the same file as "stream"; it is null when the run
+    produced no soft stream (a hard-bit coding-only run). windows/marks: an
+    exact arithmetic tiling collapses to {key}_ramp = {start, stride, count}
+    with an empty inline list; other lists over 512 entries truncate inline
+    with a *_total count and a *_path int64 sidecar holding the full list —
+    page it with read_stream. Also: per-block census (a row's kind appears
+    only when its block id doesn't already start with it), diagnostics,
+    free-text "hints" (actionable tips for THIS path, e.g. a coherent-demod
+    bit-polarity retry), and "quality": a conservative verdict (decoded /
+    uncertain / no_signal) with the evidence behind it. Treat only verdict
+    "decoded" as trustworthy; "uncertain" means evidence absent or
+    conflicting — read quality.rationale. A hard-decision demod that
+    measures its own decision dominance (dechirp's argmax over the dechirped
+    spectrum) feeds quality like a soft stream, so a bare css path can earn
+    "decoded" — and reads no_signal when the spec's chirp geometry does not
+    match the capture.
+
+    timeout is a hard wall-clock cap on the entire call — conversion,
+    pre-scan, decode, coding, and quality-scoring all count against it — so
+    an oversized decode raises [deadline_exceeded] instead of running
+    unbounded; window a large capture with capture_offset/capture_samples
+    rather than only raising timeout. Exception: a deadline landing while
+    the GR pipeline itself is mid-run returns status="timeout" normally, not
+    a raised error. Output streams live under ./marconi-runs/ and are not
+    auto-cleaned; page with read_stream (or summarize with stream_stats)
     until you remove them."""
     if (capture_path is None) == (input_path is None):
         raise ValueError("pass exactly one of capture_path or input_path")
@@ -341,8 +348,12 @@ def run_rx_tool(
             input_stream=_input_stream(Path(cast(str, input_path)), input_item_type),
             timeout=timeout,
         )
-    payload: dict[str, Any] = result.model_dump(mode="json")
-    payload.pop("softstream", None)
+    # null-valued fields are omitted product-wide (a census row lists only the
+    # ports/measures its block has); stream/soft_stream stay explicit below
+    payload: dict[str, Any] = result.model_dump(mode="json", exclude_none=True)
+    for dup in ("bitstream", "symbolstream", "softstream"):
+        payload.pop(dup, None)
+    _slim_census(payload.get("census", []))
     _cap_list(payload, "windows", run_dir / "windows.i64")
     _cap_list(payload, "marks", run_dir / "marks.i64")
     for diag in payload.get("diagnostics", []):
@@ -389,37 +400,43 @@ def run_tx_tool(
         sink_io={"path": str(out)},
     )
     r = GnuRadioBackend().run_pipeline(gr, timeout=timeout)
-    return {
+    payload: dict[str, object] = {
         "status": r.status,
-        "error": r.error,
         "iq_path": str(out),
         "num_samples": out.stat().st_size // 8 if out.is_file() else 0,
         "sample_rate": sample_rate,
-        "census": [c.model_dump() for c in r.census],
+        "census": [c.model_dump(exclude_none=True) for c in r.census],
     }
+    _slim_census(cast(list[Any], payload["census"]))
+    if r.error is not None:
+        payload["error"] = r.error
+    return payload
 
 
 def read_stream(
-    path: str, offset: int = 0, count: int = 4096, item_type: str | None = None
+    path: str,
+    offset: int = 0,
+    count: int | None = None,
+    item_type: str | None = None,
 ) -> dict[str, object]:
     """Page a decoded stream back as data you can parse directly.
 
-    Bits (.u8) return as a '0'/'1' string — the files are unpacked and frames
-    are rarely byte-aligned, so slice the string at any bit offset for your
-    framing/CRC/field work. Hard symbols (.i16) return as ints. Soft floats
-    (.f32) return as "values", whose sign convention depends on the stream's
-    level (the final validate_modem trace row states it): bits-level soft
-    streams are LLRs where bit 1 = NEGATIVE; symbols-level soft streams (a
-    path ending at a demod stage, e.g. bare fsk) are demod outputs where
-    POSITIVE slices to bit 1. Complex constellation symbols (.cf32, item_type
-    "c" — the output of a path ending at a bare demod stage, e.g. psk_demod)
-    return "real"/"imag" lists. Window/mark sidecars (.i64, from a truncated
-    run_rx result) return as ints under "values". item_type b/s/f/l/c overrides
-    suffix inference (required for suffix-less paths). Pages are capped at
-    65536 items; use offset to walk longer streams. total_items reports the
-    full stream length. Stream files live under ./marconi-runs/ (or
-    $MARCONI_WORKSPACE) and persist until externally removed; a missing path
-    returns a [not_found] error asking you to re-run the spec."""
+    Bits (.u8) return as a '0'/'1' string — the files are unpacked and
+    frames are rarely byte-aligned, so slice the string at any bit offset
+    for your framing/CRC/field work. Hard symbols (.i16) return as ints;
+    window/mark sidecars (.i64, from a truncated run_rx list) as ints under
+    "values". Soft floats (.f32) return as "values" whose sign convention is
+    per level (the final validate_modem trace row states it): bits-level =
+    LLRs, bit 1 NEGATIVE; symbols-level (a path ending at a demod stage,
+    e.g. bare fsk) slices POSITIVE to bit 1. Complex constellation symbols
+    (.cf32, a path ending at a bare demod, e.g. psk_demod) return
+    "real"/"imag" lists. item_type b/s/f/l/c overrides suffix inference
+    (required for suffix-less paths). count defaults per item type to keep a
+    page a few KB (b 4096, s 2048, f/l 1024, c 256) and caps at 65536; use
+    offset to walk longer streams — total_items reports the full length.
+    Stream files live under ./marconi-runs/ (or $MARCONI_WORKSPACE) until
+    externally removed; a missing path returns a [not_found] error asking
+    you to re-run the spec."""
     return render_page(Path(path), offset=offset, count=count, item_type=item_type)
 
 
@@ -433,43 +450,39 @@ def stream_stats(
     modulation levels — the fast way to size an mfsk_soft_demap or spot a
     closed eye without hand-rolling numpy.
 
-    Returns total_items, the sampled item count (streams over 65536 items are
-    read as evenly-strided chunks across the whole file), min/max/mean/std, and
-    a histogram of {center, count} over the 0.5..99.5 percentile range. Pass
-    clusters=K (1..16) to also fit up to K levels: sorted "centers", their
-    "cluster_counts", and a paste-ready "levels" list for mfsk_soft_demap (ask
-    for a power-of-two K to feed it). Levels with no support are dropped, so
-    "levels" may be shorter than K — a short list means the stream has fewer
-    real modes than you asked for. Read the histogram to judge modality. Bits
-    (.u8) report only ones_fraction.
+    Returns total_items, the sampled count (streams over 65536 items are
+    read as evenly-strided chunks spanning the file), min/max/mean/std, and
+    a "histogram" {start, step, counts} over the 0.5..99.5 percentile range
+    — bin i's center is start + i*step. clusters=K (1..16) also fits up to K
+    levels: sorted "centers", "cluster_counts", and a paste-ready "levels"
+    list for mfsk_soft_demap (ask for a power-of-two K to feed it). Levels
+    with no support are dropped — a short list means fewer real modes than
+    you asked for; read the histogram to judge modality. Bits (.u8) report
+    only ones_fraction.
 
-    item_type "c" (complex constellation symbols, e.g. the output of a path
-    ending at a demod stage) returns a different shape: mean_magnitude,
-    std_magnitude, and constant_modulus_ratio (std/mean of |z|), plus
-    magnitude_histogram and phase_histogram in place of the single
-    histogram. Read constant_modulus_ratio first: it is the robust
-    false-lock check. A genuine PSK/CPFSK lock sits on one ring (ratio near
-    0); a locked QAM constellation sits on a few fixed rings (moderate,
-    structured); a false lock — e.g. an FSK/frequency-modulated signal
-    forced through a PSK demod, or a demod that never fully settled — drifts
-    across many radii and reads a high, erratic ratio, even when a K-cluster
-    fit still happily returns K points. clusters=K (>=1) additionally fits a
-    2-D constellation: sorted "clusters" (each {real, imag, magnitude,
-    phase_deg, count}) and an overall "evm" (RMS error from each symbol to
-    its nearest cluster center, normalized by the RMS cluster magnitude).
-    Treat EVM and cluster balance as corroborating, not primary: once
+    item_type "c" (complex constellation symbols, e.g. a path ending at a
+    bare demod stage) returns mean_magnitude, std_magnitude,
+    constant_modulus_ratio (std/mean of |z|), and magnitude_histogram +
+    phase_histogram in place of the single histogram. Read
+    constant_modulus_ratio FIRST — it is the robust false-lock check: a
+    genuine PSK/CPFSK lock sits on one ring (near 0), a locked QAM
+    constellation on a few fixed rings (moderate, structured), and a false
+    lock — an FSK signal forced through a PSK demod, a loop that never
+    settled — drifts across many radii into a high, erratic ratio even when
+    a K-cluster fit still returns K points. clusters=K adds a 2-D fit:
+    sorted "clusters" ({real, imag, magnitude, phase_deg, count}) and "evm"
+    (RMS error to the nearest center over RMS cluster magnitude). EVM and
+    cluster balance corroborate, they are not primary: once
     constant_modulus_ratio says the lock is real, tight balanced clusters at
-    low EVM confirm which order K — but EVM by itself is not a safe
-    false-lock check (a demod that partially loses lock mid-capture, e.g. a
-    cycle slip, can read a misleadingly low EVM at the wrong K, or a
-    misleadingly high one on a signal that IS genuinely locked, while
-    constant_modulus_ratio — blind to phase/rotation — does not move). K is
-    a request, not a measurement of the signal: asking for more clusters
-    than the signal truly has over-splits real lobes into extra low-EVM
-    sub-clusters, so a returned K-length "clusters" list alone is not
-    confirmation of order K — compare EVM across a few K values (it drops
-    sharply at the true order and plateaus past it) together with
-    cluster-count balance. item_type b/s/f/l/c overrides suffix inference."""
+    low EVM confirm the order — but EVM alone is unsafe (a mid-capture cycle
+    slip can read misleadingly low at the wrong K, or misleadingly high on a
+    genuinely locked signal, while constant_modulus_ratio — blind to
+    phase/rotation — does not move). K is a request, not a measurement:
+    over-asking splits real lobes into extra low-EVM sub-clusters, so a
+    K-length "clusters" list alone is not confirmation of order K — compare
+    EVM across a few K values (it drops sharply at the true order and
+    plateaus past it) together with cluster balance. item_type b/s/f/l/c
+    overrides suffix inference."""
     return _compute_stats(Path(path), item_type=item_type, clusters=clusters, bins=bins)
 
 
@@ -487,113 +500,100 @@ def survey(
 ) -> dict[str, object]:
     """Characterize a raw-IQ capture — pure DSP measurements, no interpretation.
 
-    Runs before you know the modem: the pre-demod counterpart to stream_stats.
-    Reads a bounded slice (capture_offset/capture_samples in complex samples,
-    0 = to EOF; capture_dtype one of cf32/ci16/ci8/cu8, matching run_rx).
+    Runs before you know the modem: the pre-demod counterpart to
+    stream_stats. Reads a bounded slice (capture_offset/capture_samples in
+    complex samples, 0 = to EOF; capture_dtype cf32/ci16/ci8/cu8, matching
+    run_rx).
 
-    SUB-BAND: pass center_hz (sub-band offset from the capture centre) and/or
-    decim (>1) to characterize ONE channel of a wideband multi-signal capture
-    instead of the whole span. The slice is frequency-shifted so center_hz lands
-    at DC, low-passed, and decimated by decim BEFORE measurement, so every block
-    below then describes that channel alone — the pre-demod way to confirm a
-    channel is what you think before building a modem (there is no need to
-    channelize through run_rx first; run_rx has no conditioned-IQ output). The
-    reported sample_rate is the decimated rate (sample_rate/decim), and
-    min/max_symbol_rate scale to it. bandwidth_hz is the channel filter passband
-    width (default passes most of the decimated band); the aggregate whole-span
-    survey (the default, center_hz=0 decim=1) is unchanged. Returns five
-    measurement blocks, all raw numbers for you to judge:
-    "spectrum" (a coarse two-sided PSD in psd_db — a shape to eyeball for
-    extra carriers/sub-bands, kept small on purpose; bin i sits at
-    freq_start_hz + i*freq_step_hz, so the axis is reconstructed, never
-    shipped as a redundant ramp — plus energy-centroid offset, 99%-power
-    occupied bandwidth, and peak; read spectral asymmetry off these
-    yourself), "envelope"
-    (constant-envelope ratio + kurtosis — you decide FSK vs PSK vs QAM;
-    computed on a power-smoothed active portion of the window, gated at
-    burst timescale (a windowed power envelope above a fraction of its own
-    peak) rather than per-sample, so a sustained idle gap between bursts
-    doesn't dilute it into looking amplitude-modulated, while genuine
-    within-burst amplitude keying (OOK/ASK, which varies faster than a
-    burst boundary) still registers as amplitude-modulated. A continuous
-    signal has nothing to gate, so this is a no-op there, and the reading
-    stays consistent whether you hand survey a whole bursty capture or a
-    single isolated burst), "symbol_rate" (cyclostationary rate candidates_hz
-    ranked by strengths that are RELATIVE — normalized to the single
-    strongest line across the clock spectrum's amplitude and phase branches
-    together (not the PSD "spectrum" block above, and not each branch's own
-    peak), so even pure noise produces a top strength near 1.0: strengths
-    rank the candidates, they are not a signal-present score. A candidate
-    that looks like a low-order harmonic of some other, weaker-frequency
-    periodicity (TDMA/burst repetition, a capture-chain artifact) is
-    down-weighted, so strengths[0] is not always the largest raw line and can
-    read well under 1.0 even for a confidently-detected signal; the true
-    rate itself can never be mistaken for this comb's own fundamental. Each
-    candidate also carries eye_openness (same index as candidates_hz and
-    strengths): how cleanly a multi-level symbol eye opens when the capture
-    is resampled at that rate — near zero for a smeared or wrong-rate guess,
-    sharply higher when a clean symbol eye is genuinely present. candidates_hz
-    already re-heads toward whichever candidate's eye CLEARLY opens
-    (preferring the lower rate when more than one does, since a harmonic's
-    eye can look clean too), falling back to the strength order when no eye
-    clearly opens — so strengths[0] is not guaranteed to be the largest
-    strengths value. The boolean eye_confirmed reports which regime you are
-    in: true when a candidate's eye cleared and candidates_hz[0] is
-    eye-corroborated, false when none did and candidates_hz is strength-ranked
-    only (verify by demodulating — the usual case for constant-envelope /
-    pulse-shaped GMSK/C4FM signals). eye_openness is a clean-eye diagnostic,
-    not an authoritative rate finder: on noisy or pulse-shaped real off-air signals
-    the eye can fail to clear its floor even at the true rate, in which case
-    every candidate stays in cyclostationary-strength order, and that order
-    is NOT trustworthy for constant-envelope/FSK-family signals — strengths
-    ranks spectral lines and can seat a burst-harmonic, a TDMA slot-cadence
-    line, or another capture-chain periodicity first. When the eye never
-    clears, don't trust candidates_hz[0] alone; confirm the rate by
-    demodulating your top few candidates through run_rx and comparing
-    decoded-symbol cluster tightness with stream_stats. Treat candidates as
-    ranked hypotheses, expect harmonics of the true rate among them, and note
-    the estimate is least reliable for amplitude-null signals such as
-    OOK/ASK with a carrier offset, and for short windows spanning only a few
-    burst/TDMA cycles — prefer widening the window for bursty
-    signals; narrow with min_symbol_rate/max_symbol_rate. The search band is
-    reported as search_lo_hz/search_hi_hz: the default floor is what the
-    analyzed span can actually resolve (a few clock-spectrum bins), so a
-    longer slice searches lower by default, and clock_resolution_hz is that
-    spectrum's bin width — candidates_hz values are quantized to it, so a
-    candidate within one resolution bin of your hypothesis is a match, and a
-    rate you expect below search_lo_hz needs an explicit min_symbol_rate),
-    "inst_freq"
-    (instantaneous-frequency histogram counts (bin i center =
-    hist_start_hz + i*hist_step_hz), tone peaks_hz, and spread_hz —
-    active-gated like envelope. peaks_hz only tells you the tone order when
-    tones fully resolve: at low samples-per-symbol, closely-spaced M-ary FSK
-    tones smear into one blurred lobe, so a LOW peak count does not mean
-    few-ary or non-FSK — don't trust tone count alone. spread_hz (the
-    standard deviation of the active instantaneous frequency) is ONE-SIDED
-    evidence, not a detector: a NARROW spread relative to symbol_rate
-    reliably rules out wideband frequency modulation, even when peaks_hz
-    has collapsed to a single lobe — but a WIDE spread is AMBIGUOUS, since
-    unshaped/sharp-edged PSK or QAM (abrupt phase steps, not true frequency
-    change) and a plain noisy tone can read just as wide as genuine FSK. Do
-    NOT conclude "frequency-modulated" from a wide spread_hz alone. When
-    spread_hz is wide and envelope reads constant-envelope, don't guess the
-    modulation family — run both an fsk demod and a psk/qam demod through
-    run_rx and compare symbol-cluster tightness with stream_stats; the
-    demod that produces cleaner clusters is the better hypothesis. Some
-    capture chains mirror IQ spectrally, so if a constant-envelope signal's
-    fsk/msk demod comes back no_signal, prepend the invert stage and retry
-    before ruling out frequency modulation), and
-    "bursts" (activity segments, duty_cycle, and dominant_period_samples
-    from burst spacing — the TDMA cadence; segments is capped at 512
-    entries, with a segments_total count when longer — survey writes no
-    sidecar, so re-window with capture_offset/capture_samples to inspect a
-    busier span. Each segment's [start, length] is in analyzed-stream samples;
-    "capture_scale" {offset_samples, decim} maps them back to the original
-    capture so you can re-decode one burst with a targeted slice —
-    capture_offset = offset_samples + start*decim, capture_samples =
-    length*decim). It never
-    labels the modulation, never assembles or runs a spec, and characterizes the
-    dominant signal in the slice; window in time for a multi-signal capture."""
+    SUB-BAND: center_hz (offset from the capture centre) and/or decim (>1)
+    characterize ONE channel of a wideband capture: the slice is shifted so
+    center_hz lands at DC, low-passed (bandwidth_hz sets the passband,
+    default most of the decimated band), and decimated BEFORE measurement,
+    so every block below describes that channel alone — the pre-demod way to
+    confirm a channel before building a modem (run_rx has no conditioned-IQ
+    output to survey instead). The reported sample_rate is the decimated
+    rate; min/max_symbol_rate scale to it. The whole-span default
+    (center_hz=0, decim=1) is unchanged.
+
+    Returns five measurement blocks, all raw numbers for you to judge:
+
+    "spectrum" — coarse two-sided PSD (psd_db; bin i sits at freq_start_hz +
+    i*freq_step_hz, the axis is derivable, never shipped), energy-centroid
+    offset, 99%-power occupied bandwidth, and peak; eyeball extra
+    carriers/sub-bands and spectral asymmetry yourself.
+
+    "envelope" — constant-envelope ratio + kurtosis; you decide FSK vs PSK
+    vs QAM. Computed on a power-smoothed active portion gated at burst
+    timescale (windowed power above a fraction of its own peak), so idle
+    gaps between bursts don't dilute it into looking amplitude-modulated
+    while genuine within-burst OOK/ASK keying (faster than a burst boundary)
+    still registers; a continuous signal has nothing to gate, and the
+    reading is consistent for a whole bursty capture or a single burst.
+
+    "symbol_rate" — cyclostationary candidates_hz with strengths and
+    eye_openness (same index). strengths are RELATIVE — normalized to the
+    single strongest line across the clock spectrum's amplitude and phase
+    branches together (not the PSD above, not each branch's own peak), so
+    pure noise still tops out near 1.0: they rank candidates, they are not a
+    signal-present score. A candidate that looks like a low-order harmonic
+    of a weaker periodicity (TDMA/burst repetition, a capture-chain
+    artifact) is down-weighted, so strengths[0] need not be the largest raw
+    line and can read well under 1.0 on a confident detection (the true rate
+    itself can never be mistaken for such a comb's fundamental).
+    eye_openness is how cleanly a multi-level symbol eye opens when the
+    capture is resampled at that rate — near zero for a smeared/wrong guess,
+    sharply higher for a genuine eye. candidates_hz re-heads toward
+    whichever candidate's eye CLEARLY opens (preferring the lower rate when
+    several do — a harmonic's eye can look clean too), else falls back to
+    strength order, so candidates_hz order need not match strengths order;
+    the boolean eye_confirmed says which regime you are in: true →
+    candidates_hz[0] is eye-corroborated, false → strength-ranked only. On
+    noisy or pulse-shaped off-air signals the eye can fail to clear even at
+    the true rate (usual for constant-envelope GMSK/C4FM), and strength
+    order is NOT trustworthy there — it can seat a burst harmonic, a TDMA
+    slot-cadence line, or a capture-chain periodicity first. When the eye
+    never clears, don't trust candidates_hz[0] alone: demodulate your top
+    few candidates through run_rx and compare decoded-symbol cluster
+    tightness with stream_stats. Treat candidates as ranked hypotheses and
+    expect harmonics of the true rate among them; the estimate is least
+    reliable for amplitude-null signals (OOK/ASK with a carrier offset) and
+    short windows spanning few burst/TDMA cycles — widen the window for
+    bursty signals, narrow with min/max_symbol_rate. search_lo_hz/
+    search_hi_hz report the searched band; the default floor is what the
+    analyzed span can resolve (a few clock-spectrum bins), so a longer slice
+    searches lower, and a rate below search_lo_hz needs an explicit
+    min_symbol_rate. clock_resolution_hz is that spectrum's bin width —
+    candidates_hz is quantized to it, so a candidate within one bin of your
+    hypothesis is a match.
+
+    "inst_freq" — instantaneous-frequency histogram (hist_counts; bin i
+    center = hist_start_hz + i*hist_step_hz), tone peaks_hz, and spread_hz —
+    active-gated like envelope. peaks_hz reads tone order only when tones
+    fully resolve: at low samples-per-symbol, closely-spaced M-ary FSK tones
+    smear into one lobe, so a LOW peak count does not mean few-ary or
+    non-FSK. spread_hz (std of the active instantaneous frequency) is
+    ONE-SIDED: narrow relative to symbol_rate reliably rules OUT wideband
+    frequency modulation even when peaks_hz has collapsed, but wide is
+    AMBIGUOUS — sharp-edged PSK/QAM (abrupt phase steps) or a noisy tone
+    read just as wide as genuine FSK, so never conclude
+    "frequency-modulated" from a wide spread_hz alone. Wide spread + a
+    constant envelope: run both an fsk and a psk/qam demod through run_rx
+    and let stream_stats cluster tightness decide. Some capture chains
+    mirror IQ spectrally — if a constant-envelope signal's fsk/msk demod
+    reads no_signal, prepend the invert stage and retry before ruling out
+    frequency modulation.
+
+    "bursts" — activity segments, duty_cycle, and dominant_period_samples
+    from burst spacing (the TDMA cadence). segments is capped at 512 with a
+    segments_total count and no sidecar — re-window with capture_offset/
+    capture_samples to inspect a busier span. Each [start, length] is in
+    analyzed-stream samples; "capture_scale" {offset_samples, decim} maps
+    back to the original capture (capture_offset = offset_samples +
+    start*decim, capture_samples = length*decim) to re-decode one burst.
+
+    Never labels the modulation, never assembles or runs a spec;
+    characterizes the dominant signal in the slice — window in time for a
+    multi-signal capture."""
     if capture_offset < 0 or capture_samples < 0:
         raise ValueError("capture_offset and capture_samples must be >= 0")
     if decim < 1:
@@ -658,29 +658,26 @@ def capture_tool(
     file — the live-hardware entry to the survey → validate_modem → run_rx
     loop.
 
-    Tunes the first SoapySDR-enumerated device (pass
-    device="driver=rtlsdr,serial=..." to pick among several), applies gain
-    (gain_db None = hardware AGC) and ppm frequency correction, discards a
-    short settle transient, and records duration_s seconds (max 300) at
-    sample_rate into a fresh file under ./marconi-runs/. Returns the file
-    path plus DEVICE-READBACK metadata: the returned sample_rate and
-    center_hz are what the hardware actually delivered, not what was
-    requested — always carry the RETURNED values into survey/run_rx. A
-    warnings entry flags any divergence; a requested frequency the device
-    cannot place inside the captured span raises instead of warning.
-    "levels" is capture-chain health, not signal analysis: rms near zero
-    means gain too low or no antenna; clip_fraction > 0 (samples at >= 0.99
-    full scale) means lower gain_db (a clearly railing or dead capture also
-    adds a warnings entry); dc_offset is the usual SDR center
-    spike — prefer surveying/channelizing a sub-band away from DC rather
-    than on it. Signal characterization (modulation, symbol rate, bursts)
-    is survey's job on the returned path. The capture is raw: no DC
-    removal, no filtering, no resampling — conditioning belongs in the
-    modem spec. status "error"/"timeout" with a path present means a
-    partial capture; the samples up to the failure are real and usable.
-    Iterate on ONE capture while forming hypotheses (same bits every run);
-    re-capture only when you want fresh RF. Captures persist under
-    ./marconi-runs/ until you remove them."""
+    Tunes the first SoapySDR-enumerated device
+    (device="driver=rtlsdr,serial=..." picks among several), applies gain_db
+    (None = hardware AGC) and ppm correction, discards a short settle
+    transient, and records duration_s seconds (max 300) at sample_rate under
+    ./marconi-runs/. The returned sample_rate and center_hz are DEVICE
+    READBACK — what the hardware delivered, not what was requested — always
+    carry the RETURNED values into survey/run_rx; a warnings entry flags any
+    divergence, and a frequency the device cannot place inside the captured
+    span raises instead. "levels" is capture-chain health, not signal
+    analysis: rms near zero means gain too low or no antenna; clip_fraction
+    > 0 (samples at >= 0.99 full scale) means lower gain_db (a clearly
+    railing or dead capture also warns); dc_offset is the usual SDR center
+    spike — survey/channelize a sub-band away from DC rather than on it. The
+    capture is raw — no DC removal, filtering, or resampling; conditioning
+    belongs in the modem spec, and characterization (modulation, symbol
+    rate, bursts) is survey's job on the returned path. status
+    "error"/"timeout" with a path present is a partial capture whose samples
+    are real and usable. Iterate on ONE capture while forming hypotheses
+    (same bits every run); re-capture only when you want fresh RF. Captures
+    persist under ./marconi-runs/ until you remove them."""
     run_dir = new_run_dir("capture")
     try:
         result = capture_iq(

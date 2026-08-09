@@ -5,7 +5,7 @@ from typing import Any
 from marconi.engine.stages.base import Stage
 from marconi.engine.stages.registry import stage_registry
 
-__all__ = ["ENVELOPE", "stage_index", "stage_details"]
+__all__ = ["ENVELOPE", "family_names", "stage_index", "stage_details"]
 
 ENVELOPE: dict[str, object] = {
     "spec_envelope": {
@@ -39,18 +39,27 @@ ENVELOPE: dict[str, object] = {
 def _index_entry(stage: Stage[Any, Any]) -> dict[str, Any]:
     entry: dict[str, Any] = {
         "name": stage.name,
-        "family": stage.family,
-        "from_level": stage.from_level.value,
-        "to_level": stage.to_level.value,
-        "directions": sorted(stage.directions),
+        "levels": f"{stage.from_level.value}>{stage.to_level.value}",
+        "dir": ",".join(sorted(stage.directions)),
     }
     if stage.description:
         entry["description"] = stage.description
     return entry
 
 
-def stage_index() -> list[dict[str, Any]]:
-    return [_index_entry(s) for _, s in sorted(stage_registry().items())]
+def stage_index() -> dict[str, list[dict[str, Any]]]:
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for _, stage in sorted(stage_registry().items()):
+        grouped.setdefault(stage.family, []).append(_index_entry(stage))
+    return dict(sorted(grouped.items()))
+
+
+def family_names(family: str) -> list[str]:
+    names = sorted(n for n, s in stage_registry().items() if s.family == family)
+    if not names:
+        fams = sorted({s.family for s in stage_registry().values()})
+        raise ValueError(f"unknown family {family!r}; known: {fams}")
+    return names
 
 
 def stage_details(names: list[str]) -> list[dict[str, Any]]:
@@ -62,6 +71,7 @@ def stage_details(names: list[str]) -> list[dict[str, Any]]:
     for n in names:
         s = registry[n]
         entry = _index_entry(s)
+        entry["family"] = s.family
         entry.update(
             {
                 "accepts_item_type": (
