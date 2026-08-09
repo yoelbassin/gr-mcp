@@ -168,12 +168,13 @@ def _carrier(
 ) -> CarrierStats:
     xb = _bounded(x)
     active = _slot_active_mask(xb, _SURVEY_ACTIVE_FRACTION, _SURVEY_BURST_WINDOW)
-    xa = _gate(xb, active) - _active_mean(xb, active)
-    z = xa / np.maximum(np.abs(xa), 1e-12)
+    dof = int(active.sum()) or xb.size
+    xd = xb - _active_mean(xb, active)
+    z = (xd / np.maximum(np.abs(xd), 1e-12)) * active
     scores: dict[int, float] = {}
     lines: dict[int, float] = {}
     for m in _MPSK_ORDERS:
-        scores[m], lines[m] = _mpsk_line(z, sample_rate, m, z.size)
+        scores[m], lines[m] = _mpsk_line(z, sample_rate, m, dof)
     order = next(
         (
             m

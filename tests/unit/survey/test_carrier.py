@@ -71,6 +71,22 @@ def _qam(levels: np.ndarray, snr_db: float, foff: float, seed: int) -> np.ndarra
     return (x + n).astype(np.complex64)
 
 
+def _bursty_psk(
+    order: int, duty: float, foff: float, snr_db: float = 18.0
+) -> np.ndarray:
+    period = 4000
+    g = np.random.default_rng(5)
+    k = g.integers(0, order, _NSYM)
+    x = _upsample(np.exp(1j * 2 * np.pi * k / order))
+    x = x * np.exp(1j * 2 * np.pi * foff / _FS * np.arange(x.size))
+    on = (np.arange(x.size) % period) < int(duty * period)
+    x = x * on
+    p = float(np.mean(np.abs(x[on]) ** 2))
+    npow = p / (10 ** (snr_db / 10))
+    n = np.sqrt(npow / 2) * (g.standard_normal(x.size) + 1j * g.standard_normal(x.size))
+    return (x + n).astype(np.complex64)
+
+
 def test_qpsk_reads_order_4_with_precise_offset() -> None:
     c = _carrier(_psk(4), _FS, 30_000.0, _FOFF)
     assert c.psk_order == 4
@@ -184,6 +200,15 @@ def test_square_qam_shares_the_order_4_line() -> None:
     assert c.phase_concentration.order_4 >= 25.0
 
 
-def test_64qam_abstains() -> None:
+def test_64qam_shares_the_order_4_line() -> None:
+    # 64-QAM has the same 4-fold phase symmetry as 16-QAM and QPSK; with a
+    # correct (masked) time base its order-4 line is genuine, not a splice
+    # artifact. The envelope block disambiguates PSK from QAM, not this block.
     c = _carrier(_qam(np.arange(-7.0, 8.0, 2.0), 25.0, _FOFF, 1), _FS, 30_000.0, _FOFF)
-    assert c.psk_order is None
+    assert c.phase_concentration.order_4 >= 25.0
+
+
+def test_bursty_offset_precision() -> None:
+    c = _carrier(_bursty_psk(4, 0.05, 37_000.0), _FS, 30_000.0, 37_000.0)
+    assert c.psk_order == 4
+    assert abs(c.offset_hz - 37_000.0) < 150.0, c.offset_hz
