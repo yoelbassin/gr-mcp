@@ -60,6 +60,14 @@ _MPSK_JUMP = 10.0
 # Centroid distance from a dealiased candidate (in units of sample_rate / m)
 # beyond which the offset is too ambiguous to disambiguate — fallback to centroid.
 _DEALIAS_AMBIGUOUS_FRAC = 0.35
+# A staggered quaternary alphabet (pi/4-shifted QPSK) folds clean at 8, but its
+# 4-fold power alternates between the two component grids: the order-4 line is
+# displaced by half the symbol rate, so a naive order-4 claim reports an offset
+# biased by Rs/8 with "mpsk" confidence. When the 8-fold line is independently
+# strong, the two implied offsets must agree; a displaced 4-line hands the
+# claim to order 8 and its true offset. Genuine QPSK/QAM agree within noise —
+# the tolerance is a few FFT bins.
+_STAGGER_TOL_BINS = 6.0
 # Off the analyzed band's centre by a meaningful fraction of the occupied
 # bandwidth: the default demod (carrier at DC) will miss, so surface it.
 _OFF_CENTER_FRAC = 0.15
@@ -172,6 +180,11 @@ def _carrier(
         ),
         None,
     )
+    if order == 4 and scores[8] >= _MPSK_CONC_THRESH:
+        off4 = _dealias_offset(lines[4], 4, sample_rate, centroid_hz)
+        off8 = _dealias_offset(lines[8], 8, sample_rate, centroid_hz)
+        if abs(off8 - off4) > _STAGGER_TOL_BINS * sample_rate / xb.size:
+            order = 8
     ambiguous = False
     if order is not None:
         offset = _dealias_offset(lines[order], order, sample_rate, centroid_hz)
@@ -300,7 +313,12 @@ def _active_pairs(x: np.ndarray, fraction: float) -> np.ndarray:
 
 def _slot_active_mask(x: np.ndarray, fraction: float, window: int) -> np.ndarray:
     power = uniform_filter1d(np.abs(x).astype(np.float64) ** 2, window)
-    peak = float(power.max())
+    # reference the top-decile median, not the max: a single hot interferer
+    # burst inside the span would otherwise set the threshold and gate the
+    # actual signal of interest out of the mask entirely
+    p90 = float(np.percentile(power, 90))
+    top = power[power > p90]
+    peak = float(np.median(top)) if top.size else p90
     if peak <= 0.0:
         return np.ones(x.size, dtype=bool)
     return power > fraction * peak

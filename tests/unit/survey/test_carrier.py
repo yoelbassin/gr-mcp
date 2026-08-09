@@ -212,3 +212,36 @@ def test_bursty_offset_precision() -> None:
     c = _carrier(_bursty_psk(4, 0.05, 37_000.0), _FS, 30_000.0, 37_000.0)
     assert c.psk_order == 4
     assert abs(c.offset_hz - 37_000.0) < 150.0, c.offset_hz
+
+
+def _pi4_dqpsk(snr_db: float = 18.0, foff: float = _FOFF) -> np.ndarray:
+    g = np.random.default_rng(7)
+    incr = (2 * g.integers(0, 4, _NSYM) + 1) * (np.pi / 4)  # {±pi/4, ±3pi/4}
+    return _noisy(_upsample(np.exp(1j * np.cumsum(incr))), foff, snr_db)
+
+
+def test_pi4_staggered_quaternary_reads_order_8_with_true_offset() -> None:
+    # z^4 of a staggered (pi/4-shifted) quaternary alphabet alternates between
+    # its two component grids: the 4-fold line is displaced by Rs/2, so a naive
+    # order-4 claim would report an offset biased by Rs/8 (~15.6 kHz here) with
+    # "mpsk" confidence. The 8-fold line is clean and at the true 8*offset.
+    c = _carrier(_pi4_dqpsk(), _FS, 30_000.0, _FOFF)
+    assert c.psk_order == 8, c.psk_order
+    assert c.method == "mpsk"
+    assert abs(c.offset_hz - _FOFF) < 500.0, c.offset_hz
+
+
+def test_hot_interferer_burst_does_not_gate_out_the_victim() -> None:
+    # a short burst 30 dB above the victim must not become the activity mask's
+    # reference level (an |x|^2 max would): the victim stays in the mask and
+    # its order/offset stay readable.
+    x = _psk(4).astype(np.complex64)
+    n = x.size
+    hit = slice(n // 2, n // 2 + int(0.02 * n))
+    tone = np.sqrt(1000.0) * np.exp(
+        1j * 2 * np.pi * 0.11 * np.arange(hit.stop - hit.start)
+    )
+    x[hit] += tone.astype(np.complex64)
+    c = _carrier(x, _FS, 30_000.0, _FOFF)
+    assert c.psk_order == 4, c.psk_order
+    assert abs(c.offset_hz - _FOFF) < 1000.0, c.offset_hz
