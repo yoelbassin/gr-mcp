@@ -35,6 +35,37 @@ class SpectrumStats(BaseModel):
     occupied_hi_hz: float
 
 
+class CarrierStats(BaseModel):
+    offset_hz: float
+    psk_order: int | None
+    phase_concentration: dict[int, float]
+    method: str
+    off_center: bool
+
+
+# M-th-power carrier/phase analysis. Phase-only x^M collapses an order-M PSK
+# alphabet to a spectral line at M x the carrier offset; the score is that
+# line's peak-to-mean power divided by ln(N) — the max of N chi-square bins
+# under pure noise is ~ln(N)*mean, so the score hugs ~1 for noise at any length
+# and runs into the hundreds-plus for a real line.
+#
+# The trap the naive "smallest M over threshold" falls into: x^2 concentrates
+# for ANY signal carrying a residual carrier — OOK, narrowband FSK, GMSK all
+# square to a strong order-2 line (measured on real off-air captures: scores of
+# ~50-300, far above any fixed floor). So order-2 is never CLAIMED; instead a
+# higher order is claimed only when its line JUMPS out of the one below it
+# (score[M] >> score[M/2]) — a genuine QPSK/8-PSK signature (measured jumps
+# 260-430x) that OOK/FSK never show (their scores DECREASE past M=2). BPSK is
+# left to the caller: a strong order-2 concentration with a constant envelope
+# is BPSK, with an amplitude-modulated envelope is OOK/ASK — envelope decides.
+_MPSK_ORDERS = (2, 4, 8)
+_MPSK_CONC_THRESH = 25.0
+_MPSK_JUMP = 10.0
+# Off the analyzed band's centre by a meaningful fraction of the occupied
+# bandwidth: the default demod (carrier at DC) will miss, so surface it.
+_OFF_CENTER_FRAC = 0.15
+
+
 def _downsample(a: np.ndarray, cap: int) -> np.ndarray:
     if a.size <= cap:
         return a
@@ -78,6 +109,53 @@ def _spectrum(x: np.ndarray, sample_rate: float) -> SpectrumStats:
         occupied_bw_hz=round(hi - lo, 1),
         occupied_lo_hz=round(lo, 1),
         occupied_hi_hz=round(hi, 1),
+    )
+
+
+def _mpsk_line(z: np.ndarray, sample_rate: float, m: int) -> tuple[float, float]:
+    """(score, offset_hz) for the m-th-power carrier line of phase-only z. The
+    line sits at m x the carrier offset (at DC for a zero-offset carrier, so DC
+    is never special-cased); score is the ln(N)-normalized peak-to-mean of the
+    x^m power spectrum."""
+    spec = np.fft.fft(z**m)
+    p = spec.real**2 + spec.imag**2
+    peak = int(np.argmax(p))
+    mean = float(p.mean()) or 1e-20
+    score = (float(p[peak]) / mean) / np.log(max(p.size, 2))
+    freq = float(np.fft.fftfreq(z.size, d=1.0 / sample_rate)[peak])
+    return score, freq / m
+
+
+def _carrier(
+    x: np.ndarray, sample_rate: float, occupied_bw_hz: float, centroid_hz: float
+) -> CarrierStats:
+    active = _slot_active_mask(x, _SURVEY_ACTIVE_FRACTION, _SURVEY_BURST_WINDOW)
+    xa = _gate(x, active)
+    z = xa / np.maximum(np.abs(xa), 1e-12)
+    scores: dict[int, float] = {}
+    offsets: dict[int, float] = {}
+    for m in _MPSK_ORDERS:
+        scores[m], offsets[m] = _mpsk_line(z, sample_rate, m)
+    order = next(
+        (
+            m
+            for m in (4, 8)
+            if scores[m] >= _MPSK_CONC_THRESH
+            and scores[m] >= _MPSK_JUMP * scores[m // 2]
+        ),
+        None,
+    )
+    if order is not None:
+        offset, method = offsets[order], f"mpsk_x{order}"
+    else:
+        offset, method = centroid_hz, "spectral_centroid"
+    off_center = occupied_bw_hz > 0 and abs(offset) > _OFF_CENTER_FRAC * occupied_bw_hz
+    return CarrierStats(
+        offset_hz=round(offset, 1),
+        psk_order=order,
+        phase_concentration={m: _sig(scores[m]) for m in _MPSK_ORDERS},
+        method=method,
+        off_center=off_center,
     )
 
 
@@ -451,6 +529,7 @@ class SurveyResult(BaseModel):
     span_samples: int
     analyzed_samples: int
     spectrum: SpectrumStats
+    carrier: CarrierStats
     envelope: EnvelopeStats
     symbol_rate: SymbolRateStats
     inst_freq: InstFreqStats
@@ -484,11 +563,15 @@ def survey_iq(
         lo = min(_default_rate_floor(x.size, sample_rate), hi / 2)
     if not 0 < lo < hi:
         raise ValueError("require 0 < min_symbol_rate < max_symbol_rate")
+    spectrum = _spectrum(x, sample_rate)
     return SurveyResult(
         sample_rate=sample_rate,
         span_samples=span,
         analyzed_samples=analyzed,
-        spectrum=_spectrum(x, sample_rate),
+        spectrum=spectrum,
+        carrier=_carrier(
+            x, sample_rate, spectrum.occupied_bw_hz, spectrum.center_offset_hz
+        ),
         envelope=_envelope(x),
         symbol_rate=_symbol_rate(x, sample_rate, lo, hi),
         inst_freq=_inst_freq(x, sample_rate),

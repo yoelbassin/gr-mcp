@@ -43,3 +43,9 @@ def test_survey_recovers_dmr_parameters() -> None:
     spectrum = cast(dict[str, object], out["spectrum"])
     bw = cast(float, spectrum["occupied_bw_hz"])
     assert 4_000.0 < bw < 16_000.0, bw
+
+    # real off-air 4FSK: the M-th-power carrier block must NOT mislabel it PSK
+    # (squaring a carrier-bearing FSK concentrates at order 2 — the jump rule is
+    # what keeps psk_order null here instead of a false BPSK).
+    carrier = cast(dict[str, object], out["carrier"])
+    assert carrier["psk_order"] is None, carrier
