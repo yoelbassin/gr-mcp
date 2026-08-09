@@ -46,6 +46,31 @@ def _narrowband_fsk(snr_db: float = 15.0) -> np.ndarray:
     return _noisy(np.exp(1j * phase), _FOFF, snr_db)
 
 
+def _psk_seeded(order: int, snr_db: float, foff: float, seed: int) -> np.ndarray:
+    g = np.random.default_rng(seed)
+    k = g.integers(0, order, _NSYM)
+    x = _upsample(np.exp(1j * 2 * np.pi * k / order))
+    x = x * np.exp(1j * 2 * np.pi * foff / _FS * np.arange(x.size))
+    p = float(np.mean(np.abs(x) ** 2))
+    npow = p / (10 ** (snr_db / 10))
+    n = np.sqrt(npow / 2) * (g.standard_normal(x.size) + 1j * g.standard_normal(x.size))
+    return (x + n).astype(np.complex64)
+
+
+def _qam(levels: np.ndarray, snr_db: float, foff: float, seed: int) -> np.ndarray:
+    g = np.random.default_rng(seed)
+    k = levels.size
+    sym = levels[g.integers(0, k, _NSYM)] + 1j * levels[g.integers(0, k, _NSYM)]
+    sym = sym / np.sqrt(np.mean(np.abs(sym) ** 2))
+    x = _upsample(sym) * np.exp(
+        1j * 2 * np.pi * foff / _FS * np.arange(sym.size * _SPS)
+    )
+    p = float(np.mean(np.abs(x) ** 2))
+    npow = p / (10 ** (snr_db / 10))
+    n = np.sqrt(npow / 2) * (g.standard_normal(x.size) + 1j * g.standard_normal(x.size))
+    return (x + n).astype(np.complex64)
+
+
 def test_qpsk_reads_order_4_with_precise_offset() -> None:
     c = _carrier(_psk(4), _FS, 30_000.0, _FOFF)
     assert c.psk_order == 4
@@ -137,3 +162,28 @@ def test_bounded_truncates_to_cap() -> None:
     assert _bounded(big).size == _CARRIER_MAX_SAMPLES
     small = np.ones(1000, dtype=np.complex64)
     assert _bounded(small).size == 1000
+
+
+def test_qpsk_detected_across_snr_and_seeds() -> None:
+    for seed in (1, 2, 3):
+        for snr in (8.0, 12.0):
+            c = _carrier(_psk_seeded(4, snr, _FOFF, seed), _FS, 30_000.0, _FOFF)
+            assert c.psk_order == 4, (seed, snr, c.psk_order)
+
+
+def test_square_qam_shares_the_order_4_line() -> None:
+    # 16-QAM has QPSK's 4-fold phase symmetry; the M-th-power cannot separate
+    # them, so a strong order-4 line is expected. The envelope block (amplitude
+    # kurtosis) is what disambiguates PSK from QAM — NOT this block.
+    c = _carrier(
+        _qam(np.array([-3.0, -1.0, 1.0, 3.0]), 20.0, _FOFF, 1),
+        _FS,
+        30_000.0,
+        _FOFF,
+    )
+    assert c.phase_concentration.order_4 >= 25.0
+
+
+def test_64qam_abstains() -> None:
+    c = _carrier(_qam(np.arange(-7.0, 8.0, 2.0), 25.0, _FOFF, 1), _FS, 30_000.0, _FOFF)
+    assert c.psk_order is None
