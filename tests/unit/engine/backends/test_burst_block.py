@@ -212,6 +212,35 @@ def test_amplitude_immune_across_bursts_and_within_a_ramping_burst() -> None:
     assert _chip_string(bits_steady) in found
 
 
+def test_scans_stay_vectorized_against_numpy_control() -> None:
+    """The idle chip walk and the in-burst fall scan run inside GR's
+    scheduler thread: boxed-scalar Python loops there turn a 60 s live
+    capture into seconds of stall. Gate both paths against an in-process
+    numpy control (machine-speed normalized). Measured: idle 8.4x scalar vs
+    4.5x vectorized; dense-burst 17.7x scalar vs 10.3x vectorized (the
+    remainder there is genuine per-burst phase acquisition, not loops)."""
+    import time
+
+    rng = np.random.default_rng(1)
+    idle = np.abs(rng.normal(0.0, 0.05, 4_000_000)).astype(np.float32)
+    parts = [np.abs(rng.normal(0.0, 0.05, 4096)).astype(np.float32)]
+    for _ in range(2000):
+        parts.append((1.0 + 0.3 * np.abs(rng.standard_normal(400))).astype(np.float32))
+        parts.append(np.abs(rng.normal(0.0, 0.05, 1648)).astype(np.float32))
+    bursty = np.concatenate(parts)
+    for env, min_bursts, gate in ((idle, 0, 6.5), (bursty, 1500, 14.0)):
+        t0 = time.perf_counter()
+        np.median(env)
+        control = time.perf_counter() - t0
+        blk = make_burst_sampler(FAKE_GR, sps=2.0)
+        t0 = time.perf_counter()
+        drive(blk, env, chunk=65536, out_dtype=np.float32)
+        elapsed = time.perf_counter() - t0
+        assert blk.diagnostics["bursts_flushed"] >= min_bursts
+        ratio = elapsed / control
+        assert ratio < gate, f"{ratio=:.1f} (bursts={blk.diagnostics})"
+
+
 def test_unfinished_burst_withheld_at_eof() -> None:
     # matches the docstring: "withholds an unfinished burst tail at EOF".
     # The burst's tail is placed flush with the end of input (total length

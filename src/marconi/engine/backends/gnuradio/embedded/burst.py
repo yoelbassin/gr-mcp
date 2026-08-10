@@ -211,13 +211,7 @@ def make_burst_sampler(gr: Any, *, sps: float) -> Any:
                     self._quiet = 0
                     i = start
                     continue
-                # in burst: scan for sustained calm
-                j = i
-                while j < n:
-                    self._quiet = self._quiet + 1 if calm[j] else 0
-                    j += 1
-                    if self._quiet >= fall_run:
-                        break
+                j = self._scan_fall(calm, i, n)
                 self._burst.append(block[i:j])
                 self._burst_len += j - i
                 i = j
@@ -225,22 +219,49 @@ def make_burst_sampler(gr: Any, *, sps: float) -> Any:
                     self._flush_burst(base + j)
             self._abs = base + n
 
+        def _scan_fall(self, calm: npt.NDArray[np.bool_], i: int, n: int) -> int:
+            """One past the sample completing a sustained-calm run of fall_run
+            (counting the carried self._quiet), else n — the vectorized twin
+            of a per-sample `quiet+1 if calm else 0` walk, which ran inside
+            GR's scheduler thread for every in-burst sample."""
+            c = calm[i:n]
+            if c.size == 0:
+                return n
+            idx = np.arange(c.size, dtype=np.int64)
+            marker = np.where(~c, idx, np.int64(-1))
+            runlen = np.where(c, idx - np.maximum.accumulate(marker), np.int64(0))
+            falses = np.flatnonzero(~c)
+            lead = int(falses[0]) if falses.size else c.size
+            runlen[:lead] += self._quiet
+            hits = np.flatnonzero(runlen >= fall_run)
+            if hits.size:
+                self._quiet = int(runlen[hits[0]])
+                return i + int(hits[0]) + 1
+            self._quiet = int(runlen[-1])
+            return n
+
+        def _grid_picks(self, limit: int) -> npt.NDArray[np.int64]:
+            """Absolute positions round(k*stride) of every global chip from
+            the cursor landing before `limit`, advancing the cursor — the
+            bulk twin of the scalar int(round(k*stride)) walk (np.round and
+            Python round share half-to-even on float64)."""
+            k_hi = int((limit + 0.5) / stride) + 2
+            if k_hi <= self._k:
+                return np.empty(0, np.int64)
+            ks = np.arange(self._k, k_hi, dtype=np.float64)
+            bases = np.round(ks * stride).astype(np.int64)
+            take = int(np.searchsorted(bases, limit, side="left"))
+            self._k += take
+            return bases[:take]
+
         def _emit_idle(
             self, block: npt.NDArray[np.float32], base: int, hi: int
         ) -> None:
             # Emit every global chip whose base position round(k*stride) lands
             # in [current cursor, base+hi) - the idle default scale, phase 0.
-            limit = base + hi
-            picks: list[int] = []
-            while True:
-                b = int(round(self._k * stride))
-                if b >= limit:
-                    break
-                picks.append(b - base)
-                self._k += 1
-            if picks:
-                idx = np.asarray(picks, np.int64)
-                self._out.push(block[idx] / (_NORM_FLOOR_RATIO * self._floor))
+            bases = self._grid_picks(base + hi)
+            if bases.size:
+                self._out.push(block[bases - base] / (_NORM_FLOOR_RATIO * self._floor))
 
         def _flush_burst(self, end: int) -> None:
             seg = (
@@ -256,16 +277,10 @@ def make_burst_sampler(gr: Any, *, sps: float) -> Any:
             # Global chips this burst owns: base round(k*stride) in [s, end).
             # The count is fixed by s/end (never by the phase below), so no
             # burst boundary can insert or drop a chip on the global grid.
-            locals_: list[int] = []
-            while True:
-                b = int(round(self._k * stride))
-                if b >= end:
-                    break
-                locals_.append(b - s)
-                self._k += 1
-            if not locals_:
+            bases = self._grid_picks(end)
+            if bases.size == 0:
                 return
-            local = np.asarray(locals_, np.int64)
+            local = bases - s
             best_phase = 0
             if phases > 1 and len(local) >= 4:
                 best_var = -1.0
