@@ -3,16 +3,19 @@ from __future__ import annotations
 from typing import Any
 
 import numpy as np
+import numpy.typing as npt
 
 
-def _complex_preamble(preamble_i: list[float], preamble_q: list[float]) -> np.ndarray:
+def _complex_preamble(
+    preamble_i: list[float], preamble_q: list[float]
+) -> npt.NDArray[np.complex64]:
     return (
         np.asarray(preamble_i, dtype=np.float64)
         + 1j * np.asarray(preamble_q, dtype=np.float64)
     ).astype(np.complex64)
 
 
-def _ramp(n: int) -> np.ndarray:
+def _ramp(n: int) -> npt.NDArray[np.complex64]:
     """Constant-modulus alternating +/-1 settle pattern: transition-rich for the
     Gardner TED and decorrelated from a random preamble, so it never false-peaks."""
     r = np.ones(int(n), dtype=np.complex64)
@@ -22,7 +25,7 @@ def _ramp(n: int) -> np.ndarray:
 
 def sym_prefix(
     preamble_i: list[float], preamble_q: list[float], pad_symbols: int
-) -> np.ndarray:
+) -> npt.NDArray[np.complex64]:
     return np.concatenate(
         [_ramp(pad_symbols), _complex_preamble(preamble_i, preamble_q)]
     )

@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 import numpy as np
+import numpy.typing as npt
 
 from marconi.engine.backends.gnuradio.embedded.lifecycle import OutQueue, forecast_drain
 
@@ -84,14 +85,14 @@ def make_pilot_lattice_equalizer(
             # new-epoch item, so the push watermark is the stale/new boundary
             self._drained_baseline = self._out.pushed_total
             self._ready = False
-            self._warm: list[np.ndarray] = []
+            self._warm: list[npt.NDArray[np.complex128]] = []
             self._theta = 0.0
             self._delta = 0
             self._phi = 0
             self._emit_bins = np.empty(0, dtype=np.int64)
             self._m = 0
             self._first = 0
-            self._vecs: list[np.ndarray] = []
+            self._vecs: list[npt.NDArray[np.complex128]] = []
             self._node_ms: list[list[int]] = [[] for _ in union]
             self._node_hs: list[list[complex]] = [[] for _ in union]
             self._frames_emitted = 0
@@ -135,7 +136,7 @@ def make_pilot_lattice_equalizer(
                 if pmt.symbol_to_string(t.key) == "sync_start"
             }
 
-        def _ingest(self, vec: np.ndarray) -> None:
+        def _ingest(self, vec: npt.NDArray[np.complex128]) -> None:
             if self._ready:
                 self._vecs.append(vec)
                 self._gather_nodes(self._m, vec)
@@ -173,7 +174,9 @@ def make_pilot_lattice_equalizer(
             for m in range(warmup_syms):
                 self._gather_nodes(m, self._vecs[m])
 
-        def _estimate_phi(self, xp: np.ndarray, delta: int) -> tuple[int, float]:
+        def _estimate_phi(
+            self, xp: npt.NDArray[np.complex128], delta: int
+        ) -> tuple[int, float]:
             best_phi, best = 0, -1.0
             for phi in range(n_frame_syms):
                 fsyms = (np.arange(warmup_syms) - phi) % n_frame_syms
@@ -201,7 +204,7 @@ def make_pilot_lattice_equalizer(
                     best, best_phi = score, phi
             return best_phi, best
 
-        def _gather_nodes(self, m: int, vec: np.ndarray) -> None:
+        def _gather_nodes(self, m: int, vec: npt.NDArray[np.complex128]) -> None:
             fs = (m - self._phi) % n_frame_syms
             xd = vec * np.exp(-1j * self._theta * m)
             vals = pilot_vals[fs]
@@ -219,7 +222,7 @@ def make_pilot_lattice_equalizer(
                 self._frames_emitted += 1
                 self.diagnostics["frames_emitted"] += 1
 
-        def _equalize_frame(self, f: int) -> np.ndarray:
+        def _equalize_frame(self, f: int) -> npt.NDArray[np.complex64]:
             base = self._phi + n_frame_syms * f
             frame_end = base + n_frame_syms - 1
             syms = base + np.arange(n_frame_syms)

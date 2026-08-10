@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import numpy as np
+import numpy.typing as npt
 from pydantic import BaseModel
 
 from marconi.engine.backends.base import BlockCensus, Diagnostic
@@ -361,7 +362,7 @@ _SOFT_ACTIVE_HI_PCTILE = 90.0
 _SOFT_ACTIVE_FRACTION = 0.35
 
 
-def _sample_soft(path: Path) -> np.ndarray:
+def _sample_soft(path: Path) -> npt.NDArray[np.float32]:
     """The highest-power contiguous window of the demod stream, never a
     head-only slice (a capture with a noise lead should be judged on the signal
     it decoded, not the lead) and never strided chunks stitched together (which
@@ -384,7 +385,7 @@ def _sample_soft(path: Path) -> np.ndarray:
         return np.fromfile(f, dtype=np.float32, count=_SOFT_SAMPLE_ITEMS)
 
 
-def _active_mask(x: np.ndarray) -> np.ndarray:
+def _active_mask(x: npt.NDArray[np.float32]) -> npt.NDArray[np.bool_]:
     """Sustained-power gate. Idle gaps in a bursty stream sit near zero and drag
     mean|x| under the noise bar; keep only items whose windowed power clears a
     fraction of the stream's high-power level. Flat-power streams (noise,

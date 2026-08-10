@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
+import numpy.typing as npt
 
 
 @dataclass(frozen=True)
@@ -30,9 +32,11 @@ class CodingCarrier:
     whole-stream ops are correct); [] means a seeder ran and found nothing
     (decoding anything from it would fabricate data)."""
 
-    bits: np.ndarray
+    bits: npt.NDArray[np.uint8]
     windows: list[Window] | None = None
-    symbols: np.ndarray | None = None
+    symbols: (
+        npt.NDArray[np.signedinteger[Any]] | npt.NDArray[np.floating[Any]] | None
+    ) = None
     marks: tuple[int, ...] = ()
     stats: StepStats | None = None
 

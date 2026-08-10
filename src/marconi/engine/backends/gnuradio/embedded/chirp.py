@@ -4,12 +4,13 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
+import numpy.typing as npt
 
 from marconi.engine.backends.gnuradio.embedded.lifecycle import OutQueue, forecast_drain
 from marconi.engine.coding.primitives import gray_decode, gray_encode
 
 
-def _base_upchirp(sf: int, oversample: int) -> np.ndarray:
+def _base_upchirp(sf: int, oversample: int) -> npt.NDArray[np.complex64]:
     n = 1 << sf
     t = np.arange(oversample * n) / oversample
     return np.exp(1j * 2 * np.pi * (t * t / (2 * n) - t / 2)).astype(np.complex64)
@@ -20,8 +21,8 @@ class _Grid:
     sf: int
     oversample: int
     zero_pad: int
-    up_ref: np.ndarray = field(init=False)
-    down_ref: np.ndarray = field(init=False)
+    up_ref: npt.NDArray[np.complex64] = field(init=False)
+    down_ref: npt.NDArray[np.complex64] = field(init=False)
 
     def __post_init__(self) -> None:
         up = _base_upchirp(self.sf, self.oversample)
@@ -41,22 +42,28 @@ class _Grid:
         return self.oversample * (1 << self.sf)
 
 
-def _spectrum(signal: np.ndarray, x: int, grid: _Grid, up: bool = True) -> np.ndarray:
+def _spectrum(
+    signal: npt.NDArray[np.complex64], x: int, grid: _Grid, up: bool = True
+) -> npt.NDArray[np.complexfloating[Any, Any]]:
     seg = signal[x : x + grid.sample_num]
     ref = grid.up_ref if up else grid.down_ref
     return np.fft.fft(seg * ref, grid.fft_len)
 
 
-def _folded_mag(spec: np.ndarray, grid: _Grid) -> np.ndarray:
+def _folded_mag(
+    spec: npt.NDArray[np.complexfloating[Any, Any]], grid: _Grid
+) -> npt.NDArray[np.floating[Any]]:
     return np.abs(spec[: grid.bins]) + np.abs(spec[grid.fft_len - grid.bins :])
 
 
-def _folded(signal: np.ndarray, x: int, grid: _Grid, up: bool = True) -> np.ndarray:
+def _folded(
+    signal: npt.NDArray[np.complex64], x: int, grid: _Grid, up: bool = True
+) -> npt.NDArray[np.floating[Any]]:
     return _folded_mag(_spectrum(signal, x, grid, up), grid)
 
 
 def _fine_peak(
-    signal: np.ndarray, x: int, grid: _Grid, up: bool = True
+    signal: npt.NDArray[np.complex64], x: int, grid: _Grid, up: bool = True
 ) -> tuple[float, int]:
     f = _folded(signal, x, grid, up=up)
     peak = int(np.argmax(f))
@@ -70,7 +77,7 @@ class _DetectScan:
     x: int = 0
     run: list[int] = field(default_factory=list)
 
-    def step(self, signal: np.ndarray) -> int | None:
+    def step(self, signal: npt.NDArray[np.complex64]) -> int | None:
         sn = self.grid.sample_num
         while self.x < len(signal) - sn * self.detect_run:
             if len(self.run) == self.detect_run - 1:
@@ -90,7 +97,11 @@ class _DetectScan:
 
 
 def _sfd_sync(
-    signal: np.ndarray, x: int, grid: _Grid, cap: int, sfd_symbols: float
+    signal: npt.NDArray[np.complex64],
+    x: int,
+    grid: _Grid,
+    cap: int,
+    sfd_symbols: float,
 ) -> int | None:
     sn = grid.sample_num
     found = False
@@ -116,7 +127,9 @@ def _sfd_sync(
     return x + int(round(sfd_syms * sn))
 
 
-def _preamble_end(signal: np.ndarray, x: int, grid: _Grid, cap: int) -> int | None:
+def _preamble_end(
+    signal: npt.NDArray[np.complex64], x: int, grid: _Grid, cap: int
+) -> int | None:
     sn = grid.sample_num
     while x < len(signal) - sn:
         if x >= cap:
@@ -127,7 +140,7 @@ def _preamble_end(signal: np.ndarray, x: int, grid: _Grid, cap: int) -> int | No
     return None
 
 
-def _parabolic(f: np.ndarray, p: int) -> float:
+def _parabolic(f: npt.NDArray[np.floating[Any]], p: int) -> float:
     """3-point parabolic sub-bin refinement of an FFT-magnitude peak at index p."""
     if 0 < p < len(f) - 1:
         denom = f[p - 1] - 2.0 * f[p] + f[p + 1]
@@ -136,14 +149,16 @@ def _parabolic(f: np.ndarray, p: int) -> float:
     return float(p)
 
 
-def _peak_bin(signal: np.ndarray, x: int, grid: _Grid, up: bool) -> float:
+def _peak_bin(
+    signal: npt.NDArray[np.complex64], x: int, grid: _Grid, up: bool
+) -> float:
     """Signed, sub-bin dechirp peak of the window at x (fold-bin units)."""
     f = _folded(signal, x, grid, up=up)
     b = _parabolic(f, int(np.argmax(f)))
     return b - grid.bins if b > grid.bins / 2 else b
 
 
-def _peak_complex(signal: np.ndarray, x: int, grid: _Grid) -> complex:
+def _peak_complex(signal: npt.NDArray[np.complex64], x: int, grid: _Grid) -> complex:
     """Complex dechirp coefficient at the window's folded peak (the stronger
     of the two spectral images)."""
     spec = _spectrum(signal, x, grid)
@@ -153,7 +168,7 @@ def _peak_complex(signal: np.ndarray, x: int, grid: _Grid) -> complex:
 
 
 def _joint_sync(
-    signal: np.ndarray,
+    signal: npt.NDArray[np.complex64],
     payload_start: int,
     grid: _Grid,
     preamble_len: int,
@@ -180,7 +195,7 @@ def _joint_sync(
 
 
 def _preamble_sync(
-    signal: np.ndarray, end: int, grid: _Grid, preamble_len: int
+    signal: npt.NDArray[np.complex64], end: int, grid: _Grid, preamble_len: int
 ) -> tuple[float, float]:
     """Estimate from the preamble run alone (no SFD). The dechirp peak carries
     (CFO + STO) jointly; the CFO alone advances the dechirped tone's phase by
@@ -197,7 +212,7 @@ def _preamble_sync(
     return cfo, b - cfo
 
 
-def _modulate_symbol(s: int, sf: int, oversample: int) -> np.ndarray:
+def _modulate_symbol(s: int, sf: int, oversample: int) -> npt.NDArray[np.complex64]:
     n = 1 << sf
     t = np.arange(oversample * n) / oversample
     return (np.exp(1j * 2 * np.pi * s * t / n) * _base_upchirp(sf, oversample)).astype(
@@ -211,7 +226,7 @@ def _modulate_symbol(s: int, sf: int, oversample: int) -> np.ndarray:
 
 def chirp_prefix(
     sf: int, oversample: int, preamble_len: int, sfd_symbols: float
-) -> np.ndarray:
+) -> npt.NDArray[np.complex64]:
     sn = oversample * (1 << sf)
     up = _base_upchirp(sf, oversample)
     down = np.conj(up)
@@ -221,7 +236,7 @@ def chirp_prefix(
     return np.concatenate([np.tile(up, preamble_len), sfd]).astype(np.complex64)
 
 
-def dechirp_ref(sf: int, oversample: int) -> np.ndarray:
+def dechirp_ref(sf: int, oversample: int) -> npt.NDArray[np.complex64]:
     return np.conj(_base_upchirp(sf, oversample))
 
 

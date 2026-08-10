@@ -25,7 +25,6 @@ from marconi.engine.types.descriptor import Carrier, Descriptor
 from marconi.engine.types.enums import ItemType
 from marconi.engine.types.levels import Level
 from marconi.engine.types.models import Bitstream, Modem, Symbolstream
-from marconi.engine.types.params import ParamValue
 from marconi.errors import classify_error
 from marconi.mcp.boundary import tool_error_boundary
 from marconi.mcp.streams import (
@@ -83,9 +82,8 @@ def _input_stream(path: Path, item_type: str) -> Bitstream | Symbolstream:
     items = path.stat().st_size // _ITEM_BYTES[item_type]
     if item_type == "b":
         return Bitstream(path=path, num_bits=items)
-    return Symbolstream(
-        path=path, num_symbols=items, item_type=cast(Literal["s", "f"], item_type)
-    )
+    sym_type: Literal["s", "f"] = "f" if item_type == "f" else "s"
+    return Symbolstream(path=path, num_symbols=items, item_type=sym_type)
 
 
 _SOFT_BIT1_SIGN = {"symbols": "positive", "bits": "negative"}
@@ -370,24 +368,19 @@ def run_rx_tool(
         # its own; set_deadline here too so it counts against timeout - the
         # min-nesting means engine_run_rx's own inner deadline can't extend it
         with set_deadline(timeout):
-            src, offset, length = ensure_cf32(
+            src_slice = ensure_cf32(
                 Path(capture_path),
                 capture_dtype,
                 offset=capture_offset,
                 samples=capture_samples,
             )
-            source_io: dict[str, ParamValue] = {"path": str(src)}
-            if offset:
-                source_io["offset"] = offset
-            if length:
-                source_io["length"] = length
             result = engine_run_rx(
                 modem,
                 stage_registry(),
                 sample_rate=sample_rate,
                 start=_start_descriptor("c", None),
                 workdir=run_dir,
-                source_io=source_io,
+                source_io=src_slice.to_params(),
                 trace=trace,
                 timeout=timeout,
             )
@@ -685,7 +678,7 @@ def survey(
     if decim < 1:
         raise ValueError("decim must be >= 1")
     _require_file(Path(capture_path))
-    src, offset, length = ensure_cf32(
+    src_slice = ensure_cf32(
         Path(capture_path),
         capture_dtype,
         offset=capture_offset,
@@ -696,13 +689,13 @@ def survey(
         try:
             channel = run_dir / "channel.cf32"
             _, out_rate = channelize_to_file(
-                src,
+                src_slice.path,
                 channel,
                 sample_rate,
                 center_hz=center_hz,
                 decim=decim,
-                offset=offset,
-                length=length,
+                offset=src_slice.offset,
+                length=src_slice.length,
                 bandwidth_hz=bandwidth_hz,
             )
             result = survey_iq(
@@ -715,10 +708,10 @@ def survey(
             shutil.rmtree(run_dir, ignore_errors=True)
     else:
         result = survey_iq(
-            src,
+            src_slice.path,
             sample_rate,
-            offset=offset,
-            length=length,
+            offset=src_slice.offset,
+            length=src_slice.length,
             min_symbol_rate=min_symbol_rate,
             max_symbol_rate=max_symbol_rate,
         )
@@ -728,7 +721,7 @@ def survey(
     # map segment [start, length] back to original capture samples so a burst can
     # be re-decoded with a targeted slice: capture_offset = offset_samples +
     # start*decim, capture_samples = length*decim.
-    bursts["capture_scale"] = {"offset_samples": offset, "decim": decim}
+    bursts["capture_scale"] = {"offset_samples": src_slice.offset, "decim": decim}
     return payload
 
 

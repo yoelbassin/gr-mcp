@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Any, Literal, cast
+from typing import Any, Literal
 
 import numpy as np
+import numpy.typing as npt
 from pydantic import BaseModel
 
 from marconi.engine.backends.base import (
@@ -29,6 +30,7 @@ from marconi.engine.io.bitfile import (
     write_llrs,
     write_symbols,
 )
+from marconi.engine.io.source import SourceSlice
 from marconi.engine.quality import QualityReport, Verdict, assess_quality
 from marconi.engine.stages.base import Stage
 from marconi.engine.types.descriptor import Descriptor
@@ -109,7 +111,7 @@ def _harvest_marks(diagnostics: Sequence[Diagnostic]) -> list[int]:
 def _entry_carrier(boundary: Descriptor, path: Path, marks: list[int]) -> CodingCarrier:
     if boundary.item_type == "b":
         return CodingCarrier(bits=read_bits(path), marks=tuple(marks))
-    item_type = cast(Literal["s", "f"], boundary.item_type)
+    item_type = boundary.item_type.require_symbol()
     return CodingCarrier(
         bits=np.zeros(0, np.uint8),
         symbols=read_symbols(path, item_type),
@@ -169,10 +171,12 @@ def _wrap_gr_only(
             census=census,
             diagnostics=diagnostics,
         )
-    item_type = cast(Literal["s", "f"], cp.final.item_type)
-    symbols = read_symbols(path, item_type)
+    item_type = cp.final.item_type.require_symbol()
+    stream: npt.NDArray[np.int16] | npt.NDArray[np.float32] = read_symbols(
+        path, item_type
+    )
     symbolstream = Symbolstream(
-        path=path, num_symbols=int(symbols.size), item_type=item_type, marks=marks
+        path=path, num_symbols=int(stream.size), item_type=item_type, marks=marks
     )
     return PipelineResult(
         status="ok",
@@ -205,7 +209,7 @@ def _wrap_result(
             diagnostics=diagnostics,
         )
     symbols = carrier.symbols if carrier.symbols is not None else np.zeros(0, np.int16)
-    item_type = cast(Literal["s", "f"], final.item_type)
+    item_type = final.item_type.require_symbol()
     if item_type == "f":
         path = workdir / "out.f32"
         write_llrs(path, symbols)
@@ -253,7 +257,9 @@ def _first_nonfinite(
             want = _SCAN_CHUNK if end is None else min(_SCAN_CHUNK, end - pos)
             if want <= 0:
                 return None
-            block: np.ndarray = np.fromfile(f, dtype=dtype, count=want)
+            block: npt.NDArray[np.complex64] | npt.NDArray[np.float32] = np.fromfile(
+                f, dtype=dtype, count=want
+            )
             if block.size == 0:
                 return None
             bad = ~np.isfinite(block)
@@ -502,18 +508,13 @@ def run_rx(
             flagged = _nonfinite_input(input_stream.path, "f")
             if flagged is not None:
                 return flagged
-        if cp.gr is not None:
-            io = source_io or {}
-            src = io.get("path")
-            if isinstance(src, str):
-                flagged = _nonfinite_input(
-                    Path(src),
-                    start.item_type,
-                    int(cast(int, io.get("offset", 0))),
-                    int(cast(int, io.get("length", 0))),
-                )
-                if flagged is not None:
-                    return flagged
+        if cp.gr is not None and source_io:
+            src_slice = SourceSlice.from_params(source_io)
+            flagged = _nonfinite_input(
+                src_slice.path, start.item_type, src_slice.offset, src_slice.length
+            )
+            if flagged is not None:
+                return flagged
         census: list[BlockCensus] = []
         diagnostics: list[Diagnostic] = []
         trace_rows: list[TraceStage] = []

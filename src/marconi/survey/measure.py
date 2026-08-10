@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal, TypeVar
 
 import numpy as np
+import numpy.typing as npt
 from pydantic import BaseModel
 from scipy.ndimage import uniform_filter1d
 from scipy.signal import find_peaks, welch
@@ -75,7 +76,7 @@ _OFF_CENTER_FRAC = 0.15
 _CARRIER_MAX_SAMPLES = 1 << 20
 
 
-def _downsample(a: np.ndarray, cap: int) -> np.ndarray:
+def _downsample(a: npt.NDArray[np.float64], cap: int) -> npt.NDArray[np.float64]:
     if a.size <= cap:
         return a
     groups = -(-a.size // cap)
@@ -83,7 +84,9 @@ def _downsample(a: np.ndarray, cap: int) -> np.ndarray:
     return trimmed.reshape(-1, groups).mean(axis=1)
 
 
-def _interp_peak_hz(p: np.ndarray, peak: int, sample_rate: float) -> float:
+def _interp_peak_hz(
+    p: npt.NDArray[np.floating[Any]], peak: int, sample_rate: float
+) -> float:
     n = p.size
     a, b, c = float(p[(peak - 1) % n]), float(p[peak]), float(p[(peak + 1) % n])
     denom = a - 2.0 * b + c
@@ -112,7 +115,7 @@ def _sig(x: float, figs: int = 4) -> float:
     return float(round(x, figs - 1 - int(np.floor(np.log10(abs(x))))))
 
 
-def _spectrum(x: np.ndarray, sample_rate: float) -> SpectrumStats:
+def _spectrum(x: npt.NDArray[np.complex64], sample_rate: float) -> SpectrumStats:
     nperseg = int(min(_SURVEY_NPERSEG, x.size))
     f, pxx = welch(
         x, fs=sample_rate, nperseg=nperseg, return_onesided=False, detrend=False
@@ -140,12 +143,12 @@ def _spectrum(x: np.ndarray, sample_rate: float) -> SpectrumStats:
     )
 
 
-def _bounded(x: np.ndarray) -> np.ndarray:
+def _bounded(x: npt.NDArray[np.complex64]) -> npt.NDArray[np.complex64]:
     return x[:_CARRIER_MAX_SAMPLES] if x.size > _CARRIER_MAX_SAMPLES else x
 
 
 def _mpsk_line(
-    z: np.ndarray, sample_rate: float, m: int, dof: int
+    z: npt.NDArray[np.complexfloating[Any, Any]], sample_rate: float, m: int, dof: int
 ) -> tuple[float, float]:
     """(score, line_hz) for the m-th-power carrier line of phase-only z. The
     line sits at m x the carrier offset (at DC for a zero-offset carrier, so DC
@@ -160,7 +163,10 @@ def _mpsk_line(
 
 
 def _carrier(
-    x: np.ndarray, sample_rate: float, occupied_bw_hz: float, centroid_hz: float
+    x: npt.NDArray[np.complex64],
+    sample_rate: float,
+    occupied_bw_hz: float,
+    centroid_hz: float,
 ) -> CarrierStats:
     xb = _bounded(x)
     active = _slot_active_mask(xb, _SURVEY_ACTIVE_FRACTION, _SURVEY_BURST_WINDOW)
@@ -208,7 +214,7 @@ def _carrier(
     )
 
 
-def _envelope(x: np.ndarray) -> EnvelopeStats:
+def _envelope(x: npt.NDArray[np.complex64]) -> EnvelopeStats:
     active = _slot_active_mask(x, _SURVEY_ACTIVE_FRACTION, _SURVEY_BURST_WINDOW)
     a = np.abs(_gate(x, active)).astype(np.float64)
     mean = float(a.mean())
@@ -272,8 +278,8 @@ class SymbolRateStats(BaseModel):
 
 
 def _clock_spectrum(
-    sig: np.ndarray, sample_rate: float, chunks: int
-) -> tuple[np.ndarray, np.ndarray]:
+    sig: npt.NDArray[np.float32], sample_rate: float, chunks: int
+) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
     per = sig.size // chunks
     if per < 2:
         per, chunks = sig.size, 1
@@ -285,8 +291,12 @@ def _clock_spectrum(
 
 
 def _peaks_in_band(
-    freqs: np.ndarray, mag: np.ndarray, lo: float, hi: float, k: int | None
-) -> tuple[np.ndarray, np.ndarray]:
+    freqs: npt.NDArray[np.floating[Any]],
+    mag: npt.NDArray[np.floating[Any]],
+    lo: float,
+    hi: float,
+    k: int | None,
+) -> tuple[npt.NDArray[np.floating[Any]], npt.NDArray[np.floating[Any]]]:
     band = (freqs >= lo) & (freqs <= hi)
     fb, mb = freqs[band], mag[band]
     if mb.size == 0:
@@ -298,7 +308,9 @@ def _peaks_in_band(
     return fb[top], mb[top]
 
 
-def _active_mask(x: np.ndarray, fraction: float) -> np.ndarray:
+def _active_mask(
+    x: npt.NDArray[np.complex64], fraction: float
+) -> npt.NDArray[np.bool_]:
     mag = np.abs(x)
     med = float(np.median(mag))
     if med <= 0.0:
@@ -306,12 +318,16 @@ def _active_mask(x: np.ndarray, fraction: float) -> np.ndarray:
     return mag > fraction * med
 
 
-def _active_pairs(x: np.ndarray, fraction: float) -> np.ndarray:
+def _active_pairs(
+    x: npt.NDArray[np.complex64], fraction: float
+) -> npt.NDArray[np.bool_]:
     active = _active_mask(x, fraction)
     return active[1:] & active[:-1]
 
 
-def _slot_active_mask(x: np.ndarray, fraction: float, window: int) -> np.ndarray:
+def _slot_active_mask(
+    x: npt.NDArray[np.complex64], fraction: float, window: int
+) -> npt.NDArray[np.bool_]:
     power = uniform_filter1d(np.abs(x).astype(np.float64) ** 2, window)
     # reference the top-decile median, not the max: a single hot interferer
     # burst inside the span would otherwise set the threshold and gate the
@@ -324,24 +340,31 @@ def _slot_active_mask(x: np.ndarray, fraction: float, window: int) -> np.ndarray
     return power > fraction * peak
 
 
-def _slot_active_pairs(x: np.ndarray, fraction: float, window: int) -> np.ndarray:
+def _slot_active_pairs(
+    x: npt.NDArray[np.complex64], fraction: float, window: int
+) -> npt.NDArray[np.bool_]:
     active = _slot_active_mask(x, fraction, window)
     return active[1:] & active[:-1]
 
 
-def _gate(values: np.ndarray, keep: np.ndarray) -> np.ndarray:
+_G = TypeVar("_G", bound=np.generic)
+
+
+def _gate(values: npt.NDArray[_G], keep: npt.NDArray[np.bool_]) -> npt.NDArray[_G]:
     gated = values[keep]
     return gated if gated.size else values
 
 
-def _active_mean(x: np.ndarray, active: np.ndarray) -> complex:
+def _active_mean(
+    x: npt.NDArray[np.complex64], active: npt.NDArray[np.bool_]
+) -> complex:
     sel = x[active]
     return complex(sel.mean()) if sel.size else 0j
 
 
 def _comb_harmonic_mask(
-    freqs: np.ndarray, fundamental: float, bin_hz: float
-) -> np.ndarray:
+    freqs: npt.NDArray[np.floating[Any]], fundamental: float, bin_hz: float
+) -> npt.NDArray[np.bool_]:
     orders = np.round(freqs / fundamental)
     tol = np.maximum(_SURVEY_COMB_REL_TOL * freqs, _SURVEY_COMB_TOL_FLOOR_BINS * bin_hz)
     in_range = (orders >= _SURVEY_COMB_MIN_ORDER) & (orders <= _SURVEY_COMB_ORDER_CAP)
@@ -349,7 +372,11 @@ def _comb_harmonic_mask(
 
 
 def _fundamental_below(
-    freqs: np.ndarray, mag: np.ndarray, lo: float, targets: np.ndarray, bin_hz: float
+    freqs: npt.NDArray[np.floating[Any]],
+    mag: npt.NDArray[np.floating[Any]],
+    lo: float,
+    targets: npt.NDArray[np.floating[Any]],
+    bin_hz: float,
 ) -> float | None:
     floor = _SURVEY_COMB_FLOOR_BINS * bin_hz
     if floor >= lo or targets.size == 0:
@@ -367,11 +394,11 @@ def _fundamental_below(
 
 
 def _damp_harmonics(
-    freqs: np.ndarray,
-    strengths: np.ndarray,
+    freqs: npt.NDArray[np.floating[Any]],
+    strengths: npt.NDArray[np.floating[Any]],
     fundamental: float | None,
     bin_hz: float,
-) -> np.ndarray:
+) -> npt.NDArray[np.floating[Any]]:
     if fundamental is None or freqs.size == 0:
         return strengths
     mask = _comb_harmonic_mask(freqs, fundamental, bin_hz)
@@ -406,7 +433,7 @@ def _rerank_by_eye(
 
 
 def _symbol_rate(
-    x: np.ndarray, sample_rate: float, lo: float, hi: float
+    x: npt.NDArray[np.complex64], sample_rate: float, lo: float, hi: float
 ) -> SymbolRateStats:
     ya = np.abs(np.diff(np.abs(x)))
     dphi = np.angle(x[1:] * np.conj(x[:-1]))
@@ -468,7 +495,7 @@ def _symbol_rate(
     )
 
 
-def _inst_freq(x: np.ndarray, sample_rate: float) -> InstFreqStats:
+def _inst_freq(x: npt.NDArray[np.complex64], sample_rate: float) -> InstFreqStats:
     f = np.angle(x[1:] * np.conj(x[:-1])) / (2 * np.pi) * sample_rate
     f = _gate(f, _slot_active_pairs(x, _SURVEY_ACTIVE_FRACTION, _SURVEY_BURST_WINDOW))
     spread = float(f.std())
@@ -490,7 +517,7 @@ def _inst_freq(x: np.ndarray, sample_rate: float) -> InstFreqStats:
     )
 
 
-def _longest_true_run(mask: np.ndarray) -> tuple[int, int] | None:
+def _longest_true_run(mask: npt.NDArray[np.bool_]) -> tuple[int, int] | None:
     runs = _find_runs(mask)
     if not runs:
         return None
@@ -498,7 +525,10 @@ def _longest_true_run(mask: np.ndarray) -> tuple[int, int] | None:
 
 
 def _eye_openness(
-    instfreq: np.ndarray, active: np.ndarray, sample_rate: float, rate: float
+    instfreq: npt.NDArray[np.floating[Any]],
+    active: npt.NDArray[np.bool_],
+    sample_rate: float,
+    rate: float,
 ) -> float:
     if rate <= 0.0:
         return 0.0
@@ -536,7 +566,7 @@ class BurstStats(BaseModel):
     segments: list[tuple[int, int]]
 
 
-def _find_runs(mask: np.ndarray) -> list[tuple[int, int]]:
+def _find_runs(mask: npt.NDArray[np.bool_]) -> list[tuple[int, int]]:
     if mask.size == 0:
         return []
     d = np.diff(mask.astype(np.int8))
@@ -549,7 +579,9 @@ def _find_runs(mask: np.ndarray) -> list[tuple[int, int]]:
     return list(zip(starts, ends))
 
 
-def _bursts(sample_x: np.ndarray, path: Path, offset: int, length: int) -> BurstStats:
+def _bursts(
+    sample_x: npt.NDArray[np.complex64], path: Path, offset: int, length: int
+) -> BurstStats:
     thr = _SURVEY_BURST_FRACTION * float(np.percentile(np.abs(sample_x) ** 2, 90))
     segs: list[tuple[int, int]] = []
     active_total = 0

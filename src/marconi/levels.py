@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import numpy as np
+import numpy.typing as npt
 
 _KMEANS_ITERS = 100
 _SEPARATION_EPS = 1e-9
@@ -10,18 +11,22 @@ _LEVEL_KS = (2, 4, 8)
 _CLIP_PERCENTILES = (1.0, 99.0)
 
 
-def _assign(x: np.ndarray, centers: np.ndarray) -> np.ndarray:
+def _assign(
+    x: npt.NDArray[np.float64], centers: npt.NDArray[np.float64]
+) -> npt.NDArray[np.intp]:
     return np.argmin(np.abs(x[:, None] - centers[None, :]), axis=1)
 
 
-def _clip_range(x: np.ndarray) -> tuple[float, float]:
+def _clip_range(x: npt.NDArray[np.float64]) -> tuple[float, float]:
     lo, hi = (float(v) for v in np.percentile(x, _CLIP_PERCENTILES))
     if hi <= lo:
         hi = lo + 1.0
     return lo, hi
 
 
-def _seeded_lloyd_1d(xc: np.ndarray, k: int, lo: float, hi: float) -> np.ndarray:
+def _seeded_lloyd_1d(
+    xc: npt.NDArray[np.float64], k: int, lo: float, hi: float
+) -> npt.NDArray[np.float64]:
     if k == 1:
         return np.array([float(xc.mean())])
     quantiles = np.linspace(0.0, 1.0, k + 2)[1:-1] * 100.0
@@ -41,7 +46,7 @@ def _seeded_lloyd_1d(xc: np.ndarray, k: int, lo: float, hi: float) -> np.ndarray
     return np.sort(centers)
 
 
-def kmeans_1d(x: np.ndarray, k: int) -> np.ndarray:
+def kmeans_1d(x: npt.ArrayLike, k: int) -> npt.NDArray[np.float64]:
     x = np.asarray(x, dtype=np.float64).ravel()
     if x.size == 0 or k < 1:
         return np.zeros(0, dtype=np.float64)
@@ -54,14 +59,14 @@ def kmeans_1d(x: np.ndarray, k: int) -> np.ndarray:
 @dataclass(frozen=True)
 class LevelFit:
     order: int
-    centers: np.ndarray
-    counts: np.ndarray
+    centers: npt.NDArray[np.float64]
+    counts: npt.NDArray[np.int64]
     within: float
     min_gap: float
     separation: float
 
 
-def _fit_at_k(xc: np.ndarray, k: int, lo: float, hi: float) -> LevelFit:
+def _fit_at_k(xc: npt.NDArray[np.float64], k: int, lo: float, hi: float) -> LevelFit:
     centers = _seeded_lloyd_1d(xc, k, lo, hi)
     empty = LevelFit(0, np.zeros(0), np.zeros(0, dtype=np.int64), 0.0, 0.0, 0.0)
     if centers.size == 0:
@@ -93,7 +98,7 @@ def _fit_at_k(xc: np.ndarray, k: int, lo: float, hi: float) -> LevelFit:
     return LevelFit(int(cen.size), cen, cnt, within, min_gap, separation)
 
 
-def fit_levels(x: np.ndarray, ks: tuple[int, ...] = _LEVEL_KS) -> LevelFit:
+def fit_levels(x: npt.ArrayLike, ks: tuple[int, ...] = _LEVEL_KS) -> LevelFit:
     x = np.asarray(x, dtype=np.float64).ravel()
     if x.size < 2:
         return LevelFit(0, np.zeros(0), np.zeros(0, dtype=np.int64), 0.0, 0.0, 0.0)

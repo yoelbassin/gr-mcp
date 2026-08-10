@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from enum import IntEnum, StrEnum
+from typing import Literal
 
 
 class PskOrder(IntEnum):
@@ -41,3 +42,10 @@ class ItemType(StrEnum):
     F = "f"
     B = "b"
     S = "s"
+
+    def require_symbol(self) -> Literal["s", "f"]:
+        if self is ItemType.S:
+            return "s"
+        if self is ItemType.F:
+            return "f"
+        raise ValueError(f"expected a symbol item type, got {self.value!r}")

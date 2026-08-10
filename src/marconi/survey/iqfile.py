@@ -4,6 +4,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import numpy as np
+import numpy.typing as npt
 from scipy.signal import firwin, upfirdn
 
 from marconi.errors import register_error
@@ -61,7 +62,7 @@ def _most_active_start(path: Path, offset: int, span: int, budget: int) -> int:
 
 def sample_iq(
     path: Path, offset: int = 0, length: int = 0, budget: int = _SURVEY_SAMPLE_ITEMS
-) -> tuple[np.ndarray, int, int]:
+) -> tuple[npt.NDArray[np.complex64], int, int]:
     span = slice_len(path, offset, length)
     if span < _SURVEY_MIN_ITEMS:
         raise CaptureTooShort(
@@ -125,7 +126,7 @@ def channelize_to_file(
 
 def iter_iq(
     path: Path, offset: int = 0, length: int = 0, chunk: int = _SURVEY_SAMPLE_ITEMS
-) -> Iterator[np.ndarray]:
+) -> Iterator[npt.NDArray[np.complex64]]:
     remaining = slice_len(path, offset, length)
     with path.open("rb") as f:
         f.seek(offset * _ITEMSIZE)

@@ -3,9 +3,10 @@ from __future__ import annotations
 import math
 from collections.abc import Callable
 from dataclasses import replace
-from typing import Literal
+from typing import Any, Literal
 
 import numpy as np
+import numpy.typing as npt
 
 try:  # reedsolo's optional Cython build: identical API, 10-50x faster RS. NOT
     # a PyPI package of its own, so it cannot be a declared dependency - only
@@ -42,13 +43,13 @@ def _bitorder(bit_order: str) -> Literal["little", "big"]:
     return "little" if bit_order == "lsb" else "big"
 
 
-def bytes_to_bits(data: bytes, bit_order: str = "msb") -> np.ndarray:
+def bytes_to_bits(data: bytes, bit_order: str = "msb") -> npt.NDArray[np.uint8]:
     return np.unpackbits(
         np.frombuffer(data, dtype=np.uint8), bitorder=_bitorder(bit_order)
     )
 
 
-def bits_to_bytes(bits: np.ndarray, bit_order: str = "msb") -> bytes:
+def bits_to_bytes(bits: npt.ArrayLike, bit_order: str = "msb") -> bytes:
     return np.packbits(
         np.asarray(bits, dtype=np.uint8), bitorder=_bitorder(bit_order)
     ).tobytes()
@@ -118,7 +119,7 @@ def mark_frame_rx(c: CodingCarrier, *, offset_bits: int = 0) -> CodingCarrier:
 
 def _codebook_maps(
     code_bits: int, data_bits: int, table: list[int]
-) -> tuple[np.ndarray, np.ndarray]:
+) -> tuple[npt.NDArray[np.int64], npt.NDArray[np.int64]]:
     if len(table) != (1 << data_bits):
         raise ValueError(
             f"codebook table has {len(table)} entries, need {1 << data_bits} "
@@ -133,8 +134,8 @@ def _codebook_maps(
 
 
 def _nearest_values(
-    grouped: np.ndarray, table: list[int], code_bits: int
-) -> np.ndarray:
+    grouped: npt.NDArray[np.uint8], table: list[int], code_bits: int
+) -> npt.NDArray[np.int64]:
     if code_bits > 63:
         raise ValueError(
             "nearest decode packs codewords through int64; 63 bits is the " "ceiling"
@@ -154,22 +155,26 @@ def _nearest_values(
     return out
 
 
-def _sym_dtype(width: int) -> type:
+def _sym_dtype(width: int) -> type[np.signedinteger[Any]]:
     # width <= 31 fits int32 with room for the sign bit; wider needs int64.
     return np.int64 if width > 31 else np.int32
 
 
-def _unpack_symbols(bits: np.ndarray, width: int) -> np.ndarray:
+def _unpack_symbols(
+    bits: npt.NDArray[np.uint8], width: int
+) -> npt.NDArray[np.signedinteger[Any]]:
     n = bits.size // width
     g = np.asarray(bits[: n * width], dtype=np.uint8).reshape(n, width)
-    out: np.ndarray = np.zeros(n, dtype=_sym_dtype(width))
+    out: npt.NDArray[np.signedinteger[Any]] = np.zeros(n, dtype=_sym_dtype(width))
     for j in range(width):
         out <<= 1
         out |= g[:, j]
     return out
 
 
-def _pack_symbols(values: np.ndarray, width: int) -> np.ndarray:
+def _pack_symbols(
+    values: npt.NDArray[np.signedinteger[Any]], width: int
+) -> npt.NDArray[np.uint8]:
     out = np.empty((values.size, width), np.uint8)
     for j in range(width):
         out[:, j] = (values >> (width - 1 - j)) & 1
@@ -194,14 +199,18 @@ def codebook_rx(
     inverse table — the only mode safe for wide chip codes."""
     if decode == "nearest":
 
-        def _values(syms: np.ndarray) -> np.ndarray:
+        def _values(
+            syms: npt.NDArray[np.signedinteger[Any]],
+        ) -> npt.NDArray[np.int64]:
             rows = _pack_symbols(syms, code_bits).reshape(-1, code_bits)
             return _nearest_values(rows, table, code_bits)
 
     else:
         _, inv = _codebook_maps(code_bits, data_bits, table)
 
-        def _values(syms: np.ndarray) -> np.ndarray:
+        def _values(
+            syms: npt.NDArray[np.signedinteger[Any]],
+        ) -> npt.NDArray[np.int64]:
             return inv[syms]
 
     if symbol_input:
@@ -216,21 +225,24 @@ def codebook_rx(
         marks = tuple(int(m) * data_bits for m in c.marks)
         return CodingCarrier(bits=bits, marks=marks)
 
-    def _decode(bits: np.ndarray) -> np.ndarray:
+    def _decode(bits: npt.NDArray[np.uint8]) -> npt.NDArray[np.uint8]:
         return _pack_symbols(_values(_unpack_symbols(bits, code_bits)), data_bits)
 
     return _decode_scoped(c, lambda bits: (_decode(bits), None))
 
 
 def _syndromes(
-    words: np.ndarray, parity_masks: list[int], code_bits: int, data_bits: int
-) -> np.ndarray:
+    words: npt.NDArray[np.uint8],
+    parity_masks: list[int],
+    code_bits: int,
+    data_bits: int,
+) -> npt.NDArray[np.signedinteger[Any]]:
     # syndrome stays uint8 (mod-2 XOR of selected data cols + parity col),
     # then packs to a small per-word int - no (n_words, k) int matrix
     n_parity = code_bits - data_bits
     dtype = _sym_dtype(n_parity)
     rows = [[(m >> b) & 1 for b in range(data_bits)] for m in parity_masks]
-    s_int: np.ndarray = np.zeros(words.shape[0], dtype)
+    s_int: npt.NDArray[np.signedinteger[Any]] = np.zeros(words.shape[0], dtype)
     for p, row in enumerate(rows):
         col = words[:, data_bits + p].astype(np.uint8)
         for c, bit in enumerate(row):
@@ -241,13 +253,13 @@ def _syndromes(
 
 
 def _block_decode(
-    bits: np.ndarray,
+    bits: npt.NDArray[np.uint8],
     code_bits: int,
     data_bits: int,
     parity_masks: list[int],
     t: int,
     emit: str,
-) -> tuple[np.ndarray, tuple[int, int]]:
+) -> tuple[npt.NDArray[np.uint8], tuple[int, int]]:
     # Codeword basis is LSB-first: stream bit j of a stride is codeword bit j,
     # so parity_masks and the emitted data bits are LSB-first too. A caller
     # assembling codewords MSB-first must reconcile the basis (supply masks
@@ -328,7 +340,10 @@ def _word_stats(
 
 def _decode_scoped(
     c: CodingCarrier,
-    decode: Callable[[np.ndarray], tuple[np.ndarray, tuple[int, int] | None]],
+    decode: Callable[
+        [npt.NDArray[np.uint8]],
+        tuple[npt.NDArray[np.uint8], tuple[int, int] | None],
+    ],
     *,
     chance_word_rate: float | None = None,
 ) -> CodingCarrier:
@@ -339,7 +354,7 @@ def _decode_scoped(
             tallies.append(tally)
         return CodingCarrier(bits=out, stats=_word_stats(tallies, chance_word_rate))
     bits = np.asarray(c.bits, np.uint8)
-    pieces: list[np.ndarray] = []
+    pieces: list[npt.NDArray[np.uint8]] = []
     windows: list[Window] = []
     pos = 0
     for lo, hi in c.window_spans():
@@ -356,13 +371,13 @@ def _decode_scoped(
 
 
 def _rs_decode_words(
-    bits: np.ndarray,
+    bits: npt.NDArray[np.uint8],
     codec: _rs.RSCodec,
     symbol_bits: int,
     n: int,
     k: int,
     emit: str,
-) -> tuple[np.ndarray, tuple[int, int]]:
+) -> tuple[npt.NDArray[np.uint8], tuple[int, int]]:
     syms = _unpack_symbols(bits, symbol_bits)
     out: list[int] = []
     total = syms.size // n
@@ -408,7 +423,7 @@ def rs_code_rx(
     )
 
 
-def _perm_span(idx: np.ndarray) -> int:
+def _perm_span(idx: npt.NDArray[np.int64]) -> int:
     """Input stride a gather consumes: one past its highest index, NOT its
     length. A dropping gather (one that skips per-slot bits, so it spans more
     input than it emits) reads further than it writes, and assuming
@@ -416,7 +431,9 @@ def _perm_span(idx: np.ndarray) -> int:
     return int(idx.max()) + 1 if idx.size else 0
 
 
-def _permute_block(bits: np.ndarray, idx: np.ndarray, span: int) -> np.ndarray:
+def _permute_block(
+    bits: npt.NDArray[np.uint8], idx: npt.NDArray[np.int64], span: int
+) -> npt.NDArray[np.uint8]:
     n = bits.size // span if span else 0
     return bits[: n * span].reshape(n, span)[:, idx].reshape(-1)
 
@@ -446,7 +463,7 @@ def differential_rx(c: CodingCarrier, *, invert: bool = False) -> CodingCarrier:
     return replace(c, bits=np.bitwise_xor(np.bitwise_xor(b, prev), inv))
 
 
-def _nibble_swap_bits(bits: np.ndarray) -> np.ndarray:
+def _nibble_swap_bits(bits: npt.ArrayLike) -> npt.NDArray[np.uint8]:
     b = np.asarray(bits, dtype=np.uint8).copy()
     n = (b.size // 8) * 8
     if n:
@@ -459,14 +476,14 @@ def nibble_swap_rx(c: CodingCarrier) -> CodingCarrier:
     return replace(c, bits=_nibble_swap_bits(c.bits))
 
 
-def _seq_bits(sequence: str) -> np.ndarray:
+def _seq_bits(sequence: str) -> npt.NDArray[np.uint8]:
     return np.unpackbits(np.frombuffer(bytes.fromhex(sequence), dtype=np.uint8))
 
 
 _LFSR_CHUNK = 1 << 16
 
 
-def _lfsr_seq(mask: int, seed: int, length: int, n: int) -> np.ndarray:
+def _lfsr_seq(mask: int, seed: int, length: int, n: int) -> npt.NDArray[np.uint8]:
     # The Fibonacci state is a sliding window of the output, so the output
     # stream obeys out[t+L] = XOR of out[t+j] over the mask's tap positions:
     # a whole block resolves as uint64 row-masks AND window + popcount,
@@ -520,7 +537,7 @@ def descramble_rx(
 
 
 def _descramble_lfsr(
-    c: CodingCarrier, bits: np.ndarray, mask: int, seed: int, length: int
+    c: CodingCarrier, bits: npt.NDArray[np.uint8], mask: int, seed: int, length: int
 ) -> CodingCarrier:
     if c.windows is None:
         lfsr_seq = _lfsr_seq(mask, seed, length, bits.size)
@@ -536,7 +553,7 @@ def _descramble_lfsr(
 
 
 def _descramble_sequence(
-    c: CodingCarrier, bits: np.ndarray, sequence: str
+    c: CodingCarrier, bits: npt.NDArray[np.uint8], sequence: str
 ) -> CodingCarrier:
     seq = _seq_bits(sequence)
     if seq.size == 0:

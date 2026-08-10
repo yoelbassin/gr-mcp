@@ -38,6 +38,7 @@ from __future__ import annotations
 from typing import Any
 
 import numpy as np
+import numpy.typing as npt
 
 from marconi.engine.backends.gnuradio.embedded.burst import (
     _sustained_runs,
@@ -49,7 +50,7 @@ from marconi.engine.backends.gnuradio.embedded.lifecycle import (
 )
 
 
-def estimate_tau(block: np.ndarray, sps: int) -> float:
+def estimate_tau(block: npt.NDArray[np.complex64], sps: int) -> float:
     e = (block.real.astype(np.float64) ** 2) + (block.imag.astype(np.float64) ** 2)
     whole = (e.size // sps) * sps
     if whole:
@@ -61,11 +62,13 @@ def estimate_tau(block: np.ndarray, sps: int) -> float:
     return -float(np.angle(c)) / (2.0 * np.pi)
 
 
-def _cubic(samples: np.ndarray, x: np.ndarray) -> np.ndarray:
+def _cubic(
+    samples: npt.NDArray[np.complex128], x: npt.NDArray[np.floating[Any]]
+) -> npt.NDArray[np.complex128]:
     x0 = np.floor(x).astype(np.int64)
     mu = x - x0
 
-    def g(off: int) -> np.ndarray:
+    def g(off: int) -> npt.NDArray[np.complex128]:
         return samples[np.clip(x0 + off, 0, samples.size - 1)]
 
     m1, p0, p1, p2 = g(-1), g(0), g(1), g(2)
@@ -75,7 +78,7 @@ def _cubic(samples: np.ndarray, x: np.ndarray) -> np.ndarray:
     return ((a0 * mu + a1) * mu + a2) * mu + p0
 
 
-def _clock_line_ratio(seg: np.ndarray, sps: int) -> float:
+def _clock_line_ratio(seg: npt.NDArray[np.complex64], sps: int) -> float:
     e = seg.real.astype(np.float64) ** 2 + seg.imag.astype(np.float64) ** 2
     n = (e.size // sps) * sps
     if n < 2 * sps:
@@ -130,13 +133,15 @@ _CLOCK_CAL_ALPHA = 0.35
 _CLOCK_LINE_NOISE_CEILING = 20.0
 
 
-def _block_peak(smoothed: np.ndarray) -> float:
+def _block_peak(smoothed: npt.NDArray[np.floating[Any]]) -> float:
     p90 = float(np.percentile(smoothed, 90))
     top = smoothed[smoothed > p90]
     return float(np.median(top)) if top.size else p90
 
 
-def _activity_mask(smoothed: np.ndarray, peak: float) -> np.ndarray:
+def _activity_mask(
+    smoothed: npt.NDArray[np.floating[Any]], peak: float
+) -> npt.NDArray[np.bool_]:
     return smoothed > _THRESH_FRAC * peak
 
 
@@ -181,7 +186,7 @@ def make_oerder_meyr(
             self._pending = np.empty(0, np.complex64)  # < _FLOOR_BLOCK carryover
             self._abs = 0  # absolute index of the next input sample to classify
             self._m = 0  # next global symbol index; its base is m*stride
-            self._burst: list[np.ndarray] = []
+            self._burst: list[npt.NDArray[np.complex64]] = []
             self._burst_len = 0
             self._burst_start = 0  # absolute sample index this burst began at
             self._in_burst = False
@@ -246,7 +251,7 @@ def make_oerder_meyr(
                 rate = _FLOOR_RISE if med > self._floor else _FLOOR_FALL
                 self._floor += rate * (med - self._floor)
 
-        def _update_peak(self, smoothed: np.ndarray) -> float:
+        def _update_peak(self, smoothed: npt.NDArray[np.floating[Any]]) -> float:
             blk_hi = _block_peak(smoothed)
             if self._peak == 0.0:
                 self._peak = blk_hi if blk_hi > 0.0 else 1e-9
@@ -263,7 +268,7 @@ def make_oerder_meyr(
                 self._peak = max(self._peak, _NOISE_GUARD * self._floor)
             return self._peak
 
-        def _process_block(self, block: np.ndarray) -> None:
+        def _process_block(self, block: npt.NDArray[np.complex64]) -> None:
             power = (
                 block.real.astype(np.float64) ** 2 + block.imag.astype(np.float64) ** 2
             )
@@ -309,7 +314,7 @@ def make_oerder_meyr(
                     self._burst_len = len(carry)
             self._abs = base + n
 
-        def _scan_fall(self, active: np.ndarray, i: int) -> int:
+        def _scan_fall(self, active: npt.NDArray[np.bool_], i: int) -> int:
             # vectorized equivalent of counting consecutive inactive samples
             # (carrying self._quiet across blocks) until fall_run completes
             seg = active[i:]
@@ -332,7 +337,7 @@ def make_oerder_meyr(
             self._in_burst = True
             self._quiet = 0
 
-        def _advance_grid(self, limit: int) -> np.ndarray:
+        def _advance_grid(self, limit: int) -> npt.NDArray[np.int64]:
             a = limit - self._m * stride
             if a <= 0:
                 return np.empty(0, np.int64)
@@ -346,7 +351,7 @@ def make_oerder_meyr(
             if bases.size:
                 self._out.push(np.zeros(bases.size, np.complex64))
 
-        def _burst_tau(self, seg: np.ndarray) -> float:
+        def _burst_tau(self, seg: npt.NDArray[np.complex64]) -> float:
             nsym = seg.size // stride
             excl = min(span, max(0, (nsym - _MIN_INTERIOR_SYMS) // 2))
             if excl < span:

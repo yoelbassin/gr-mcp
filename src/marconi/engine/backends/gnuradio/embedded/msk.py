@@ -22,6 +22,7 @@ import math
 from typing import Any
 
 import numpy as np
+import numpy.typing as npt
 
 from marconi.engine.backends.gnuradio.embedded.lifecycle import OutQueue, forecast_drain
 
@@ -44,7 +45,7 @@ _NORM_EPS = 1e-8
 _VECTOR_SPS_MIN = 16.0
 
 
-def _matched_filter(sps: float, flen: int, oversample: int) -> np.ndarray:
+def _matched_filter(sps: float, flen: int, oversample: int) -> npt.NDArray[np.float64]:
     """Half-cosine MSK matched pulse, oversampled `oversample`×: one positive
     lobe of a cosine at the MSK deviation (baud/4), spanning two bit periods,
     negatives clamped to zero. The deviation-over-rate ratio is 1/(4·sps)."""
@@ -56,7 +57,7 @@ def _matched_filter(sps: float, flen: int, oversample: int) -> np.ndarray:
     return h
 
 
-def _polyphase_taps(sps: float, flen: int, oversample: int) -> np.ndarray:
+def _polyphase_taps(sps: float, flen: int, oversample: int) -> npt.NDArray[np.float64]:
     """(oversample+1, flen) branch matrix: branch b is the matched filter
     decimated by `oversample` starting at offset b, so a matched-filter dump
     is a single dot product of a branch against the last `flen` baseband

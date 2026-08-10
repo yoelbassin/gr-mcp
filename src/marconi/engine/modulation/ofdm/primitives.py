@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
+import numpy.typing as npt
 
 
 def find_null(
-    x: np.ndarray,
+    x: npt.NDArray[np.complexfloating[Any, Any]],
     *,
     null_len: int,
     frame_len: int,
@@ -45,7 +48,7 @@ def find_null(
     return refined + int(above[0])
 
 
-def qpsk_lock(z: np.ndarray) -> float:
+def qpsk_lock(z: npt.NDArray[np.complexfloating[Any, Any]]) -> float:
     """|E[(z/|z|)^4]| — 1.0 on four clean clusters, conjugation-invariant."""
     z = z[np.abs(z) > 0]
     return float(np.abs(np.mean((z / np.abs(z)) ** 4)))

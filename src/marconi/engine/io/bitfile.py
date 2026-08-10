@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Literal
+from typing import Literal, overload
 
 import numpy as np
+import numpy.typing as npt
 
 from marconi.errors import register_error
 
@@ -34,20 +35,32 @@ def _guard(n_bits: int, path: Path) -> None:
         )
 
 
-def write_bits(path: Path, bits: np.ndarray) -> None:
+def write_bits(path: Path, bits: npt.ArrayLike) -> None:
     np.asarray(bits, dtype=np.uint8).tofile(path)
 
 
-def read_bits(path: Path) -> np.ndarray:
+def read_bits(path: Path) -> npt.NDArray[np.uint8]:
     _guard(path.stat().st_size, path)
     return np.fromfile(path, dtype=np.uint8)
 
 
-def write_symbols(path: Path, symbols: np.ndarray) -> None:
+def write_symbols(path: Path, symbols: npt.ArrayLike) -> None:
     np.asarray(symbols, dtype=np.int16).tofile(path)
 
 
-def read_symbols(path: Path, item_type: Literal["s", "f"] = "s") -> np.ndarray:
+@overload
+def read_symbols(
+    path: Path, item_type: Literal["s"] = ...
+) -> npt.NDArray[np.int16]: ...
+
+
+@overload
+def read_symbols(path: Path, item_type: Literal["f"]) -> npt.NDArray[np.float32]: ...
+
+
+def read_symbols(
+    path: Path, item_type: Literal["s", "f"] = "s"
+) -> npt.NDArray[np.int16] | npt.NDArray[np.float32]:
     if item_type == "f":
         _guard(path.stat().st_size // 4, path)
         return np.fromfile(path, dtype=np.float32)
@@ -55,14 +68,14 @@ def read_symbols(path: Path, item_type: Literal["s", "f"] = "s") -> np.ndarray:
     return np.fromfile(path, dtype=np.int16)
 
 
-def write_llrs(path: Path, llrs: np.ndarray) -> None:
+def write_llrs(path: Path, llrs: npt.ArrayLike) -> None:
     np.asarray(llrs, dtype=np.float32).tofile(path)
 
 
-def read_llrs(path: Path) -> np.ndarray:
+def read_llrs(path: Path) -> npt.NDArray[np.float32]:
     _guard(path.stat().st_size // 4, path)
     return np.fromfile(path, dtype=np.float32)
 
 
-def harden(llrs: np.ndarray) -> np.ndarray:
+def harden(llrs: npt.ArrayLike) -> npt.NDArray[np.uint8]:
     return (np.asarray(llrs, dtype=np.float32) < 0).astype(np.uint8)

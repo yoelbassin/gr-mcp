@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import multiprocessing
 import threading
-from pathlib import Path
 from typing import Any
 
 from marconi.engine.backends.base import BackendError
 from marconi.engine.backends.gnuradio.blocks import _factories, _modules
 from marconi.engine.backends.gnuradio.embedded.lifecycle import EofProbe
 from marconi.engine.compile.ir import GrPipeline
+from marconi.engine.io.source import SourceSlice
 
 _FILE_SOURCE_KINDS = frozenset(
     {"iq_file_source", "bits_file_source", "soft_bits_file_source"}
@@ -45,12 +45,10 @@ def _wire_eof_probe(pipeline: GrPipeline, instances: dict[str, Any]) -> None:
     spec = sources[0]
     src = instances[spec.id]
     item_bytes = int(src.output_signature().sizeof_stream_item(0))
-    file_count = Path(str(spec.params["path"])).stat().st_size // item_bytes
-    raw_off, raw_len = spec.params.get("offset", 0), spec.params.get("length", 0)
-    offset = int(raw_off) if isinstance(raw_off, (int, float)) else 0
-    length = int(raw_len) if isinstance(raw_len, (int, float)) else 0
-    avail = max(0, file_count - offset)
-    emitted = avail if length <= 0 else min(length, avail)
+    src_slice = SourceSlice.from_params(spec.params)
+    file_count = src_slice.path.stat().st_size // item_bytes
+    avail = max(0, file_count - src_slice.offset)
+    emitted = avail if src_slice.length == 0 else min(src_slice.length, avail)
     src_rate = pipeline.sample_rate
     for bid, blk in consenting.items():
         into = [c for c in pipeline.connections if c.dst_block == bid]

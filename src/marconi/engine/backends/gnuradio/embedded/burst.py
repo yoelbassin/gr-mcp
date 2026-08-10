@@ -38,6 +38,7 @@ import math
 from typing import Any
 
 import numpy as np
+import numpy.typing as npt
 
 from marconi.engine.backends.gnuradio.embedded.lifecycle import (
     OutQueue,
@@ -74,7 +75,9 @@ _NORM_FLOOR_RATIO = 16.0  # emitted-value normalization reference (own
 # emitted chip lands independent of whatever gain an upstream stage was at.
 
 
-def _sustained_runs(mask: np.ndarray, run: int) -> np.ndarray:
+def _sustained_runs(
+    mask: npt.NDArray[np.bool_], run: int
+) -> npt.NDArray[np.signedinteger[Any]]:
     """Start indices of every maximal run of >= `run` consecutive True
     values in `mask`, via a vectorized sliding-window sum (cumsum
     difference) - the idle-span hunt is bulk, so this must not be a
@@ -88,7 +91,9 @@ def _sustained_runs(mask: np.ndarray, run: int) -> np.ndarray:
     return np.flatnonzero(window >= run)
 
 
-def _trailing_mean(block: np.ndarray, window: int) -> np.ndarray:
+def _trailing_mean(
+    block: npt.NDArray[np.floating[Any]], window: int
+) -> npt.NDArray[np.floating[Any]]:
     """Trailing moving average, same length as `block` (front-padded with
     `block[0]` so the first few samples of each fixed-size processing block
     do not see a false dip toward zero from implicit zero-padding)."""
@@ -119,7 +124,7 @@ def make_burst_sampler(gr: Any, *, sps: float) -> Any:
             self._floor = 0.0
             self._abs = 0  # absolute index of the next input sample to classify
             self._k = 0  # next global chip index; its base is round(k*stride)
-            self._burst: list[np.ndarray] = []
+            self._burst: list[npt.NDArray[np.float32]] = []
             self._burst_len = 0
             self._burst_start = 0  # absolute sample index this burst began at
             self._burst_floor = 0.0  # floor at burst start (idle-reference term)
@@ -179,7 +184,7 @@ def make_burst_sampler(gr: Any, *, sps: float) -> Any:
                 self.diagnostics["bursts_truncated_at_eof"] += 1
                 self._flush_burst(self._abs)
 
-        def _process_block(self, block: np.ndarray) -> None:
+        def _process_block(self, block: npt.NDArray[np.float32]) -> None:
             med = float(np.median(block))
             if self._floor == 0.0:
                 self._floor = med if med > 0.0 else 1e-9
@@ -220,7 +225,9 @@ def make_burst_sampler(gr: Any, *, sps: float) -> Any:
                     self._flush_burst(base + j)
             self._abs = base + n
 
-        def _emit_idle(self, block: np.ndarray, base: int, hi: int) -> None:
+        def _emit_idle(
+            self, block: npt.NDArray[np.float32], base: int, hi: int
+        ) -> None:
             # Emit every global chip whose base position round(k*stride) lands
             # in [current cursor, base+hi) - the idle default scale, phase 0.
             limit = base + hi

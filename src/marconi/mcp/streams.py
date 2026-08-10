@@ -4,10 +4,13 @@ import hashlib
 import os
 import tempfile
 from pathlib import Path
+from typing import Any, TypeVar
 
 import numpy as np
+import numpy.typing as npt
 
 from marconi.engine.deadline import check_deadline
+from marconi.engine.io.source import SourceSlice
 from marconi.levels import kmeans_1d
 from marconi.mcp.workspace import conversion_cache_dir
 
@@ -42,7 +45,7 @@ _RAW_SCALES: dict[str, tuple[type, float, float]] = {
 }
 
 
-def parse_bits(text: str) -> np.ndarray:
+def parse_bits(text: str) -> npt.NDArray[np.uint8]:
     if not text or len(text) > _MAX_INLINE_BITS:
         raise ValueError(
             f"bits must be 1..{_MAX_INLINE_BITS} characters of '0'/'1', "
@@ -113,14 +116,14 @@ def render_page(
 
 def ensure_cf32(
     src: Path, dtype: str, *, offset: int = 0, samples: int = 0
-) -> tuple[Path, int, int]:
-    """Resolve a capture to (cf32 path, source offset items, source length
-    items). cf32 passes through untouched - the GR file source does the
-    slicing while streaming. Raw integer formats convert only the requested
-    slice, into a content-keyed cache shared across runs: iterating specs
-    against one capture must not write a fresh multi-GB copy per run."""
+) -> SourceSlice:
+    """Resolve a capture to the cf32 SourceSlice a GR file source can stream.
+    cf32 passes through untouched - the GR file source does the slicing while
+    streaming. Raw integer formats convert only the requested slice, into a
+    content-keyed cache shared across runs: iterating specs against one
+    capture must not write a fresh multi-GB copy per run."""
     if dtype == "cf32":
-        return src, offset, samples
+        return SourceSlice(path=src, offset=offset, length=samples)
     if dtype not in _RAW_SCALES:
         raise ValueError(
             f"capture_dtype must be one of {sorted(('cf32', *_RAW_SCALES))}"
@@ -133,7 +136,7 @@ def ensure_cf32(
         hashlib.sha1(key.encode()).hexdigest()[:24] + ".cf32"
     )
     if dest.is_file():
-        return dest, 0, 0
+        return SourceSlice(path=dest)
     raw_dtype, scale, bias = _RAW_SCALES[dtype]
     raw_size = np.dtype(raw_dtype).itemsize
     remaining = samples * 2 if samples > 0 else None
@@ -154,7 +157,11 @@ def ensure_cf32(
                     )
                     if want == 0:
                         break
-                    block: np.ndarray = np.fromfile(fin, dtype=raw_dtype, count=want)
+                    block: (
+                        npt.NDArray[np.int16]
+                        | npt.NDArray[np.int8]
+                        | npt.NDArray[np.uint8]
+                    ) = np.fromfile(fin, dtype=raw_dtype, count=want)
                     if block.size == 0:
                         break
                     if remaining is not None:
@@ -169,10 +176,15 @@ def ensure_cf32(
             except OSError:
                 pass
             raise
-    return dest, 0, 0
+    return SourceSlice(path=dest)
 
 
-def _sample_stream(path: Path, dtype: np.dtype) -> tuple[np.ndarray, int, bool]:
+_S = TypeVar("_S", bound=np.generic)
+
+
+def _sample_stream(
+    path: Path, dtype: np.dtype[_S]
+) -> tuple[npt.NDArray[_S], int, bool]:
     total = path.stat().st_size // dtype.itemsize
     with path.open("rb") as f:
         if total <= _STATS_SAMPLE_ITEMS:
@@ -186,7 +198,7 @@ def _sample_stream(path: Path, dtype: np.dtype) -> tuple[np.ndarray, int, bool]:
     return np.concatenate(parts), total, True
 
 
-def _hist(x: np.ndarray, bins: int) -> dict[str, object]:
+def _hist(x: npt.NDArray[np.float64], bins: int) -> dict[str, object]:
     lo, hi = (float(v) for v in np.percentile(x, [0.5, 99.5]))
     if hi <= lo:
         hi = lo + 1.0
@@ -200,11 +212,18 @@ def _hist(x: np.ndarray, bins: int) -> dict[str, object]:
     }
 
 
-def _nearest_labels(values: np.ndarray, centers: np.ndarray) -> np.ndarray:
+_N = TypeVar("_N", np.float64, np.complex128)
+
+
+def _nearest_labels(
+    values: npt.NDArray[_N], centers: npt.NDArray[_N]
+) -> npt.NDArray[np.intp]:
     return np.abs(values[:, None] - centers[None, :]).argmin(1)
 
 
-def _farthest_point_seeds(points: np.ndarray, k: int) -> np.ndarray:
+def _farthest_point_seeds(
+    points: npt.NDArray[np.complex128], k: int
+) -> npt.NDArray[np.complex128]:
     # deterministic greedy k-means++ (no RNG): each seed is the point farthest
     # from every seed chosen so far. Data-driven, not a fixed angular grid, so
     # it has no unlucky-rotation basin (a grid seeded exactly between a
@@ -218,7 +237,9 @@ def _farthest_point_seeds(points: np.ndarray, k: int) -> np.ndarray:
     return seeds
 
 
-def _kmeans_2d(points: np.ndarray, k: int) -> np.ndarray:
+def _kmeans_2d(
+    points: npt.NDArray[np.complex128], k: int
+) -> npt.NDArray[np.complex128]:
     centers = _farthest_point_seeds(points, k)
     for _ in range(_STATS_KMEANS_ITERS):
         labels = _nearest_labels(points, centers)
@@ -243,7 +264,7 @@ def stream_stats(
         raise ValueError(f"bins must be 1..{_STATS_MAX_BINS}, got {bins}")
     if not 0 <= clusters <= _STATS_MAX_CLUSTERS:
         raise ValueError(f"clusters must be 0..{_STATS_MAX_CLUSTERS}, got {clusters}")
-    dtype = np.dtype(_ITEM_DTYPES[kind])
+    dtype: np.dtype[Any] = np.dtype(_ITEM_DTYPES[kind])
     sample, total, sampled = _sample_stream(path, dtype)
     out: dict[str, object] = {
         "item_type": kind,
@@ -286,7 +307,7 @@ def stream_stats(
 
 
 def _constellation_stats(
-    out: dict[str, object], sample: np.ndarray, clusters: int, bins: int
+    out: dict[str, object], sample: npt.NDArray[np.complex64], clusters: int, bins: int
 ) -> dict[str, object]:
     z = sample.astype(np.complex128)
     z = z[np.isfinite(z)]

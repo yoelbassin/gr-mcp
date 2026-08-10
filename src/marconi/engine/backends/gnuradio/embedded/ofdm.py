@@ -3,13 +3,14 @@ from __future__ import annotations
 from typing import Any
 
 import numpy as np
+import numpy.typing as npt
 
 from marconi.engine.backends.gnuradio.embedded.lifecycle import OutQueue, forecast_drain
 from marconi.engine.modulation.ofdm import primitives as prim
 
 
 def _resync_base(
-    buf: np.ndarray,
+    buf: npt.NDArray[np.complex64],
     predicted: int,
     *,
     null_len: int,
@@ -44,7 +45,9 @@ def make_ofdm_frame_sync(
     frame_len: int,
     data_syms: int,
 ) -> Any:
-    def _frame_usefuls(buf: np.ndarray, base: int) -> np.ndarray:
+    def _frame_usefuls(
+        buf: npt.NDArray[np.complex64], base: int
+    ) -> npt.NDArray[np.complex64]:
         blocks = [
             buf[base + m * sym_len + cp_len : base + m * sym_len + cp_len + fft_len]
             for m in range(data_syms + 1)

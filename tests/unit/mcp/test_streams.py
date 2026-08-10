@@ -5,6 +5,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from marconi.engine.io.source import SourceSlice
 from marconi.mcp.streams import ensure_cf32, parse_bits, render_page
 
 
@@ -65,9 +66,9 @@ def test_ensure_cf32_converts_ci16(
     monkeypatch.setenv("MARCONI_WORKSPACE", str(tmp_path))
     src = tmp_path / "cap.iq"
     np.array([32767, 0, -32768, 16384], np.int16).tofile(src)
-    out, offset, length = ensure_cf32(src, "ci16")
-    assert (offset, length) == (0, 0)
-    x = np.fromfile(out, np.complex64)
+    slc = ensure_cf32(src, "ci16")
+    assert (slc.offset, slc.length) == (0, 0)
+    x = np.fromfile(slc.path, np.complex64)
     assert x.size == 2
     assert abs(x[0].real - 1.0) < 1e-3
     assert abs(x[1].imag - 0.5) < 1e-3
@@ -80,9 +81,9 @@ def test_ensure_cf32_conversion_is_cached_per_capture(
     monkeypatch.setenv("MARCONI_WORKSPACE", str(tmp_path))
     src = tmp_path / "cap.iq"
     np.arange(8, dtype=np.int16).tofile(src)
-    first, _, _ = ensure_cf32(src, "ci16")
+    first = ensure_cf32(src, "ci16").path
     stamp = first.stat().st_mtime_ns
-    again, _, _ = ensure_cf32(src, "ci16")
+    again = ensure_cf32(src, "ci16").path
     assert again == first
     assert again.stat().st_mtime_ns == stamp
 
@@ -93,9 +94,9 @@ def test_ensure_cf32_converts_only_the_requested_slice(
     monkeypatch.setenv("MARCONI_WORKSPACE", str(tmp_path))
     src = tmp_path / "cap.iq"
     np.array([100, 200, 300, 400, 500, 600, 700, 800], np.int16).tofile(src)
-    out, offset, length = ensure_cf32(src, "ci16", offset=1, samples=2)
-    assert (offset, length) == (0, 0)
-    x = np.fromfile(out, np.complex64)
+    slc = ensure_cf32(src, "ci16", offset=1, samples=2)
+    assert (slc.offset, slc.length) == (0, 0)
+    x = np.fromfile(slc.path, np.complex64)
     assert x.size == 2
     assert abs(x[0].real - 300 / 32768.0) < 1e-6
     assert abs(x[1].imag - 600 / 32768.0) < 1e-6
@@ -130,6 +131,8 @@ def test_ensure_cf32_passthrough_and_unknown(tmp_path: Path) -> None:
     src = tmp_path / "cap.cf32"
     np.zeros(2, np.complex64).tofile(src)
     # cf32 passes through with the slice delegated to the GR file source
-    assert ensure_cf32(src, "cf32", offset=5, samples=7) == (src, 5, 7)
+    assert ensure_cf32(src, "cf32", offset=5, samples=7) == SourceSlice(
+        path=src, offset=5, length=7
+    )
     with pytest.raises(ValueError, match="cu8"):
         ensure_cf32(src, "wat")
