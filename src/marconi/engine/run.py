@@ -468,30 +468,30 @@ def run_rx(
                 "use compile_modem and run the backend directly)"
             )
         if cp.gr is not None and input_stream is not None:
-            raise ValueError(
+            raise CompileError(
                 "this modem's path has a GR segment fed by source_io; "
                 "input_stream only enters a path that starts with a coding "
                 "stage"
             )
         if cp.gr is None and input_stream is None:
-            raise ValueError(
+            raise CompileError(
                 "this modem's path starts with a coding stage, so no GR "
                 "segment writes the seam file; supply input_stream"
             )
         if isinstance(input_stream, Bitstream) and cp.boundary.item_type != "b":
-            raise ValueError(
+            raise CompileError(
                 f"input_stream is a Bitstream (item_type 'b') but the entry "
                 f"boundary is item_type {cp.boundary.item_type.value!r}"
             )
         if isinstance(input_stream, Symbolstream):
             if cp.boundary.item_type not in ("s", "f"):
-                raise ValueError(
+                raise CompileError(
                     f"input_stream is a Symbolstream (item_type "
                     f"{input_stream.item_type!r}) but the entry boundary is "
                     f"item_type {cp.boundary.item_type.value!r}"
                 )
             if input_stream.item_type != cp.boundary.item_type:
-                raise ValueError(
+                raise CompileError(
                     f"input_stream item_type {input_stream.item_type!r} does "
                     "not match the entry boundary item_type "
                     f"{cp.boundary.item_type.value!r}"

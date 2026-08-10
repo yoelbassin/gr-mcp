@@ -11,6 +11,7 @@ from marconi.engine.compile.compiler import (
     compile_modem,
     compile_pipeline,
 )
+from marconi.engine.compile.errors import CompileError
 from marconi.engine.compile.ir import GrPipeline
 from marconi.engine.io.bitfile import read_bits, write_bits
 from marconi.engine.modulation.css.stages import (
@@ -349,7 +350,7 @@ def test_nonfinite_soft_symbol_input_is_an_error(tmp_path: Path) -> None:
 
 
 def test_pure_coding_path_without_input_stream_is_an_error(tmp_path: Path) -> None:
-    with pytest.raises(ValueError, match="input_stream"):
+    with pytest.raises(CompileError, match="input_stream"):
         run_rx(
             _sync_word_modem(),
             stage_registry(),
@@ -360,7 +361,7 @@ def test_pure_coding_path_without_input_stream_is_an_error(tmp_path: Path) -> No
 
 
 def test_gr_segment_with_input_stream_is_an_error(tmp_path: Path) -> None:
-    with pytest.raises(ValueError, match="source_io"):
+    with pytest.raises(CompileError, match="source_io"):
         run_rx(
             _gr_modem(),
             stage_registry(),
@@ -372,7 +373,7 @@ def test_gr_segment_with_input_stream_is_an_error(tmp_path: Path) -> None:
 
 
 def test_bitstream_input_against_symbol_boundary_is_an_error(tmp_path: Path) -> None:
-    with pytest.raises(ValueError, match="Bitstream"):
+    with pytest.raises(CompileError, match="Bitstream"):
         run_rx(
             _sync_symbols_modem(),
             stage_registry(),
@@ -384,7 +385,7 @@ def test_bitstream_input_against_symbol_boundary_is_an_error(tmp_path: Path) -> 
 
 
 def test_symbolstream_input_against_bit_boundary_is_an_error(tmp_path: Path) -> None:
-    with pytest.raises(ValueError, match="Symbolstream"):
+    with pytest.raises(CompileError, match="Symbolstream"):
         run_rx(
             _sync_word_modem(),
             stage_registry(),
@@ -398,7 +399,7 @@ def test_symbolstream_input_against_bit_boundary_is_an_error(tmp_path: Path) -> 
 def test_symbolstream_item_type_mismatch_against_boundary_is_an_error(
     tmp_path: Path,
 ) -> None:
-    with pytest.raises(ValueError, match="item_type"):
+    with pytest.raises(CompileError, match="item_type"):
         run_rx(
             _symbol_map_modem(),
             stage_registry(),

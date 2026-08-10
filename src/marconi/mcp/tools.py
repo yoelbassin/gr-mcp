@@ -135,11 +135,12 @@ def _trace_payload(result: PipelineResult) -> list[dict[str, object]]:
         if st.items and keys:
             try:
                 full = _compute_stats(Path(st.path), item_type=st.item_type, clusters=0)
-            except (ValueError, FileNotFoundError):
-                full = {}
-            stat = {k: full[k] for k in keys if full.get(k) is not None}
-            if stat:
-                row["stats"] = stat
+            except (ValueError, FileNotFoundError) as exc:
+                row["stats_error"] = f"{type(exc).__name__}: {exc}"
+            else:
+                stat = {k: full[k] for k in keys if full.get(k) is not None}
+                if stat:
+                    row["stats"] = stat
         rows.append(row)
     return rows
 
