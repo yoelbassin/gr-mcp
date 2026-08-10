@@ -21,7 +21,7 @@ from marconi.engine.types.descriptor import Amplitude, Descriptor
 from marconi.engine.types.enums import ItemType
 from marconi.engine.types.models import Modem, ValidationIssue
 from marconi.engine.types.params import ParamValue
-from marconi.engine.types.step import Step
+from marconi.engine.types.step import Step, stage_label
 
 # item_type -> (source_kind, sink_kind). The GR wire type alone selects IO;
 # carrier is decision-hardness (a seam invariant), never a routing knob. Descriptor
@@ -384,7 +384,7 @@ def compile_pipeline(
         b = CodingBuilder()
         for i in range(k, len(steps)):
             stage = _resolve(steps[i], registry)
-            b.label = f"{steps[i].conv}[{i}]"
+            b.label = stage_label(i, steps[i].conv)
             b.kind = steps[i].conv
             stage.emit_rx(b, steps[i])
         coding = CodingProgram(

@@ -8,6 +8,12 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 from marconi.errors import register_error
 
 
+def stage_label(index: int, conv: str) -> str:
+    """One home for the step-instance label — census, trace, and coding-builder
+    rows cross-reference by it and must agree."""
+    return f"{conv}[{index}]"
+
+
 class Step(BaseModel):
     model_config = ConfigDict(extra="forbid")
     conv: str

@@ -6,12 +6,17 @@ from typing import cast
 
 import numpy as np
 
-from marconi.mcp.tools import _cap_list, read_stream
+from marconi.mcp.payload import capped_int_list
+from marconi.mcp.tools import read_stream
 
 
 def test_ramp_compresses_without_sidecar(tmp_path: Path) -> None:
-    payload = {"windows": list(range(0, 112 * 1558, 112))}
-    _cap_list(payload, "windows", tmp_path / "windows.i64")
+    payload: dict[str, object] = {}
+    payload.update(
+        capped_int_list(
+            "windows", list(range(0, 112 * 1558, 112)), tmp_path / "windows.i64"
+        )
+    )
     assert payload["windows"] == []
     assert payload["windows_ramp"] == {"start": 0, "stride": 112, "count": 1558}
     assert payload["windows_total"] == 1558
@@ -20,8 +25,8 @@ def test_ramp_compresses_without_sidecar(tmp_path: Path) -> None:
 
 def test_irregular_long_list_keeps_sidecar_behavior(tmp_path: Path) -> None:
     vals = list(range(0, 600)) + [10_000]
-    payload = {"windows": list(vals)}
-    _cap_list(payload, "windows", tmp_path / "windows.i64")
+    payload: dict[str, object] = {}
+    payload.update(capped_int_list("windows", list(vals), tmp_path / "windows.i64"))
     assert payload["windows"] == vals[:512]
     assert payload["windows_total"] == 601
     # full list preserved in sidecar for non-ramp long lists
@@ -35,6 +40,6 @@ def test_irregular_long_list_keeps_sidecar_behavior(tmp_path: Path) -> None:
 
 
 def test_short_lists_untouched(tmp_path: Path) -> None:
-    payload = {"windows": [0, 7, 9]}
-    _cap_list(payload, "windows", tmp_path / "windows.i64")
+    payload: dict[str, object] = {}
+    payload.update(capped_int_list("windows", [0, 7, 9], tmp_path / "windows.i64"))
     assert payload == {"windows": [0, 7, 9]}

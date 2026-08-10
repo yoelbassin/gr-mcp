@@ -38,6 +38,7 @@ from marconi.engine.types.enums import ItemType
 from marconi.engine.types.levels import Level
 from marconi.engine.types.models import Bitstream, Modem, Softstream, Symbolstream
 from marconi.engine.types.params import ParamValue
+from marconi.engine.types.step import stage_label
 
 
 class TraceStage(BaseModel):
@@ -87,7 +88,7 @@ def _harvest_trace(
         size = path.stat().st_size if path.is_file() else 0
         rows.append(
             TraceStage(
-                after=f"{conv}[{i}]",
+                after=stage_label(i, conv),
                 level=out.level.value,
                 item_type=it,
                 sample_rate=cp.rates[i + 1],

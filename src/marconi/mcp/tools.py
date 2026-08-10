@@ -3,7 +3,7 @@ from __future__ import annotations
 import shutil
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Literal, cast
+from typing import Any, Literal
 
 import numpy as np
 from pydantic import ValidationError
@@ -17,7 +17,7 @@ from marconi.engine.compile.compiler import (
     compile_pipeline,
 )
 from marconi.engine.deadline import set_deadline
-from marconi.engine.run import PipelineResult, composition_warnings
+from marconi.engine.run import composition_warnings
 from marconi.engine.run import run_rx as engine_run_rx
 from marconi.engine.stages.base import SpecValidationError
 from marconi.engine.stages.registry import stage_registry, step_models
@@ -25,8 +25,10 @@ from marconi.engine.types.descriptor import Carrier, Descriptor
 from marconi.engine.types.enums import ItemType
 from marconi.engine.types.levels import Level
 from marconi.engine.types.models import Bitstream, Modem, Symbolstream
+from marconi.engine.types.step import stage_label
 from marconi.errors import classify_error
 from marconi.mcp.boundary import tool_error_boundary
+from marconi.mcp.payload import pipeline_payload, slim_census, survey_payload
 from marconi.mcp.streams import (
     _ITEM_DTYPES,
     _require_file,
@@ -56,7 +58,7 @@ def _start_descriptor(item_type: str, level: str | None) -> Descriptor:
 
 
 def _trace_rows(modem: Modem, cp: CompiledPipeline) -> list[dict[str, object]]:
-    labels = ["<start>"] + [f"{s.conv}[{i}]" for i, s in enumerate(modem.path)]
+    labels = ["<start>"] + [stage_label(i, s.conv) for i, s in enumerate(modem.path)]
     rows = [
         {
             "after": label,
@@ -86,79 +88,6 @@ def _input_stream(path: Path, item_type: str) -> Bitstream | Symbolstream:
     return Symbolstream(path=path, num_symbols=items, item_type=sym_type)
 
 
-_SOFT_BIT1_SIGN = {"symbols": "positive", "bits": "negative"}
-
-
-def _slim_census(rows: list[Any]) -> None:
-    for row in rows:
-        if not isinstance(row, dict):
-            continue
-        kind = row.get("kind")
-        if isinstance(kind, str) and str(row.get("block", "")).startswith(kind):
-            del row["kind"]
-
-
-def _soft_summary(result: PipelineResult) -> dict[str, object] | None:
-    if result.softstream is None:
-        return None
-    return {
-        "path": str(result.softstream.path),
-        "item_type": "f",
-        "items": result.softstream.num_items,
-        "level": result.softstream.level,
-        "bit1_sign": _SOFT_BIT1_SIGN[result.softstream.level],
-    }
-
-
-_TRACE_STAT_KEYS: dict[str, tuple[str, ...]] = {
-    "c": ("mean_magnitude", "std_magnitude", "constant_modulus_ratio"),
-    "f": ("min", "max", "mean", "std"),
-    "s": ("min", "max", "mean", "std"),
-    "b": ("ones_fraction",),
-}
-
-
-def _trace_payload(result: PipelineResult) -> list[dict[str, object]]:
-    rows: list[dict[str, object]] = []
-    for st in result.trace:
-        row: dict[str, object] = {
-            "after": st.after,
-            "level": st.level,
-            "item_type": st.item_type,
-            "sample_rate": round(st.sample_rate, 3),
-            "path": st.path,
-            "items": st.items,
-        }
-        keys = _TRACE_STAT_KEYS.get(st.item_type)
-        if st.items and keys:
-            try:
-                full = _compute_stats(Path(st.path), item_type=st.item_type, clusters=0)
-            except (ValueError, FileNotFoundError) as exc:
-                row["stats_error"] = f"{type(exc).__name__}: {exc}"
-            else:
-                stat = {k: full[k] for k in keys if full.get(k) is not None}
-                if stat:
-                    row["stats"] = stat
-        rows.append(row)
-    return rows
-
-
-def _stream_summary(result: PipelineResult) -> dict[str, object] | None:
-    if result.bitstream is not None:
-        return {
-            "path": str(result.bitstream.path),
-            "item_type": "b",
-            "items": result.bitstream.num_bits,
-        }
-    if result.symbolstream is not None:
-        return {
-            "path": str(result.symbolstream.path),
-            "item_type": result.symbolstream.item_type,
-            "items": result.symbolstream.num_symbols,
-        }
-    return None
-
-
 def describe_stages(
     family: str | None = None, stage: str | None = None
 ) -> dict[str, object]:
@@ -178,6 +107,13 @@ def describe_stages(
     if family is not None:
         return {"stages": stage_details(family_names(family))}
     return {"stages": stage_index(), "envelope": ENVELOPE}
+
+
+def _error_row(code: str, message: str, at: str | None = None) -> dict[str, str]:
+    row = {"code": code, "message": message}
+    if at is not None:
+        row["at"] = at
+    return row
 
 
 def validate_modem(
@@ -217,53 +153,18 @@ def validate_modem(
         return {
             "valid": False,
             "errors": [
-                {"code": "invalid_argument", "message": i.message, "at": i.block_id}
+                _error_row("invalid_argument", i.message, at=i.block_id)
                 for i in exc.issues
             ],
         }
     except (CompileError, ValidationError, ValueError) as exc:
         code, message = classify_error(exc)
-        return {"valid": False, "errors": [{"code": code, "message": message}]}
+        return {"valid": False, "errors": [_error_row(code, message)]}
     return {
         "valid": True,
         "trace": _trace_rows(modem, cp),
         "warnings": composition_warnings(modem, stage_registry()),
     }
-
-
-_MAX_INLINE_LIST = 512
-_RAMP_MIN_LEN = 64
-
-
-def _as_ramp(seq: list[Any]) -> dict[str, int] | None:
-    if len(seq) <= _RAMP_MIN_LEN or not all(isinstance(v, int) for v in seq):
-        return None
-    stride = seq[1] - seq[0]
-    arr = np.asarray(seq, np.int64)
-    if not bool(np.all(np.diff(arr) == stride)):
-        return None
-    return {"start": int(seq[0]), "stride": int(stride), "count": len(seq)}
-
-
-def _cap_list(container: dict[str, Any], key: str, sidecar: Path | None = None) -> None:
-    seq = container.get(key)
-    if not isinstance(seq, list):
-        return
-    ramp = _as_ramp(seq)
-    if ramp is not None:
-        # a uniform tiling is fully derivable: ship the formula, not the list
-        container[f"{key}_total"] = ramp["count"]
-        container[f"{key}_ramp"] = ramp
-        container[key] = []
-        return
-    if len(seq) > _MAX_INLINE_LIST:
-        container[f"{key}_total"] = len(seq)
-        if sidecar is not None:
-            # the full list must stay reachable: entries past the cap have no
-            # other home, and a >512-frame carve needs every window offset
-            np.asarray(seq, np.int64).tofile(sidecar)
-            container[f"{key}_path"] = str(sidecar)
-        container[key] = seq[:_MAX_INLINE_LIST]
 
 
 def run_rx_tool(
@@ -387,33 +288,18 @@ def run_rx_tool(
     else:
         if input_item_type is None:
             raise ValueError("input_item_type is required with input_path")
+        assert input_path is not None
         result = engine_run_rx(
             modem,
             stage_registry(),
             sample_rate=sample_rate,
             start=_start_descriptor(input_item_type, input_level),
             workdir=run_dir,
-            input_stream=_input_stream(Path(cast(str, input_path)), input_item_type),
+            input_stream=_input_stream(Path(input_path), input_item_type),
             trace=trace,
             timeout=timeout,
         )
-    # null-valued fields are omitted product-wide (a census row lists only the
-    # ports/measures its block has); stream/soft_stream stay explicit below
-    payload: dict[str, Any] = result.model_dump(mode="json", exclude_none=True)
-    for dup in ("bitstream", "symbolstream", "softstream"):
-        payload.pop(dup, None)
-    _slim_census(payload.get("census", []))
-    _cap_list(payload, "windows", run_dir / "windows.i64")
-    _cap_list(payload, "marks", run_dir / "marks.i64")
-    for diag in payload.get("diagnostics", []):
-        if isinstance(diag, dict):
-            _cap_list(diag, "marks")
-    payload.pop("trace", None)  # replace the model's raw trace with the enriched one
-    if result.trace:
-        payload["trace"] = _trace_payload(result)
-    payload["stream"] = _stream_summary(result)
-    payload["soft_stream"] = _soft_summary(result)
-    return payload
+    return pipeline_payload(result, run_dir)
 
 
 def run_tx_tool(
@@ -440,7 +326,8 @@ def run_tx_tool(
         bits_file = run_dir / "tx_bits.u8"
         parse_bits(bits).tofile(bits_file)
     else:
-        bits_file = Path(cast(str, bits_path))
+        assert bits_path is not None
+        bits_file = Path(bits_path)
     out = Path(out_path) if out_path is not None else run_dir / "out.cf32"
     gr = compile_modem(
         modem,
@@ -457,9 +344,8 @@ def run_tx_tool(
         "iq_path": str(out),
         "num_samples": out.stat().st_size // 8 if out.is_file() else 0,
         "sample_rate": sample_rate,
-        "census": [c.model_dump(exclude_none=True) for c in r.census],
+        "census": slim_census(r.census),
     }
-    _slim_census(cast(list[Any], payload["census"]))
     if r.error is not None:
         payload["error"] = r.error
     return payload
@@ -715,14 +601,7 @@ def survey(
             min_symbol_rate=min_symbol_rate,
             max_symbol_rate=max_symbol_rate,
         )
-    payload: dict[str, Any] = result.model_dump(mode="json")
-    bursts = cast(dict, payload["bursts"])
-    _cap_list(bursts, "segments")
-    # map segment [start, length] back to original capture samples so a burst can
-    # be re-decoded with a targeted slice: capture_offset = offset_samples +
-    # start*decim, capture_samples = length*decim.
-    bursts["capture_scale"] = {"offset_samples": src_slice.offset, "decim": decim}
-    return payload
+    return survey_payload(result, offset_samples=src_slice.offset, decim=decim)
 
 
 def capture_tool(

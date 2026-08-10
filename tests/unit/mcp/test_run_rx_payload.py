@@ -43,7 +43,7 @@ def test_uniform_window_tiling_compresses_to_ramp(
 def test_soft_stream_summary_states_the_sign_convention_per_level() -> None:
     from marconi.engine.run import PipelineResult
     from marconi.engine.types.models import Softstream
-    from marconi.mcp.tools import _soft_summary
+    from marconi.mcp.payload import soft_summary as _soft_summary
 
     def result(level: Literal["symbols", "bits"]) -> PipelineResult:
         return PipelineResult(

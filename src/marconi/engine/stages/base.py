@@ -10,7 +10,7 @@ from marconi.engine.types.descriptor import Amplitude, Carrier, Descriptor
 from marconi.engine.types.enums import ItemType
 from marconi.engine.types.levels import Level
 from marconi.engine.types.models import ValidationIssue
-from marconi.engine.types.step import Step
+from marconi.engine.types.step import Step, stage_label
 from marconi.errors import register_error
 
 B = TypeVar("B")
@@ -201,7 +201,7 @@ def validate_path(
 ) -> None:
     prev_level = start_level
     for idx, step in enumerate(steps):
-        sid = f"{step.conv}[{idx}]"
+        sid = stage_label(idx, step.conv)
         conv = registry.get(step.conv)
         if conv is None:
             known = ", ".join(sorted(registry))

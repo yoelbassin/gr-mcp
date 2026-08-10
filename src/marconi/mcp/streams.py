@@ -3,8 +3,9 @@ from __future__ import annotations
 import hashlib
 import os
 import tempfile
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import Any, BinaryIO, TypeVar
 
 import numpy as np
 import numpy.typing as npt
@@ -99,19 +100,40 @@ def render_page(
         "count": int(items.size),
         "total_items": int(total),
     }
-    if kind == "b":
-        bits_array = items.astype(np.uint8)
-        page["bits"] = "".join(chr(ord("0") + int(v & np.uint8(1))) for v in bits_array)
-    elif kind == "s":
-        page["symbols"] = [int(v) for v in items]
-    elif kind == "l":
-        page["values"] = [int(v) for v in items]
-    elif kind == "c":
-        page["real"] = [round(float(v.real), 6) for v in items]
-        page["imag"] = [round(float(v.imag), 6) for v in items]
-    else:
-        page["values"] = [round(float(v), 4) for v in items]
+    page.update(_PAGE_FORMATTERS[kind](items))
     return page
+
+
+def _format_bits(items: npt.NDArray[Any]) -> dict[str, object]:
+    bits_array = items.astype(np.uint8)
+    return {"bits": "".join(chr(ord("0") + int(v & np.uint8(1))) for v in bits_array)}
+
+
+def _format_ints(key: str) -> Callable[[npt.NDArray[Any]], dict[str, object]]:
+    def _format(items: npt.NDArray[Any]) -> dict[str, object]:
+        return {key: [int(v) for v in items]}
+
+    return _format
+
+
+def _format_complex(items: npt.NDArray[Any]) -> dict[str, object]:
+    return {
+        "real": [round(float(v.real), 6) for v in items],
+        "imag": [round(float(v.imag), 6) for v in items],
+    }
+
+
+def _format_floats(items: npt.NDArray[Any]) -> dict[str, object]:
+    return {"values": [round(float(v), 4) for v in items]}
+
+
+_PAGE_FORMATTERS: dict[str, Callable[[npt.NDArray[Any]], dict[str, object]]] = {
+    "b": _format_bits,
+    "s": _format_ints("symbols"),
+    "l": _format_ints("values"),
+    "c": _format_complex,
+    "f": _format_floats,
+}
 
 
 def ensure_cf32(
@@ -137,10 +159,8 @@ def ensure_cf32(
     )
     if dest.is_file():
         return SourceSlice(path=dest)
-    raw_dtype, scale, bias = _RAW_SCALES[dtype]
-    raw_size = np.dtype(raw_dtype).itemsize
-    remaining = samples * 2 if samples > 0 else None
     with src.open("rb") as fin:
+        raw_size = np.dtype(_RAW_SCALES[dtype][0]).itemsize
         fin.seek(offset * 2 * raw_size)
         # mkstemp: concurrent converters of the same capture (FastMCP runs
         # tools on worker threads) must never share a tmp path - the loser
@@ -148,27 +168,7 @@ def ensure_cf32(
         fd, tmp_name = tempfile.mkstemp(dir=dest.parent, suffix=".cf32.tmp")
         try:
             with os.fdopen(fd, "wb") as fout:
-                while True:
-                    check_deadline()
-                    want = (
-                        _CHUNK_ITEMS * 2
-                        if remaining is None
-                        else min(_CHUNK_ITEMS * 2, remaining)
-                    )
-                    if want == 0:
-                        break
-                    block: (
-                        npt.NDArray[np.int16]
-                        | npt.NDArray[np.int8]
-                        | npt.NDArray[np.uint8]
-                    ) = np.fromfile(fin, dtype=raw_dtype, count=want)
-                    if block.size == 0:
-                        break
-                    if remaining is not None:
-                        remaining -= int(block.size)
-                    pairs = block[: block.size - (block.size % 2)].astype(np.float32)
-                    pairs = (pairs - bias) / scale
-                    (pairs[0::2] + 1j * pairs[1::2]).astype(np.complex64).tofile(fout)
+                _convert_slice(fin, fout, dtype, samples)
             os.replace(tmp_name, dest)
         except BaseException:
             try:
@@ -177,6 +177,28 @@ def ensure_cf32(
                 pass
             raise
     return SourceSlice(path=dest)
+
+
+def _convert_slice(fin: BinaryIO, fout: BinaryIO, dtype: str, samples: int) -> None:
+    raw_dtype, scale, bias = _RAW_SCALES[dtype]
+    remaining = samples * 2 if samples > 0 else None
+    while True:
+        check_deadline()
+        want = (
+            _CHUNK_ITEMS * 2 if remaining is None else min(_CHUNK_ITEMS * 2, remaining)
+        )
+        if want == 0:
+            return
+        block: npt.NDArray[np.int16] | npt.NDArray[np.int8] | npt.NDArray[np.uint8] = (
+            np.fromfile(fin, dtype=raw_dtype, count=want)
+        )
+        if block.size == 0:
+            return
+        if remaining is not None:
+            remaining -= int(block.size)
+        pairs = block[: block.size - (block.size % 2)].astype(np.float32)
+        pairs = (pairs - bias) / scale
+        (pairs[0::2] + 1j * pairs[1::2]).astype(np.complex64).tofile(fout)
 
 
 _S = TypeVar("_S", bound=np.generic)
