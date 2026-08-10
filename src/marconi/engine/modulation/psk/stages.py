@@ -57,6 +57,14 @@ class SymbolSyncStep(Step):
         return self
 
 
+SYMBOL_SYNC_OPEN_LOOP_HINT = (
+    "symbol_sync ran closed-loop Gardner timing (loop_bw>0), which rails on "
+    "short or bursty signals. Retry with symbol_sync "
+    '{"loop_bw": 0} — open-loop feedforward (Oerder-Meyr) timing with '
+    "per-burst acquisition; it needs an integer sps >= 4."
+)
+
+
 class SymbolSync(RxStage[CompileContext, SymbolSyncStep]):
     """Symbol-timing recovery, IQ->IQ: RRC matched filter, decimating an
     oversampled stream to one sample per symbol, followed by either a
@@ -114,6 +122,11 @@ class SymbolSync(RxStage[CompileContext, SymbolSyncStep]):
 
     def min_input_sps_for(self, step: SymbolSyncStep) -> float | None:
         return 4.0 if step.loop_bw == 0.0 else None
+
+    def retry_hints(
+        self, step: SymbolSyncStep, path_convs: frozenset[str]
+    ) -> list[str]:
+        return [SYMBOL_SYNC_OPEN_LOOP_HINT] if step.loop_bw > 0.0 else []
 
 
 class SampleSymbolsStep(Step):

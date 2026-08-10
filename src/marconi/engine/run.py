@@ -340,30 +340,6 @@ _POLARITY_HINT = (
 )
 
 
-_FSK_OPEN_LOOP_HINT = (
-    "fsk ran closed-loop Gardner symbol timing (loop_bw>0), which rails on short "
-    "or bursty packets and recovers few clean symbols. If this capture is bursty "
-    "or the packets are short (under ~1000 symbols), retry with fsk "
-    '{"loop_bw": 0} — open-loop, fixed-rate sampling at the nominal sps.'
-)
-
-_OOK_OPEN_LOOP_HINT = (
-    "ook_envelope ran closed-loop Gardner symbol timing (loop_bw>0), which "
-    "rails on bursty/pulsed environments and decodes nothing. Retry with "
-    'ook_envelope {"loop_bw": 0} - open-loop per-burst sampling, which needs '
-    "NO agc: remove any agc stage from the path. A sliding-window agc steps "
-    "its gain mid-burst on pulsed signals and defeats fixed-threshold "
-    "slicing; open-loop normalizes each burst internally instead."
-)
-
-_OOK_AGC_REMOVE_HINT = (
-    "ook_envelope is running open-loop (amplitude-agnostic, per-burst "
-    "normalized) but the path still contains an agc stage - remove it; a "
-    "sliding-window agc steps its gain mid-burst on pulsed signals and "
-    "corrupts the chips downstream."
-)
-
-
 def composition_warnings(
     modem: Modem, registry: Mapping[str, Stage[Any, Any]]
 ) -> list[str]:
@@ -401,24 +377,12 @@ def _hints(
         getattr(registry.get(s.conv), "polarity_ambiguous", False) for s in modem.path
     ):
         hints.append(_POLARITY_HINT)
-    if verdict != "decoded" and any(
-        s.conv == "fsk" and getattr(s, "loop_bw", 0.0) > 0.0 for s in modem.path
-    ):
-        hints.append(_FSK_OPEN_LOOP_HINT)
-    if verdict != "decoded" and any(
-        s.conv == "ook_envelope" and getattr(s, "loop_bw", 0.0) > 0.0
-        for s in modem.path
-    ):
-        hints.append(_OOK_OPEN_LOOP_HINT)
-    if (
-        verdict != "decoded"
-        and any(
-            s.conv == "ook_envelope" and getattr(s, "loop_bw", 0.0) == 0.0
-            for s in modem.path
-        )
-        and any(s.conv == "agc" for s in modem.path)
-    ):
-        hints.append(_OOK_AGC_REMOVE_HINT)
+    if verdict != "decoded":
+        path_convs = frozenset(s.conv for s in modem.path)
+        for s in modem.path:
+            stage = registry.get(s.conv)
+            if stage is not None:
+                hints.extend(stage.retry_hints(s, path_convs))
     return hints
 
 

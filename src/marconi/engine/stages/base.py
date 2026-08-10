@@ -166,6 +166,14 @@ class Stage(ABC, Generic[B, S]):
         fails the compile."""
         return None
 
+    def retry_hints(self, step: S, path_convs: frozenset[str]) -> list[str]:
+        """Actionable retry guidance when a decode's verdict fell short of
+        'decoded', owned by the stage whose parameters the retry would change
+        (a conv-name lookup table in the runner drifts the moment a stage
+        gains a new mode). path_convs names the other stages in the spec for
+        cross-stage advice ('remove the agc')."""
+        return []
+
     def output_item_rate(
         self, step: S, in_rate: float, symbol_rate: float
     ) -> float | None:

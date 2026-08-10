@@ -30,6 +30,14 @@ class FskStep(Step):
     )
 
 
+FSK_OPEN_LOOP_HINT = (
+    "fsk ran closed-loop Gardner symbol timing (loop_bw>0), which rails on short "
+    "or bursty packets and recovers few clean symbols. If this capture is bursty "
+    "or the packets are short (under ~1000 symbols), retry with fsk "
+    '{"loop_bw": 0} — open-loop, fixed-rate sampling at the nominal sps.'
+)
+
+
 class Fsk(DuplexStage[CompileContext, FskStep]):
     """Binary FSK carrier stage. RX: FM discriminator + Gardner symbol timing ->
     one soft float per symbol. TX: upsample + FM modulate. The symbol-rate
@@ -62,6 +70,9 @@ class Fsk(DuplexStage[CompileContext, FskStep]):
         self, step: FskStep, in_rate: float, symbol_rate: float
     ) -> float | None:
         return symbol_rate
+
+    def retry_hints(self, step: FskStep, path_convs: frozenset[str]) -> list[str]:
+        return [FSK_OPEN_LOOP_HINT] if step.loop_bw > 0.0 else []
 
 
 class MskStep(Step):

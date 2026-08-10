@@ -1,8 +1,13 @@
 from __future__ import annotations
 
 from marconi.engine.modulation.fsk.stages import FskStep, MskStep
-from marconi.engine.modulation.ook.stages import OokEnvelopeStep
-from marconi.engine.run import _OOK_AGC_REMOVE_HINT, _hints, composition_warnings
+from marconi.engine.modulation.ook.stages import (
+    OOK_AGC_REMOVE_HINT as _OOK_AGC_REMOVE_HINT,
+)
+from marconi.engine.modulation.ook.stages import (
+    OokEnvelopeStep,
+)
+from marconi.engine.run import _hints, composition_warnings
 from marconi.engine.stages.conditioning import AgcStep
 from marconi.engine.stages.general import SliceStep
 from marconi.engine.stages.registry import stage_registry, step_models
@@ -54,6 +59,21 @@ def test_hints_silent_when_fsk_decoded_or_already_open_loop() -> None:
     # a decoded run needs no retry; an already-open-loop run has none to offer
     assert _hints(closed, stage_registry(), BITS, "decoded") == []
     assert _hints(open_loop, stage_registry(), BITS, "no_signal") == []
+
+
+def test_symbol_sync_closed_loop_hint_on_undecoded() -> None:
+    # symbol_sync gained the same loop_bw=0 open-loop mode as fsk and
+    # ook_envelope; a failed closed-loop run must get the same class of
+    # retry hint — stage-owned, so a new open-loop mode cannot silently
+    # miss the hint table again
+    from marconi.engine.modulation.psk.stages import SymbolSyncStep
+
+    closed = Modem(symbol_rate=1000.0, path=[SymbolSyncStep(sps=4)])
+    hints = _hints(closed, stage_registry(), BITS, "no_signal")
+    assert any("symbol_sync" in h and "loop_bw" in h for h in hints)
+    open_loop = Modem(symbol_rate=1000.0, path=[SymbolSyncStep(sps=4, loop_bw=0.0)])
+    assert _hints(open_loop, stage_registry(), BITS, "no_signal") == []
+    assert _hints(closed, stage_registry(), BITS, "decoded") == []
 
 
 def test_ook_closed_loop_hint_on_undecoded() -> None:

@@ -34,6 +34,23 @@ class OokEnvelopeStep(Step):
     )
 
 
+OOK_OPEN_LOOP_HINT = (
+    "ook_envelope ran closed-loop Gardner symbol timing (loop_bw>0), which "
+    "rails on bursty/pulsed environments and decodes nothing. Retry with "
+    'ook_envelope {"loop_bw": 0} - open-loop per-burst sampling, which needs '
+    "NO agc: remove any agc stage from the path. A sliding-window agc steps "
+    "its gain mid-burst on pulsed signals and defeats fixed-threshold "
+    "slicing; open-loop normalizes each burst internally instead."
+)
+
+OOK_AGC_REMOVE_HINT = (
+    "ook_envelope is running open-loop (amplitude-agnostic, per-burst "
+    "normalized) but the path still contains an agc stage - remove it; a "
+    "sliding-window agc steps its gain mid-burst on pulsed signals and "
+    "corrupts the chips downstream."
+)
+
+
 class OokEnvelope(DuplexStage[CompileContext, OokEnvelopeStep]):
     name = "ook_envelope"
     description = (
@@ -90,6 +107,15 @@ class OokEnvelope(DuplexStage[CompileContext, OokEnvelopeStep]):
         self, step: OokEnvelopeStep, in_rate: float, symbol_rate: float
     ) -> float | None:
         return symbol_rate
+
+    def retry_hints(
+        self, step: OokEnvelopeStep, path_convs: frozenset[str]
+    ) -> list[str]:
+        if step.loop_bw > 0.0:
+            return [OOK_OPEN_LOOP_HINT]
+        if "agc" in path_convs:
+            return [OOK_AGC_REMOVE_HINT]
+        return []
 
 
 OOK_STAGES: tuple[type[Stage[CompileContext, Any]], ...] = (OokEnvelope,)
