@@ -73,6 +73,11 @@ class QamDemod(DuplexStage[CompileContext, QamDemodStep]):
             Level.SYMBOLS, ItemType.B, Carrier.HARD, order=int(step.order)
         )
 
+    def output_item_rate(
+        self, step: QamDemodStep, in_rate: float, symbol_rate: float
+    ) -> float | None:
+        return symbol_rate
+
 
 class QamDemapStep(Step):
     conv: Literal["qam_demap"] = "qam_demap"
@@ -105,6 +110,11 @@ class QamDemap(DuplexStage[CompileContext, QamDemapStep]):
 
     def required_input_order(self, step: QamDemapStep) -> int | None:
         return int(step.order)
+
+    def output_item_rate(
+        self, step: QamDemapStep, in_rate: float, symbol_rate: float
+    ) -> float | None:
+        return in_rate * math.log2(int(step.order))
 
 
 QAM_STAGES: tuple[type[Stage[CompileContext, Any]], ...] = (QamDemod, QamDemap)

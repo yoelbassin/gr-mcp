@@ -185,6 +185,11 @@ class Dechirp(DuplexStage[CompileContext, DechirpStep]):
         # the input must arrive at exactly that many samples per symbol.
         return step.oversample * (1 << step.sf) * symbol_rate
 
+    def output_item_rate(
+        self, step: DechirpStep, in_rate: float, symbol_rate: float
+    ) -> float | None:
+        return symbol_rate
+
 
 class CssDemap(DuplexStage[CompileContext, CssDemapStep]):
     """CSS symbol<->bits, SYMBOLS<->BITS. RX Gray-decodes the symbol index and
@@ -209,6 +214,11 @@ class CssDemap(DuplexStage[CompileContext, CssDemapStep]):
 
     def required_input_order(self, step: CssDemapStep) -> int | None:
         return 1 << int(step.sf)
+
+    def output_item_rate(
+        self, step: CssDemapStep, in_rate: float, symbol_rate: float
+    ) -> float | None:
+        return in_rate * int(step.sf)
 
 
 CSS_STAGES: tuple[type[Stage[CompileContext, Any]], ...] = (

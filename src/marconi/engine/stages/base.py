@@ -166,6 +166,17 @@ class Stage(ABC, Generic[B, S]):
         fails the compile."""
         return None
 
+    def output_item_rate(
+        self, step: S, in_rate: float, symbol_rate: float
+    ) -> float | None:
+        """True items-per-second of this stage's OUTPUT stream where it
+        departs from the compiled rate model: an RX demod that decimates by
+        sps internally (rate_factor stays 1.0 for TX symmetry) emits at the
+        symbol rate; a demap that unpacks k bits per symbol multiplies by k.
+        None means the rate model is already the truth. Observability only —
+        trace metadata, never compile checks."""
+        return None
+
 
 class RxStage(Stage[B, S]):
     directions: frozenset[str] = frozenset({"rx"})

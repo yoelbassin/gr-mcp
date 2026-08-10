@@ -44,6 +44,11 @@ def test_trace_taps_every_gr_stage_with_stats(
     assert res["status"] == "ok"
     trace = cast(list[dict[str, object]], res["trace"])
     assert [row["after"] for row in trace] == ["agc[0]", "psk_demod[1]"]
+    # rows report the sidecar's TRUE item rate: psk_demod decimates by sps
+    # internally (rate_factor stays 1.0 for TX symmetry), so its symbols tick
+    # at the symbol rate, not the IQ rate
+    assert cast(float, trace[0]["sample_rate"]) == 8000.0
+    assert cast(float, trace[1]["sample_rate"]) == 1000.0
     for row in trace:
         assert row["level"] in ("iq", "symbols")
         assert cast(int, row["items"]) > 0

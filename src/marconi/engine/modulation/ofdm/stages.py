@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from dataclasses import replace
 from typing import Any, Literal
 
@@ -43,6 +44,12 @@ class OfdmFrameSyncProbe(RxStage[CompileContext, OfdmFrameSyncProbeStep]):
             frame_len=step.frame_len,
             data_syms=step.data_syms,
         )
+
+    def output_item_rate(
+        self, step: OfdmFrameSyncProbeStep, in_rate: float, symbol_rate: float
+    ) -> float | None:
+        usefuls = (step.data_syms + 1) * step.fft_len
+        return in_rate * usefuls / step.frame_len
 
 
 class OfdmDemodStep(Step):
@@ -92,6 +99,12 @@ class OfdmDemod(RxStage[CompileContext, OfdmDemodStep]):
 
     def out_descriptor(self, in_desc: Descriptor, step: OfdmDemodStep) -> Descriptor:
         return Descriptor(Level.SYMBOLS, ItemType.C, Carrier.SOFT)
+
+    def output_item_rate(
+        self, step: OfdmDemodStep, in_rate: float, symbol_rate: float
+    ) -> float | None:
+        cells = (step.data_syms + 1) * step.n_carriers
+        return in_rate * cells / step.frame_len
 
 
 def _check_explicit_points(
@@ -190,6 +203,13 @@ class DqpskSoftDemap(RxStage[CompileContext, DqpskSoftDemapStep]):
     def required_input_order(self, step: DqpskSoftDemapStep) -> int | None:
         return step.alphabet()
 
+    def output_item_rate(
+        self, step: DqpskSoftDemapStep, in_rate: float, symbol_rate: float
+    ) -> float | None:
+        # PRS reference dropped, then log2(alphabet) LLRs per kept carrier
+        kept = step.data_syms / (step.data_syms + 1)
+        return in_rate * kept * math.log2(step.alphabet())
+
 
 # cp_symbol_sync's calibrated lock threshold (CP-correlation ratio): measured
 # noise ~1.3-1.6, real lock >= 2.0. quality.py derives its permille fallback
@@ -286,6 +306,11 @@ class OfdmCoherentSync(RxStage[CompileContext, OfdmCoherentSyncStep]):
     ) -> Descriptor:
         return Descriptor(Level.SYMBOLS, ItemType.C, Carrier.SOFT)
 
+    def output_item_rate(
+        self, step: OfdmCoherentSyncStep, in_rate: float, symbol_rate: float
+    ) -> float | None:
+        return in_rate * step.n_carriers / step.sym_len
+
 
 class SoftDemapStep(Step):
     conv: Literal["soft_demap"] = "soft_demap"
@@ -365,6 +390,11 @@ class SoftDemap(RxStage[CompileContext, SoftDemapStep]):
 
     def required_input_order(self, step: SoftDemapStep) -> int | None:
         return step.alphabet()
+
+    def output_item_rate(
+        self, step: SoftDemapStep, in_rate: float, symbol_rate: float
+    ) -> float | None:
+        return in_rate * (step.alphabet().bit_length() - 1)
 
 
 class CellSelectStep(Step):

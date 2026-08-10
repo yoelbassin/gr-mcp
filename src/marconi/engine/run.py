@@ -78,12 +78,28 @@ _ITEM_BYTES: dict[str, int] = {"c": 8, "f": 4, "s": 2, "b": 1}
 
 
 def _harvest_trace(
-    modem: Modem, cp: CompiledPipeline, trace_dir: Path
+    modem: Modem,
+    cp: CompiledPipeline,
+    trace_dir: Path,
+    registry: Mapping[str, Stage[Any, Any]],
 ) -> list[TraceStage]:
     rows: list[TraceStage] = []
+    # the true item-rate ladder: compose the compiled rate model onto a base
+    # corrected by each stage's own output_item_rate, so rows at and after an
+    # internally-decimating demod report the sidecar's real rate
+    rate = cp.rates[0]
     for i in range(cp.gr_steps):
-        conv = modem.path[i].conv
+        step = modem.path[i]
+        conv = step.conv
         out = cp.boundaries[i + 1]
+        stage = registry.get(conv)
+        model_rate = rate * (cp.rates[i + 1] / cp.rates[i])
+        true_rate = (
+            stage.output_item_rate(step, rate, modem.symbol_rate)
+            if stage is not None
+            else None
+        )
+        rate = model_rate if true_rate is None else true_rate
         it_enum = trace_item_type(out)
         it = it_enum.value
         path = trace_sink_path(trace_dir, i, conv, it_enum)
@@ -93,7 +109,7 @@ def _harvest_trace(
                 after=stage_label(i, conv),
                 level=out.level.value,
                 item_type=it,
-                sample_rate=cp.rates[i + 1],
+                sample_rate=rate,
                 path=str(path),
                 items=size // _ITEM_BYTES[it],
             )
@@ -546,7 +562,7 @@ def run_rx(
             r = backend.run_pipeline(cp.gr, timeout=remaining())
             census, diagnostics = list(r.census), list(r.diagnostics)
             if trace_dir is not None:
-                trace_rows = _harvest_trace(modem, cp, trace_dir)
+                trace_rows = _harvest_trace(modem, cp, trace_dir, registry)
             if r.status != "ok":
                 return PipelineResult(
                     status=r.status,

@@ -144,6 +144,11 @@ class SampleSymbols(RxStage[CompileContext, SampleSymbolsStep]):
     ) -> float | None:
         return symbol_rate
 
+    def output_item_rate(
+        self, step: SampleSymbolsStep, in_rate: float, symbol_rate: float
+    ) -> float | None:
+        return symbol_rate
+
 
 class DifferentialDemodStep(Step):
     conv: Literal["differential_demod"] = "differential_demod"
@@ -256,6 +261,11 @@ class PskDemod(DuplexStage[CompileContext, PskDemodStep]):
             Level.SYMBOLS, ItemType.C, Carrier.SOFT, order=int(step.order)
         )
 
+    def output_item_rate(
+        self, step: PskDemodStep, in_rate: float, symbol_rate: float
+    ) -> float | None:
+        return symbol_rate
+
 
 class PskDemapStep(Step):
     conv: Literal["psk_demap"] = "psk_demap"
@@ -290,6 +300,11 @@ class PskDemap(DuplexStage[CompileContext, PskDemapStep]):
 
     def required_input_order(self, step: PskDemapStep) -> int | None:
         return int(step.order)
+
+    def output_item_rate(
+        self, step: PskDemapStep, in_rate: float, symbol_rate: float
+    ) -> float | None:
+        return in_rate * math.log2(int(step.order))
 
 
 class PskSoftDemapStep(Step):
@@ -327,6 +342,11 @@ class PskSoftDemap(RxStage[CompileContext, PskSoftDemapStep]):
 
     def required_input_order(self, step: PskSoftDemapStep) -> int | None:
         return int(step.order)
+
+    def output_item_rate(
+        self, step: PskSoftDemapStep, in_rate: float, symbol_rate: float
+    ) -> float | None:
+        return in_rate * math.log2(int(step.order))
 
 
 PSK_STAGES: tuple[type[Stage[CompileContext, Any]], ...] = (

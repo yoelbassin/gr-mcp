@@ -86,5 +86,10 @@ class OokEnvelope(DuplexStage[CompileContext, OokEnvelopeStep]):
     def out_descriptor(self, in_desc: Descriptor, step: OokEnvelopeStep) -> Descriptor:
         return Descriptor(Level.SYMBOLS, ItemType.F, Carrier.SOFT)
 
+    def output_item_rate(
+        self, step: OokEnvelopeStep, in_rate: float, symbol_rate: float
+    ) -> float | None:
+        return symbol_rate
+
 
 OOK_STAGES: tuple[type[Stage[CompileContext, Any]], ...] = (OokEnvelope,)

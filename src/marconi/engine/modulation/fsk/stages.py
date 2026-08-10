@@ -58,6 +58,11 @@ class Fsk(DuplexStage[CompileContext, FskStep]):
     def out_descriptor(self, in_desc: Descriptor, step: FskStep) -> Descriptor:
         return Descriptor(Level.SYMBOLS, ItemType.F, Carrier.SOFT)
 
+    def output_item_rate(
+        self, step: FskStep, in_rate: float, symbol_rate: float
+    ) -> float | None:
+        return symbol_rate
+
 
 class MskStep(Step):
     conv: Literal["msk"] = "msk"
@@ -93,6 +98,11 @@ class Msk(RxStage[CompileContext, MskStep]):
 
     def out_descriptor(self, in_desc: Descriptor, step: MskStep) -> Descriptor:
         return Descriptor(Level.SYMBOLS, ItemType.F, Carrier.SOFT)
+
+    def output_item_rate(
+        self, step: MskStep, in_rate: float, symbol_rate: float
+    ) -> float | None:
+        return symbol_rate
 
 
 class MfskSoftDemapStep(Step):
@@ -163,6 +173,11 @@ class MfskSoftDemap(RxStage[CompileContext, MfskSoftDemapStep]):
 
     def required_input_order(self, step: MfskSoftDemapStep) -> int | None:
         return len(step.levels)
+
+    def output_item_rate(
+        self, step: MfskSoftDemapStep, in_rate: float, symbol_rate: float
+    ) -> float | None:
+        return in_rate * math.log2(len(step.levels))
 
 
 FSK_STAGES: tuple[type[Stage[CompileContext, Any]], ...] = (Fsk, Msk, MfskSoftDemap)
