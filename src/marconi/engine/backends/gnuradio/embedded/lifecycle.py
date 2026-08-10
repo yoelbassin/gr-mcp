@@ -1,5 +1,5 @@
 """Shared lifecycle for the embedded Python blocks — the one home of the
-GR-scheduler contract these blocks live by (issues 01/05/16):
+GR-scheduler contract these blocks live by:
 
 - forecast is the only EOF channel: once upstream is exhausted, a block is
   called again only if its forecast demands zero input. Pending output (or

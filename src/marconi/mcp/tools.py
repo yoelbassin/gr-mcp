@@ -516,7 +516,7 @@ def survey(
     the boolean eye_confirmed says which regime you are in: true →
     candidates_hz[0] is eye-corroborated, false → strength-ranked only. On
     noisy or pulse-shaped off-air signals the eye can fail to clear even at
-    the true rate (usual for constant-envelope GMSK/C4FM), and strength
+    the true rate (usual for constant-envelope signals, e.g. GMSK), and strength
     order is NOT trustworthy there — it can seat a burst harmonic, a TDMA
     slot-cadence line, or a capture-chain periodicity first. When the eye
     never clears, don't trust candidates_hz[0] alone: demodulate your top

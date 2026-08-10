@@ -227,7 +227,7 @@ def _modulate_symbol(s: int, sf: int, oversample: int) -> npt.NDArray[np.complex
 
 
 # Each GR class is defined INSIDE its builder so that `gr` is never a module-
-# level name (satisfies the phy ⊥ gnuradio invariant checked by test_invariants).
+# level name (satisfies the engine ⊥ gnuradio invariant in test_invariants).
 
 
 def chirp_prefix(

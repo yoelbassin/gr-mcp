@@ -408,7 +408,7 @@ def _eye_cleared(eyes: list[float]) -> bool:
     # A candidate's eye "clears" only above the measured smear ceiling, so this
     # is the single source for both the re-rank trigger and the caller-facing
     # eye_confirmed flag — when False, candidates_hz is strength-ranked only and
-    # untrustworthy for constant-envelope/pulse-shaped (GMSK/C4FM) signals.
+    # untrustworthy for constant-envelope or pulse-shaped (e.g. GMSK) signals.
     return bool(eyes) and max(eyes) >= _CLEAR_EYE
 
 

@@ -9,7 +9,7 @@ DECOUPLED path, ratified for baseband input where the subcarrier the reference
 passband detector once slaved its clock to has already been removed by
 conditioning); a polyphase branch of the oversampled matched filter supplies
 sub-sample timing. Coherent detection of a raw (non-precoded) MSK signal
-recovers the payload differentially-encoded (NRZI) — the data rides in the
+recovers the payload differentially-encoded — the data rides in the
 ±90°/bit phase step; the per-link differential decode is a bits-layer concern,
 so this block stays protocol-agnostic and emits the rail decisions directly.
 Constants are pinned from the validated reference detector.

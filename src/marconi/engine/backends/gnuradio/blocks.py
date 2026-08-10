@@ -221,7 +221,8 @@ def _soapy_source(c: _GrModules, p: Params) -> Any:
     return src
 
 
-# kind -> (ctx, params) -> live GR block. The ONLY GR-aware vocabulary in phy.
+# kind -> (ctx, params) -> live GR block. The only GR-aware vocabulary in the
+# engine (the engine ⊥ gnuradio invariant in test_invariants).
 GR_BLOCKS: dict[str, Callable[[_GrModules, Params], Any]] = {
     # offset/length are in items; length 0 = to EOF (stock file_source
     # semantics) - the streaming way to decode a bounded capture slice

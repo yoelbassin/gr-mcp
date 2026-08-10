@@ -28,7 +28,7 @@ Direction = Literal["rx", "tx"]
 
 # item_type -> (source_kind, sink_kind). The GR wire type alone selects IO;
 # carrier is decision-hardness (a seam invariant), never a routing knob. Descriptor
-# data, never stage names: replaces v1's rate-by-name scan and sink-by-type lookup.
+# data, never stage names.
 _IO_BLOCKS: dict[ItemType, tuple[str | None, str]] = {
     ItemType.C: ("iq_file_source", "iq_file_sink"),
     ItemType.S: (None, "symbols_file_sink"),

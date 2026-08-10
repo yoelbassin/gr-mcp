@@ -154,7 +154,7 @@ class DqpskSoftDemapStep(Step):
 
 class DqpskSoftDemap(RxStage[CompileContext, DqpskSoftDemapStep]):
     """Differential-QPSK soft demap, SYMBOLS->BITS soft, from STOCK GR blocks. The
-    per-carrier differential is delay + multiply_conjugate; the PRS reference is
+    per-carrier differential is delay + multiply_conjugate; the leading reference
     dropped by keep_m_in_n; the soft decision is constellation_soft_decoder over
     the named psk scheme or explicit caller points (a point's bit pattern is its
     index, MSB-first — the door for protocols whose differential mapping differs
@@ -180,7 +180,7 @@ class DqpskSoftDemap(RxStage[CompileContext, DqpskSoftDemapStep]):
         b.connect(src, mc, dst_port=0)  # carriers  -> mc.0
         b.connect(dly, mc, dst_port=1)  # delayed   -> mc.1  (c[i]*conj(c[i-nc]))
         b.set_tail(mc)
-        b.chain("keep_m_in_n_c", m=ds * nc, n=(ds + 1) * nc, offset=nc)  # drop PRS diff
+        b.chain("keep_m_in_n_c", m=ds * nc, n=(ds + 1) * nc, offset=nc)
         if step.scheme == "explicit":
             b.chain(
                 "constellation_soft_decoder",
@@ -205,7 +205,7 @@ class DqpskSoftDemap(RxStage[CompileContext, DqpskSoftDemapStep]):
     def output_item_rate(
         self, step: DqpskSoftDemapStep, in_rate: float, symbol_rate: float
     ) -> float | None:
-        # PRS reference dropped, then log2(alphabet) LLRs per kept carrier
+        # reference symbol dropped, then log2(alphabet) LLRs per kept carrier
         kept = step.data_syms / (step.data_syms + 1)
         return in_rate * kept * math.log2(step.alphabet())
 
