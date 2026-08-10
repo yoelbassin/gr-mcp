@@ -16,7 +16,7 @@ from marconi.engine.types.step import Step
 
 class FskStep(Step):
     conv: Literal["fsk"] = "fsk"
-    deviation: float
+    deviation: float = Field(gt=0)
     loop_bw: float = Field(
         default=0.045,
         ge=0,

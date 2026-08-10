@@ -138,3 +138,15 @@ def test_fsk_and_ook_accept_open_loop_reject_negative() -> None:
         FskStep(deviation=2400.0, loop_bw=-0.01)
     with pytest.raises(ValidationError):
         OokEnvelopeStep(loop_bw=-0.01)
+
+
+def test_fsk_deviation_must_be_positive() -> None:
+    # deviation=0 divides the discriminator gain by zero (an [internal_error]
+    # at runtime today), and a negative deviation silently complements every
+    # output bit — both are spec errors, not signals
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        FskStep(deviation=0.0)
+    with pytest.raises(ValidationError):
+        FskStep(deviation=-2400.0)
