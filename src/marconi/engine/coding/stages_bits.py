@@ -96,6 +96,19 @@ def check_codebook_sizing(
             "value_error",
             "nearest decode packs codewords through int64; 63 bits is " "the ceiling",
         )
+    bad = [x for x in table if x < 0 or x >= (1 << code_bits)]
+    if bad:
+        raise PydanticCustomError(
+            "value_error",
+            "codebook entries must lie in [0, 2**code_bits); got {bad}",
+            {"bad": bad[:5]},
+        )
+    if len(set(table)) != len(table):
+        raise PydanticCustomError(
+            "value_error",
+            "codebook entries must be unique; duplicate codewords make "
+            "decode ambiguous",
+        )
 
 
 class CodebookStep(Step):

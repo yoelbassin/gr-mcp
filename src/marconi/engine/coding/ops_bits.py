@@ -126,11 +126,20 @@ def _codebook_maps(
             f"for data_bits={data_bits}"
         )
     fwd = np.asarray(table, dtype=np.int64)
-    if fwd.size and int(fwd.max()) >= (1 << code_bits):
-        raise ValueError("codebook symbol exceeds code_bits width")
+    _check_table_entries(fwd, code_bits)
     inv = np.zeros(1 << code_bits, dtype=np.int64)  # unknown symbol -> 0
     inv[fwd] = np.arange(fwd.size, dtype=np.int64)
     return fwd, inv
+
+
+def _check_table_entries(fwd: npt.NDArray[np.int64], code_bits: int) -> None:
+    if fwd.size and (int(fwd.min()) < 0 or int(fwd.max()) >= (1 << code_bits)):
+        raise ValueError("codebook entries must lie in [0, 2**code_bits)")
+    if np.unique(fwd).size != fwd.size:
+        raise ValueError(
+            "codebook entries must be unique; duplicate codewords make "
+            "decode ambiguous"
+        )
 
 
 def _nearest_values(
@@ -141,8 +150,7 @@ def _nearest_values(
             "nearest decode packs codewords through int64; 63 bits is the " "ceiling"
         )
     fwd = np.asarray(table, dtype=np.int64)
-    if fwd.size and int(fwd.max()) >= (1 << code_bits):
-        raise ValueError("codebook symbol exceeds code_bits width")
+    _check_table_entries(fwd, code_bits)
     tbl = np.zeros((fwd.size, code_bits), np.uint8)
     for j in range(code_bits):
         tbl[:, j] = (fwd >> (code_bits - 1 - j)) & 1
@@ -217,6 +225,13 @@ def codebook_rx(
         if c.symbols is None:
             raise ValueError("codebook(symbol_input=True) needs a symbols carrier")
         syms = np.asarray(c.symbols, np.int64)
+        if syms.size and (int(syms.min()) < 0 or int(syms.max()) >= (1 << code_bits)):
+            raise ValueError(
+                f"symbol values must lie in [0, {1 << code_bits}) for "
+                f"code_bits={code_bits}; got [{int(syms.min())}, {int(syms.max())}]."
+                " m_slice levels are the emitted symbol values — label them "
+                "0..2**code_bits-1"
+            )
         bits = (
             _pack_symbols(_values(syms), data_bits)
             if syms.size

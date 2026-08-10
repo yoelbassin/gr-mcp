@@ -118,7 +118,7 @@ def test_decode_param_is_validated() -> None:
 
 def test_nearest_rejects_over_width_table_entries() -> None:
     wire = _bits_of([0], 4)
-    with pytest.raises(ValueError, match="exceeds code_bits width"):
+    with pytest.raises(ValueError, match=r"\[0, 2\*\*code_bits\)"):
         ops_bits.codebook_rx(
             CodingCarrier(bits=wire),
             code_bits=4,
