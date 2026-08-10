@@ -8,6 +8,7 @@ import numpy.typing as npt
 
 from marconi.engine.backends.gnuradio.embedded.lifecycle import (
     Diagnostics,
+    EofProbe,
     OutQueue,
     bump,
     forecast_drain,
@@ -386,7 +387,7 @@ def make_chirp_sync(
             self._det_x: int | None = None
             self._out = OutQueue(np.complex64)
             self._tagq: list[int] = []  # _out indices (absolute) of burst starts
-            self.eof_probe: Any = None
+            self.eof_probe: EofProbe | None = None
             self._eof_padded = False  # FIR tail zeros injected (once, at flush)
             self.diagnostics: Diagnostics = {"locks": 0, "eof_flushed": 0}
 

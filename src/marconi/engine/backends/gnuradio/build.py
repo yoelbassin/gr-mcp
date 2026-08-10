@@ -132,7 +132,7 @@ def build_top_block(pipeline: GrPipeline) -> Any:
     """Resolve every block kind via the factories and wire all connections into
     a gr.top_block. Imports gnuradio (lazily) into the calling process."""
     gr = _modules().gr
-    factories = _factories(pipeline.sample_rate)
+    factories = _factories()
     tb = _guarded_top_block_cls(gr)(pipeline.name)
     instances: dict[str, Any] = {}
     for b in pipeline.blocks:

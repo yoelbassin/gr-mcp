@@ -3,14 +3,14 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from marconi.engine.backends.gnuradio.blocks import GR_BLOCKS, _make_ctx
+from marconi.engine.backends.gnuradio.blocks import GR_BLOCKS, _modules
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
 from marconi.engine.compile.ir import GrBlock, GrConnection, GrPipeline
 
 
 def test_agc2_applies_max_gain() -> None:
     blk = GR_BLOCKS["agc2_cc"](
-        _make_ctx(4.0),
+        _modules(),
         {
             "attack_rate": 0.01,
             "decay_rate": 0.001,

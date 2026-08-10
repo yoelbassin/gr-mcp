@@ -20,9 +20,10 @@ streaming pass-throughs (sym_strip — emits within each granted window).
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Protocol
 
 import numpy as np
+import numpy.typing as npt
 
 # The block-side diagnostics payload the worker harvests into Diagnostic rows:
 # int -> count, float -> value, list[int] -> marks. Any other value type is a
@@ -35,6 +36,58 @@ def bump(diag: Diagnostics, key: str, n: int = 1) -> None:
     if not isinstance(cur, int):
         raise TypeError(f"diagnostic {key!r} is not an int counter: {cur!r}")
     diag[key] = cur + n
+
+
+class ChunkedBlock(Protocol):
+    _pending: npt.NDArray[Any]
+    _eof_done: bool
+    _out: "OutQueue"
+    eof_probe: "EofProbe | None"
+
+    def _process_block(self, block: Any) -> None: ...
+
+    def _flush_tail(self) -> None: ...
+
+    def consume(self, port: int, n: int) -> None: ...
+
+    def nitems_read(self, port: int) -> int: ...
+
+
+def eof_final(block: ChunkedBlock) -> bool:
+    """True only once every input sample this block will ever get has been
+    read (source-relative count proven by the build-wired probe). Needs no
+    straggler grace: nitems_read reaching the propagated total means the
+    block's own buffer already holds the whole capture, so irreversible tail
+    work (sub-block remainders, committing an open burst) is safe. Without
+    expected_items (unknown rate / a live source) it never fires and the
+    sim-pad withhold stands."""
+    p = block.eof_probe
+    return (
+        p is not None
+        and p.expected_items is not None
+        and int(block.nitems_read(0)) >= p.expected_items
+    )
+
+
+def drain_chunked(
+    block: ChunkedBlock,
+    input_items: Any,
+    output_items: Any,
+    *,
+    floor: int,
+    dtype: Any,
+) -> int:
+    inp = input_items[0]
+    if len(inp):
+        block._pending = np.concatenate([block._pending, np.asarray(inp, dtype)])
+        block.consume(0, len(inp))
+        while len(block._pending) >= floor:
+            chunk, block._pending = block._pending[:floor], block._pending[floor:]
+            block._process_block(chunk)
+    if not block._eof_done and eof_final(block):
+        block._eof_done = True
+        block._flush_tail()
+    return block._out.drain(output_items[0])
 
 
 class OutQueue:
@@ -82,9 +135,10 @@ class EofProbe:
     its entire file into the graph — no NEW sample will ever enter, though
     already-written ones may still be in flight through upstream buffers, so
     it licenses only actions that stay correct if more input arrives (e.g.
-    releasing whole-window margins early). ``expected_items`` is set when the
-    source feeds the holding block DIRECTLY: then nitems_read reaching it
-    proves every sample is already in the block's hands — true finality, safe
+    releasing whole-window margins early). ``expected_items`` (build.py wires it:
+    the source's emitted count carried through a single-edged, integer-ratio
+    decimation path — ratio 1 included) makes nitems_read reaching it prove
+    every sample is already in the block's hands — true finality, safe
     for irreversible steps like padding out a filter tail. nitems_written is
     a monotonic counter safe to read cross-thread; a stale read only delays
     the flush by one wakeup."""

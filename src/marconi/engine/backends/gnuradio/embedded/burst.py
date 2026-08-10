@@ -40,10 +40,16 @@ from typing import Any
 import numpy as np
 import numpy.typing as npt
 
+from marconi.engine.backends.gnuradio.embedded.envelope import (
+    sustained_runs,
+    trailing_mean,
+)
 from marconi.engine.backends.gnuradio.embedded.lifecycle import (
     Diagnostics,
+    EofProbe,
     OutQueue,
     bump,
+    drain_chunked,
     forecast_drain,
 )
 
@@ -77,35 +83,6 @@ _NORM_FLOOR_RATIO = 16.0  # emitted-value normalization reference (own
 # emitted chip lands independent of whatever gain an upstream stage was at.
 
 
-def _sustained_runs(
-    mask: npt.NDArray[np.bool_], run: int
-) -> npt.NDArray[np.signedinteger[Any]]:
-    """Start indices of every maximal run of >= `run` consecutive True
-    values in `mask`, via a vectorized sliding-window sum (cumsum
-    difference) - the idle-span hunt is bulk, so this must not be a
-    per-sample Python loop the way the (rare, short) in-burst scan is."""
-    if run <= 1:
-        return np.flatnonzero(mask)
-    if len(mask) < run:
-        return np.empty(0, dtype=np.int64)
-    csum = np.concatenate([[0], np.cumsum(mask, dtype=np.int64)])
-    window = csum[run:] - csum[:-run]
-    return np.flatnonzero(window >= run)
-
-
-def _trailing_mean(
-    block: npt.NDArray[np.floating[Any]], window: int
-) -> npt.NDArray[np.floating[Any]]:
-    """Trailing moving average, same length as `block` (front-padded with
-    `block[0]` so the first few samples of each fixed-size processing block
-    do not see a false dip toward zero from implicit zero-padding)."""
-    if window <= 1:
-        return block
-    kernel = np.full(window, 1.0 / window, dtype=np.float64)
-    padded = np.concatenate([np.full(window - 1, block[0], dtype=np.float64), block])
-    return np.convolve(padded, kernel, mode="valid")
-
-
 def make_burst_sampler(gr: Any, *, sps: float) -> Any:
     if sps < 1.0:
         raise ValueError(f"burst_sampler needs sps >= 1, got {sps}")
@@ -132,7 +109,7 @@ def make_burst_sampler(gr: Any, *, sps: float) -> Any:
             self._burst_floor = 0.0  # floor at burst start (idle-reference term)
             self._in_burst = False
             self._quiet = 0
-            self.eof_probe: Any = None  # set by build wiring; None => no flush
+            self.eof_probe: EofProbe | None = None  # set by build wiring
             self._eof_done = False
             self.diagnostics: Diagnostics = {
                 "bursts_flushed": 0,
@@ -143,36 +120,8 @@ def make_burst_sampler(gr: Any, *, sps: float) -> Any:
             return forecast_drain(self._out.pending, ninputs)
 
         def general_work(self, input_items: Any, output_items: Any) -> int:
-            inp = input_items[0]
-            if len(inp):
-                self._pending = np.concatenate(
-                    [self._pending, np.asarray(inp, np.float32)]
-                )
-                self.consume(0, len(inp))
-                while len(self._pending) >= _FLOOR_BLOCK:
-                    block, self._pending = (
-                        self._pending[:_FLOOR_BLOCK],
-                        self._pending[_FLOOR_BLOCK:],
-                    )
-                    self._process_block(block)
-            if not self._eof_done and self._eof_final():
-                self._eof_done = True
-                self._flush_tail()
-            return self._out.drain(output_items[0])
-
-        def _eof_final(self) -> bool:
-            """True only once every input sample this block will ever get has
-            been read (source-relative count proven by the probe). Unlike
-            exhausted(), this needs no straggler grace: nitems_read reaching the
-            propagated total means _pending already holds the whole capture, so
-            processing its <_FLOOR_BLOCK tail and committing an open burst's
-            per-burst phase is safe. Without expected_items (unknown rate / a
-            live source) it never fires and the sim-pad withhold stands."""
-            p = self.eof_probe
-            return (
-                p is not None
-                and p.expected_items is not None
-                and int(self.nitems_read(0)) >= p.expected_items
+            return drain_chunked(
+                self, input_items, output_items, floor=_FLOOR_BLOCK, dtype=np.float32
             )
 
         def _flush_tail(self) -> None:
@@ -196,13 +145,13 @@ def make_burst_sampler(gr: Any, *, sps: float) -> Any:
             rate = _FLOOR_UP if med > self._floor else _FLOOR_DOWN
             self._floor += rate * (med - self._floor)
             active = block > _RISE_RATIO * self._floor
-            calm = _trailing_mean(block, fall_smooth) < _FALL_RATIO * self._floor
+            calm = trailing_mean(block, fall_smooth) < _FALL_RATIO * self._floor
             base = self._abs
             n = len(block)
             i = 0
             while i < n:
                 if not self._in_burst:
-                    rises = _sustained_runs(active[i:], rise_run)
+                    rises = sustained_runs(active[i:], rise_run)
                     if len(rises) == 0:
                         self._emit_idle(block, base, n)
                         break

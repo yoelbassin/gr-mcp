@@ -40,12 +40,14 @@ from typing import Any
 import numpy as np
 import numpy.typing as npt
 
-from marconi.engine.backends.gnuradio.embedded.burst import (
-    _sustained_runs,
-    _trailing_mean,
+from marconi.engine.backends.gnuradio.embedded.envelope import (
+    sustained_runs,
+    trailing_mean,
 )
 from marconi.engine.backends.gnuradio.embedded.lifecycle import (
+    EofProbe,
     OutQueue,
+    drain_chunked,
     forecast_drain,
 )
 
@@ -193,7 +195,7 @@ def make_oerder_meyr(
             self._quiet = 0
             self._peak = 0.0  # persistent tracked signal-level peak
             self._floor = 0.0  # noise-floor estimate; 0 until proven
-            self.eof_probe: Any = None  # set by build wiring; None => no flush
+            self.eof_probe: EofProbe | None = None  # set by build wiring
             self._eof_done = False
             self.diagnostics = {
                 "bursts_flushed": 0,
@@ -208,29 +210,8 @@ def make_oerder_meyr(
             return forecast_drain(self._out.pending, ninputs)
 
         def general_work(self, input_items: Any, output_items: Any) -> int:
-            inp = input_items[0]
-            if len(inp):
-                self._pending = np.concatenate(
-                    [self._pending, np.asarray(inp, np.complex64)]
-                )
-                self.consume(0, len(inp))
-                while len(self._pending) >= _FLOOR_BLOCK:
-                    block, self._pending = (
-                        self._pending[:_FLOOR_BLOCK],
-                        self._pending[_FLOOR_BLOCK:],
-                    )
-                    self._process_block(block)
-            if not self._eof_done and self._eof_final():
-                self._eof_done = True
-                self._flush_tail()
-            return self._out.drain(output_items[0])
-
-        def _eof_final(self) -> bool:
-            p = self.eof_probe
-            return (
-                p is not None
-                and p.expected_items is not None
-                and int(self.nitems_read(0)) >= p.expected_items
+            return drain_chunked(
+                self, input_items, output_items, floor=_FLOOR_BLOCK, dtype=np.complex64
             )
 
         def _flush_tail(self) -> None:
@@ -272,14 +253,14 @@ def make_oerder_meyr(
             power = (
                 block.real.astype(np.float64) ** 2 + block.imag.astype(np.float64) ** 2
             )
-            smoothed = _trailing_mean(power, smooth_w)
+            smoothed = trailing_mean(power, smooth_w)
             active = _activity_mask(smoothed, self._update_peak(smoothed))
             base = self._abs
             n = len(block)
             i = 0
             while i < n:
                 if not self._in_burst:
-                    rises = _sustained_runs(active[i:], rise_run)
+                    rises = sustained_runs(active[i:], rise_run)
                     if len(rises) == 0:
                         self._emit_idle(base, n)
                         break
@@ -388,13 +369,11 @@ def make_oerder_meyr(
                     # and via the _NOISE_GUARD clamp lifts the peak clear of
                     # the noise band (ends a cold start's noise-reads-active
                     # state)
-                    self._update_floor(
-                        float(np.median(_trailing_mean(power, smooth_w)))
-                    )
+                    self._update_floor(float(np.median(trailing_mean(power, smooth_w))))
                     self._out.push(np.zeros(bases.size, np.complex64))
                     return True
             elif self._floor > 0.0:
-                level = _block_peak(_trailing_mean(power, smooth_w))
+                level = _block_peak(trailing_mean(power, smooth_w))
                 if level < _BURST_CONTRAST * self._floor:
                     self.diagnostics["bursts_zeroed_low_contrast"] += 1
                     self._out.push(np.zeros(bases.size, np.complex64))

@@ -21,7 +21,7 @@ def _agc2_output(attack_sym: float, decay_sym: float) -> np.ndarray:
             5.0 * np.ones(SEG, dtype=np.complex64),
         ]
     )
-    agc = _factories(1_000_000.0)["agc2_cc"](
+    agc = _factories()["agc2_cc"](
         {
             "attack_rate": 1.0 / (attack_sym * SPS),
             "decay_rate": 1.0 / (decay_sym * SPS),

@@ -4,7 +4,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 
 from marconi.engine.backends.base import Backend, BackendError, RunResult
-from marconi.engine.compile.ir import GrPipeline
+from marconi.engine.compile.ir import GrConnection, GrPipeline
 
 
 @dataclass(frozen=True)
@@ -16,7 +16,7 @@ class BlockArity:
 @dataclass
 class StubGraph:
     blocks: dict[str, BlockArity]
-    edges: list[tuple[str, int, str, int]] = field(default_factory=list)
+    edges: list[GrConnection] = field(default_factory=list)
 
 
 class StubBackend(Backend):
@@ -38,7 +38,7 @@ class StubBackend(Backend):
             if arity is None:
                 raise BackendError(f"block '{b.id}': kind '{b.kind}' has no factory")
             blocks[b.id] = arity
-        edges: list[tuple[str, int, str, int]] = []
+        edges: list[GrConnection] = []
         for c in pipeline.connections:
             if c.src_block not in blocks:
                 raise BackendError(f"connection from unknown block '{c.src_block}'")
@@ -52,7 +52,7 @@ class StubBackend(Backend):
                 raise BackendError(
                     f"block '{c.dst_block}' has no input port {c.dst_port}"
                 )
-            edges.append((c.src_block, c.src_port, c.dst_block, c.dst_port))
+            edges.append(c)
         return StubGraph(blocks=blocks, edges=edges)
 
     def run_pipeline(self, pipeline: GrPipeline, timeout: float = 30.0) -> RunResult:

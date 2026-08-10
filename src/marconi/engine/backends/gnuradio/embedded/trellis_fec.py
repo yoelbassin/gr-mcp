@@ -8,7 +8,7 @@ from typing import Any
 
 
 def make_trellis_viterbi(
-    ctx: Any, *, rate_inv: int, polys: list, frame_bits: int, tail: int, k: int
+    ctx: Any, *, rate_inv: int, polys: list[int], frame_bits: int, tail: int, k: int
 ) -> Any:
     fsm = ctx.trellis.fsm(k, rate_inv, [int(p) for p in polys])
     o_card, d = fsm.O(), rate_inv

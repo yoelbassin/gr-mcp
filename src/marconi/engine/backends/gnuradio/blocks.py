@@ -126,39 +126,7 @@ def _modules() -> _GrModules:
     )
 
 
-@dataclass(frozen=True)
-class _GrCtx:
-    gr: Any
-    blocks: Any
-    analog: Any
-    digital: Any
-    gr_filter: Any
-    firdes: Any
-    pfb: Any
-    fft: Any
-    trellis: Any
-    fec: Any
-    rate: float
-
-
-def _make_ctx(rate: float) -> _GrCtx:
-    m = _modules()
-    return _GrCtx(
-        gr=m.gr,
-        blocks=m.blocks,
-        analog=m.analog,
-        digital=m.digital,
-        gr_filter=m.gr_filter,
-        firdes=m.firdes,
-        pfb=m.pfb,
-        fft=m.fft,
-        trellis=m.trellis,
-        fec=m.fec,
-        rate=rate,
-    )
-
-
-def _const_psk(c: _GrCtx, p: Params) -> Any:
+def _const_psk(c: _GrModules, p: Params) -> Any:
     builders = {
         2: c.digital.constellation_bpsk,
         4: c.digital.constellation_qpsk,
@@ -170,7 +138,7 @@ def _const_psk(c: _GrCtx, p: Params) -> Any:
     return builders[order]()
 
 
-def _const_qam(c: _GrCtx, p: Params) -> Any:
+def _const_qam(c: _GrModules, p: Params) -> Any:
     order = _as_int(p["order"])
     if order not in (16, 64):
         raise BackendError(f"unsupported qam order {order}")
@@ -184,7 +152,7 @@ def _const_qam(c: _GrCtx, p: Params) -> Any:
     return con
 
 
-def _const_explicit(c: _GrCtx, p: Params) -> Any:
+def _const_explicit(c: _GrModules, p: Params) -> Any:
     """Arbitrary constellation from caller-supplied points; the bit pattern of a
     point is its index (MSB-first). Covers the 1-D real case (M-PAM / M-ary FSK
     levels, imaginary part zero) as well as any 2-D layout the named schemes
@@ -196,14 +164,14 @@ def _const_explicit(c: _GrCtx, p: Params) -> Any:
     return con
 
 
-_CONSTELLATIONS: dict[str, Callable[[_GrCtx, Params], Any]] = {
+_CONSTELLATIONS: dict[str, Callable[[_GrModules, Params], Any]] = {
     "psk": _const_psk,
     "qam": _const_qam,
     "explicit": _const_explicit,
 }
 
 
-def _const(c: _GrCtx, p: Params) -> Any:
+def _const(c: _GrModules, p: Params) -> Any:
     scheme = str(p["scheme"])
     build = _CONSTELLATIONS.get(scheme)
     if build is None:
@@ -214,7 +182,7 @@ def _const(c: _GrCtx, p: Params) -> Any:
     return build(c, p)
 
 
-def _keep_m_in_n_f(c: _GrCtx, p: Params) -> Any:
+def _keep_m_in_n_f(c: _GrModules, p: Params) -> Any:
     blk = c.blocks.keep_m_in_n(
         c.gr.sizeof_float, _as_int(p["m"]), _as_int(p["n"]), _as_int(p.get("offset", 0))
     )
@@ -223,7 +191,7 @@ def _keep_m_in_n_f(c: _GrCtx, p: Params) -> Any:
     return blk
 
 
-def _agc2(c: _GrCtx, p: Params) -> Any:
+def _agc2(c: _GrModules, p: Params) -> Any:
     blk = c.analog.agc2_cc(
         _as_float(p["attack_rate"]),
         _as_float(p["decay_rate"]),
@@ -236,7 +204,7 @@ def _agc2(c: _GrCtx, p: Params) -> Any:
     return blk
 
 
-def _soapy_source(c: _GrCtx, p: Params) -> Any:
+def _soapy_source(c: _GrModules, p: Params) -> Any:
     from gnuradio import soapy
 
     src = soapy.source(str(p.get("device", "")), "fc32", 1, "", "", [""], [""])
@@ -254,7 +222,7 @@ def _soapy_source(c: _GrCtx, p: Params) -> Any:
 
 
 # kind -> (ctx, params) -> live GR block. The ONLY GR-aware vocabulary in phy.
-GR_BLOCKS: dict[str, Callable[[_GrCtx, Params], Any]] = {
+GR_BLOCKS: dict[str, Callable[[_GrModules, Params], Any]] = {
     # offset/length are in items; length 0 = to EOF (stock file_source
     # semantics) - the streaming way to decode a bounded capture slice
     "iq_file_source": lambda c, p: c.blocks.file_source(
@@ -627,10 +595,10 @@ GR_BLOCKS: dict[str, Callable[[_GrCtx, Params], Any]] = {
 }
 
 
-def _bind(fn: Callable[[_GrCtx, Params], Any], ctx: _GrCtx) -> Factory:
+def _bind(fn: Callable[[_GrModules, Params], Any], ctx: _GrModules) -> Factory:
     return lambda p: fn(ctx, p)
 
 
-def _factories(rate: float) -> dict[str, Factory]:
-    ctx = _make_ctx(rate)
+def _factories() -> dict[str, Factory]:
+    ctx = _modules()
     return {kind: _bind(fn, ctx) for kind, fn in GR_BLOCKS.items()}
