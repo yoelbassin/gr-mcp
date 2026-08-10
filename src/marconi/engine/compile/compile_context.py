@@ -79,10 +79,13 @@ class CompileContext:
     def set_tail(self, block_id: str) -> None:
         self._tail = block_id
 
-    def build(self, name: str, sample_rate: float) -> GrPipeline:
+    def build(
+        self, name: str, sample_rate: float, *, terminal_sink: str | None = None
+    ) -> GrPipeline:
         return GrPipeline(
             name=name,
             sample_rate=sample_rate,
             blocks=list(self._blocks),
             connections=list(self._connections),
+            terminal_sink=terminal_sink,
         )

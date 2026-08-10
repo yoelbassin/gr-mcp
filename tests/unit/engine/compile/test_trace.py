@@ -68,6 +68,14 @@ def test_trace_dir_taps_each_gr_stage(tmp_path: Path) -> None:
     }
 
 
+def test_terminal_sink_marks_the_product_sink_not_a_tap(tmp_path: Path) -> None:
+    cp = _demod_demap(tmp_path / "trace")
+    assert cp.gr is not None
+    terminal = cp.gr.terminal_sink
+    assert terminal is not None
+    assert str(cp.gr.block(terminal).params["path"]) == "out.bits"
+
+
 def test_no_trace_dir_adds_no_taps() -> None:
     base = _demod_demap(None)
     traced = _demod_demap(Path("/tmp/whatever/trace"))

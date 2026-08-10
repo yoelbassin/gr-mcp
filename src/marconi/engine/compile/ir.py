@@ -36,6 +36,10 @@ class GrPipeline(BaseModel):
     sample_rate: float = Field(gt=0)
     blocks: list[GrBlock] = []
     connections: list[GrConnection] = []
+    # The block whose output IS the pipeline's product. Trace/soft taps share
+    # the sink block kinds, so the empty-terminal verdict must key on this id,
+    # never on "all sinks". None only for hand-built dev/test IR.
+    terminal_sink: str | None = None
 
     @model_validator(mode="after")
     def _unique_block_ids(self) -> GrPipeline:

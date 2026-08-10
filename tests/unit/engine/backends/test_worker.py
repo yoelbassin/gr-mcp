@@ -323,3 +323,54 @@ def test_resolve_timeout_and_abnormal_shapes() -> None:
     a = _resolve_result(False, None, 1, "boom")
     assert a.status == "error"
     assert "exitcode=1" in (a.error or "") and "boom" in (a.error or "")
+
+
+def _census(block: str, kind: str, **counts: int) -> Any:
+    from marconi.engine.backends.base import BlockCensus
+
+    return BlockCensus(block=block, kind=kind, **counts)
+
+
+def _tapped_pipeline(terminal: str | None) -> GrPipeline:
+    return GrPipeline(
+        sample_rate=1.0,
+        blocks=[
+            GrBlock(id="iq_file_source_0", kind="iq_file_source", params={"path": "x"}),
+            GrBlock(id="iq_file_sink_0", kind="iq_file_sink", params={"path": "tap"}),
+            GrBlock(id="bits_file_sink_0", kind="bits_file_sink", params={"path": "o"}),
+        ],
+        terminal_sink=terminal,
+    )
+
+
+def test_empty_terminal_verdict_survives_item_bearing_taps() -> None:
+    """Trace/soft taps share the sink block kinds and DO carry items on the
+    conditioning stages; only the compiler-marked terminal decides empty."""
+    result = RunResult(
+        status="ok",
+        artifacts=[],
+        census=[
+            _census("iq_file_source_0", "iq_file_source", items_out=100),
+            _census("iq_file_sink_0", "iq_file_sink", items_in=100),
+            _census("demod_0", "demod", items_in=100, items_out=0),
+            _census("bits_file_sink_0", "bits_file_sink", items_in=0),
+        ],
+    )
+    out = worker_mod._flag_empty_sink(result, _tapped_pipeline("bits_file_sink_0"))
+    assert out.status == "empty"
+    assert out.stalled_at == "demod_0"
+
+
+def test_empty_aggregate_rule_holds_for_unmarked_ir() -> None:
+    # hand-built dev IR never marks a terminal: the all-sinks rule remains,
+    # so an item-bearing sink keeps the run ok
+    result = RunResult(
+        status="ok",
+        artifacts=[],
+        census=[
+            _census("iq_file_sink_0", "iq_file_sink", items_in=100),
+            _census("bits_file_sink_0", "bits_file_sink", items_in=0),
+        ],
+    )
+    out = worker_mod._flag_empty_sink(result, _tapped_pipeline(None))
+    assert out.status == "ok"

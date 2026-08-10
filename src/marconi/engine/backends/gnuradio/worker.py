@@ -204,7 +204,13 @@ def _flag_empty_sink(result: RunResult, pipeline: GrPipeline) -> RunResult:
     missing census never fabricates an empty verdict."""
     if result.status != "ok" or not result.census:
         return result
-    sink_ids = {b.id for b in pipeline.blocks if b.kind in _SINK_KINDS}
+    # taps share the sink kinds and DO carry items on conditioning stages —
+    # only the compiler-marked terminal decides; the aggregate rule covers
+    # hand-built dev IR that never marks one
+    if pipeline.terminal_sink is not None:
+        sink_ids = {pipeline.terminal_sink}
+    else:
+        sink_ids = {b.id for b in pipeline.blocks if b.kind in _SINK_KINDS}
     sinks = [c for c in result.census if c.block in sink_ids]
     if not sinks or any(c.items_in is None or c.items_in > 0 for c in sinks):
         return result

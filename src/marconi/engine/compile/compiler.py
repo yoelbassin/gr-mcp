@@ -283,7 +283,7 @@ def _emit_gr_segment(
                 ctx.connect(tail, tap)
         ctx.descriptor = boundaries[n]
         ctx.rate = rates[n]
-        ctx.chain(_sink_kind(boundaries[n]), **dict(sink_io))
+        terminal = ctx.chain(_sink_kind(boundaries[n]), **dict(sink_io))
         if soft_tap_path is not None and soft_tail is not None:
             tap = ctx.add("soft_bits_file_sink", path=str(soft_tap_path))
             ctx.connect(soft_tail, tap)
@@ -297,9 +297,9 @@ def _emit_gr_segment(
             stage.emit_tx(ctx, step)
         ctx.descriptor = boundaries[0]
         ctx.rate = rates[0]
-        ctx.chain(_sink_kind(boundaries[0]), **dict(sink_io))
+        terminal = ctx.chain(_sink_kind(boundaries[0]), **dict(sink_io))
 
-    return ctx.build(name, plan.sample_rate)
+    return ctx.build(name, plan.sample_rate, terminal_sink=terminal)
 
 
 def _emit_coding_segment(plan: _CompilePlan, k: int) -> CodingProgram:
