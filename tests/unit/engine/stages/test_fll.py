@@ -33,6 +33,7 @@ from helpers._dsp import (
 
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
 from marconi.engine.compile.compiler import compile_modem
+from marconi.engine.compile.ir import GrPipeline
 from marconi.engine.modulation.psk.stages import PskDemapStep, PskDemodStep
 from marconi.engine.stages.acquisition import FllStep
 from marconi.engine.stages.conditioning import AgcStep
@@ -55,7 +56,7 @@ def _points() -> tuple[np.ndarray, int]:
     return np.asarray(c.points()), int(c.bits_per_symbol())
 
 
-def _compile(path: list[Step], direction: str, src: Path, snk: Path):
+def _compile(path: list[Step], direction: str, src: Path, snk: Path) -> GrPipeline:
     return compile_modem(
         Modem(symbol_rate=_SYM, path=path),
         stage_registry(),

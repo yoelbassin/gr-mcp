@@ -4,6 +4,7 @@ import pytest
 
 from marconi.engine.compile.compile_context import CompileContext
 from marconi.engine.compile.compiler import CompileError, compile_modem
+from marconi.engine.compile.ir import GrPipeline
 from marconi.engine.modulation.ook.stages import OokEnvelopeStep
 from marconi.engine.stages.base import DuplexStage, RxStage
 from marconi.engine.stages.conditioning import AgcStep, ChannelizeStep
@@ -87,7 +88,7 @@ def _registry() -> dict:
     return reg
 
 
-def _compile(path: list[Step], direction: str = "rx"):
+def _compile(path: list[Step], direction: str = "rx") -> GrPipeline:
     return compile_modem(
         Modem(symbol_rate=1.0, path=path),
         _registry(),

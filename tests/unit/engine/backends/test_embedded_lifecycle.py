@@ -7,6 +7,7 @@ memory via backpressure instead of unbounded buffering."""
 from __future__ import annotations
 
 import re
+from typing import Any
 
 import numpy as np
 from helpers._fakegr import FAKE_GR, drive
@@ -22,7 +23,7 @@ from marconi.engine.backends.gnuradio.embedded.lifecycle import OutQueue, foreca
 _EMBEDDED = SRC_MARCONI / "engine" / "backends" / "gnuradio" / "embedded"
 
 
-def _make_expander(gr, block_in: int, block_out: int):
+def _make_expander(gr: Any, block_in: int, block_out: int) -> Any:
     """Minimal OutQueue consumer: zero-pads each block_in items to block_out.
     The test-owned vehicle for exercising the shared drain discipline."""
 
@@ -37,7 +38,7 @@ def _make_expander(gr, block_in: int, block_out: int):
         def forecast(self, noutput_items: int, ninputs: int) -> list:
             return forecast_drain(self._out.pending, ninputs)
 
-        def general_work(self, input_items, output_items) -> int:
+        def general_work(self, input_items: Any, output_items: Any) -> int:
             inp = input_items[0]
             if inp.size:
                 self._buf = np.concatenate([self._buf, np.asarray(inp, np.float32)])
@@ -146,7 +147,7 @@ def test_chirp_sync_eof_probe_flushes_withheld_tail() -> None:
         def exhausted(self) -> bool:
             return True
 
-    def run(probe) -> np.ndarray:
+    def run(probe: _Exhausted | None) -> np.ndarray:
         blk = make_chirp_sync(FAKE_GR, sf, osr, zp, pl, float(1 << sf), 2.25, 2)
         blk.eof_probe = probe
         parts = [drive(blk, sig, chunk=sn, out_dtype=np.complex64)]

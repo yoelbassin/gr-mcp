@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import numpy as np
 
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
@@ -11,7 +13,7 @@ from marconi.engine.types.levels import Level
 from marconi.engine.types.models import Modem
 
 
-def test_harden_matches_bitfile_convention(tmp_path) -> None:
+def test_harden_matches_bitfile_convention(tmp_path: Path) -> None:
     """harden decides bit 1 = negative LLR, the same rule as bitfile.harden and
     the soft coding lane (trellis Euclidean bit 0 = +1)."""
     ensure_worker_warm()

@@ -222,7 +222,7 @@ def test_chirp_prepend_output_length(tmp_path: Path) -> None:
     )
 
 
-def test_chirp_mod_build_allocation_bounded():
+def test_chirp_mod_build_allocation_bounded() -> None:
     ensure_worker_warm()
     from gnuradio import gr
 
@@ -236,7 +236,7 @@ def test_chirp_mod_build_allocation_bounded():
         assert peak < 10 * 2**20, f"sf={sf} build allocated {peak} bytes"
 
 
-def test_chirp_sync_noise_bounded_no_lock():
+def test_chirp_sync_noise_bounded_no_lock() -> None:
     ensure_worker_warm()
     from gnuradio import blocks as gb
     from gnuradio import gr

@@ -8,6 +8,7 @@ from pydantic import ValidationError
 
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
 from marconi.engine.compile.compiler import CompileError, compile_modem
+from marconi.engine.compile.ir import GrPipeline
 from marconi.engine.modulation.ofdm.stages import CellSelectStep
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Carrier, Descriptor
@@ -18,7 +19,9 @@ from marconi.engine.types.models import Modem
 SYM_C = Descriptor(Level.SYMBOLS, ItemType.C, Carrier.SOFT)
 
 
-def _compile(modem: Modem, src: Path, snk: Path, start: Descriptor = SYM_C):
+def _compile(
+    modem: Modem, src: Path, snk: Path, start: Descriptor = SYM_C
+) -> GrPipeline:
     return compile_modem(
         modem,
         stage_registry(),

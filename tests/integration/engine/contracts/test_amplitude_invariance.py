@@ -266,7 +266,7 @@ def _compile_pipeline(
     start: Descriptor,
     src: Path,
     snk: Path,
-):
+) -> GrPipeline:
     return compile_modem(
         Modem(symbol_rate=symbol_rate, path=path),
         stage_registry(),

@@ -8,8 +8,10 @@ from pathlib import Path
 
 import numpy as np
 
+from marconi.engine.backends.base import RunResult
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
 from marconi.engine.compile.compiler import compile_modem
+from marconi.engine.compile.ir import GrPipeline
 from marconi.engine.io.bitfile import write_bits
 from marconi.engine.modulation.css.stages import (
     ChirpSyncStep,
@@ -31,7 +33,7 @@ _SYM = 1.0
 _RATE = 2 * (1 << _SF) * _SYM
 
 
-def _compile(m: Modem, direction: str, src: Path, dst: Path):
+def _compile(m: Modem, direction: str, src: Path, dst: Path) -> GrPipeline:
     return compile_modem(
         m,
         stage_registry(),
@@ -63,7 +65,7 @@ def _spec(*, probe: bool, sync: bool) -> Modem:
     return Modem(symbol_rate=_SYM, path=path)
 
 
-def _bursts(r) -> list[int] | None:
+def _bursts(r: RunResult) -> list[int] | None:
     for d in r.diagnostics:
         if d.key == "bursts" and d.marks is not None:
             return [int(m) for m in d.marks]

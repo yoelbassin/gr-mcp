@@ -1,6 +1,8 @@
+from pathlib import Path
 from typing import Any
 
 import numpy as np
+import numpy.typing as npt
 import pytest
 from pydantic import ValidationError
 
@@ -15,13 +17,15 @@ from marconi.engine.types.levels import Level
 from marconi.engine.types.models import Modem
 
 
-def _frozen(n, k):
+def _frozen(n: int, k: int) -> list[int]:
     from gnuradio.fec.polar.channel_construction import frozen_bit_positions
 
     return [int(p) for p in frozen_bit_positions(n, k, 0.5)]
 
 
-def _polar_encode(info, n, k, fpos, fval):
+def _polar_encode(
+    info: npt.NDArray[np.uint8], n: int, k: int, fpos: list[int], fval: list[int]
+) -> npt.NDArray[np.uint8]:
     from gnuradio import blocks as gb
     from gnuradio import fec, gr
 
@@ -37,7 +41,9 @@ def _polar_encode(info, n, k, fpos, fval):
     return np.asarray(snk.data(), np.uint8)
 
 
-def _roundtrip(tmp_path, *, n, k, list_size, nframes, seed):
+def _roundtrip(
+    tmp_path: Path, *, n: int, k: int, list_size: int, nframes: int, seed: int
+) -> tuple[npt.NDArray[np.uint8], npt.NDArray[np.uint8]]:
     ensure_worker_warm()
     fpos = _frozen(n, k)
     fval = [0] * len(fpos)
@@ -75,12 +81,12 @@ def _roundtrip(tmp_path, *, n, k, list_size, nframes, seed):
     return read_bits(snk)[: info.size], info
 
 
-def test_polar_sc_roundtrip(tmp_path):
+def test_polar_sc_roundtrip(tmp_path: Path) -> None:
     out, info = _roundtrip(tmp_path, n=256, k=128, list_size=1, nframes=20, seed=1)
     assert np.array_equal(out, info)
 
 
-def test_polar_sc_list_roundtrip(tmp_path):
+def test_polar_sc_list_roundtrip(tmp_path: Path) -> None:
     out, info = _roundtrip(tmp_path, n=512, k=256, list_size=8, nframes=12, seed=2)
     assert np.array_equal(out, info)
 
@@ -93,7 +99,7 @@ _OK: dict[str, Any] = {
 }
 
 
-def test_polar_params_accept_valid():
+def test_polar_params_accept_valid() -> None:
     step = Polar().step_model.model_validate(_OK)
     assert step.block_size == 8 and step.info_bits == 4 and step.list_size == 1
 
@@ -111,6 +117,6 @@ def test_polar_params_accept_valid():
         {"list_size": 0},  # < 1
     ],
 )
-def test_polar_params_reject_malformed(override):
+def test_polar_params_reject_malformed(override: dict[str, Any]) -> None:
     with pytest.raises(ValidationError):
         Polar().step_model.model_validate({**_OK, **override})

@@ -4,7 +4,11 @@ from pathlib import Path
 
 from helpers._fixtures import FakeDemapStep, FakeDemodStep, fixture_registry
 
-from marconi.engine.compile.compiler import compile_pipeline, trace_sink_path
+from marconi.engine.compile.compiler import (
+    CompiledPipeline,
+    compile_pipeline,
+    trace_sink_path,
+)
 from marconi.engine.modulation.fsk.stages import FskStep
 from marconi.engine.stages.general import SliceStep
 from marconi.engine.stages.registry import stage_registry
@@ -34,7 +38,7 @@ def test_compiled_pipeline_carries_full_trace() -> None:
     assert cp.rates[0] == 4.0
 
 
-def _demod_demap(trace_dir: Path | None):
+def _demod_demap(trace_dir: Path | None) -> CompiledPipeline:
     modem = Modem(symbol_rate=2.0, path=[FakeDemodStep(), FakeDemapStep()])
     return compile_pipeline(
         modem,

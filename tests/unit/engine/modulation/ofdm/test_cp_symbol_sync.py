@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
 from helpers import _lattice
 from helpers._fakegr import FAKE_GR, drive
@@ -7,7 +9,7 @@ from helpers._fakegr import FAKE_GR, drive
 from marconi.engine.backends.gnuradio.embedded.cp_sync import make_cp_symbol_sync
 
 
-def _blk():
+def _blk() -> Any:
     return make_cp_symbol_sync(
         FAKE_GR,
         fft_len=_lattice.FFT_LEN,

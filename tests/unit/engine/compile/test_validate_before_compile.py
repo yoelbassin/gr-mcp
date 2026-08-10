@@ -1,3 +1,5 @@
+from typing import Any
+
 import pytest
 from helpers._fixtures import (
     FakeDemapStep,
@@ -12,7 +14,10 @@ from helpers._fixtures import (
 )
 from pydantic import ValidationError
 
+from marconi.engine.compile.compile_context import CompileContext
 from marconi.engine.compile.compiler import CompileError, compile_modem
+from marconi.engine.compile.ir import GrPipeline
+from marconi.engine.stages.base import Stage
 from marconi.engine.types.descriptor import Descriptor
 from marconi.engine.types.enums import ItemType
 from marconi.engine.types.levels import Level
@@ -26,7 +31,11 @@ def _modem(*steps: Step, symbol_rate: float) -> Modem:
     return Modem(symbol_rate=symbol_rate, path=list(steps))
 
 
-def _compile(modem: Modem, direction: str, registry=None):
+def _compile(
+    modem: Modem,
+    direction: str,
+    registry: dict[str, Stage[CompileContext, Any]] | None = None,
+) -> GrPipeline:
     return compile_modem(
         modem,
         registry or fixture_registry(),

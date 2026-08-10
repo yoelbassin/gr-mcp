@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from marconi.engine.coding.stages_bits import DescrambleStep
-from marconi.engine.compile.compiler import compile_pipeline
+from marconi.engine.compile.compiler import CompiledPipeline, compile_pipeline
 from marconi.engine.modulation.fsk.stages import FskStep
 from marconi.engine.stages.general import SliceStep
 from marconi.engine.stages.registry import stage_registry
@@ -16,7 +16,7 @@ from marconi.engine.types.step import Step
 IQ = Descriptor(Level.IQ, ItemType.C)
 
 
-def _compile(*steps: Step, quality_tap: bool = True):
+def _compile(*steps: Step, quality_tap: bool = True) -> CompiledPipeline:
     return compile_pipeline(
         Modem(symbol_rate=1.0, path=list(steps)),
         stage_registry(),

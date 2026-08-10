@@ -2,7 +2,7 @@ import numpy as np
 from e2e.drm import _drm
 
 
-def test_scattered_pilot_matches_golden():
+def test_scattered_pilot_matches_golden() -> None:
     # golden phase indices from Dream/scratch (drm_phy_ref.md worked check):
     # s=0,k=1 -> phase 0 ; s=0,k=7 -> phase 524
     assert (
@@ -16,26 +16,26 @@ def test_scattered_pilot_matches_golden():
     assert abs(abs(_drm.scat_ref(2, -103)) - 2.0) < 1e-9
 
 
-def test_pilot_positions_period_and_count():
+def test_pilot_positions_period_and_count() -> None:
     for fs in range(15):
         ks = _drm.scat_carriers(fs)
         assert all(k % 2 == 1 for k in ks)  # scattered pilots on odd carriers
         assert all((k - 1 - 2 * (fs % 3)) % 6 == 0 for k in ks)
 
 
-def test_fac_cells_count_and_parity():
+def test_fac_cells_count_and_parity() -> None:
     assert len(_drm.FAC_CELLS) == 65
     assert all(c % 2 == 1 for _, c in _drm.FAC_CELLS)  # FAC carriers all odd
 
 
-def test_crc8_and_crc16_are_real():
+def test_crc8_and_crc16_are_real() -> None:
     z = np.zeros(64, np.int64)
     assert _drm.crc8(z) != _drm.crc8(np.r_[z[:-1], [1]])  # sensitive to input
     z16 = np.zeros(300, np.int64)
     assert _drm.crc16(z16) != _drm.crc16(np.r_[z16[:-1], [1]])
 
 
-def test_pilot_tables_matches_scat_functions():
+def test_pilot_tables_matches_scat_functions() -> None:
     carriers, values = _drm.pilot_tables()
     assert len(carriers) == len(values) == _drm.NS
     for fs in range(_drm.NS):
@@ -43,13 +43,13 @@ def test_pilot_tables_matches_scat_functions():
         assert values[fs] == [_drm.scat_ref(fs, k) for k in carriers[fs]]
 
 
-def test_frequency_pilots():
+def test_frequency_pilots() -> None:
     assert _drm.FP_CARRIERS == [16, 48, 64]
     assert len(_drm.FP_VALUES) == 3
     assert all(abs(abs(v) - np.sqrt(2)) < 1e-9 for v in _drm.FP_VALUES)
 
 
-def test_sdc_cells_count_and_symbol_split():
+def test_sdc_cells_count_and_symbol_split() -> None:
     assert len(_drm.SDC_CELLS) == 322
     sym0 = [c for fs, c in _drm.SDC_CELLS if fs == 0]
     sym1 = [c for fs, c in _drm.SDC_CELLS if fs == 1]
@@ -57,7 +57,7 @@ def test_sdc_cells_count_and_symbol_split():
     assert all(fs in (0, 1) for fs, _ in _drm.SDC_CELLS)
 
 
-def test_select_perms_are_full_permutations_with_wanted_cells_fronted():
+def test_select_perms_are_full_permutations_with_wanted_cells_fronted() -> None:
     # blockinterleaver_cc needs perm to span the whole repeating block it
     # gathers over; keep_m_in_n_c(65|322, block) then trims to the front.
     fac_perm = _drm.fac_select_perm()
@@ -75,12 +75,12 @@ def test_select_perms_are_full_permutations_with_wanted_cells_fronted():
     ]
 
 
-def test_bit_perms_are_permutations_of_their_length():
+def test_bit_perms_are_permutations_of_their_length() -> None:
     assert sorted(_drm.fac_bit_perm()) == list(range(130))
     assert sorted(_drm.sdc_bit_perm()) == list(range(644))
 
 
-def test_bit_perm_inverts_the_reference_tx_interleave():
+def test_bit_perm_inverts_the_reference_tx_interleave() -> None:
     # fac_bit_perm/sdc_bit_perm must be the functional inverse of the raw
     # Dream interleave table so a gather-only permute (out[t] = in[perm[t]])
     # reproduces Dream's proven scatter-style RX deinterleave exactly.
@@ -96,14 +96,14 @@ def test_bit_perm_inverts_the_reference_tx_interleave():
         assert np.array_equal(deint, coded)
 
 
-def test_puncture_keep_masks_lengths_and_weight():
+def test_puncture_keep_masks_lengths_and_weight() -> None:
     assert len(_drm.FAC_PUNCTURE_KEEP) == _drm.FAC_STEPS * _drm.CONV_RATE_INV
     assert sum(_drm.FAC_PUNCTURE_KEEP) == _drm.FAC_CODED_BITS
     assert len(_drm.SDC_PUNCTURE_KEEP) == _drm.SDC_STEPS * _drm.CONV_RATE_INV
     assert sum(_drm.SDC_PUNCTURE_KEEP) == _drm.SDC_CODED_BITS
 
 
-def test_conv_code_matches_shared_dab_drm_mother_code():
+def test_conv_code_matches_shared_dab_drm_mother_code() -> None:
     # Same K=7 rate-1/4 mother code already proven end-to-end for real
     # off-air DAB via the generic "fec" scheme="cc" stage.
     assert _drm.CONV_POLYS == [0o133, 0o171, 0o145, 0o133]
@@ -111,7 +111,7 @@ def test_conv_code_matches_shared_dab_drm_mother_code():
     assert _drm.TAIL == 6
 
 
-def test_energy_prbs_is_deterministic_and_nontrivial():
+def test_energy_prbs_is_deterministic_and_nontrivial() -> None:
     seq = _drm.energy_prbs(72)
     assert seq.shape == (72,)
     assert set(np.unique(seq)) <= {0, 1}
@@ -123,7 +123,7 @@ def _pack_msb(bits: np.ndarray) -> bytes:
     return np.packbits(bits.astype(np.uint8), bitorder="big").tobytes()
 
 
-def test_parse_fac_roundtrips_channel_parameter_fields():
+def test_parse_fac_roundtrips_channel_parameter_fields() -> None:
     # parse_fac(bytes.fromhex(...)) reads msb-first packed bytes end to end
     # (helpers.bitops.bits_to_bytes convention) -- see tests/e2e/drm/test_drm_offair.py.
     bits = np.zeros(72, np.int64)
@@ -140,7 +140,7 @@ def test_parse_fac_roundtrips_channel_parameter_fields():
     assert fields["sdc_mode"] == 1
 
 
-def test_parse_sdc_label_extracts_utf8_type1_entity():
+def test_parse_sdc_label_extracts_utf8_type1_entity() -> None:
     block = np.zeros(316, np.int64)
     label = b"DW DRM"
     entity_bits = np.zeros(7 + 1 + 4 + 4 + 8 * len(label), np.int64)
@@ -157,6 +157,6 @@ def test_parse_sdc_label_extracts_utf8_type1_entity():
     assert _drm.parse_sdc_label(_pack_msb(block)) == "DW DRM"
 
 
-def test_parse_sdc_label_empty_when_no_type1_entity():
+def test_parse_sdc_label_empty_when_no_type1_entity() -> None:
     block = np.zeros(316, np.int64)
     assert _drm.parse_sdc_label(_pack_msb(block)) == ""

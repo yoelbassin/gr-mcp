@@ -4,6 +4,7 @@ from pydantic import ValidationError
 
 from marconi.engine.compile.compile_context import CompileContext
 from marconi.engine.compile.compiler import CompileError, compile_modem
+from marconi.engine.compile.ir import GrPipeline
 from marconi.engine.modulation.fsk.stages import FskStep
 from marconi.engine.modulation.psk.stages import PskDemodStep
 from marconi.engine.stages.acquisition import PreambleSync, PreambleSyncStep
@@ -54,7 +55,7 @@ def test_emit_tx_chains_sym_prepend() -> None:
     assert [x.kind for x in b.build("t", 4.0).blocks] == ["sym_prepend"]
 
 
-def _compile_rx(*steps: Step):
+def _compile_rx(*steps: Step) -> GrPipeline:
     return compile_modem(
         Modem(symbol_rate=1.0, path=list(steps)),
         stage_registry(),

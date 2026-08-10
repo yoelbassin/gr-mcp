@@ -15,6 +15,7 @@ from __future__ import annotations
 import ast
 import subprocess
 import sys
+from typing import Any
 
 import pytest
 from helpers._paths import SRC_MARCONI
@@ -71,7 +72,7 @@ def test_no_gnuradio_import_anywhere_in_coding() -> None:
         assert not any(m.split(".")[0] == "gnuradio" for m in mods), py
 
 
-def _coding_stages():
+def _coding_stages() -> dict[str, CodingStage[Any]]:
     return {
         name: stage
         for name, stage in stage_registry().items()

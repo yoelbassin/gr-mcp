@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 import pytest
 from pydantic import ValidationError
@@ -85,7 +87,7 @@ def test_fm_demod_rejects_nonpositive_deviation() -> None:
         _fm_modem(deviation=0.0)
 
 
-def test_run_rx_rejects_audio_final(tmp_path) -> None:
+def test_run_rx_rejects_audio_final(tmp_path: Path) -> None:
     modem = Modem(
         symbol_rate=1200.0,
         path=[FmDemodStep(deviation=3000.0)],
@@ -101,7 +103,7 @@ def test_run_rx_rejects_audio_final(tmp_path) -> None:
         )
 
 
-def test_run_rx_accepts_conditioned_iq_final(tmp_path) -> None:
+def test_run_rx_accepts_conditioned_iq_final(tmp_path: Path) -> None:
     # a conditioned-IQ terminal (channelize, no demod) now returns the cleaned
     # sub-band as a complex ("c") stream to survey/inspect further, instead of
     # a dead-end compile reject that pushed the agent back to survey.
@@ -126,7 +128,7 @@ def test_run_rx_accepts_conditioned_iq_final(tmp_path) -> None:
     assert r.symbolstream.path.suffix == ".cf32"
 
 
-def test_run_rx_accepts_complex_symbol_final(tmp_path) -> None:
+def test_run_rx_accepts_complex_symbol_final(tmp_path: Path) -> None:
     # Now a valid .cf32 terminal (bare demod, no demap), not a compile reject.
     modem = Modem(
         symbol_rate=1.0,

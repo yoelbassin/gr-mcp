@@ -1,16 +1,21 @@
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
+import numpy.typing as npt
 from helpers._fakegr import FAKE_GR, FakeTag, drive
 
 from marconi.engine.backends.gnuradio.embedded.framing import make_tag_gate
 
 
-def _gate(frame_len: int):
+def _gate(frame_len: int) -> Any:
     return make_tag_gate(FAKE_GR, frame_len=frame_len, tag_name="sync")
 
 
-def _stream(frame_len: int, gaps: list[int], frames: list[np.ndarray]):
+def _stream(
+    frame_len: int, gaps: list[int], frames: list[np.ndarray]
+) -> tuple[npt.NDArray[np.float32], list[int]]:
     """Interleave junk gaps and frames; return (stream, sync-offsets)."""
     parts: list[np.ndarray] = []
     offsets: list[int] = []

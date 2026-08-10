@@ -12,6 +12,7 @@ from helpers._dsp import (
 
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
 from marconi.engine.compile.compiler import compile_modem
+from marconi.engine.compile.ir import GrPipeline
 from marconi.engine.modulation.fsk.stages import FskStep
 from marconi.engine.stages.conditioning import ChannelizeStep, InvertStep
 from marconi.engine.stages.general import SliceStep
@@ -25,7 +26,9 @@ _DEV, _SYM = 0.75, 1.0
 _BASE_RATE, _UP = 8.0, 2  # baseband rate 8 -> widened to 16; channelize decim 2 -> 8
 
 
-def _compile(modem, direction, sample_rate, src, snk):
+def _compile(
+    modem: Modem, direction: str, sample_rate: float, src: Path, snk: Path
+) -> GrPipeline:
     from marconi.engine.stages.registry import stage_registry
 
     return compile_modem(

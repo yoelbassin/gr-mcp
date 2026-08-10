@@ -6,6 +6,7 @@ from helpers._dsp import aligned_ber, channel, read_bits, write_bits
 
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
 from marconi.engine.compile.compiler import CompileError, compile_modem
+from marconi.engine.compile.ir import GrPipeline
 from marconi.engine.modulation.css.stages import (
     ChirpSyncStep,
     CssDemapStep,
@@ -39,7 +40,9 @@ def _modem(sf: int, oversample: int = _OS) -> Modem:
     )
 
 
-def _compile(modem: Modem, direction: str, rate: float, src: Path, snk: Path):
+def _compile(
+    modem: Modem, direction: str, rate: float, src: Path, snk: Path
+) -> GrPipeline:
     from marconi.engine.stages.registry import stage_registry
 
     return compile_modem(
@@ -204,7 +207,9 @@ def _anatomy_modem(
     # the payload dechirp bins (timing and carrier residuals are equal and
     # opposite). 0.4 pins the in-range case, 3.84 the whole-bin cancellation.
 )
-def test_css_nosfd_ber0_impaired(sf: int, osr: int, cfo_bins: float, tmp_path) -> None:
+def test_css_nosfd_ber0_impaired(
+    sf: int, osr: int, cfo_bins: float, tmp_path: Path
+) -> None:
     """The second CSS anatomy: bare preamble run straight into payload — no
     down-chirp SFD, no sync gap. Pins that chirp_sync's acquisition grammar is
     parametric, not LoRa's frame layout."""
@@ -235,7 +240,7 @@ def test_css_nosfd_ber0_impaired(sf: int, osr: int, cfo_bins: float, tmp_path) -
     assert aligned_ber(out, bits, max_shift=8 * sf) == 0.0
 
 
-def test_css_single_symbol_sfd_ber0(tmp_path) -> None:
+def test_css_single_symbol_sfd_ber0(tmp_path: Path) -> None:
     """sfd_symbols=1.0 has always been validator-legal; the joint estimator
     must read exactly the down-chirp windows the params declare, not LoRa's
     two — one payload window mistaken for SFD corrupts the timing estimate."""
@@ -265,7 +270,7 @@ def test_css_single_symbol_sfd_ber0(tmp_path) -> None:
     assert aligned_ber(out, bits, max_shift=8 * sf) == 0.0
 
 
-def test_css_long_sync_gap_locks(tmp_path) -> None:
+def test_css_long_sync_gap_locks(tmp_path: Path) -> None:
     """A declared 9-symbol gap between preamble run and SFD must be honored:
     the SFD hunt span derives from the declared anatomy (not a constant sized
     to LoRa's 2+2.25), and the preamble look-back skips the gap instead of

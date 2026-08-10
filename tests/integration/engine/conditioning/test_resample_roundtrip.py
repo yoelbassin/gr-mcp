@@ -6,6 +6,7 @@ from helpers._dsp import aligned_ber, read_bits, read_complex, write_bits
 
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
 from marconi.engine.compile.compiler import compile_modem
+from marconi.engine.compile.ir import GrPipeline
 from marconi.engine.modulation.fsk.stages import FskStep
 from marconi.engine.stages.conditioning import ResampleStep
 from marconi.engine.stages.general import SliceStep
@@ -18,7 +19,9 @@ IQ = Descriptor(Level.IQ, ItemType.C)
 _DEV, _SYM = 0.75, 1.0
 
 
-def _compile(modem, direction, sample_rate, src, snk):
+def _compile(
+    modem: Modem, direction: str, sample_rate: float, src: Path, snk: Path
+) -> GrPipeline:
     from marconi.engine.stages.registry import stage_registry
 
     return compile_modem(

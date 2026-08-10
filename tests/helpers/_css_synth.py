@@ -3,6 +3,11 @@ encoders that run the decoder's coding primitives in reverse."""
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
+from typing import Any
+
+import numpy as np
+import numpy.typing as npt
 from helpers import blockmath as coding
 from helpers._css_lora import HEADER, PARITY_MASKS
 from helpers.css_explicit import css_explicit_decode
@@ -44,7 +49,7 @@ WHITEN = bytes.fromhex(
 )
 
 
-def assemble(bits, payload_len=255):
+def assemble(bits: Sequence[int], payload_len: int = 255) -> bytes:
     nibbles = [
         (bits[4 * i] << 3)
         | (bits[4 * i + 1] << 2)
@@ -62,11 +67,15 @@ def assemble(bits, payload_len=255):
     return bytes(raw[:payload_len])
 
 
-def run(symbols, marks=(), params=HEADER):
+def run(
+    symbols: Sequence[int],
+    marks: Sequence[int] = (),
+    params: Mapping[str, Any] = HEADER,
+) -> npt.NDArray[np.uint8]:
     return css_explicit_decode(symbols, marks, params)
 
 
-def encode_header(payload_len, cr, has_crc):
+def encode_header(payload_len: int, cr: int, has_crc: int) -> list[int]:
     """Synthesize a parity-valid explicit header (carry nibbles zeroed) by
     running the decoder's coding primitives in reverse."""
     sf, sf_red = HEADER["sf"], HEADER["sf_reduction"]
@@ -89,7 +98,7 @@ def encode_header(payload_len, cr, has_crc):
     ] + [0] * (sf_app - 5)
     fec = coding.parity_for_cr(PARITY_MASKS, header_cr)
     perm = coding.diag_deinterleave_perm(sf_app, cw_len)
-    deint = []
+    deint: list[int] = []
     for nib in nibbles:
         cw = nib
         for p, m in enumerate(fec):
@@ -107,7 +116,7 @@ def encode_header(payload_len, cr, has_crc):
     return syms
 
 
-def encode_payload(nibbles, cr, sf_app):
+def encode_payload(nibbles: Sequence[int], cr: int, sf_app: int) -> list[int]:
     """Synthesize payload symbols by running the decoder's coding primitives
     in reverse; full-rate (sf_app == sf) uses the divisor=1 bin-offset lane."""
     sf, data_bits = HEADER["sf"], HEADER["data_bits"]
@@ -116,7 +125,7 @@ def encode_payload(nibbles, cr, sf_app):
     perm = coding.diag_deinterleave_perm(sf_app, cw_len)
     syms = []
     for b in range(len(nibbles) // sf_app):
-        deint = []
+        deint: list[int] = []
         for nib in nibbles[b * sf_app : (b + 1) * sf_app]:
             cw = nib
             for p, m in enumerate(fec):

@@ -6,6 +6,7 @@ from helpers._dsp import aligned_ber, channel, read_bits, write_bits
 
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
 from marconi.engine.compile.compiler import compile_modem
+from marconi.engine.compile.ir import GrPipeline
 from marconi.engine.modulation.css.stages import (
     ChirpSyncStep,
     CssDemapStep,
@@ -37,7 +38,9 @@ def _css_steps() -> list[Step]:
     ]
 
 
-def _compile(path, direction, rate, src, snk):
+def _compile(
+    path: list[Step], direction: str, rate: float, src: Path, snk: Path
+) -> GrPipeline:
     from marconi.engine.stages.registry import stage_registry
 
     return compile_modem(

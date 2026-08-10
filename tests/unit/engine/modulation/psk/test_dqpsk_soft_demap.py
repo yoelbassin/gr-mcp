@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import numpy as np
 
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
@@ -13,7 +15,7 @@ from marconi.engine.types.models import Modem
 NC, DS = 5, 3  # 5 carriers, PRS + 3 FIC symbols
 
 
-def test_dqpsk_soft_demap_recovers_bits(tmp_path):
+def test_dqpsk_soft_demap_recovers_bits(tmp_path: Path) -> None:
     ensure_worker_warm()
     rng = np.random.default_rng(2)
     qpsk = np.array([1 + 1j, 1 - 1j, -1 + 1j, -1 - 1j]) / np.sqrt(2)

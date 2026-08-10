@@ -4,6 +4,7 @@ Run once:
     cd /Users/joel/Clones/gr-mcp-rebuild
     .venv/bin/python tests/e2e/dab/make_dab_slice.py
 """
+
 from __future__ import annotations
 
 from pathlib import Path

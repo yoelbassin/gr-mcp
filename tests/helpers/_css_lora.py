@@ -14,6 +14,8 @@ a datasheet/gr-lora fact; production takes them as caller-supplied parameters.
 
 from __future__ import annotations
 
+from typing import Any
+
 # Hamming parity masks: cr -> rows, flattened low-cr-first.
 _PARITY = {
     1: [15],
@@ -24,7 +26,7 @@ _PARITY = {
 PARITY_MASKS = [m for cr in sorted(_PARITY) for m in _PARITY[cr]]
 
 # css_explicit_decode / CssExplicitDecode geometry.
-HEADER = {
+HEADER: dict[str, Any] = {
     "sf": 11,
     "header_cr": 4,
     "reduced": True,

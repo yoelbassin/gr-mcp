@@ -1,4 +1,8 @@
+from pathlib import Path
+from typing import Any
+
 import numpy as np
+import numpy.typing as npt
 import pytest
 from helpers._ldpc import ldpc_codes, parse_check_nodes
 from pydantic import ValidationError
@@ -19,7 +23,7 @@ _needs_codes = pytest.mark.skipif(
 )
 
 
-def _encode(path, gap, info):
+def _encode(path: Path, gap: int, info: npt.NDArray[np.uint8]) -> npt.NDArray[np.uint8]:
     from gnuradio import blocks as gb
     from gnuradio import fec, gr
 
@@ -36,7 +40,7 @@ def _encode(path, gap, info):
 
 
 @_needs_codes
-def test_ldpc_roundtrip(tmp_path):
+def test_ldpc_roundtrip(tmp_path: Path) -> None:
     ensure_worker_warm()
     path, n, k, gap = _CODES[0]
     checks = parse_check_nodes(path, n)
@@ -67,7 +71,7 @@ def test_ldpc_roundtrip(tmp_path):
 
 
 @_needs_codes
-def test_ldpc_info_bits_matches_decoder():
+def test_ldpc_info_bits_matches_decoder() -> None:
     """The stage's declared K = N - (parity checks) matches the code's rate."""
     path, n, k, _ = _CODES[0]
     step = LdpcStep(block_size=n, check_nodes=parse_check_nodes(path, n))
@@ -77,7 +81,7 @@ def test_ldpc_info_bits_matches_decoder():
 _OK = {"block_size": 4, "check_nodes": [[0, 1, 2], [1, 2, 3]]}
 
 
-def test_ldpc_params_accept_valid():
+def test_ldpc_params_accept_valid() -> None:
     step = Ldpc().step_model.model_validate(_OK)
     assert step.block_size == 4 and step.info_bits == 2 and step.max_iterations == 50
 
@@ -93,6 +97,6 @@ def test_ldpc_params_accept_valid():
         {"max_iterations": 0},  # < 1
     ],
 )
-def test_ldpc_params_reject_malformed(override):
+def test_ldpc_params_reject_malformed(override: dict[str, Any]) -> None:
     with pytest.raises(ValidationError):
         Ldpc().step_model.model_validate({**_OK, **override})

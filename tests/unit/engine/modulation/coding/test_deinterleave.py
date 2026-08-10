@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import numpy as np
 
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
@@ -11,7 +13,7 @@ from marconi.engine.types.levels import Level
 from marconi.engine.types.models import Modem
 
 
-def test_deinterleave_applies_perm(tmp_path):
+def test_deinterleave_applies_perm(tmp_path: Path) -> None:
     ensure_worker_warm()
     perm = [3, 0, 1, 2]
     data = np.array([10, 20, 30, 40, 50, 60, 70, 80], np.float32)

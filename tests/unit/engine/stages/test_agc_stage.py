@@ -8,6 +8,7 @@ import pytest
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
 from marconi.engine.compile.compile_context import CompileContext
 from marconi.engine.compile.compiler import compile_modem
+from marconi.engine.compile.ir import GrBlock
 from marconi.engine.stages.conditioning import AgcStep
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Amplitude, Carrier, Descriptor
@@ -18,7 +19,9 @@ from marconi.engine.types.models import Modem
 _NORMALIZED = Descriptor(Level.IQ, ItemType.C, Carrier.HARD, Amplitude.RMS_UNITY)
 
 
-def _emit(params: Mapping[str, Any], rate: float = 8.0, symbol_rate: float = 1.0):
+def _emit(
+    params: Mapping[str, Any], rate: float = 8.0, symbol_rate: float = 1.0
+) -> list[GrBlock]:
     ctx = CompileContext(Descriptor(Level.IQ, ItemType.C), rate, symbol_rate)
     step = AgcStep(**params)
     stage_registry()["agc"].emit_rx(ctx, step)
@@ -92,7 +95,7 @@ def test_unknown_param_is_rejected() -> None:
 
 def _compile_agc(
     params: Mapping[str, Any], rate: float = 8.0, symbol_rate: float = 1.0
-):
+) -> list[GrBlock]:
     return compile_modem(
         Modem(symbol_rate=symbol_rate, path=[AgcStep(**params)]),
         stage_registry(),
@@ -125,7 +128,9 @@ def test_power_mode_alpha_converts_via_sps() -> None:
             symbol_rate=symbol_rate,
         )
         rms = next(b for b in blocks if b.kind == "rms_cf")
-        return float(rms.params["alpha"])
+        alpha = rms.params["alpha"]
+        assert isinstance(alpha, float)
+        return alpha
 
     assert _rms_alpha(rate=8.0, symbol_rate=1.0) == pytest.approx(1.0 / 512.0)
     assert _rms_alpha(rate=100.0, symbol_rate=25.0) == pytest.approx(1.0 / 256.0)

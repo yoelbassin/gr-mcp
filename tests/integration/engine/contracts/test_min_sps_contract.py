@@ -1,6 +1,7 @@
 import pytest
 
 from marconi.engine.compile.compiler import CompileError, compile_modem
+from marconi.engine.compile.ir import GrPipeline
 from marconi.engine.modulation.fsk.stages import FskStep, MskStep
 from marconi.engine.modulation.ook.stages import OokEnvelopeStep
 from marconi.engine.modulation.psk.stages import PskDemapStep, PskDemodStep
@@ -18,7 +19,7 @@ IQ = Descriptor(Level.IQ, ItemType.C)
 _AGC = AgcStep(mode=AgcMode.POWER)
 
 
-def _compile(path: list[Step], sample_rate: float, direction: str = "rx"):
+def _compile(path: list[Step], sample_rate: float, direction: str = "rx") -> GrPipeline:
     return compile_modem(
         Modem(symbol_rate=1.0, path=path),
         stage_registry(),

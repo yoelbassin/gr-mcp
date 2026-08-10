@@ -1,7 +1,9 @@
 from math import log2
 from pathlib import Path
+from typing import Any
 
 import numpy as np
+import numpy.typing as npt
 import pytest
 from helpers._dsp import (
     channel,
@@ -14,7 +16,9 @@ from helpers._dsp import (
 
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
 from marconi.engine.compile.compiler import compile_modem
+from marconi.engine.compile.ir import GrPipeline
 from marconi.engine.modulation.psk.stages import PskDemapStep, PskDemodStep
+from marconi.engine.stages.base import Stage
 from marconi.engine.stages.conditioning import AgcStep
 from marconi.engine.types.descriptor import Carrier, Descriptor
 from marconi.engine.types.enums import AgcMode, ItemType, PskOrder
@@ -29,7 +33,7 @@ _SR, _SYM = 4.0, 1.0
 _CFG = {2: (2048, 0.004, 128), 4: (4096, 0.006, 128), 8: (6144, 0.001, 192)}
 
 
-def _const_points(order: int):
+def _const_points(order: int) -> tuple[npt.NDArray[np.complex128], int]:
     from gnuradio import digital  # in-process GR for oracle ground truth (allowed)
 
     c = {
@@ -66,7 +70,9 @@ def _demod(order: int) -> Modem:
     )
 
 
-def _compile(modem, direction, start, src, snk):
+def _compile(
+    modem: Modem, direction: str, start: Descriptor, src: Path, snk: Path
+) -> GrPipeline:
     return compile_modem(
         modem,
         _stage_registry(),
@@ -78,7 +84,7 @@ def _compile(modem, direction, start, src, snk):
     )
 
 
-def _stage_registry():
+def _stage_registry() -> dict[str, Stage[Any, Any]]:
     from marconi.engine.stages.registry import stage_registry
 
     return stage_registry()

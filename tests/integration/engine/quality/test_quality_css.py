@@ -19,7 +19,7 @@ from helpers._dsp import channel, write_bits
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
 from marconi.engine.compile.compiler import compile_modem
 from marconi.engine.modulation.css.stages import CssDemapStep, DechirpStep
-from marconi.engine.run import run_rx
+from marconi.engine.run import PipelineResult, run_rx
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Descriptor
 from marconi.engine.types.enums import ItemType
@@ -60,7 +60,9 @@ def _tx_iq(tmp_path: Path, snr_db: float | None) -> Path:
     return channel(clean, tmp_path / "noisy.cf32", snr_db=snr_db)
 
 
-def _rx(tmp_path: Path, iq: Path, sf: int = _SF, oversample: int = _OS):
+def _rx(
+    tmp_path: Path, iq: Path, sf: int = _SF, oversample: int = _OS
+) -> PipelineResult:
     return run_rx(
         Modem(
             symbol_rate=1.0,
@@ -136,7 +138,9 @@ def test_wrong_sf_is_never_decoded(tmp_path: Path) -> None:
 def test_dominance_tallies_cover_every_symbol(tmp_path: Path, snr_db: float) -> None:
     res = _rx(tmp_path, _tx_iq(tmp_path, snr_db=snr_db))
     dom = {
-        d.key: d.count for d in res.diagnostics if d.block.startswith("peak_decision")
+        d.key: d.count
+        for d in res.diagnostics
+        if d.block.startswith("peak_decision") and d.count is not None
     }
     assert dom["symbols_total"] == _N_SYM
     # threshold, not exact: at -12 dB a symbol's dominance can graze the floor

@@ -6,6 +6,7 @@ errors the raw link makes -- not just a noiseless self-consistent round-trip."""
 from pathlib import Path
 
 import numpy as np
+import numpy.typing as npt
 
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
 from marconi.engine.compile.compiler import compile_modem
@@ -17,18 +18,21 @@ from marconi.engine.types.descriptor import Carrier, Descriptor
 from marconi.engine.types.enums import ItemType, PskOrder
 from marconi.engine.types.levels import Level
 from marconi.engine.types.models import Modem
+from marconi.engine.types.step import Step
 
 SYM_C = Descriptor(Level.SYMBOLS, ItemType.C, carrier=Carrier.SOFT)
 _N, _K, _NFRAMES = 256, 128, 8
 
 
-def _frozen(n, k):
+def _frozen(n: int, k: int) -> list[int]:
     from gnuradio.fec.polar.channel_construction import frozen_bit_positions
 
     return [int(p) for p in frozen_bit_positions(n, k, 0.5)]
 
 
-def _polar_encode(info, n, k, fpos, fval):
+def _polar_encode(
+    info: npt.NDArray[np.uint8], n: int, k: int, fpos: list[int], fval: list[int]
+) -> npt.NDArray[np.uint8]:
     from gnuradio import blocks as gb
     from gnuradio import fec, gr
 
@@ -44,13 +48,15 @@ def _polar_encode(info, n, k, fpos, fval):
     return np.asarray(snk.data(), np.uint8)
 
 
-def _qpsk_points():
+def _qpsk_points() -> npt.NDArray[np.complex128]:
     from gnuradio import digital
 
     return np.asarray(digital.constellation_qpsk().points())
 
 
-def _run(path, sym, tmp_path):
+def _run(
+    path: list[Step], sym: npt.NDArray[np.complex128], tmp_path: Path
+) -> npt.NDArray[np.uint8]:
     src = tmp_path / "sym.cf32"
     np.asarray(sym, np.complex64).tofile(src)
     snk = tmp_path / "out.u8"

@@ -20,7 +20,11 @@ a SYMBOLS->BITS demap stage and a block-permutation stage.
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
+from typing import Any
+
 import numpy as np
+import numpy.typing as npt
 from helpers import bitops
 from helpers import blockmath as coding
 from helpers import parse
@@ -35,7 +39,7 @@ from marconi.engine.coding import ops_bits
 from marconi.engine.coding.carrier import CodingCarrier
 
 
-def _demap(syms, sf_app, p):
+def _demap(syms: Sequence[int], sf_app: int, p: Mapping[str, Any]) -> list[int]:
     n = 1 << p["sf"]
     if sf_app < p["sf"]:
         return coding.demap_symbols(
@@ -50,7 +54,9 @@ def _demap(syms, sf_app, p):
     )
 
 
-def _block_code_stage(bits, sf_app, cr, p):
+def _block_code_stage(
+    bits: Sequence[int], sf_app: int, cr: int, p: Mapping[str, Any]
+) -> npt.NDArray[np.uint8]:
     """Deinterleave and the codeword-basis bridge fold into ONE static gather
     (the diagonal perm emits codewords MSB-first, the block_code op reads
     LSB-first strides), then the generic op decodes; nibble bits return
@@ -76,7 +82,9 @@ def _block_code_stage(bits, sf_app, cr, p):
     return decoded.reshape(-1, d)[:, ::-1].reshape(-1)
 
 
-def _parse_stage_header(hbits, p):
+def _parse_stage_header(
+    hbits: npt.NDArray[np.uint8], p: Mapping[str, Any]
+) -> dict[str, int | str]:
     """helpers.parse.parse_message over the packed header bits; the field
     schema derives from the same (start, len) spans the orchestrator takes.
     A '_pad'-prefixed field name is dropped from the result, exactly as the
@@ -102,7 +110,9 @@ def _parse_stage_header(hbits, p):
     return msg
 
 
-def _two_pass_decode(syms, p):
+def _two_pass_decode(
+    syms: Sequence[int], p: Mapping[str, Any]
+) -> npt.NDArray[np.uint8]:
     d, hn, hs = p["data_bits"], p["header_nibbles"], p["header_symbols"]
     sf_app_hdr = p["sf"] - p["sf_reduction"]
     hdr_stream = _block_code_stage(
@@ -138,14 +148,14 @@ def _two_pass_decode(syms, p):
     return np.concatenate([carry, body])[:declared]
 
 
-def test_composition_matches_orchestrator_on_offair_frame():
+def test_composition_matches_orchestrator_on_offair_frame() -> None:
     composed = _two_pass_decode(_SF11_SYMBOLS, _HEADER)
     assert np.array_equal(composed, _run(_SF11_SYMBOLS))
     payload = _assemble(list(composed))
     assert payload.startswith(b"RF fingerpring Project for Lora"), payload[:31]
 
 
-def test_composition_matches_orchestrator_non_ldro():
+def test_composition_matches_orchestrator_non_ldro() -> None:
     p = {**_HEADER, "reduced": False}
     nibbles = [(3 * i + 1) % 16 for i in range(3 * _HEADER["sf"])]
     syms = _encode_header(16, 1, 0) + _encode_payload(nibbles, 1, _HEADER["sf"])
@@ -154,7 +164,7 @@ def test_composition_matches_orchestrator_non_ldro():
     assert composed.size == 16 * 8
 
 
-def test_composition_matches_orchestrator_reduced_correcting_cr():
+def test_composition_matches_orchestrator_reduced_correcting_cr() -> None:
     """cr=4 payload: the correcting-FEC path (can_correct holds) through the
     reduced payload lane."""
     sf_app = _HEADER["sf"] - _HEADER["sf_reduction"]

@@ -6,6 +6,7 @@ errors the raw link makes -- not just a noiseless self-consistent round-trip."""
 from pathlib import Path
 
 import numpy as np
+import numpy.typing as npt
 import pytest
 from helpers._ldpc import ldpc_codes, parse_check_nodes
 
@@ -19,11 +20,12 @@ from marconi.engine.types.descriptor import Carrier, Descriptor
 from marconi.engine.types.enums import ItemType, PskOrder
 from marconi.engine.types.levels import Level
 from marconi.engine.types.models import Modem
+from marconi.engine.types.step import Step
 
 SYM_C = Descriptor(Level.SYMBOLS, ItemType.C, carrier=Carrier.SOFT)
 
 
-def _pick_code():
+def _pick_code() -> tuple[Path, int, int, int] | None:
     codes = ldpc_codes()
     big = [c for c in codes if c[1] >= 256]  # a longer code -> a sharper waterfall
     return big[0] if big else (codes[-1] if codes else None)
@@ -35,7 +37,7 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-def _encode(path, gap, info):
+def _encode(path: Path, gap: int, info: npt.NDArray[np.uint8]) -> npt.NDArray[np.uint8]:
     from gnuradio import blocks as gb
     from gnuradio import fec, gr
 
@@ -51,13 +53,15 @@ def _encode(path, gap, info):
     return np.asarray(snk.data(), np.uint8)
 
 
-def _qpsk_points():
+def _qpsk_points() -> npt.NDArray[np.complex128]:
     from gnuradio import digital
 
     return np.asarray(digital.constellation_qpsk().points())
 
 
-def _run(path, sym, tmp_path):
+def _run(
+    path: list[Step], sym: npt.NDArray[np.complex128], tmp_path: Path
+) -> npt.NDArray[np.uint8]:
     src = tmp_path / "sym.cf32"
     np.asarray(sym, np.complex64).tofile(src)
     snk = tmp_path / "out.u8"
@@ -80,6 +84,7 @@ def test_ldpc_corrects_errors_the_uncoded_link_makes(tmp_path: Path) -> None:
     LDPC decoder recovers the frame exactly. Measured over 4 seeds (N=300):
     uncoded 0.048-0.059, coded 0.0 every time."""
     ensure_worker_warm()
+    assert _CODE is not None
     path, n, k, gap = _CODE
     checks = parse_check_nodes(path, n)
     pts = _qpsk_points()

@@ -6,6 +6,7 @@ from helpers._fixtures import (
 )
 
 from marconi.engine.compile.compiler import compile_modem
+from marconi.engine.compile.ir import GrPipeline
 from marconi.engine.types.descriptor import Descriptor
 from marconi.engine.types.enums import ItemType
 from marconi.engine.types.levels import Level
@@ -19,7 +20,7 @@ def _modem(*steps: Step, symbol_rate: float) -> Modem:
     return Modem(symbol_rate=symbol_rate, path=list(steps))
 
 
-def _compile_tx(modem: Modem, sample_rate: float):
+def _compile_tx(modem: Modem, sample_rate: float) -> GrPipeline:
     return compile_modem(
         modem,
         fixture_registry(),

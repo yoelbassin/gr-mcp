@@ -15,7 +15,7 @@ from marconi.engine.types.models import Modem
 IQ = Descriptor(Level.IQ, ItemType.C, amplitude=Amplitude.RMS_UNITY)
 
 
-def _kinds(loop_bw: float, sps: int, rate: float):
+def _kinds(loop_bw: float, sps: int, rate: float) -> list[str]:
     m = Modem(symbol_rate=1000.0, path=[SymbolSyncStep(sps=sps, loop_bw=loop_bw)])
     gr = compile_modem(
         m,

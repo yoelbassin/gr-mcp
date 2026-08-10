@@ -17,7 +17,7 @@ import pytest
 
 from marconi.engine.backends.gnuradio.runner import ensure_worker_warm
 from marconi.engine.modulation.css.stages import DechirpStep
-from marconi.engine.run import run_rx
+from marconi.engine.run import PipelineResult, run_rx
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Descriptor
 from marconi.engine.types.enums import ItemType
@@ -45,7 +45,7 @@ def _labels(slice_dir: Path) -> list[int]:
     return [value for _, value in keyed]
 
 
-def _decode(tmp_path: Path, capture: Path, sf: int):
+def _decode(tmp_path: Path, capture: Path, sf: int) -> PipelineResult:
     ensure_worker_warm()
     return run_rx(
         Modem(

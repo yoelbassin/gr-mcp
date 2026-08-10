@@ -11,6 +11,7 @@ This exercises the first SYMBOLS-terminal routing in the compiler.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pytest
@@ -312,7 +313,7 @@ def test_detect_scan_chunked_equals_oneshot() -> None:
         assert got == oneshot
 
 
-def test_detect_scan_single_pass(monkeypatch) -> None:
+def test_detect_scan_single_pass(monkeypatch: pytest.MonkeyPatch) -> None:
     from marconi.engine.backends.gnuradio.embedded import chirp
 
     grid = chirp._Grid(7, 2, 4)
@@ -320,7 +321,7 @@ def test_detect_scan_single_pass(monkeypatch) -> None:
     calls = {"n": 0}
     orig = chirp._fine_peak
 
-    def counting(*a, **k):  # untyped: mypy checks typed-def bodies even in tests
+    def counting(*a: Any, **k: Any) -> tuple[float, int]:
         calls["n"] += 1
         return orig(*a, **k)
 

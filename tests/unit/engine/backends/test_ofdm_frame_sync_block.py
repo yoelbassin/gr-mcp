@@ -4,7 +4,10 @@ snapping, and truncated-final-frame accounting — scheduler-free via
 FAKE_GR/drive. The real-scheduler paths live in
 tests/integration/engine/modulation/test_ofdm_frame_sync.py."""
 
+from typing import Any
+
 import numpy as np
+import numpy.typing as npt
 from helpers._fakegr import FAKE_GR as _FakeGr
 from helpers._fakegr import drive as _drive
 
@@ -17,7 +20,7 @@ FFT, CP, SYM, NULL, DS = 16, 4, 20, 24, 3
 FRAME = NULL + 4 * SYM
 
 
-def test_zero_input_wakeup_is_timing_invariant():
+def test_zero_input_wakeup_is_timing_invariant() -> None:
     """forecast announces 0 whenever emission work is pending, so the scheduler
     MAY deliver zero-input calls at any point mid-stream; emitted content must
     not depend on when they land. The pre-fix code treated inp.size == 0 as EOF
@@ -62,7 +65,7 @@ def test_zero_input_wakeup_is_timing_invariant():
         assert np.array_equal(chunked, oneshot), f"chunk={chunk} diverged"
 
 
-def test_null_less_stream_holds_a_bounded_buffer():
+def test_null_less_stream_holds_a_bounded_buffer() -> None:
     """A wrong-band capture never contains a null: detection keeps failing and
     the pre-fix block buffered the whole stream (GB capture -> OOM). Past the
     ladder cap the detection window must slide instead — and a frame train
@@ -70,7 +73,7 @@ def test_null_less_stream_holds_a_bounded_buffer():
     rng = np.random.default_rng(11)
     flat = np.exp(2j * np.pi * rng.random(50 * FRAME)).astype(np.complex64)
 
-    def mk():
+    def mk() -> Any:
         return make_ofdm_frame_sync(
             _FakeGr,
             fft_len=FFT,
@@ -110,7 +113,7 @@ def test_null_less_stream_holds_a_bounded_buffer():
         assert np.allclose(out, expected, atol=1e-4), f"chunk={chunk} diverged"
 
 
-def test_resync_base_snaps_corrects_and_rejects():
+def test_resync_base_snaps_corrects_and_rejects() -> None:
     null_len, tol, max_corr = 24, 2, 20
     rng = np.random.default_rng(3)
     z = rng.standard_normal(400) + 1j * rng.standard_normal(400)
@@ -123,21 +126,21 @@ def test_resync_base_snaps_corrects_and_rejects():
     assert _resync_base(buf, 395, **r) == 395  # insufficient buffer -> keep prediction
 
 
-def test_frame_sync_reports_truncated_final_frame():
+def test_frame_sync_reports_truncated_final_frame() -> None:
     """A frame whose usefuls never fully arrive (end-of-stream mid-frame) is
     dropped by design — frames are atomic — but the drop must be visible:
     diagnostics carry the missing item count. A capture ending cleanly after
     its last frame reports zero."""
     rng = np.random.default_rng(0)
 
-    def frame_parts():
+    def frame_parts() -> list[npt.NDArray[np.complex128]]:
         us = [
             rng.standard_normal(FFT) + 1j * rng.standard_normal(FFT)
             for _ in range(DS + 1)
         ]
         return [np.zeros(NULL, complex)] + [np.concatenate([u[-CP:], u]) for u in us]
 
-    def mk():
+    def mk() -> Any:
         return make_ofdm_frame_sync(
             _FakeGr,
             fft_len=FFT,

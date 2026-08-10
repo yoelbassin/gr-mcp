@@ -5,6 +5,7 @@ from helpers._dsp import aligned_ber, channel, read_bits, write_bits
 
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
 from marconi.engine.compile.compiler import compile_modem
+from marconi.engine.compile.ir import GrPipeline
 from marconi.engine.modulation.ook.stages import OokEnvelopeStep
 from marconi.engine.stages.conditioning import AgcStep
 from marconi.engine.stages.general import SliceStep
@@ -25,7 +26,7 @@ def _modem(direction: str) -> Modem:
     return Modem(symbol_rate=_SYM, path=rx if direction == "rx" else tx)
 
 
-def _compile(direction: str, src: Path, snk: Path):
+def _compile(direction: str, src: Path, snk: Path) -> GrPipeline:
     return compile_modem(
         _modem(direction),
         stage_registry(),

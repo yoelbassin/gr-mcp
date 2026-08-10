@@ -49,12 +49,12 @@ def test_block_fec_decode_is_correct_codeword_masked_to_data() -> None:
         assert block_fec_decode(cw, masks, data_bits, correct=False) == (cw & mask)
 
 
-def test_gray_roundtrip():
+def test_gray_roundtrip() -> None:
     for x in range(256):
         assert coding.gray_decode(coding.gray_encode(x)) == x
 
 
-def test_demap_reduced_rate_absorbs_minus_one_within_quad():
+def test_demap_reduced_rate_absorbs_minus_one_within_quad() -> None:
     # reduced-rate (sf_app < sf): value = gray_encode(s // 4). s and s-1 share s//4
     # unless s is a multiple of 4.
     n = 1 << 11
@@ -65,18 +65,18 @@ def test_demap_reduced_rate_absorbs_minus_one_within_quad():
     assert c != a  # 19//4 == 4 != 5
 
 
-def test_demap_full_rate_offset_and_width():
+def test_demap_full_rate_offset_and_width() -> None:
     n = 1 << 7
     bits = coding.demap_symbols([5], sf_app=7, n=n, divisor=1, offset=1)
     assert bits == [(coding.gray_encode(4) >> (6 - j)) & 1 for j in range(7)]
 
 
-def test_parity_rows_masks_roundtrip():
+def test_parity_rows_masks_roundtrip() -> None:
     # bit b of the mask is row entry b
     assert coding.parity_rows([7, 14], 4) == [[1, 1, 1, 0], [0, 1, 1, 1]]
 
 
-def test_block_fec_detect_only_cr1_passes_clean_codeword():
+def test_block_fec_detect_only_cr1_passes_clean_codeword() -> None:
     # 1 parity bit detects but does not correct; a clean codeword returns its
     # nibble.
     nibble = 0b1011
@@ -87,7 +87,7 @@ def test_block_fec_detect_only_cr1_passes_clean_codeword():
     assert coding.block_fec_decode(codeword, masks, _DB, correct=False) == nibble
 
 
-def test_block_fec_cr1_does_not_correct_even_when_requested():
+def test_block_fec_cr1_does_not_correct_even_when_requested() -> None:
     # 1 parity bit is below the Hamming bound; correct=True must still return the
     # corrupted nibble unchanged — detect-only stays detect-only.
     assert not coding.can_correct(1, _DB)
@@ -102,7 +102,7 @@ def test_block_fec_cr1_does_not_correct_even_when_requested():
     assert coding.block_fec_decode(corrupted, masks, _DB, correct) == (nibble ^ 1)
 
 
-def test_can_correct_matches_hamming_bound():
+def test_can_correct_matches_hamming_bound() -> None:
     assert [coding.can_correct(cr, _DB) for cr in (1, 2, 3, 4)] == [
         False,
         False,
@@ -111,7 +111,7 @@ def test_can_correct_matches_hamming_bound():
     ]
 
 
-def test_frame_len_sf11_255_byte_reduced_cr1():
+def test_frame_len_sf11_255_byte_reduced_cr1() -> None:
     # 255-byte payload, has_crc, cr=1, sf=11, reduced=1, sf_reduction=2, 4-bit
     # data units, 2-byte CRC, 5 header nibbles -> 285 coded payload symbols.
     got = coding.css_explicit_frame_len(
@@ -120,7 +120,7 @@ def test_frame_len_sf11_255_byte_reduced_cr1():
     assert got == 285
 
 
-def test_header_parity_ok_roundtrips_known_masks():
+def test_header_parity_ok_roundtrips_known_masks() -> None:
     masks = [3840, 2273, 1178, 599, 303]
     data = 0b101010101010
     # compute the parity the function expects, then confirm it validates
@@ -130,7 +130,7 @@ def test_header_parity_ok_roundtrips_known_masks():
     assert coding.header_parity_ok(data, computed, masks)
 
 
-def test_supported_cr_reads_the_supplied_table():
+def test_supported_cr_reads_the_supplied_table() -> None:
     for cr in (1, 2, 3, 4):
         assert coding.supported_cr(PARITY_MASKS, cr)
     for cr in (0, 5, 6, 7):
@@ -150,7 +150,7 @@ def _diag_reference(sf_app: int, cw_len: int) -> list[int]:
     return out
 
 
-def test_diag_perm_matches_independent_construction():
+def test_diag_perm_matches_independent_construction() -> None:
     for sf_app, cw_len in ((4, 8), (7, 5), (9, 8), (11, 8)):
         assert coding.diag_deinterleave_perm(sf_app, cw_len) == _diag_reference(
             sf_app, cw_len

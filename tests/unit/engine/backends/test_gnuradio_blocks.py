@@ -38,6 +38,6 @@ def test_qam_const_rejects_unknown_order() -> None:
         GR_BLOCKS["chunks_to_symbols_bc"](ctx, {"scheme": "qam", "order": 32})
 
 
-def test_ctx_exposes_trellis():
+def test_ctx_exposes_trellis() -> None:
     ctx = _make_ctx(1.0)
     assert hasattr(ctx.trellis, "fsm") and hasattr(ctx.trellis, "viterbi_combined_fb")

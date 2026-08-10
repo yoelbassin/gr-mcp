@@ -6,6 +6,7 @@ from marconi.engine.compile.compiler import (
     compile_modem,
     compile_pipeline,
 )
+from marconi.engine.compile.ir import GrPipeline
 from marconi.engine.modulation.css.stages import CssDemapStep, DechirpStep
 from marconi.engine.modulation.fsk.stages import FskStep, MfskSoftDemapStep
 from marconi.engine.modulation.ofdm.stages import DqpskSoftDemapStep
@@ -36,7 +37,7 @@ def _compile(
     direction: str = "rx",
     start: Descriptor = IQ,
     sample_rate: float = 4.0,
-):
+) -> GrPipeline:
     return compile_modem(
         Modem(symbol_rate=1.0, path=path),
         stage_registry(),

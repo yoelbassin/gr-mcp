@@ -2,6 +2,7 @@
 from pathlib import Path
 
 import numpy as np
+import numpy.typing as npt
 import pytest
 from e2e.dab.test_dab_ofdm_offair import _bin_perm
 
@@ -31,13 +32,13 @@ _SLICE = (
 _NC, _DS = 1536, 3
 
 
-def _regroup():
+def _regroup() -> list[int]:
     return [c * 2 + 1 for c in range(_NC)] + [c * 2 for c in range(_NC)]
 
 
-def _keep_mask():
-    def rep(pat, n):
-        out = []
+def _keep_mask() -> list[int]:
+    def rep(pat: list[int], n: int) -> list[int]:
+        out: list[int] = []
         while len(out) < n:
             out += pat
         return out[:n]
@@ -57,9 +58,9 @@ def _keep_mask():
     return mask
 
 
-def _prbs():
+def _prbs() -> npt.NDArray[np.uint8]:
     sr = [1] * 9
-    out = []
+    out: list[int] = []
     for _ in range(768):
         b = sr[8] ^ sr[4]
         out.append(b)
@@ -67,7 +68,7 @@ def _prbs():
     return np.array(out, np.uint8)
 
 
-def _fib_crc_ok(fib32):
+def _fib_crc_ok(fib32: npt.NDArray[np.uint8]) -> bool:
     crc = 0xFFFF
     for byte in fib32[:30]:
         crc ^= int(byte) << 8
@@ -108,7 +109,7 @@ def _dab_phy_steps() -> list[Step]:
 @pytest.mark.skipif(
     not _SLICE.exists(), reason="DAB slice absent — run tests/e2e/dab/make_dab_slice.py"
 )
-def test_dab_phy_decodes_crc_valid_fibs(tmp_path):
+def test_dab_phy_decodes_crc_valid_fibs(tmp_path: Path) -> None:
     ensure_worker_warm()
     snk = tmp_path / "fic.u8"
     modem = Modem(

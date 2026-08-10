@@ -24,7 +24,7 @@ _SLICE = (
 _NC, _DS, _FFT = 1536, 3, 2048
 
 
-def _carrier_bins():
+def _carrier_bins() -> list[int]:
     tmp = [0]
     for _ in range(1, _FFT):
         tmp.append((13 * tmp[-1] + 511) % _FFT)
@@ -32,7 +32,7 @@ def _carrier_bins():
     return [d if d > 0 else _FFT + d for d in off]
 
 
-def _bin_perm():
+def _bin_perm() -> list[int]:
     bins = _carrier_bins()
     return bins + [b for b in range(_FFT) if b not in set(bins)]
 
@@ -40,7 +40,7 @@ def _bin_perm():
 @pytest.mark.skipif(
     not _SLICE.exists(), reason="DAB slice absent — run tests/e2e/dab/make_dab_slice.py"
 )
-def test_dab_carriers_lock(tmp_path):
+def test_dab_carriers_lock(tmp_path: Path) -> None:
     ensure_worker_warm()
     snk = tmp_path / "car.cf32"
     modem = Modem(

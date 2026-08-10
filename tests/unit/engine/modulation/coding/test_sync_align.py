@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import numpy as np
 
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
@@ -42,7 +44,7 @@ def _soft_bits(bits: np.ndarray) -> np.ndarray:
     return (1.0 - 2.0 * bits.astype(np.float32)).astype(np.float32)
 
 
-def test_sync_align_then_fec_decodes_bursts(tmp_path) -> None:
+def test_sync_align_then_fec_decodes_bursts(tmp_path: Path) -> None:
     ensure_worker_warm()
     frame_bits, tail, rate_inv = 96, 6, 2
     polys = [0o7, 0o5]

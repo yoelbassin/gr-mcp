@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import numpy as np
 
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
@@ -13,7 +15,7 @@ FFT, CP, SYM, NULL, DS = 16, 4, 20, 24, 3
 FRAME = NULL + 4 * SYM
 
 
-def test_frame_sync_strips_cp(tmp_path):
+def test_frame_sync_strips_cp(tmp_path: Path) -> None:
     ensure_worker_warm()
     rng = np.random.default_rng(0)
     usefuls = [
@@ -60,7 +62,7 @@ def test_frame_sync_strips_cp(tmp_path):
     assert np.allclose(out, expected, atol=1e-4)
 
 
-def test_frame_sync_resyncs_under_drift(tmp_path):
+def test_frame_sync_resyncs_under_drift(tmp_path: Path) -> None:
     # Actual on-air period is FRAME + DRIFT (SFO): a constant stride drifts off
     # the useful part after the first frame; per-frame null resync must track it.
     ensure_worker_warm()
@@ -117,7 +119,7 @@ def test_frame_sync_resyncs_under_drift(tmp_path):
     assert np.allclose(out, expected, atol=1e-4)
 
 
-def test_frame_sync_buffer_stays_bounded():
+def test_frame_sync_buffer_stays_bounded() -> None:
     ensure_worker_warm()
     from gnuradio import blocks as gb
     from gnuradio import gr

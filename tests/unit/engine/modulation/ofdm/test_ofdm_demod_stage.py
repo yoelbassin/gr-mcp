@@ -1,4 +1,7 @@
+from pathlib import Path
+
 import numpy as np
+import numpy.typing as npt
 
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
 from marconi.engine.compile.compiler import compile_modem
@@ -15,7 +18,7 @@ BIN_PERM = ACTIVE + [b for b in range(FFT) if b not in ACTIVE]
 FRAME = NULL + 4 * SYM
 
 
-def _synth():
+def _synth() -> tuple[npt.NDArray[np.complex64], npt.NDArray[np.complex128]]:
     rng = np.random.default_rng(7)
     out = [np.zeros(NULL, np.complex64)]
     cells = []
@@ -29,7 +32,7 @@ def _synth():
     return np.concatenate(out), np.stack(cells)  # cells: (symbol, carrier)
 
 
-def test_ofdm_demod_symbol_major(tmp_path):
+def test_ofdm_demod_symbol_major(tmp_path: Path) -> None:
     ensure_worker_warm()
     sig, cells = _synth()
     src = tmp_path / "in.cf32"

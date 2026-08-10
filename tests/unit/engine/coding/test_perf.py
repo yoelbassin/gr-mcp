@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import tracemalloc
 from collections.abc import Callable
+from pathlib import Path
 
 import numpy as np
+import numpy.typing as npt
 import pytest
 from crc import Calculator, Configuration
 from crc._crc import TableBasedRegister
@@ -29,7 +31,7 @@ def _measure_peak(fn: Callable[[], object]) -> int:
     return peak
 
 
-def _reference_find_flags(bits):
+def _reference_find_flags(bits: npt.NDArray[np.uint8]) -> list[int]:
     out: list[int] = []
     i, n = 0, len(bits)
     while i <= n - 8:
@@ -49,11 +51,11 @@ class _CallCounter:
     size, while a per-item python loop's would. Same size in, same call
     count out is the signature of "no per-item loop"."""
 
-    def __init__(self, fn):
+    def __init__(self, fn: Callable[..., object]) -> None:
         self._fn = fn
         self.calls = 0
 
-    def __call__(self, *args, **kwargs):
+    def __call__(self, *args: object, **kwargs: object) -> object:
         self.calls += 1
         return self._fn(*args, **kwargs)
 
@@ -81,7 +83,9 @@ def test_crc_value_uses_the_table_engine_not_the_bitwise_one() -> None:
     ), "crc.Calculator not constructed optimized=True -- bitwise engine in effect?"
 
 
-def test_flag_scan_makes_input_size_independent_numpy_calls(monkeypatch) -> None:
+def test_flag_scan_makes_input_size_independent_numpy_calls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     counter = _CallCounter(np.cumsum)
     monkeypatch.setattr(np, "cumsum", counter)
 
@@ -101,7 +105,7 @@ def test_flag_scan_makes_input_size_independent_numpy_calls(monkeypatch) -> None
 
 
 def test_block_code_correction_makes_input_size_independent_numpy_calls(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     counter = _CallCounter(np.flatnonzero)
     monkeypatch.setattr(np, "flatnonzero", counter)
@@ -136,7 +140,7 @@ def test_block_code_correction_makes_input_size_independent_numpy_calls(
     )
 
 
-def test_find_flags_matches_greedy_reference():
+def test_find_flags_matches_greedy_reference() -> None:
     rng = np.random.default_rng(1)
     for _ in range(20):
         bits = rng.integers(0, 2, int(rng.integers(8, 200)), dtype=np.uint8)
@@ -211,7 +215,9 @@ def test_sync_word_scan_matches_naive_reference() -> None:
             assert [w.start for w in out.windows or []] == want
 
 
-def test_oversized_capture_raises_actionable(tmp_path, monkeypatch):
+def test_oversized_capture_raises_actionable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setattr(bitfile, "_MAX_BITS", 64)
     path = tmp_path / "big.bits"
     bitfile.write_bits(path, np.zeros(65, np.uint8))
@@ -221,7 +227,7 @@ def test_oversized_capture_raises_actionable(tmp_path, monkeypatch):
     assert "65 bits" in msg and "slice" in msg
 
 
-def test_within_budget_reads_fine(tmp_path):
+def test_within_budget_reads_fine(tmp_path: Path) -> None:
     path = tmp_path / "ok.bits"
     bitfile.write_bits(path, np.array([0, 1, 1, 0], np.uint8))
     assert read_bits(path).tolist() == [0, 1, 1, 0]

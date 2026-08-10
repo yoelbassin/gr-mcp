@@ -1,6 +1,8 @@
+from pathlib import Path
 from typing import Any
 
 import numpy as np
+import numpy.typing as npt
 import pytest
 from pydantic import ValidationError
 
@@ -15,7 +17,9 @@ from marconi.engine.types.levels import Level
 from marconi.engine.types.models import Modem
 
 
-def _roundtrip(tmp_path, *, rate_inv, polys, frame_bits, seed):
+def _roundtrip(
+    tmp_path: Path, *, rate_inv: int, polys: list[int], frame_bits: int, seed: int
+) -> tuple[npt.NDArray[np.uint8], npt.NDArray[np.uint8]]:
     ensure_worker_warm()
     from gnuradio import blocks as gb
     from gnuradio import gr, trellis
@@ -27,7 +31,7 @@ def _roundtrip(tmp_path, *, rate_inv, polys, frame_bits, seed):
     fsm = trellis.fsm(1, rate_inv, polys)
 
     class Enc(gr.top_block):
-        def __init__(self, data):
+        def __init__(self, data: npt.NDArray[np.uint8]) -> None:
             gr.top_block.__init__(self)
             src = gb.vector_source_b(list(map(int, data)), False)
             enc = trellis.encoder_bb(fsm, 0)
@@ -72,14 +76,14 @@ def _roundtrip(tmp_path, *, rate_inv, polys, frame_bits, seed):
     return read_bits(snk)[:frame_bits], info
 
 
-def test_fec_conv_dab_rate_quarter(tmp_path):
+def test_fec_conv_dab_rate_quarter(tmp_path: Path) -> None:
     out, info = _roundtrip(
         tmp_path, rate_inv=4, polys=[0o133, 0o171, 0o145, 0o133], frame_bits=768, seed=1
     )
     assert np.array_equal(out, info)
 
 
-def test_fec_conv_generic_rate_half(tmp_path):
+def test_fec_conv_generic_rate_half(tmp_path: Path) -> None:
     out, info = _roundtrip(
         tmp_path, rate_inv=2, polys=[0o133, 0o171], frame_bits=200, seed=2
     )
@@ -95,23 +99,24 @@ _CC_PARAMS: dict[str, Any] = {
 }
 
 
-def test_fec_params_reject_unknown_scheme():
+def test_fec_params_reject_unknown_scheme() -> None:
     with pytest.raises(ValidationError):
         Fec().step_model.model_validate({**_CC_PARAMS, "scheme": "turbo"})
 
 
-def test_fec_params_reject_nonpositive_and_empty():
+def test_fec_params_reject_nonpositive_and_empty() -> None:
+    override: dict[str, Any]
     for override in ({"rate_inv": 0}, {"frame_bits": 0}, {"polys": []}, {"tail": -1}):
         with pytest.raises(ValidationError):
             Fec().step_model.model_validate({**_CC_PARAMS, **override})
 
 
-def test_fec_params_accept_cc():
+def test_fec_params_accept_cc() -> None:
     step = Fec().step_model.model_validate(_CC_PARAMS)
     assert step.scheme == "cc"
 
 
-def test_fec_conv_unterminated_frame_tail_bits_correct(tmp_path):
+def test_fec_conv_unterminated_frame_tail_bits_correct(tmp_path: Path) -> None:
     ensure_worker_warm()
     from gnuradio import blocks as gb
     from gnuradio import gr, trellis
@@ -124,7 +129,7 @@ def test_fec_conv_unterminated_frame_tail_bits_correct(tmp_path):
     fsm = trellis.fsm(1, rate_inv, polys)
 
     class Enc(gr.top_block):
-        def __init__(self, data):
+        def __init__(self, data: npt.NDArray[np.uint8]) -> None:
             gr.top_block.__init__(self)
             src = gb.vector_source_b(list(map(int, data)), False)
             enc = trellis.encoder_bb(fsm, 0)
@@ -170,7 +175,7 @@ def test_fec_conv_unterminated_frame_tail_bits_correct(tmp_path):
     assert np.array_equal(out, info), np.flatnonzero(out != info)
 
 
-def test_fec_conv_rate_two_thirds_k2(tmp_path):
+def test_fec_conv_rate_two_thirds_k2(tmp_path: Path) -> None:
     ensure_worker_warm()
     from gnuradio import blocks as gb
     from gnuradio import gr, trellis
@@ -184,7 +189,7 @@ def test_fec_conv_rate_two_thirds_k2(tmp_path):
     fsm = trellis.fsm(k, rate_inv, polys)
 
     class Enc(gr.top_block):
-        def __init__(self, data):
+        def __init__(self, data: npt.NDArray[np.uint8]) -> None:
             gr.top_block.__init__(self)
             src = gb.vector_source_b(list(map(int, data)), False)
             enc = trellis.encoder_bb(fsm, 0)

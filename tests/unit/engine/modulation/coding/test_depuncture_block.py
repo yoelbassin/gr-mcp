@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import numpy as np
 import pytest
 from pydantic import ValidationError
@@ -13,7 +15,7 @@ from marconi.engine.types.levels import Level
 from marconi.engine.types.models import Modem
 
 
-def test_depuncture_scatters_per_mask(tmp_path):
+def test_depuncture_scatters_per_mask(tmp_path: Path) -> None:
     ensure_worker_warm()
     mask = [1, 1, 0, 1, 0, 0, 1, 1]
     data = np.array(
