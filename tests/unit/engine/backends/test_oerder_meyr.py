@@ -100,15 +100,39 @@ def test_output_is_chunk_independent() -> None:
 
 
 def test_output_is_chunk_independent_across_gaps() -> None:
-    # the hairy state machine paths — idle emission, rise/fall straddling a
-    # block boundary, the quiet-counter carry — must all be chunk-blind too,
-    # not just the single-burst steady state
+    # honest scope: internal processing is fixed 1024-sample blocks whatever
+    # the caller's chunking, so both runs drive IDENTICAL state transitions —
+    # this verifies _pending reassembly and drain paths over a gapped signal,
+    # while state-machine equivalence itself is pinned by
+    # test_scan_fall_matches_the_reference_loop and the gap/tail tests
     iq = _bursty(nbursts=8, L=80, gap=120, sto=0.37, sfo_ppm=25.0, snr=25)
     mf = np.convolve(iq.astype(complex), _RRC, "same").astype(np.complex64)
     whole = _drive(mf, _BURST_SPS, chunk=mf.size)
     pieced = _drive(mf, _BURST_SPS, chunk=137)
     n = min(whole.size, pieced.size)
     assert np.allclose(whole[:n], pieced[:n], atol=1e-4), "chunking changed output"
+
+
+def test_scan_fall_matches_the_reference_loop() -> None:
+    # the vectorized fall scan (run-length trick + quiet carry) must be
+    # sample-exact against the per-sample loop it replaced, including the
+    # carry of a quiet run straddling a block boundary
+    blk = make_oerder_meyr(FAKE_GR, sps=8)
+    fall_run = 2 * 8
+    rng = np.random.default_rng(9)
+    for trial in range(200):
+        active = rng.random(int(rng.integers(1, 200))) < 0.7
+        q0 = int(rng.integers(0, fall_run))
+        i = int(rng.integers(0, active.size))
+        q, j = q0, i
+        while j < active.size:
+            q = q + 1 if not active[j] else 0
+            j += 1
+            if q >= fall_run:
+                break
+        blk._quiet = q0
+        jv = blk._scan_fall(active, i)
+        assert jv == j and blk._quiet == q, (trial, i, q0, jv, j, blk._quiet, q)
 
 
 def test_withholds_the_uncapped_tail_without_a_finality_probe() -> None:
@@ -138,10 +162,9 @@ def _bursty(
     sfo_ppm: float,
     snr: float,
     seed: int = 11,
-    lead: int = 0,
 ) -> np.ndarray:
     rng = np.random.default_rng(seed)
-    seq: list[complex] = [0j] * lead
+    seq: list[complex] = []
     for _ in range(nbursts):
         k = rng.integers(0, 4, L)
         seq.extend(np.exp(1j * np.cumsum(k) * (np.pi / 2)).tolist())
