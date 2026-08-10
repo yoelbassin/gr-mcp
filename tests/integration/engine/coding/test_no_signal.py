@@ -33,8 +33,6 @@ from e2e.ble.test_ble_offair import WHITEN as _BLE_WHITEN
 from e2e.ble.test_ble_offair import (
     _ble_modem,
 )
-from e2e.dab.test_dab_codec import _FRAME_BODY_LEN as _DAB_FRAME_LEN
-from e2e.dab.test_dab_codec import _golden_modem as _dab_golden_modem
 from e2e.dmr import _dmr
 from e2e.dmr.test_dmr_offair import _dmr_modem
 from e2e.pocsag.test_pocsag_offair import (
@@ -47,6 +45,8 @@ from e2e.pocsag.test_pocsag_offair import (
 )
 from e2e.pocsag.test_pocsag_offair import _word as _pocsag_word
 from helpers import bitops, crc, framing, rds
+from integration.engine.coding.test_dab_codec import _FRAME_BODY_LEN as _DAB_FRAME_LEN
+from integration.engine.coding.test_dab_codec import _golden_modem as _dab_golden_modem
 from integration.engine.coding.test_lora_golden import (
     _FRAME_BODY_LEN as _LORA_FRAME_LEN,
 )

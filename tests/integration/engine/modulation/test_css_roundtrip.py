@@ -328,7 +328,7 @@ def test_css_long_sync_gap_locks(tmp_path) -> None:
 @pytest.mark.xfail(
     reason="chirp_sync does not correct SFO; clock_correct owns it "
     "(see test_clock_correct_roundtrip). Pins the coverage boundary.",
-    strict=False,
+    strict=True,
 )
 @pytest.mark.parametrize("sf", [7])
 def test_css_ber0_sfo_documents_gap(sf: int, tmp_path: Path) -> None:
