@@ -20,6 +20,7 @@ from marconi.engine.compile.compiler import (
     CompiledPipeline,
     CompileError,
     compile_pipeline,
+    trace_item_type,
     trace_sink_path,
 )
 from marconi.engine.deadline import check_deadline, remaining, set_deadline
@@ -83,8 +84,9 @@ def _harvest_trace(
     for i in range(cp.gr_steps):
         conv = modem.path[i].conv
         out = cp.boundaries[i + 1]
-        it = out.item_type.value
-        path = trace_sink_path(trace_dir, i, conv, out.item_type)
+        it_enum = trace_item_type(out)
+        it = it_enum.value
+        path = trace_sink_path(trace_dir, i, conv, it_enum)
         size = path.stat().st_size if path.is_file() else 0
         rows.append(
             TraceStage(

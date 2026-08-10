@@ -53,6 +53,31 @@ def test_trace_taps_every_gr_stage_with_stats(
         assert "constant_modulus_ratio" in stats  # a "c" wire's compact summary
 
 
+def test_trace_of_symbol_index_wire_surfaces_symbols_not_bits(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # qam_demod ends at (SYMBOLS, 'b'): hard symbol indices on the u8 wire.
+    # The terminal rewrites that to an i16 symbolstream; the trace tap must
+    # match — a 'b' row would LSB-mask 0..M-1 indices into plausible fake bits
+    cap = _capture(tmp_path, monkeypatch)
+    spec = {
+        "symbol_rate": 1000.0,
+        "path": [{"conv": "agc", "mode": "power"}, {"conv": "qam_demod", "order": 16}],
+    }
+    res = run_rx_tool(spec, 8000.0, capture_path=cap, trace=True, timeout=60.0)
+    assert res["status"] == "ok"
+    stream = cast(dict[str, object], res["stream"])
+    assert stream["item_type"] == "s"  # the terminal rewrite, unchanged
+    row = cast(list[dict[str, object]], res["trace"])[-1]
+    assert row["after"] == "qam_demod[1]"
+    assert row["item_type"] == "s"
+    p = Path(cast(str, row["path"]))
+    assert p.suffix == ".i16"
+    symbols = np.fromfile(p, np.int16)
+    assert symbols.size == cast(int, row["items"]) == cast(int, stream["items"])
+    assert symbols.min() >= 0 and symbols.max() < 16
+
+
 def test_trace_absent_by_default(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

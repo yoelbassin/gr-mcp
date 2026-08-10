@@ -442,6 +442,8 @@ GR_BLOCKS: dict[str, Callable[[_GrCtx, Params], Any]] = {
     "complex_to_mag": lambda c, p: c.blocks.complex_to_mag(_as_int(p.get("vlen", 1))),
     "dc_blocker_ff": lambda c, p: c.gr_filter.dc_blocker_ff(_as_int(p["d"]), True),
     "hilbert_fc": lambda c, p: c.gr_filter.hilbert_fc(_as_int(p["ntaps"])),
+    "uchar_to_float": lambda c, p: c.blocks.uchar_to_float(),
+    "float_to_short": lambda c, p: c.blocks.float_to_short(1, _as_float(p["scale"])),
     "multiply_const_ff": lambda c, p: c.blocks.multiply_const_ff(_as_float(p["value"])),
     "add_const_ff": lambda c, p: c.blocks.add_const_ff(_as_float(p["value"])),
     "float_to_complex": lambda c, p: c.blocks.float_to_complex(1),

@@ -19,6 +19,7 @@ from marconi.engine.stages.base import (
 from marconi.engine.stages.conditioning import agc_modes_for
 from marconi.engine.types.descriptor import Amplitude, Descriptor
 from marconi.engine.types.enums import ItemType
+from marconi.engine.types.levels import Level
 from marconi.engine.types.models import Modem, ValidationIssue
 from marconi.engine.types.params import ParamValue
 from marconi.engine.types.step import Step, stage_label
@@ -50,12 +51,23 @@ _TRACE_SUFFIX: dict[ItemType, str] = {
 }
 
 
+def trace_item_type(desc: Descriptor) -> ItemType:
+    """The item type a boundary's trace sidecar carries. Hard symbol indices
+    ride the u8 wire (a qam-class demod boundary): their tap converts to i16
+    symbols — a 'b' sidecar would invite bitwise parsing of symbol indices,
+    the trap the terminal (SYMBOLS, 'b') rewrite exists to close."""
+    if desc.item_type is ItemType.B and desc.level is Level.SYMBOLS:
+        return ItemType.S
+    return desc.item_type
+
+
 def trace_sink_path(
     trace_dir: Path, index: int, conv: str, item_type: ItemType
 ) -> Path:
-    """Where the trace tap for GR stage `index` (named `conv`, item_type per its
-    output boundary) writes. Shared by the compiler that emits the tap and the
-    runner that harvests it, so the two never disagree on the filename."""
+    """Where the trace tap for GR stage `index` (named `conv`, item_type per
+    trace_item_type of its output boundary) writes. Shared by the compiler that
+    emits the tap and the runner that harvests it, so the two never disagree on
+    the filename."""
     return trace_dir / f"stage_{index}_{conv}{_TRACE_SUFFIX[item_type]}"
 
 
@@ -255,11 +267,20 @@ def _emit_gr_segment(
                 soft_tail = ctx.tail
             if trace_dir is not None and ctx.tail is not None:
                 out = boundaries[i + 1]
+                trace_it = trace_item_type(out)
+                tail = ctx.tail
+                if trace_it is not out.item_type:
+                    # exact uchar->i16 (char_to_short scales by 256)
+                    to_f = ctx.add("uchar_to_float")
+                    ctx.connect(tail, to_f)
+                    to_s = ctx.add("float_to_short", scale=1.0)
+                    ctx.connect(to_f, to_s)
+                    tail = to_s
                 tap = ctx.add(
-                    _sink_kind(out),
-                    path=str(trace_sink_path(trace_dir, i, step.conv, out.item_type)),
+                    _IO_BLOCKS[trace_it][1],
+                    path=str(trace_sink_path(trace_dir, i, step.conv, trace_it)),
                 )
-                ctx.connect(ctx.tail, tap)
+                ctx.connect(tail, tap)
         ctx.descriptor = boundaries[n]
         ctx.rate = rates[n]
         ctx.chain(_sink_kind(boundaries[n]), **dict(sink_io))
