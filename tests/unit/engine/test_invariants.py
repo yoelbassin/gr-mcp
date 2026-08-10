@@ -12,7 +12,6 @@ VOCAB = [
     Path("src/marconi/errors.py"),
     Path("src/marconi/engine/coding/primitives.py"),
     Path("src/marconi/engine/io/bitfile.py"),
-    Path("src/marconi/engine/io/specs.py"),
     Path("src/marconi/engine/stages/base.py"),
     Path("src/marconi/engine/types/descriptor.py"),
     Path("src/marconi/engine/types/levels.py"),
@@ -71,7 +70,7 @@ def test_vocabulary_imports_without_gnuradio_or_fastmcp() -> None:
         "import marconi.engine.types.levels, marconi.engine.types.descriptor\n"
         "import marconi.engine.stages.base\n"
         "import marconi.engine.types.models, marconi.engine.types.params\n"
-        "import marconi.engine.io.specs, marconi.errors\n"
+        "import marconi.engine.io.bitfile, marconi.errors\n"
         "print('ok')\n"
     )
     out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
