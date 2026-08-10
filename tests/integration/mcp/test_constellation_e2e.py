@@ -17,7 +17,7 @@ _QPSK_TX = {
     "symbol_rate": _RATE,
     "path": [{"conv": "psk_demod", "order": 4}, {"conv": "psk_demap", "order": 4}],
 }
-# bare demod-only path: lands on complex soft symbols (item_type "c", Task 4);
+# bare demod-only path: lands on complex soft symbols (item_type "c");
 # psk_demod requires normalized amplitude, hence the leading agc
 _QPSK_RX = {
     "symbol_rate": _RATE,

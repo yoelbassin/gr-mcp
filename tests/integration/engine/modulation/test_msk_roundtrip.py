@@ -18,8 +18,8 @@ from marconi.engine.types.models import Modem
 IQ = Descriptor(Level.IQ, ItemType.C)
 _SR, _SYM = 20.0, 1.0  # sps 20 = the ACARS operating point
 
-# fractional 2.5/48000 cycles/sample -- half the +-5 Hz Gate-B CFO bound
-# measured on the real capture at 48 kHz (task-2 report Sec6; same fraction
+# fractional 2.5/48000 cycles/sample -- half the +-5 Hz CFO bound
+# measured on the real capture at 48 kHz (same fraction
 # test_msk_block.py pins as _CFO_PINNED), rescaled to this test's _SR=20.0.
 _CFO_HZ_PINNED = 2.5 / 48000.0 * _SR
 
@@ -80,7 +80,7 @@ def test_msk_roundtrip_survives_impairments(tmp_path: Path) -> None:
     clean, imp, op = tmp_path / "clean.iq", tmp_path / "imp.iq", tmp_path / "o.bits"
     write_bits(bp, bits)
     _run("tx", _tx_modem(), bp, clean)
-    # cfo bound from the Task-2 measured tracking range. msk_demod's bit clock
+    # cfo bound from the measured tracking range. msk_demod's bit clock
     # free-runs at the nominal baud (embedded/msk.py: the DECOUPLED path) with
     # no active SFO tracking, only sub-sample polyphase timing; empirically
     # BER stays 0 up to ~350ppm drift over this 2048-bit/sps=20 burst, so

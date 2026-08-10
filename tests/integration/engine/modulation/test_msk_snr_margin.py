@@ -1,7 +1,7 @@
 """First SNR-margin guard in the suite (issues 22/05): the coherent msk RX
 holds BER-0 at an AWGN SNR where the non-coherent fsk RX measurably fails.
 
-_SNR_DB pinned from a 7x5 sweep (see plan 2026-07-10, Task 5) over
+_SNR_DB pinned from a 7x5 sweep over
 S in {28,26,24,22,20,18,16} dB x seeds {0..4}, both paths matched at
 deviation = symbol_rate/4 (h=0.5). The brief's originally-suggested sweep
 range (2-14 dB) was calibrated for a wider FSK deviation elsewhere in the

@@ -119,7 +119,7 @@ _RECIPES: dict[str, dict[str, object]] = {
         # order 16: the matrix's claim is GAIN-invariance, which order 16 shows
         # cleanly. Order 64's ring spacing entangles the documented power-mode
         # startup fragility (a window-robustness issue, not a gain issue) — its
-        # SER-0 is already proven by the round-trip in Task 6.
+        # SER-0 is already proven by the round-trip suite.
         # window_symbols=8: empirically SER-0 across this matrix's static gains
         # AND the slow-fade condition at this file's fixed STO/seed (128, the
         # value tuned for test_qam_roundtrip.py's own impairments, leaves a

@@ -138,6 +138,12 @@ class DqpskSoftDemap(RxStage[CompileContext, DqpskSoftDemapStep]):
         return int(step.order)
 
 
+# cp_symbol_sync's calibrated lock threshold (CP-correlation ratio): measured
+# noise ~1.3-1.6, real lock >= 2.0. quality.py derives its permille fallback
+# from this constant.
+LOCK_MIN_RATIO_DEFAULT = 2.0
+
+
 class OfdmCoherentSyncStep(Step):
     conv: Literal["ofdm_coherent_sync"] = "ofdm_coherent_sync"
     fft_len: StrictInt
@@ -155,7 +161,7 @@ class OfdmCoherentSyncStep(Step):
     fp_carriers: list[int]
     fp_i: list[float]
     fp_q: list[float]
-    lock_min_ratio: float = Field(default=2.0, ge=0.0)
+    lock_min_ratio: float = Field(default=LOCK_MIN_RATIO_DEFAULT, ge=0.0)
     lock_min_score: float = Field(default=0.35, ge=0.0)
 
     @model_validator(mode="after")

@@ -4,7 +4,7 @@ import cmath
 import math
 from typing import Any, Literal
 
-from pydantic import StrictInt, model_validator
+from pydantic import Field, StrictInt, model_validator
 from pydantic_core import PydanticCustomError
 
 from marconi.engine.compile.compile_context import CompileContext
@@ -113,9 +113,14 @@ class PreambleSync(DuplexStage[CompileContext, PreambleSyncStep]):
 
 class FllStep(Step):
     conv: Literal["fll"] = "fll"
-    # Must match the pulse shaping the transmitter used: the band-edge filters
-    # are built from the excess bandwidth, so a wrong rolloff mistunes them.
-    rolloff: float = 0.35
+    rolloff: float = Field(
+        default=0.35,
+        description=(
+            "Excess-bandwidth factor; must match the transmitter's pulse "
+            "shaping — the band-edge filters are built from it, so a wrong "
+            "rolloff mistunes them."
+        ),
+    )
     filter_size: StrictInt = 44
     loop_bw: float = 0.03
 

@@ -94,7 +94,7 @@ def _forward_pass(
 
 # Relative tolerance on a stage's required input rate. Comfortably admits
 # clock_correct's ppm-scale rate shift (~5e-5 at 50 ppm) while catching the gross
-# resample-ratio mistakes issue 06 is about (forgotten/swapped/off-by-one ratios,
+# resample-ratio mistakes (forgotten/swapped/off-by-one ratios,
 # all >=2%) — the silent-garbage class the fixed-window dechirp cannot self-detect.
 _RATE_TOL = 0.02
 

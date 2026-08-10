@@ -121,7 +121,7 @@ def make_ofdm_frame_sync(
             # flushes the final frame at EOF; the base advances (and the buffer
             # trims) only behind a forward null window (frame_len + max_corr).
             # A naive trim that ignored the forward window dropped all but the
-            # first few frames of a real multi-frame capture (issue 18).
+            # first few frames of a real multi-frame capture.
             while self._base is not None:
                 if not self._emitted:
                     if self._base + usefuls_len > self._buf.size:

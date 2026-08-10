@@ -35,13 +35,6 @@ class OokEnvelopeStep(Step):
 
 
 class OokEnvelope(DuplexStage[CompileContext, OokEnvelopeStep]):
-    """Non-coherent OOK envelope, IQ<->SYMBOLS. RX: magnitude, then either a
-    per-burst open-loop sampler followed by centring to +/-1 (loop_bw=0) or
-    centring to +/-1 followed by closed-loop Gardner symbol timing (loop_bw>0)
-    - one soft float per symbol either way, CFO-immune by construction. TX:
-    invert the centring, upsample, embed as the real part. Pairs with the
-    general Slice for the SYMBOLS<->BITS decision."""
-
     name = "ook_envelope"
     description = (
         "Non-coherent OOK/PPM envelope demod, IQ<->SYMBOLS, whose amplitude "
@@ -68,18 +61,9 @@ class OokEnvelope(DuplexStage[CompileContext, OokEnvelopeStep]):
     def accepts_amplitude_for(
         self, step: OokEnvelopeStep
     ) -> frozenset[Amplitude] | None:
-        # open-loop (loop_bw=0) routes through burst_sampler, which
-        # normalizes every emitted chip itself - scale-invariant input,
-        # unlike the closed-loop Gardner path which still needs the class
-        # default (a fixed slicing threshold against an un-normalized
-        # envelope is meaningless)
         return None if step.loop_bw == 0.0 else self.accepts_amplitude
 
     def min_input_sps_for(self, step: OokEnvelopeStep) -> float | None:
-        # open-loop (loop_bw=0) routes through burst_sampler, which
-        # re-acquires its sampling phase per burst instead of running a
-        # continuous timing loop - well-formed down to native sps=1 (the
-        # closed-loop Gardner path below still needs the class default 2.0)
         return 1.0 if step.loop_bw == 0.0 else self.min_input_sps
 
     def emit_rx(self, b: CompileContext, step: OokEnvelopeStep) -> None:

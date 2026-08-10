@@ -36,7 +36,7 @@ class CompileContext:
 
     def sps_int(self) -> int:
         """sps as an exact integer for TX interpolation/repeat factors. Raises
-        rather than silently rounding an off-grid rate pair (issue 10)."""
+        rather than silently rounding an off-grid rate pair."""
         sps = self.sps
         if abs(sps - round(sps)) > 1e-9:
             raise SampleRateError(

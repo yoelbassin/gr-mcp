@@ -10,6 +10,7 @@ import numpy.typing as npt
 from pydantic import BaseModel
 
 from marconi.engine.backends.base import BlockCensus, Diagnostic
+from marconi.engine.modulation.ofdm.stages import LOCK_MIN_RATIO_DEFAULT
 from marconi.engine.stages.base import Stage
 from marconi.levels import fit_levels
 
@@ -106,9 +107,8 @@ def _word_excess_significant(valid: int, total: int, chance: float) -> bool:
 
 
 # Fallback when a lock diagnostic arrives without its block's configured
-# threshold; matches cp_symbol_sync's calibrated default (noise ~1300-1600
-# permille, real lock >= 2000).
-_LOCK_MIN_FALLBACK_PERMILLE = 2000
+# threshold.
+_LOCK_MIN_FALLBACK_PERMILLE = int(1000 * LOCK_MIN_RATIO_DEFAULT)
 
 
 def _sync_assessment(found: int, expected: float) -> Assessment | None:
@@ -321,7 +321,7 @@ _SOFT_SAMPLE_ITEMS = 65536
 # end: several real inter-burst noise gaps all read order=2, separation
 # 2.51-2.78; the capture's real bursts all read order=4, separation
 # 5.07-8.12 -- a clean, non-overlapping gap between real noise and real
-# signal. Task 1's synthetic fixtures corroborate at the extremes (unimodal
+# signal. The synthetic fixtures corroborate at the extremes (unimodal
 # blob ~2.7-3.6, clean synthetic 4-level ~25-40) but say nothing about where
 # a REAL demodulated signal lands: the prior 8.0 bar was calibrated against
 # synthetics alone and sat above every real burst measured, rejecting all of

@@ -1,4 +1,4 @@
-"""DMR BPTC(196,96) as caller data for the composition proof (Task 4), now
+"""DMR BPTC(196,96) as caller data for the composition proof, now
 driven through the product coding engine (a coding-only Modem over
 run_rx) instead of calling the plain-function bptc_generic in _dmr.py
 directly. Every DMR value here -- deinterleave/transpose/extract perms,

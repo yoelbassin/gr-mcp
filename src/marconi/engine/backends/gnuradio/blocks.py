@@ -294,8 +294,8 @@ GR_BLOCKS: dict[str, Callable[[_GrCtx, Params], Any]] = {
     "soft_bits_file_sink": lambda c, p: c.blocks.file_sink(
         c.gr.sizeof_float, str(p["path"]), False
     ),
-    # symbols are hard integer symbol indices (int16); exercised by a later
-    # symbol-terminating vertical (CSS). Present here for _IO_BLOCKS coherence.
+    # symbols are hard integer symbol indices (int16) — the wire type of the
+    # symbol-terminating verticals (CSS peak_decision, m_slice)
     "symbols_file_sink": lambda c, p: c.blocks.file_sink(
         c.gr.sizeof_short, str(p["path"]), False
     ),

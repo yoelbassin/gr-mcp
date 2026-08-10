@@ -79,7 +79,7 @@ class Stage(ABC, Generic[B, S]):
     # is NOT tagged (its only flip is a spectrally mirrored capture -> invert).
     polarity_ambiguous: bool = False
 
-    # Seam invariant (issue 06): the wire item_type / decision-carrier a stage
+    # Seam invariant: the wire item_type / decision-carrier a stage
     # accepts on input. The phy compiler checks them against the upstream
     # descriptor, so an ill-typed composition (e.g. hard bits into a soft-LLR
     # consumer) fails at compile, not in the worker. None = polymorphic. The rule
@@ -128,7 +128,7 @@ class Stage(ABC, Generic[B, S]):
         compiler checks it against the rate it computed for this stage's input
         boundary (within a tolerance that admits ppm-scale clock correction), so
         a wrong resample ratio fails at compile instead of decoding garbage with
-        no diagnostics (issue 06)."""
+        no diagnostics."""
         return None
 
     def required_input_order(self, step: S) -> int | None:
@@ -149,14 +149,10 @@ class Stage(ABC, Generic[B, S]):
         return self.accepts_amplitude
 
     def min_input_sps_for(self, step: S) -> float | None:
-        """The minimum samples-per-symbol this step config's timing recovery
-        needs, or None if it does not recover symbol timing for it - defaults
-        to the class-level min_input_sps. Override when a stage's requirement
-        varies by its own step (e.g. an alternate RX path that re-acquires
-        timing per burst instead of running one continuous loop, so the sps
-        floor drops). The compiler consults this method, never the bare
-        attribute, so a step-conditional requirement is expressed in one
-        place."""
+        """Like accepts_amplitude_for, for the samples-per-symbol floor:
+        defaults to the class-level min_input_sps; override when the floor
+        varies by step (e.g. a path that re-acquires timing per burst instead
+        of running one continuous loop)."""
         return self.min_input_sps
 
     def validate_input(self, in_desc: Descriptor, step: S) -> str | None:

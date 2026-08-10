@@ -12,7 +12,7 @@ sub-sample timing. Coherent detection of a raw (non-precoded) MSK signal
 recovers the payload differentially-encoded (NRZI) — the data rides in the
 ±90°/bit phase step; the per-link differential decode is a bits-layer concern,
 so this block stays protocol-agnostic and emits the rail decisions directly.
-Constants are pinned from the task-1/2 validated reference detector.
+Constants are pinned from the validated reference detector.
 """
 
 from __future__ import annotations
@@ -32,8 +32,8 @@ from marconi.engine.backends.gnuradio.embedded.lifecycle import OutQueue, foreca
 _MF_OVERSAMPLE = 12
 
 # The decision-directed carrier loop needs BOTH a loop gain (loop_bw) and a
-# leaky-integrator pole (loop_pole); defaults from the reference detector (Gate-B
-# validated in task-2). freq_corr = pole·freq_corr + (1−pole)·gain·err
+# leaky-integrator pole (loop_pole); defaults from the validated reference
+# detector. freq_corr = pole·freq_corr + (1−pole)·gain·err
 _LOOP_POLE = 0.52
 _NORM_EPS = 1e-8
 
@@ -109,7 +109,7 @@ def make_msk_demod(
     composition (matched filter + delay-and-multiply differential detection),
     and within ~1-2 dB of the coherent-BPSK bound; stock GR 3.10 has no coherent
     MSK/OQPSK receiver, so this custom block is the only path to that gain
-    (issue 22, guarded by
+    (guarded by
     tests/integration/engine/modulation/test_msk_snr_margin.py). One soft float
     per symbol, sign = bit."""
 

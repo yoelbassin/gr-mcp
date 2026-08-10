@@ -73,7 +73,7 @@ class PipelineResult(BaseModel):
         return find_diagnostic(self.diagnostics, block, key)
 
 
-_TRACE_ITEM_BYTES: dict[str, int] = {"c": 8, "f": 4, "s": 2, "b": 1}
+_ITEM_BYTES: dict[str, int] = {"c": 8, "f": 4, "s": 2, "b": 1}
 
 
 def _harvest_trace(
@@ -93,7 +93,7 @@ def _harvest_trace(
                 item_type=it,
                 sample_rate=cp.rates[i + 1],
                 path=str(path),
-                items=size // _TRACE_ITEM_BYTES[it],
+                items=size // _ITEM_BYTES[it],
             )
         )
     return rows
@@ -162,7 +162,7 @@ def _wrap_gr_only(
             diagnostics=diagnostics,
         )
     if cp.final.item_type == "c":
-        num = int(path.stat().st_size // 8)  # complex64 = 8 bytes
+        num = int(path.stat().st_size // _ITEM_BYTES["c"])
         return PipelineResult(
             status="ok",
             symbolstream=Symbolstream(

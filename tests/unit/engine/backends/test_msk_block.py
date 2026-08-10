@@ -16,8 +16,8 @@ from marconi.engine.backends.gnuradio.embedded.msk import (
 
 _SPS = 20
 
-# cycles/sample = 2.5 Hz at 48 kHz, half the ±5 Hz Gate-B CFO bound measured on
-# the real capture (task-2 report §6: ±5 Hz PASS, ±7 Hz FAIL). sps=20 pins the
+# cycles/sample = 2.5 Hz at 48 kHz, half the ±5 Hz CFO bound measured on the
+# real capture (±5 Hz PASS, ±7 Hz FAIL). sps=20 pins the
 # implied rate at baud·sps = 2400·20 = 48 kHz.
 _CFO_PINNED = 2.5 / 48000.0
 
@@ -67,7 +67,7 @@ def test_clean_msk_ber0_across_chunk_sizes(sps: float) -> None:
 
 @pytest.mark.parametrize("sps", [10, _SPS])  # both media track the pinned CFO
 def test_small_cfo_tracked(sps: int) -> None:
-    # tolerance bound pinned from the Task-2 report's measured CFO range
+    # tolerance bound pinned from the measured CFO range
     rng = np.random.default_rng(1)
     bits = rng.integers(0, 2, 4096).astype(np.uint8)
     sig = _msk_iq(bits, sps, cfo_cycles=_CFO_PINNED)  # cycles/sample; PIN

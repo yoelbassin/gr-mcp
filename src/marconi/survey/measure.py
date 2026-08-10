@@ -254,9 +254,7 @@ _SURVEY_COMB_DAMPING = 0.05
 _EYE_MIN_SYMBOLS = 64
 _EYE_MAX_SYMBOLS = 2000
 _EYE_PHASE_STEPS = 8
-_CLEAR_EYE = (
-    8.0  # measured in Task 1: unimodal / wrong-rate smear tops out ~3.6; a real eye ~25
-)
+_CLEAR_EYE = 8.0  # measured: unimodal / wrong-rate smear tops out ~3.6; a real eye ~25
 _HARMONIC_FRAC = 0.6
 
 

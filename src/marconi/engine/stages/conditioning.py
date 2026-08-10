@@ -17,11 +17,16 @@ from marconi.engine.types.step import Step
 
 class ChannelizeStep(Step):
     conv: Literal["channelize"] = "channelize"
-    decim: (
-        StrictInt  # required & explicit: rate_factor (1/decim) must be params-derivable
+    decim: StrictInt = Field(
+        description="Integer decimation factor; output rate = input rate / decim."
     )
-    bandwidth_hz: float  # required: signal bandwidth -> LPF cutoff/transition
-    center_hz: float = 0.0  # offset of the sub-band from the capture centre
+    bandwidth_hz: float = Field(
+        description="Signal bandwidth in Hz — sets the low-pass cutoff/transition."
+    )
+    center_hz: float = Field(
+        default=0.0,
+        description="Offset of the wanted sub-band from the capture centre, in Hz.",
+    )
 
     @model_validator(mode="after")
     def _ok(self) -> "ChannelizeStep":
@@ -95,9 +100,6 @@ class Translate(RxStage[CompileContext, TranslateStep]):
 
 
 class Invert(RxStage[CompileContext, InvertStep]):
-    """Spectral conjugate (un-mirror a flipped capture, e.g. SDR# .wav). RX-only,
-    IQ->IQ, rate unchanged."""
-
     name = "invert"
     from_level = Level.IQ
     to_level = Level.IQ
@@ -187,8 +189,9 @@ class AgcStep(Step):
             "Feedforward/power normalization window, in symbols. For bursty "
             "signals it must exceed the burst-repetition scale (e.g. 1024): "
             "small windows normalize noise-only stretches to full scale, "
-            "erasing the on/off contrast a downstream slicer needs (measured: "
-            "ones-fraction 0.335 vs 0.018 on live 1090 MHz). For bursty/pulsed "
+            "erasing the on/off contrast a downstream slicer needs (measured "
+            "on a live impulsive-RFI capture: ones-fraction 0.335 vs 0.018). "
+            "For bursty/pulsed "
             "OOK specifically, prefer ook_envelope(loop_bw=0), which detects and "
             "normalizes each burst internally and needs no agc; the large-window "
             "guidance here applies when an agc IS used (continuous signals / "
@@ -437,9 +440,6 @@ class AmStep(Step):
 
 
 class Am(RxStage[CompileContext, AmStep]):
-    """AM envelope to audio: stock complex_to_mag + dc_blocker. RX-only, IQ->AUDIO,
-    rate unchanged."""
-
     name = "am"
     from_level = Level.IQ
     to_level = Level.AUDIO
@@ -467,10 +467,6 @@ class FmDemodStep(Step):
 
 
 class FmDemod(RxStage[CompileContext, FmDemodStep]):
-    """FM discriminator to audio: stock quadrature_demod scaled so +-deviation
-    maps to +-1.0, then dc_blocker (carrier frequency error rides the
-    discriminator output as DC). RX-only, IQ->AUDIO, rate unchanged."""
-
     name = "fm_demod"
     from_level = Level.IQ
     to_level = Level.AUDIO
@@ -497,9 +493,6 @@ class AnalyticStep(Step):
 
 
 class Analytic(RxStage[CompileContext, AnalyticStep]):
-    """Real audio to its analytic signal (stock hilbert_fc) so IQ demods compose
-    downstream. RX-only, AUDIO->IQ, rate unchanged."""
-
     name = "analytic"
     from_level = Level.AUDIO
     to_level = Level.IQ
