@@ -96,6 +96,32 @@ def test_sync_symbols_stage_registered() -> None:
     assert "sync_symbols" in stage_registry()
 
 
+def test_sync_symbols_pattern_alphabet_is_validated() -> None:
+    # the pattern alphabet is {-1 match-negative, 0 wildcard, +1
+    # match-positive}: an M-ary or bit-style value outside it would quietly
+    # change the match arithmetic
+    from marconi.engine.coding.stages_symbols import SyncSymbolsStep
+
+    with pytest.raises(ValidationError, match="wildcard"):
+        SyncSymbolsStep(pattern=[2, 1, -1])
+    with pytest.raises(ValidationError, match="wildcard"):
+        SyncSymbolsStep(pattern=[0, 0, 0])
+    assert SyncSymbolsStep(pattern=[1, 0, -1]).pattern == [1, 0, -1]
+
+
+def test_sync_symbols_short_input_finds_nothing_not_entry_marks() -> None:
+    # an input shorter than the pattern means the search found nothing;
+    # passing the incoming burst marks through would let downstream stages
+    # treat burst boundaries as sync positions
+    c = CodingCarrier(
+        bits=np.zeros(0, np.uint8),
+        symbols=np.array([1.0, -1.0], np.float32),
+        marks=(0, 5),
+    )
+    out = sync_symbols_rx(c, pattern=[1, -1, 1, -1, 1], max_errors=0, pre_symbols=0)
+    assert out.marks == ()
+
+
 # --- normalize_rx (ported from tests/bits/test_normalize.py) ---
 
 

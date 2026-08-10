@@ -12,7 +12,9 @@ def sync_symbols_rx(
 ) -> CodingCarrier:
     sym = c.symbols
     if sym is None or sym.size < len(pattern):
-        return c
+        # the search found nothing — entry burst marks must not leak through
+        # as sync positions
+        return replace(c, marks=())
     pat = np.asarray(pattern, np.int64)
     want = pat != 0
     n_care = int(want.sum())

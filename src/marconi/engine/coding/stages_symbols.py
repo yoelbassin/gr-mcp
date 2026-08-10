@@ -18,9 +18,31 @@ from marconi.engine.types.step import Step
 
 class SyncSymbolsStep(Step):
     conv: Literal["sync_symbols"] = "sync_symbols"
-    pattern: list[int]
+    pattern: list[int] = Field(
+        description=(
+            "Sign pattern matched against the soft symbols: +1 requires a "
+            "positive symbol, -1 a negative one, 0 is a wildcard (don't "
+            "care). NOT a 0/1 bit string — encode bits as +-1 first, or "
+            "every 0 becomes a wildcard and the correlator over-matches."
+        )
+    )
     max_errors: StrictInt = 0
     pre_symbols: StrictInt = 0
+
+    @model_validator(mode="after")
+    def _sign_alphabet(self) -> "SyncSymbolsStep":
+        if any(x not in (-1, 0, 1) for x in self.pattern):
+            raise PydanticCustomError(
+                "value_error",
+                "pattern entries must be -1 (match negative), 0 (wildcard), "
+                "or +1 (match positive)",
+            )
+        if not any(self.pattern):
+            raise PydanticCustomError(
+                "value_error",
+                "pattern needs at least one non-wildcard (+-1) entry",
+            )
+        return self
 
 
 class SyncSymbols(CodingStage[SyncSymbolsStep]):
