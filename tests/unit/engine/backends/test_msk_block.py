@@ -208,3 +208,23 @@ def test_burst_between_noise_keeps_lock(sps: int) -> None:
     guard = 8
     core = bits[guard:-guard]
     assert _best_ber(out, core) == 0.0
+
+
+def test_scalar_and_vectorized_media_agree(monkeypatch: pytest.MonkeyPatch) -> None:
+    # the two _process media implement ONE decision-feedback loop (msk.py
+    # documents the twin); a change landing in only one must fail here
+    from marconi.engine.backends.gnuradio.embedded import msk as msk_mod
+
+    rng = np.random.default_rng(3)
+    bits = rng.integers(0, 2, 2048).astype(np.uint8)
+    sig = _msk_iq(bits, _SPS, cfo_cycles=_CFO_PINNED)
+    vec = drive(
+        make_msk_demod(FAKE_GR, sps=float(_SPS)), sig, chunk=997, out_dtype=np.float32
+    )
+    monkeypatch.setattr(msk_mod, "_VECTOR_SPS_MIN", 1e9)
+    scal = drive(
+        make_msk_demod(FAKE_GR, sps=float(_SPS)), sig, chunk=997, out_dtype=np.float32
+    )
+    assert vec.size == scal.size
+    assert np.array_equal(_hard(vec), _hard(scal))
+    np.testing.assert_allclose(vec, scal, rtol=1e-4, atol=1e-5)

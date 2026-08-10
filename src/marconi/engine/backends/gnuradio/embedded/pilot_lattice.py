@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
@@ -10,7 +12,56 @@ from marconi.engine.backends.gnuradio.embedded.lifecycle import OutQueue, foreca
 _LOCK_MIN_SCORE = 0.35  # calibrated: synthetic lattice locks ~0.9, noise ~0.1
 
 
-def _pilot_period(pilot_sets: list[frozenset[int]], n_frame_syms: int) -> int:
+@dataclass(frozen=True)
+class PilotLattice:
+    """Per-frame-symbol scattered-pilot maps plus the frequency pilots.
+    from_flat is the one decoder of the flat ParamValue wire form (parallel
+    index-coupled lists) — no other module may reassemble it."""
+
+    pilot_sets: tuple[frozenset[int], ...]
+    pilot_vals: tuple[dict[int, complex], ...]
+    fp_carriers: tuple[int, ...]
+    fp_vals: tuple[complex, ...]
+
+    @classmethod
+    def from_flat(
+        cls,
+        *,
+        pilot_lens: Sequence[int],
+        pilot_carriers: Sequence[int],
+        pilot_i: Sequence[float],
+        pilot_q: Sequence[float],
+        fp_carriers: Sequence[int],
+        fp_i: Sequence[float],
+        fp_q: Sequence[float],
+    ) -> "PilotLattice":
+        n = sum(pilot_lens)
+        if not len(pilot_carriers) == len(pilot_i) == len(pilot_q) == n:
+            raise ValueError("pilot arrays must match sum(pilot_lens)")
+        if not len(fp_carriers) == len(fp_i) == len(fp_q):
+            raise ValueError("fp arrays must be equal length")
+        sets: list[frozenset[int]] = []
+        vals: list[dict[int, complex]] = []
+        off = 0
+        for length in pilot_lens:
+            ks = [int(k) for k in pilot_carriers[off : off + length]]
+            vals.append(
+                {
+                    ks[j]: complex(pilot_i[off + j], pilot_q[off + j])
+                    for j in range(length)
+                }
+            )
+            sets.append(frozenset(ks))
+            off += length
+        return cls(
+            pilot_sets=tuple(sets),
+            pilot_vals=tuple(vals),
+            fp_carriers=tuple(int(k) for k in fp_carriers),
+            fp_vals=tuple(complex(i, q) for i, q in zip(fp_i, fp_q)),
+        )
+
+
+def _pilot_period(pilot_sets: Sequence[frozenset[int]], n_frame_syms: int) -> int:
     for gap in range(1, n_frame_syms):
         if all(
             pilot_sets[(fs + gap) % n_frame_syms] == pilot_sets[fs]
@@ -29,13 +80,7 @@ def make_pilot_lattice_equalizer(
     kmin: int,
     dc_search: int,
     warmup_syms: int,
-    pilot_lens: list[int],
-    pilot_carriers: list[int],
-    pilot_i: list[float],
-    pilot_q: list[float],
-    fp_carriers: list[int],
-    fp_i: list[float],
-    fp_q: list[float],
+    lattice: PilotLattice,
     lock_min_score: float = _LOCK_MIN_SCORE,
 ) -> Any:
     if not kmin <= 0 <= kmin + n_carriers:
@@ -44,18 +89,10 @@ def make_pilot_lattice_equalizer(
             f"kmin={kmin}, n_carriers={n_carriers}"
         )
     dc0 = fft_len // 2
-    pilot_sets: list[frozenset[int]] = []
-    pilot_vals: list[dict[int, complex]] = []
-    off = 0
-    for length in pilot_lens:
-        ks = [int(k) for k in pilot_carriers[off : off + length]]
-        vals = {
-            ks[j]: complex(pilot_i[off + j], pilot_q[off + j]) for j in range(length)
-        }
-        pilot_sets.append(frozenset(ks))
-        pilot_vals.append(vals)
-        off += length
-    fp_vals = [complex(fp_i[j], fp_q[j]) for j in range(len(fp_carriers))]
+    pilot_sets = lattice.pilot_sets
+    pilot_vals = lattice.pilot_vals
+    fp_carriers = lattice.fp_carriers
+    fp_vals = lattice.fp_vals
     gap = _pilot_period(pilot_sets, n_frame_syms)
     union = np.array(sorted(set().union(*pilot_sets)), dtype=np.int64)
     union_index = {int(k): i for i, k in enumerate(union)}

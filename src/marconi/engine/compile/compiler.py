@@ -99,14 +99,24 @@ def _forward_pass(
 _RATE_TOL = 0.02
 
 
-def _validate_descriptors(
-    steps: Sequence[Step],
-    registry: Mapping[str, Stage[Any, Any]],
-    boundaries: Sequence[Descriptor],
-    rates: Sequence[float],
-    symbol_rate: float,
-    direction: str,
-) -> None:
+@dataclass(frozen=True)
+class _CompilePlan:
+    """The forward pass's outputs plus what produced them — the unit every
+    validation and emission pass consumes."""
+
+    steps: Sequence[Step]
+    registry: Mapping[str, Stage[Any, Any]]
+    boundaries: Sequence[Descriptor]
+    rates: Sequence[float]
+    symbol_rate: float
+    sample_rate: float
+    direction: str
+
+
+def _validate_descriptors(plan: _CompilePlan) -> None:
+    steps, registry = plan.steps, plan.registry
+    boundaries, rates = plan.boundaries, plan.rates
+    symbol_rate, direction = plan.symbol_rate, plan.direction
     for i, step in enumerate(steps):
         stage = _resolve(step, registry)
         in_desc = boundaries[i]
@@ -182,22 +192,16 @@ def _validate_descriptors(
             raise CompileError(f"stage '{step.conv}': {problem}")
 
 
-def _validate_probe_marks(
-    steps: Sequence[Step],
-    registry: Mapping[str, Stage[Any, Any]],
-    boundaries: Sequence[Descriptor],
-    rates: Sequence[float],
-    k: int,
-    direction: str,
-) -> None:
+def _validate_probe_marks(plan: _CompilePlan, k: int) -> None:
     """A probe records burst marks in item units at its own graph position; the
     engine hands them to the coding entry at the seam. If a GR stage between
     the two changes the item rate or level, the marks reach the seam in the
     wrong units and silently seed wrong windows."""
-    if direction != "rx" or k >= len(steps):
+    steps, boundaries, rates = plan.steps, plan.boundaries, plan.rates
+    if plan.direction != "rx" or k >= len(steps):
         return
     for j, step in enumerate(steps[:k]):
-        if _resolve(step, registry).family != "probe":
+        if _resolve(step, plan.registry).family != "probe":
             continue
         if boundaries[k].level is not boundaries[j + 1].level or (
             rates[k] != rates[j + 1]
@@ -225,24 +229,21 @@ def _validate(
 
 
 def _emit_gr_segment(
-    steps: Sequence[Step],
-    registry: Mapping[str, Stage[Any, Any]],
-    boundaries: Sequence[Descriptor],
-    rates: Sequence[float],
-    symbol_rate: float,
-    direction: str,
-    sample_rate: float,
-    start: Descriptor,
+    plan: _CompilePlan,
+    k: int,
+    *,
     source_io: Mapping[str, ParamValue],
     sink_io: Mapping[str, ParamValue],
     name: str,
     soft_tap_path: Path | None = None,
     trace_dir: Path | None = None,
 ) -> GrPipeline:
+    steps = plan.steps[:k]
+    registry, boundaries, rates = plan.registry, plan.boundaries, plan.rates
     n = len(steps)
-    ctx = CompileContext(start, sample_rate, symbol_rate)
+    ctx = CompileContext(boundaries[0], plan.sample_rate, plan.symbol_rate)
 
-    if direction == "rx":
+    if plan.direction == "rx":
         ctx.chain(_source_kind(boundaries[0]), **dict(source_io))
         soft_tail: str | None = None
         for i, step in enumerate(steps):
@@ -262,9 +263,6 @@ def _emit_gr_segment(
         ctx.descriptor = boundaries[n]
         ctx.rate = rates[n]
         ctx.chain(_sink_kind(boundaries[n]), **dict(sink_io))
-        # Quality tap: a bits-final path hard-slices a soft demod, so its final
-        # sink carries no decision confidence. Tap the last soft-symbol wire to a
-        # sidecar so the run can score the demod it actually produced.
         if soft_tap_path is not None and soft_tail is not None:
             tap = ctx.add("soft_bits_file_sink", path=str(soft_tap_path))
             ctx.connect(soft_tail, tap)
@@ -280,7 +278,21 @@ def _emit_gr_segment(
         ctx.rate = rates[0]
         ctx.chain(_sink_kind(boundaries[0]), **dict(sink_io))
 
-    return ctx.build(name, sample_rate)
+    return ctx.build(name, plan.sample_rate)
+
+
+def _emit_coding_segment(plan: _CompilePlan, k: int) -> CodingProgram:
+    b = CodingBuilder()
+    for i in range(k, len(plan.steps)):
+        stage = _resolve(plan.steps[i], plan.registry)
+        b.label = stage_label(i, plan.steps[i].conv)
+        b.kind = plan.steps[i].conv
+        stage.emit_rx(b, plan.steps[i])
+    return CodingProgram(
+        steps=b.steps,
+        entry_level=plan.boundaries[k].level,
+        entry_item_type=plan.boundaries[k].item_type,
+    )
 
 
 def _known_engine(step: Step, registry: Mapping[str, Stage[Any, Any]]) -> str | None:
@@ -346,10 +358,17 @@ def compile_pipeline(
     k = _split_index(steps, registry, direction)
     _validate(modem, registry, start, direction)
     boundaries, rates = _forward_pass(steps, registry, start, sample_rate)
-    _validate_descriptors(
-        steps, registry, boundaries, rates, modem.symbol_rate, direction
+    plan = _CompilePlan(
+        steps=steps,
+        registry=registry,
+        boundaries=boundaries,
+        rates=rates,
+        symbol_rate=modem.symbol_rate,
+        sample_rate=sample_rate,
+        direction=direction,
     )
-    _validate_probe_marks(steps, registry, boundaries, rates, k, direction)
+    _validate_descriptors(plan)
+    _validate_probe_marks(plan, k)
     # An all-GR path that hard-slices a soft demod to bits (no coding tail) leaves
     # the demod's decision confidence unmeasurable at the final sink; tap the last
     # soft-symbol wire to a sidecar the run scores instead of reading "uncertain".
@@ -365,33 +384,17 @@ def compile_pipeline(
     gr: GrPipeline | None = None
     if k or direction == "tx" or not steps:
         gr = _emit_gr_segment(
-            steps[:k],
-            registry,
-            boundaries,
-            rates,
-            modem.symbol_rate,
-            direction,
-            sample_rate,
-            start,
-            source_io,
-            sink_io,
-            name,
-            soft_seam,
-            trace_dir,
+            plan,
+            k,
+            source_io=source_io,
+            sink_io=sink_io,
+            name=name,
+            soft_tap_path=soft_seam,
+            trace_dir=trace_dir,
         )
     coding: CodingProgram | None = None
     if k < len(steps):
-        b = CodingBuilder()
-        for i in range(k, len(steps)):
-            stage = _resolve(steps[i], registry)
-            b.label = stage_label(i, steps[i].conv)
-            b.kind = steps[i].conv
-            stage.emit_rx(b, steps[i])
-        coding = CodingProgram(
-            steps=b.steps,
-            entry_level=boundaries[k].level,
-            entry_item_type=boundaries[k].item_type,
-        )
+        coding = _emit_coding_segment(plan, k)
     return CompiledPipeline(
         gr=gr,
         coding=coding,

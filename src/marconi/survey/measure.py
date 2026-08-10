@@ -17,6 +17,8 @@ _SURVEY_NPERSEG = 4096
 # the frequency axis is a uniform ramp reconstructed from start+step, never
 # shipped as hundreds of derivable floats.
 _SPECTRUM_BINS = 64
+_SURVEY_ACTIVE_FRACTION = 0.3
+_SURVEY_BURST_WINDOW = 64
 
 
 class EnvelopeStats(BaseModel):
@@ -238,7 +240,6 @@ _SURVEY_RATE_FLOOR_BINS = 3.0
 # as rate candidates crowding the pool.
 _SURVEY_CADENCE_HUNT_RATIO = 1000.0
 _SURVEY_RATE_POOL_K = 2 * _SURVEY_RATE_K
-_SURVEY_ACTIVE_FRACTION = 0.3
 _SURVEY_FUNDAMENTAL_POOL = 20
 _SURVEY_COMB_ORDER_CAP = 20
 _SURVEY_COMB_MIN_ORDER = 2
@@ -463,25 +464,8 @@ def _symbol_rate(
 
     cand = np.concatenate([ca, cg])
     strg = np.concatenate([sa, sg]) / norm
-    # dedup at the scale a line can actually smear (its own 2%, the comb
-    # tolerance, floored at two clock bins) — a band-proportional tolerance
-    # over a wide default search swallows distinct low-frequency lines into
-    # their 2x harmonics
     tol_floor = 2.0 * max(float(dfa), float(dfg))
-    merged_f: list[float] = []
-    merged_s: list[float] = []
-    for i in np.argsort(strg)[::-1]:
-        f_ = float(cand[i])
-        if all(
-            abs(f_ - m) > max(_SURVEY_COMB_REL_TOL * m, tol_floor) for m in merged_f
-        ):
-            merged_f.append(f_)
-            merged_s.append(float(strg[i]))
-        if len(merged_f) == _SURVEY_RATE_K:
-            break
-
-    candidates = merged_f
-    strengths = merged_s
+    candidates, strengths = _merge_candidates(cand, strg, tol_floor)
     eyes = [_eye_openness(dphi, active_pairs, sample_rate, r) for r in candidates]
     candidates, strengths, eyes = _rerank_by_eye(candidates, strengths, eyes)
     return SymbolRateStats(
@@ -493,6 +477,29 @@ def _symbol_rate(
         search_hi_hz=round(hi, 1),
         clock_resolution_hz=round(float(dfa), 1),
     )
+
+
+def _merge_candidates(
+    cand: npt.NDArray[np.floating[Any]],
+    strg: npt.NDArray[np.floating[Any]],
+    tol_floor: float,
+) -> tuple[list[float], list[float]]:
+    # dedup at the scale a line can actually smear (its own 2%, the comb
+    # tolerance, floored at two clock bins) — a band-proportional tolerance
+    # over a wide default search swallows distinct low-frequency lines into
+    # their 2x harmonics
+    merged_f: list[float] = []
+    merged_s: list[float] = []
+    for i in np.argsort(strg)[::-1]:
+        f_ = float(cand[i])
+        if all(
+            abs(f_ - m) > max(_SURVEY_COMB_REL_TOL * m, tol_floor) for m in merged_f
+        ):
+            merged_f.append(f_)
+            merged_s.append(float(strg[i]))
+        if len(merged_f) == _SURVEY_RATE_K:
+            break
+    return merged_f, merged_s
 
 
 def _inst_freq(x: npt.NDArray[np.complex64], sample_rate: float) -> InstFreqStats:
@@ -555,7 +562,6 @@ def _eye_openness(
     return best
 
 
-_SURVEY_BURST_WINDOW = 64
 _SURVEY_BURST_FRACTION = 0.35
 
 

@@ -439,6 +439,62 @@ def _soft_tap(
     return None
 
 
+def _validate_entry(
+    cp: CompiledPipeline, input_stream: Bitstream | Symbolstream | None
+) -> None:
+    if cp.final.level is Level.AUDIO:
+        raise CompileError(
+            "rx pipeline ends at AUDIO; run_rx extracts symbol/bit streams — "
+            "continue the path with a demodulation stage (for audio output "
+            "use compile_modem and run the backend directly)"
+        )
+    if cp.gr is not None and input_stream is not None:
+        raise CompileError(
+            "this modem's path has a GR segment fed by source_io; "
+            "input_stream only enters a path that starts with a coding "
+            "stage"
+        )
+    if cp.gr is None and input_stream is None:
+        raise CompileError(
+            "this modem's path starts with a coding stage, so no GR "
+            "segment writes the seam file; supply input_stream"
+        )
+    if isinstance(input_stream, Bitstream) and cp.boundary.item_type != "b":
+        raise CompileError(
+            f"input_stream is a Bitstream (item_type 'b') but the entry "
+            f"boundary is item_type {cp.boundary.item_type.value!r}"
+        )
+    if isinstance(input_stream, Symbolstream):
+        if cp.boundary.item_type not in ("s", "f"):
+            raise CompileError(
+                f"input_stream is a Symbolstream (item_type "
+                f"{input_stream.item_type!r}) but the entry boundary is "
+                f"item_type {cp.boundary.item_type.value!r}"
+            )
+        if input_stream.item_type != cp.boundary.item_type:
+            raise CompileError(
+                f"input_stream item_type {input_stream.item_type!r} does "
+                "not match the entry boundary item_type "
+                f"{cp.boundary.item_type.value!r}"
+            )
+
+
+def _reject_nonfinite(
+    cp: CompiledPipeline,
+    start: Descriptor,
+    source_io: Mapping[str, ParamValue] | None,
+    input_stream: Bitstream | Symbolstream | None,
+) -> PipelineResult | None:
+    if isinstance(input_stream, Symbolstream) and input_stream.item_type == "f":
+        return _nonfinite_input(input_stream.path, "f")
+    if cp.gr is not None and source_io:
+        src_slice = SourceSlice.from_params(source_io)
+        return _nonfinite_input(
+            src_slice.path, start.item_type, src_slice.offset, src_slice.length
+        )
+    return None
+
+
 def run_rx(
     modem: Modem,
     registry: Mapping[str, Stage[Any, Any]],
@@ -470,52 +526,10 @@ def run_rx(
             quality_tap=True,
             trace_dir=trace_dir,
         )
-        if cp.final.level is Level.AUDIO:
-            raise CompileError(
-                "rx pipeline ends at AUDIO; run_rx extracts symbol/bit streams — "
-                "continue the path with a demodulation stage (for audio output "
-                "use compile_modem and run the backend directly)"
-            )
-        if cp.gr is not None and input_stream is not None:
-            raise CompileError(
-                "this modem's path has a GR segment fed by source_io; "
-                "input_stream only enters a path that starts with a coding "
-                "stage"
-            )
-        if cp.gr is None and input_stream is None:
-            raise CompileError(
-                "this modem's path starts with a coding stage, so no GR "
-                "segment writes the seam file; supply input_stream"
-            )
-        if isinstance(input_stream, Bitstream) and cp.boundary.item_type != "b":
-            raise CompileError(
-                f"input_stream is a Bitstream (item_type 'b') but the entry "
-                f"boundary is item_type {cp.boundary.item_type.value!r}"
-            )
-        if isinstance(input_stream, Symbolstream):
-            if cp.boundary.item_type not in ("s", "f"):
-                raise CompileError(
-                    f"input_stream is a Symbolstream (item_type "
-                    f"{input_stream.item_type!r}) but the entry boundary is "
-                    f"item_type {cp.boundary.item_type.value!r}"
-                )
-            if input_stream.item_type != cp.boundary.item_type:
-                raise CompileError(
-                    f"input_stream item_type {input_stream.item_type!r} does "
-                    "not match the entry boundary item_type "
-                    f"{cp.boundary.item_type.value!r}"
-                )
-        if isinstance(input_stream, Symbolstream) and input_stream.item_type == "f":
-            flagged = _nonfinite_input(input_stream.path, "f")
-            if flagged is not None:
-                return flagged
-        if cp.gr is not None and source_io:
-            src_slice = SourceSlice.from_params(source_io)
-            flagged = _nonfinite_input(
-                src_slice.path, start.item_type, src_slice.offset, src_slice.length
-            )
-            if flagged is not None:
-                return flagged
+        _validate_entry(cp, input_stream)
+        flagged = _reject_nonfinite(cp, start, source_io, input_stream)
+        if flagged is not None:
+            return flagged
         census: list[BlockCensus] = []
         diagnostics: list[Diagnostic] = []
         trace_rows: list[TraceStage] = []

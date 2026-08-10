@@ -553,15 +553,18 @@ def make_chirp_sync(
             before = self._out.drained_total
             k = self._out.drain(output_items[0])
             if k:
-                for tag in self._tagq:
-                    if before <= tag < before + k:
-                        self.add_item_tag(
-                            0,
-                            self.nitems_written(0) + (tag - before),
-                            pmt.intern("burst"),
-                            pmt.PMT_NIL,
-                        )
-                self._tagq = [t for t in self._tagq if t >= before + k]
+                self._emit_tags(before, k)
             return k
+
+        def _emit_tags(self, before: int, k: int) -> None:
+            for tag in self._tagq:
+                if before <= tag < before + k:
+                    self.add_item_tag(
+                        0,
+                        self.nitems_written(0) + (tag - before),
+                        pmt.intern("burst"),
+                        pmt.PMT_NIL,
+                    )
+            self._tagq = [t for t in self._tagq if t >= before + k]
 
     return _ChirpSync()

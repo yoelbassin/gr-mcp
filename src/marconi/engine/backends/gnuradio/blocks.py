@@ -22,6 +22,7 @@ from marconi.engine.backends.gnuradio.embedded.msk import make_msk_demod
 from marconi.engine.backends.gnuradio.embedded.oerder_meyr import make_oerder_meyr
 from marconi.engine.backends.gnuradio.embedded.ofdm import make_ofdm_frame_sync
 from marconi.engine.backends.gnuradio.embedded.pilot_lattice import (
+    PilotLattice,
     make_pilot_lattice_equalizer,
 )
 from marconi.engine.backends.gnuradio.embedded.polar import make_polar_decoder
@@ -536,13 +537,15 @@ GR_BLOCKS: dict[str, Callable[[_GrCtx, Params], Any]] = {
         kmin=_as_int(p["kmin"]),
         dc_search=_as_int(p["dc_search"]),
         warmup_syms=_as_int(p["warmup_syms"]),
-        pilot_lens=_as_int_list(p["pilot_lens"]),
-        pilot_carriers=_as_int_list(p["pilot_carriers"]),
-        pilot_i=_as_float_list(p["pilot_i"]),
-        pilot_q=_as_float_list(p["pilot_q"]),
-        fp_carriers=_as_int_list(p["fp_carriers"]),
-        fp_i=_as_float_list(p["fp_i"]),
-        fp_q=_as_float_list(p["fp_q"]),
+        lattice=PilotLattice.from_flat(
+            pilot_lens=_as_int_list(p["pilot_lens"]),
+            pilot_carriers=_as_int_list(p["pilot_carriers"]),
+            pilot_i=_as_float_list(p["pilot_i"]),
+            pilot_q=_as_float_list(p["pilot_q"]),
+            fp_carriers=_as_int_list(p["fp_carriers"]),
+            fp_i=_as_float_list(p["fp_i"]),
+            fp_q=_as_float_list(p["fp_q"]),
+        ),
         lock_min_score=_as_float(p["lock_min_score"]),
     ),
     "cp_symbol_sync": lambda c, p: make_cp_symbol_sync(

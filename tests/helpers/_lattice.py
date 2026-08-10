@@ -8,6 +8,8 @@ from typing import Any
 
 import numpy as np
 
+from marconi.engine.backends.gnuradio.embedded.pilot_lattice import PilotLattice
+
 FFT_LEN = 64
 CP_LEN = 16
 SYM_LEN = 80
@@ -66,6 +68,19 @@ def eq_params() -> dict[str, Any]:
     p = sync_params()
     for k in ("cp_len", "sym_len"):
         del p[k]
+    flat = {
+        k: p.pop(k)
+        for k in (
+            "pilot_lens",
+            "pilot_carriers",
+            "pilot_i",
+            "pilot_q",
+            "fp_carriers",
+            "fp_i",
+            "fp_q",
+        )
+    }
+    p["lattice"] = PilotLattice.from_flat(**flat)
     return p
 
 
