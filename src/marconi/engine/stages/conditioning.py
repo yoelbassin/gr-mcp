@@ -21,7 +21,13 @@ class ChannelizeStep(Step):
         description="Integer decimation factor; output rate = input rate / decim."
     )
     bandwidth_hz: float = Field(
-        description="Signal bandwidth in Hz — sets the low-pass cutoff/transition."
+        description=(
+            "Filter PASSBAND width in Hz (cutoff = bandwidth_hz/2 each side of "
+            "center_hz), not the signal's occupied bandwidth. A signal that "
+            "fills its band edge-to-edge (e.g. a chirp sweeping +/-B/2) needs "
+            "bandwidth_hz >= ~2x its occupied bandwidth, or the band edges are "
+            "clipped — a silent, progressive decode degradation, not an error."
+        )
     )
     center_hz: float = Field(
         default=0.0,
@@ -57,20 +63,12 @@ def _nyquist_problem(center_hz: float, rate: float) -> str | None:
 
 
 class Channelize(RxStage[CompileContext, ChannelizeStep]):
-    """Extract a sub-band: frequency-shift center_hz to baseband, low-pass, and
-    decimate by `decim` (one freq_xlating_fir_filter). RX-only conditioning. The
-    cutoff/transition are derived from bandwidth_hz; `decim` is explicit because
-    rate_factor (1/decim) is computed from params alone. The freq_xlating reads
-    the INPUT rate (b.rate); the compiler hands the decimated rate to downstream
-    stages via rate_factor.
-
-    NOTE: bandwidth_hz is the filter PASSBAND width (cutoff = bandwidth_hz/2), not
-    the signal's occupied bandwidth. A signal that fills its band edge-to-edge --
-    notably a CSS chirp sweeping +/-B/2 -- must be given bandwidth_hz >= ~2x its
-    bandwidth, or the band edges are clipped (for chirps: a silent, progressive
-    decode drift, not an error)."""
-
     name = "channelize"
+    description = (
+        "Extract a sub-band: frequency-shift center_hz to baseband, low-pass "
+        "to bandwidth_hz, and decimate by decim (output rate = input rate / "
+        "decim). RX-only conditioning."
+    )
     from_level = Level.IQ
     to_level = Level.IQ
     family = "conditioning"

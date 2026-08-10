@@ -67,11 +67,6 @@ def segment_rx(c: CodingCarrier, *, frame_body_len: int) -> CodingCarrier:
 def sync_word_rx(
     c: CodingCarrier, *, sync: str = "", bits: str = "", max_errors: int = 0
 ) -> CodingCarrier:
-    """Correlating window seeder: seed a window just past every position where
-    the bitstream matches the pattern (``sync`` as hex, or ``bits`` as a
-    '0'/'1' string for non-byte lengths) within ``max_errors`` bit flips (a
-    sync word is detected by correlation, not equality). Matches are taken
-    non-overlapping."""
     pat = (
         bytes_to_bits(bytes.fromhex(sync))
         if sync

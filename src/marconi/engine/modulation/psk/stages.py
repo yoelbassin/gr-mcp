@@ -66,26 +66,19 @@ SYMBOL_SYNC_OPEN_LOOP_HINT = (
 
 
 class SymbolSync(RxStage[CompileContext, SymbolSyncStep]):
-    """Symbol-timing recovery, IQ->IQ: RRC matched filter, decimating an
-    oversampled stream to one sample per symbol, followed by either a
-    closed-loop Gardner symbol_sync (loop_bw>0) or open-loop feedforward
-    (Oerder-Meyr) timing (loop_bw=0). This is psk_demod's timing half split
-    out, so a 1-sps seam opens where an equalizer (or any per-symbol
-    conditioning) can sit before carrier recovery. Unlike psk_demod -- which
-    hides its sps decimation inside the IQ->SYMBOLS level change -- this
-    stays at IQ and decimates honestly: rate_factor is 1/sps and
-    required_input_rate makes the explicit sps agree with the delivered rate.
-    RX-only; output amplitude is UNKNOWN (the filters rescale)."""
-
     name = "symbol_sync"
     min_input_sps = 2.0
     description = (
-        "Symbol-timing recovery, IQ->IQ (RRC matched filter + timing). "
-        "loop_bw>0 uses a closed-loop Gardner symbol_sync; loop_bw=0 uses "
-        "open-loop feedforward (Oerder-Meyr) timing for bursty/short PSK. "
-        "min_input_sps is conditional on loop_bw (compile-enforced): 2 "
-        "closed-loop, 4 open-loop. The amplitude contract (normalized "
-        "input, via an upstream agc) is unchanged across both modes."
+        "Symbol-timing recovery, IQ->IQ (RRC matched filter + timing), "
+        "decimating to one sample per symbol. loop_bw>0 uses a closed-loop "
+        "Gardner symbol_sync; loop_bw=0 uses open-loop feedforward "
+        "(Oerder-Meyr) timing for bursty/short PSK. min_input_sps is "
+        "conditional on loop_bw (compile-enforced): 2 closed-loop, 4 "
+        "open-loop. This is psk_demod's timing half split out: it stays at "
+        "IQ, so an equalizer (or any per-symbol conditioning) can sit at the "
+        "1-sps seam before carrier recovery. The amplitude contract "
+        "(normalized input, via an upstream agc) is unchanged across both "
+        "modes."
     )
     from_level = Level.IQ
     to_level = Level.IQ

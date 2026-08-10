@@ -162,14 +162,6 @@ class SyncAlignStep(Step):
 
 
 class SyncAlign(RxStage[CompileContext, SyncAlignStep]):
-    """Correlating frame align, BITS->BITS soft. Detects an uncoded sync word in
-    the soft stream (stock correlate_access_code_tag_ff), then gates the
-    fixed-length coded frame after each match (tag_gate), dropping inter-frame
-    junk. The output is back-to-back frames that a downstream fec decodes
-    contiguously — this is what makes GR-native sync-then-Viterbi expressible.
-    The multiply_const_ff pair maps the soft-LLR sign (bit 1 negative here) to
-    the correlator's convention (bit 1 positive) and back."""
-
     name = "sync_align"
     description = (
         "Correlate an access code on the soft bit stream and GATE: keep "
