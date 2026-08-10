@@ -584,7 +584,9 @@ def survey(
     "carrier" — carrier offset + phase-fold evidence from M-th-power analysis.
     offset_hz is the carrier's offset from the slice centre; method is "mpsk" (a
     clean order-M line, de-aliased against the spectrum centroid and
-    interpolated) or "spectral_centroid" (the robust fallback). offset_ambiguous
+    interpolated) or "spectral_centroid" (the robust fallback — but with more
+    than one emitter in the slice the centroid is a blend of them, so check the
+    spectrum block before trusting it as a single carrier's offset). offset_ambiguous
     is true when the M-fold offset candidates could not be told apart and the
     centroid was reported instead. off_center is true when the offset is a large
     fraction of the occupied bandwidth — the signal sits off-channel, so a demod
