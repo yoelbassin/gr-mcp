@@ -5,7 +5,6 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Literal
 
-import numpy as np
 from pydantic import ValidationError
 
 from marconi.capture import capture_iq
@@ -43,18 +42,21 @@ from marconi.survey import channelize_to_file, survey_iq
 
 _START_LEVELS = {"iq": Level.IQ, "symbols": Level.SYMBOLS, "bits": Level.BITS}
 _DEFAULT_LEVEL = {"c": "iq", "b": "bits", "s": "symbols", "f": "symbols"}
-_ITEM = {"c": ItemType.C, "b": ItemType.B, "s": ItemType.S, "f": ItemType.F}
-_ITEM_BYTES: dict[str, int] = {k: np.dtype(v).itemsize for k, v in _ITEM_DTYPES.items()}
+_ITEM_BYTES: dict[str, int] = {k: v.itemsize for k, v in _ITEM_DTYPES.items()}
 
 
 def _start_descriptor(item_type: str, level: str | None) -> Descriptor:
-    if item_type not in _ITEM:
-        raise ValueError(f"input_item_type must be one of {sorted(_ITEM)}")
+    try:
+        item = ItemType(item_type)
+    except ValueError:
+        raise ValueError(
+            f"input_item_type must be one of {sorted(t.value for t in ItemType)}"
+        ) from None
     level_key = level if level is not None else _DEFAULT_LEVEL[item_type]
     if level_key not in _START_LEVELS:
         raise ValueError(f"input_level must be one of {sorted(_START_LEVELS)}")
-    carrier = Carrier.SOFT if item_type == "f" else Carrier.HARD
-    return Descriptor(_START_LEVELS[level_key], _ITEM[item_type], carrier)
+    carrier = Carrier.SOFT if item is ItemType.F else Carrier.HARD
+    return Descriptor(_START_LEVELS[level_key], item, carrier)
 
 
 def _trace_rows(modem: Modem, cp: CompiledPipeline) -> list[dict[str, object]]:

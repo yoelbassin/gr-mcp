@@ -43,14 +43,6 @@ def _io_kinds(desc: Descriptor) -> tuple[str | None, str]:
     return _IO_BLOCKS[desc.item_type]
 
 
-_TRACE_SUFFIX: dict[ItemType, str] = {
-    ItemType.C: ".cf32",
-    ItemType.F: ".f32",
-    ItemType.S: ".i16",
-    ItemType.B: ".u8",
-}
-
-
 def trace_item_type(desc: Descriptor) -> ItemType:
     """The item type a boundary's trace sidecar carries. Hard symbol indices
     ride the u8 wire (a qam-class demod boundary): their tap converts to i16
@@ -68,7 +60,7 @@ def trace_sink_path(
     trace_item_type of its output boundary) writes. Shared by the compiler that
     emits the tap and the runner that harvests it, so the two never disagree on
     the filename."""
-    return trace_dir / f"stage_{index}_{conv}{_TRACE_SUFFIX[item_type]}"
+    return trace_dir / f"stage_{index}_{conv}{item_type.suffix}"
 
 
 def _source_kind(desc: Descriptor) -> str:

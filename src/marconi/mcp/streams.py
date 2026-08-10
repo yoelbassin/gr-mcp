@@ -12,6 +12,7 @@ import numpy.typing as npt
 
 from marconi.engine.deadline import check_deadline
 from marconi.engine.io.source import SourceSlice
+from marconi.engine.types.enums import ItemType
 from marconi.levels import kmeans_1d
 from marconi.mcp.workspace import conversion_cache_dir
 
@@ -31,13 +32,9 @@ _STATS_KMEANS_ITERS = 100
 
 # "l" (int64) is a paging-only type for run sidecars (windows/marks offsets),
 # never an engine wire type
-_SUFFIX_TYPES = {".u8": "b", ".i16": "s", ".f32": "f", ".i64": "l", ".cf32": "c"}
-_ITEM_DTYPES: dict[str, type] = {
-    "b": np.uint8,
-    "s": np.int16,
-    "f": np.float32,
-    "l": np.int64,
-    "c": np.complex64,
+_SUFFIX_TYPES = {".i64": "l"} | {t.suffix: t.value for t in ItemType}
+_ITEM_DTYPES: dict[str, np.dtype[Any]] = {"l": np.dtype(np.int64)} | {
+    t.value: t.np_dtype for t in ItemType
 }
 _RAW_SCALES: dict[str, tuple[type, float, float]] = {
     "ci16": (np.int16, 32768.0, 0.0),
@@ -88,7 +85,7 @@ def render_page(
     kind = _resolve_item_type(path, item_type)
     if count is None:
         count = _DEFAULT_PAGE_ITEMS[kind]
-    dtype = np.dtype(_ITEM_DTYPES[kind])
+    dtype = _ITEM_DTYPES[kind]
     total = path.stat().st_size // dtype.itemsize
     count = max(0, min(count, _MAX_PAGE_ITEMS, total - offset))
     with path.open("rb") as f:
@@ -286,7 +283,7 @@ def stream_stats(
         raise ValueError(f"bins must be 1..{_STATS_MAX_BINS}, got {bins}")
     if not 0 <= clusters <= _STATS_MAX_CLUSTERS:
         raise ValueError(f"clusters must be 0..{_STATS_MAX_CLUSTERS}, got {clusters}")
-    dtype: np.dtype[Any] = np.dtype(_ITEM_DTYPES[kind])
+    dtype: np.dtype[Any] = _ITEM_DTYPES[kind]
     sample, total, sampled = _sample_stream(path, dtype)
     out: dict[str, object] = {
         "item_type": kind,

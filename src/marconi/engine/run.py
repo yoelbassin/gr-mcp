@@ -74,9 +74,6 @@ class PipelineResult(BaseModel):
         return find_diagnostic(self.diagnostics, block, key)
 
 
-_ITEM_BYTES: dict[str, int] = {"c": 8, "f": 4, "s": 2, "b": 1}
-
-
 def _harvest_trace(
     modem: Modem,
     cp: CompiledPipeline,
@@ -111,7 +108,7 @@ def _harvest_trace(
                 item_type=it,
                 sample_rate=rate,
                 path=str(path),
-                items=size // _ITEM_BYTES[it],
+                items=size // it_enum.item_bytes,
             )
         )
     return rows
@@ -138,9 +135,6 @@ def _entry_carrier(boundary: Descriptor, path: Path, marks: list[int]) -> Coding
     )
 
 
-_FINAL_SUFFIX = {"b": ".u8", "s": ".i16", "f": ".f32", "c": ".cf32"}
-
-
 def _wrap_gr_only(
     cp: CompiledPipeline,
     seam: Path,
@@ -148,7 +142,7 @@ def _wrap_gr_only(
     census: list[BlockCensus],
     diagnostics: list[Diagnostic],
 ) -> PipelineResult:
-    path = seam.with_suffix(_FINAL_SUFFIX[cp.final.item_type])
+    path = seam.with_suffix(cp.final.item_type.suffix)
     if path != seam:
         seam.replace(path)
     if cp.final.item_type == "b" and cp.final.level is Level.SYMBOLS:
@@ -180,7 +174,7 @@ def _wrap_gr_only(
             diagnostics=diagnostics,
         )
     if cp.final.item_type == "c":
-        num = int(path.stat().st_size // _ITEM_BYTES["c"])
+        num = int(path.stat().st_size // ItemType.C.item_bytes)
         return PipelineResult(
             status="ok",
             symbolstream=Symbolstream(
