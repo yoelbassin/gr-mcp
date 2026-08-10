@@ -16,6 +16,7 @@ import numpy as np
 import pytest
 
 from marconi.engine.backends.gnuradio.runner import ensure_worker_warm
+from marconi.engine.io.source import SourceSlice
 from marconi.engine.modulation.css.stages import DechirpStep
 from marconi.engine.run import PipelineResult, run_rx
 from marconi.engine.stages.registry import stage_registry
@@ -56,7 +57,7 @@ def _decode(tmp_path: Path, capture: Path, sf: int) -> PipelineResult:
         sample_rate=_FS,
         start=IQ,
         workdir=tmp_path,
-        source_io={"path": str(capture)},
+        source=SourceSlice(path=capture),
         timeout=60.0,
     )
 

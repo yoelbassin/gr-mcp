@@ -283,7 +283,7 @@ def run_rx_tool(
                 sample_rate=sample_rate,
                 start=_start_descriptor("c", None),
                 workdir=run_dir,
-                source_io=src_slice.to_params(),
+                source=src_slice,
                 trace=trace,
                 timeout=timeout,
             )

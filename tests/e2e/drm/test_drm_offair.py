@@ -24,6 +24,7 @@ from helpers import framing
 
 from marconi.engine.backends.gnuradio.runner import ensure_worker_warm
 from marconi.engine.io.bitfile import read_bits
+from marconi.engine.io.source import SourceSlice
 from marconi.engine.run import run_rx
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Descriptor
@@ -57,7 +58,7 @@ def test_drm_fac(tmp_path: Path) -> None:
         sample_rate=_drm.RATE,
         start=IQ,
         workdir=tmp_path,
-        source_io={"path": str(_SLICE)},
+        source=SourceSlice(path=_SLICE),
     )
     assert res.status == "ok", res
     assert res.windows, "no FAC blocks segmented"
@@ -104,7 +105,7 @@ def test_drm_sdc(tmp_path: Path) -> None:
             sample_rate=_drm.RATE,
             start=IQ,
             workdir=workdir,
-            source_io={"path": str(_SLICE)},
+            source=SourceSlice(path=_SLICE),
         )
         assert res.status == "ok", res
         assert res.bitstream is not None

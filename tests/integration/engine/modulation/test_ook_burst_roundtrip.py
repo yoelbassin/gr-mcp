@@ -69,6 +69,7 @@ from helpers._dsp import channel, read_bits, write_bits
 
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
 from marconi.engine.compile.compiler import compile_modem
+from marconi.engine.io.source import SourceSlice
 from marconi.engine.modulation.ook.stages import OokEnvelopeStep
 from marconi.engine.run import run_rx
 from marconi.engine.stages.general import SliceStep
@@ -188,7 +189,7 @@ def _run_open_loop(workdir: Path, capture: Path) -> np.ndarray:
         sample_rate=_SAMPLE_RATE,
         start=IQ,
         workdir=workdir,
-        source_io={"path": str(capture)},
+        source=SourceSlice(path=capture),
     )
     assert r.status == "ok", r
     assert r.bitstream is not None

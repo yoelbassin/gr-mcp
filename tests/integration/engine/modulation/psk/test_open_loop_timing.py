@@ -4,6 +4,7 @@ from pathlib import Path
 
 import numpy as np
 
+from marconi.engine.io.source import SourceSlice
 from marconi.engine.run import run_rx
 from marconi.engine.stages.registry import stage_registry, step_models
 from marconi.engine.types.descriptor import Amplitude, Carrier, Descriptor
@@ -69,7 +70,7 @@ def _decode(iq: np.ndarray, tmp: Path) -> np.ndarray:
         sample_rate=FS,
         start=start,
         workdir=tmp,
-        source_io={"path": str(tmp / "iq.cf32")},
+        source=SourceSlice(path=tmp / "iq.cf32"),
         timeout=120.0,
     )
     assert res.symbolstream is not None, res

@@ -45,6 +45,7 @@ from marconi.engine.coding.stages_symbols import (
     SyncSymbolsStep,
 )
 from marconi.engine.io.bitfile import read_bits
+from marconi.engine.io.source import SourceSlice
 from marconi.engine.modulation.fsk.stages import FskStep
 from marconi.engine.run import run_rx
 from marconi.engine.stages.conditioning import ChannelizeStep
@@ -100,7 +101,7 @@ def test_dmr_offair(tmp_path: Path) -> None:
         sample_rate=RATE,
         start=IQ,
         workdir=tmp_path,
-        source_io={"path": str(src)},
+        source=SourceSlice(path=src),
     )
     assert res.status == "ok", res
     assert res.windows, f"no DMR bursts framed; census: {res.census}"

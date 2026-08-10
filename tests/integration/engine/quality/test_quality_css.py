@@ -18,6 +18,7 @@ from helpers._dsp import channel, write_bits
 
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
 from marconi.engine.compile.compiler import compile_modem
+from marconi.engine.io.source import SourceSlice
 from marconi.engine.modulation.css.stages import CssDemapStep, DechirpStep
 from marconi.engine.run import PipelineResult, run_rx
 from marconi.engine.stages.registry import stage_registry
@@ -72,7 +73,7 @@ def _rx(
         sample_rate=_RATE,
         start=IQ,
         workdir=tmp_path,
-        source_io={"path": str(iq)},
+        source=SourceSlice(path=iq),
         timeout=60.0,
     )
 

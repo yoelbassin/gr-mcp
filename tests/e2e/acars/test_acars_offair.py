@@ -64,6 +64,7 @@ from helpers import bitops, crc, framing, parse
 from marconi.engine.backends.gnuradio.runner import ensure_worker_warm
 from marconi.engine.coding.stages_bits import DescrambleStep, SyncWordStep
 from marconi.engine.io.bitfile import read_bits
+from marconi.engine.io.source import SourceSlice
 from marconi.engine.modulation.fsk.stages import MskStep
 from marconi.engine.run import run_rx
 from marconi.engine.stages.conditioning import (
@@ -191,7 +192,7 @@ def test_acars_offair_matches_acarsdec_golden(tmp_path: Path) -> None:
                 sample_rate=RATE,
                 start=IQ,
                 workdir=workdir,
-                source_io={"path": str(_CF32)},
+                source=SourceSlice(path=_CF32),
                 timeout=300.0,
             )
             assert res.status == "ok", res

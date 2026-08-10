@@ -24,6 +24,7 @@ from helpers import bitops, crc, framing
 from marconi.engine.backends.gnuradio.runner import ensure_worker_warm
 from marconi.engine.coding.stages_bits import DescrambleStep, SegmentStep
 from marconi.engine.io.bitfile import read_bits
+from marconi.engine.io.source import SourceSlice
 from marconi.engine.modulation.coding.stages import (
     DeinterleaveStep,
     DepunctureStep,
@@ -174,7 +175,7 @@ def test_dab_offair(tmp_path: Path) -> None:
         sample_rate=RATE,
         start=IQ,
         workdir=tmp_path,
-        source_io={"path": str(_SLICE)},
+        source=SourceSlice(path=_SLICE),
     )
     assert res.status == "ok", res
     assert res.windows, "no DAB FIBs segmented"

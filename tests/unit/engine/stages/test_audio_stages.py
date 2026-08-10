@@ -8,6 +8,7 @@ from pydantic import ValidationError
 
 from marconi.engine.compile.compiler import CompileError, compile_modem
 from marconi.engine.compile.ir import GrPipeline
+from marconi.engine.io.source import SourceSlice
 from marconi.engine.modulation.fsk.stages import FskStep
 from marconi.engine.modulation.psk.stages import PskDemodStep
 from marconi.engine.run import run_rx
@@ -99,7 +100,7 @@ def test_run_rx_rejects_audio_final(tmp_path: Path) -> None:
             sample_rate=48000.0,
             start=IQ,
             workdir=tmp_path,
-            source_io={"path": str(tmp_path / "in.cf32")},
+            source=SourceSlice(path=tmp_path / "in.cf32"),
         )
 
 
@@ -120,7 +121,7 @@ def test_run_rx_accepts_conditioned_iq_final(tmp_path: Path) -> None:
         sample_rate=48000.0,
         start=IQ,
         workdir=tmp_path,
-        source_io={"path": str(cap)},
+        source=SourceSlice(path=cap),
     )
     assert r.status == "ok", r
     assert r.symbolstream is not None
@@ -143,7 +144,7 @@ def test_run_rx_accepts_complex_symbol_final(tmp_path: Path) -> None:
         sample_rate=4.0,
         start=Descriptor(Level.IQ, ItemType.C, amplitude=Amplitude.RMS_UNITY),
         workdir=tmp_path,
-        source_io={"path": str(cap)},
+        source=SourceSlice(path=cap),
     )
     assert r.status == "ok", r
     assert r.symbolstream is not None

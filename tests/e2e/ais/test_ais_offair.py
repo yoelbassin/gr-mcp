@@ -41,6 +41,7 @@ from helpers import crc, framing, parse
 from marconi.engine.backends.gnuradio.runner import ensure_worker_warm
 from marconi.engine.coding.stages_bits import DifferentialStep
 from marconi.engine.io.bitfile import read_bits
+from marconi.engine.io.source import SourceSlice
 from marconi.engine.modulation.fsk.stages import FskStep
 from marconi.engine.run import run_rx
 from marconi.engine.stages.conditioning import AgcStep, ChannelizeStep, SquelchStep
@@ -135,7 +136,7 @@ def test_ais_offair_crc(tmp_path: Path) -> None:
             sample_rate=RATE,
             start=IQ,
             workdir=workdir,
-            source_io={"path": str(_SLICE)},
+            source=SourceSlice(path=_SLICE),
         )
         assert res.status == "ok", res
         assert res.bitstream is not None

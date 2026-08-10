@@ -15,6 +15,7 @@ from helpers._dsp import (
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
 from marconi.engine.compile.compiler import compile_modem
 from marconi.engine.compile.ir import GrPipeline
+from marconi.engine.io.source import SourceSlice
 from marconi.engine.modulation.qam.stages import QamDemapStep, QamDemodStep
 from marconi.engine.stages.conditioning import AgcStep
 from marconi.engine.types.descriptor import Carrier, Descriptor
@@ -148,7 +149,7 @@ def test_run_rx_wraps_symbol_index_final_as_symbolstream(tmp_path: Path) -> None
         sample_rate=_SR,
         start=IQ,
         workdir=workdir,
-        source_io={"path": str(imp)},
+        source=SourceSlice(path=imp),
     )
     assert res.status == "ok", res
     assert res.bitstream is None

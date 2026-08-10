@@ -38,7 +38,6 @@ from marconi.engine.types.descriptor import Descriptor
 from marconi.engine.types.enums import ItemType
 from marconi.engine.types.levels import Level
 from marconi.engine.types.models import Bitstream, Modem, Softstream, Symbolstream
-from marconi.engine.types.params import ParamValue
 from marconi.engine.types.step import stage_label
 
 
@@ -458,15 +457,14 @@ def _validate_entry(
 def _reject_nonfinite(
     cp: CompiledPipeline,
     start: Descriptor,
-    source_io: Mapping[str, ParamValue] | None,
+    source: SourceSlice | None,
     input_stream: Bitstream | Symbolstream | None,
 ) -> PipelineResult | None:
     if isinstance(input_stream, Symbolstream) and input_stream.item_type == "f":
         return _nonfinite_input(input_stream.path, "f")
-    if cp.gr is not None and source_io:
-        src_slice = SourceSlice.from_params(source_io)
+    if cp.gr is not None and source is not None:
         return _nonfinite_input(
-            src_slice.path, start.item_type, src_slice.offset, src_slice.length
+            source.path, start.item_type, source.offset, source.length
         )
     return None
 
@@ -478,7 +476,7 @@ def run_rx(
     sample_rate: float,
     start: Descriptor,
     workdir: Path,
-    source_io: Mapping[str, ParamValue] | None = None,
+    source: SourceSlice | None = None,
     input_stream: Bitstream | Symbolstream | None = None,
     backend: Backend | None = None,
     trace: bool = False,
@@ -496,14 +494,14 @@ def run_rx(
             direction="rx",
             sample_rate=sample_rate,
             start=start,
-            source_io=source_io or {},
+            source_io=source.to_params() if source is not None else {},
             sink_io={"path": str(seam)},
             name=modem.name,
             quality_tap=True,
             trace_dir=trace_dir,
         )
         _validate_entry(cp, input_stream)
-        flagged = _reject_nonfinite(cp, start, source_io, input_stream)
+        flagged = _reject_nonfinite(cp, start, source, input_stream)
         if flagged is not None:
             return flagged
         census: list[BlockCensus] = []

@@ -23,6 +23,7 @@ from e2e.dmr.test_dmr_offair import _SLICE, RATE
 from e2e.dmr.test_dmr_offair import _dmr_modem as _dmr_full_modem
 
 from marconi.engine.backends.gnuradio.runner import ensure_worker_warm
+from marconi.engine.io.source import SourceSlice
 from marconi.engine.run import run_rx
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Descriptor
@@ -63,7 +64,7 @@ def test_bare_fsk_reads_as_signal(tmp_path: Path) -> None:
             sample_rate=RATE,
             start=IQ,
             workdir=tmp_path,
-            source_io={"path": str(_SLICE), "offset": offset, "length": length},
+            source=SourceSlice(path=_SLICE, offset=offset, length=length),
             timeout=60.0,
         )
         assert res.quality is not None

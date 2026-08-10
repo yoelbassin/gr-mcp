@@ -10,6 +10,7 @@ from helpers.hardware import sdr_present
 from marconi.capture import capture_iq
 from marconi.engine.backends.gnuradio.runner import ensure_worker_warm
 from marconi.engine.io.bitfile import read_bits
+from marconi.engine.io.source import SourceSlice
 from marconi.engine.run import run_rx
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Descriptor
@@ -49,7 +50,7 @@ def test_fm_rds_live(tmp_path: Path) -> None:
         sample_rate=cap.sample_rate,
         start=IQ,
         workdir=tmp_path,
-        source_io={"path": cap.path},
+        source=SourceSlice(path=Path(cap.path)),
     )
     assert res.status == "ok", res
     assert res.bitstream is not None

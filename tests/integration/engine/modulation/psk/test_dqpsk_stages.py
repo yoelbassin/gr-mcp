@@ -7,6 +7,7 @@ from helpers._dsp import aligned_ber, channel
 
 from marconi.engine.backends.gnuradio.runner import ensure_worker_warm
 from marconi.engine.io.bitfile import read_bits
+from marconi.engine.io.source import SourceSlice
 from marconi.engine.modulation.psk.stages import (
     DifferentialDemodStep,
     PskDemapStep,
@@ -79,7 +80,7 @@ def test_pi4_dqpsk_roundtrip(tmp_path: Path, phase0: float) -> None:
         sample_rate=float(_SPS),
         start=IQ,
         workdir=tmp_path,
-        source_io={"path": str(imp)},
+        source=SourceSlice(path=imp),
     )
     assert r.status == "ok", r
     assert r.bitstream is not None

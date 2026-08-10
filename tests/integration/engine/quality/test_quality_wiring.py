@@ -5,6 +5,7 @@ from pathlib import Path
 import numpy as np
 from integration.engine.quality._capture import make_clean_capture
 
+from marconi.engine.io.source import SourceSlice
 from marconi.engine.modulation.fsk.stages import FskStep, MfskSoftDemapStep
 from marconi.engine.run import run_rx
 from marconi.engine.stages.general import SliceStep
@@ -35,7 +36,7 @@ def test_clean_soft_run_is_decoded(tmp_path: Path) -> None:
         sample_rate=_SR,
         start=IQ,
         workdir=workdir,
-        source_io={"path": str(iq)},
+        source=SourceSlice(path=iq),
     )
     assert res.status == "ok", res
     assert res.quality is not None
@@ -63,7 +64,7 @@ def test_hard_slice_of_bare_demod_is_signal_present_not_decoded(
         sample_rate=_SR,
         start=IQ,
         workdir=workdir,
-        source_io={"path": str(iq)},
+        source=SourceSlice(path=iq),
     )
     assert res.status == "ok", res
     assert res.bitstream is not None  # the delivered stream is still hard bits
@@ -93,7 +94,7 @@ def test_non_ok_result_has_no_quality(tmp_path: Path) -> None:
         sample_rate=_SR,
         start=IQ,
         workdir=workdir,
-        source_io={"path": str(bad)},
+        source=SourceSlice(path=bad),
     )
     assert res.status == "error"
     assert res.quality is None

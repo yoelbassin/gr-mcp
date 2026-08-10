@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 
 from marconi.engine.deadline import RunTimeout
+from marconi.engine.io.source import SourceSlice
 from marconi.engine.run import run_rx
 from marconi.engine.stages.registry import stage_registry, step_models
 from marconi.engine.types.descriptor import Descriptor
@@ -37,7 +38,7 @@ def test_run_rx_times_out_deterministically(tmp_path: Path) -> None:
             sample_rate=8000.0,
             start=Descriptor(Level.IQ, ItemType.C),
             workdir=tmp_path,
-            source_io={"path": str(cap)},
+            source=SourceSlice(path=cap),
             timeout=0.0,
         )
 
@@ -50,7 +51,7 @@ def test_run_rx_normal_timeout_still_succeeds(tmp_path: Path) -> None:
         sample_rate=8000.0,
         start=Descriptor(Level.IQ, ItemType.C),
         workdir=tmp_path,
-        source_io={"path": str(cap)},
+        source=SourceSlice(path=cap),
         timeout=180.0,
     )
     assert result.status in ("ok", "empty")  # ran to completion, not timed out

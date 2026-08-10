@@ -14,6 +14,7 @@ from marconi.engine.compile.compiler import (
 from marconi.engine.compile.errors import CompileError
 from marconi.engine.compile.ir import GrPipeline
 from marconi.engine.io.bitfile import read_bits, write_bits
+from marconi.engine.io.source import SourceSlice
 from marconi.engine.modulation.css.stages import (
     ChirpSyncStep,
     CssDemapStep,
@@ -171,7 +172,7 @@ def test_gr_plus_coding_run_shares_windows_and_census(tmp_path: Path) -> None:
         sample_rate=1.0,
         start=SOFT_SYMBOLS,
         workdir=tmp_path,
-        source_io={"path": str(_flag_soft_symbols(tmp_path))},
+        source=SourceSlice(path=_flag_soft_symbols(tmp_path)),
     )
     assert res.status == "ok", res.error
     assert res.windows == [11]
@@ -217,7 +218,7 @@ def test_gr_only_hard_symbols_final_get_i16_suffix(tmp_path: Path) -> None:
         sample_rate=rate,
         start=IQ,
         workdir=tmp_path,
-        source_io={"path": str(iq_path)},
+        source=SourceSlice(path=iq_path),
     )
     assert res.status == "ok", res
     assert res.symbolstream is not None
@@ -245,7 +246,7 @@ def test_empty_gr_run_propagates_status_and_stalled_at(tmp_path: Path) -> None:
         sample_rate=1.0,
         start=SOFT_SYMBOLS,
         workdir=tmp_path,
-        source_io={"path": str(tmp_path / "in.f32")},
+        source=SourceSlice(path=tmp_path / "in.f32"),
         backend=_CannedBackend(canned),
     )
     assert res.status == "empty"
@@ -307,7 +308,7 @@ def test_iq_terminal_pipeline_returns_conditioned_iq(tmp_path: Path) -> None:
         sample_rate=8.0,
         start=Descriptor(Level.IQ, ItemType.C),
         workdir=tmp_path,
-        source_io={"path": str(iq)},
+        source=SourceSlice(path=iq),
     )
     assert res.status == "ok"
     assert res.symbolstream is not None
@@ -333,7 +334,7 @@ def test_nonfinite_iq_source_is_an_error_before_the_gr_run(tmp_path: Path) -> No
         sample_rate=48000.0,
         start=Descriptor(Level.IQ, ItemType.C),
         workdir=tmp_path,
-        source_io={"path": str(p)},
+        source=SourceSlice(path=p),
         backend=_CannedBackend(RunResult(status="ok")),
     )
     assert res.status == "error"

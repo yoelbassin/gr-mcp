@@ -31,6 +31,7 @@ from helpers.css_explicit import css_explicit_decode
 from marconi.engine.backends.gnuradio.runner import ensure_worker_warm
 from marconi.engine.coding.stages_bits import NibbleSwapStep, SegmentStep
 from marconi.engine.io.bitfile import read_bits, read_symbols, write_bits
+from marconi.engine.io.source import SourceSlice
 from marconi.engine.modulation.css.stages import ChirpSyncStep, DechirpStep
 from marconi.engine.run import run_rx
 from marconi.engine.stages.conditioning import ResampleStep
@@ -147,7 +148,7 @@ def test_lora_offair(tmp_path: Path) -> None:
         sample_rate=RATE,
         start=IQ,
         workdir=tmp_path,
-        source_io={"path": str(_SLICE)},
+        source=SourceSlice(path=_SLICE),
     )
     assert res.status == "ok", res
     assert len(res.marks) >= 2, res.diagnostics

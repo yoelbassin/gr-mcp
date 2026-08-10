@@ -38,6 +38,7 @@ from marconi.engine.coding.stages_bits import (
     SyncWordStep,
 )
 from marconi.engine.io.bitfile import read_bits
+from marconi.engine.io.source import SourceSlice
 from marconi.engine.modulation.coding.stages import HardenStep, SyncAlignStep
 from marconi.engine.modulation.fsk.stages import FskStep, MfskSoftDemapStep
 from marconi.engine.run import run_rx
@@ -173,7 +174,7 @@ def test_pocsag_offair(tmp_path: Path) -> None:
         sample_rate=RATE,
         start=IQ,
         workdir=tmp_path,
-        source_io={"path": str(_SLICE)},
+        source=SourceSlice(path=_SLICE),
     )
     assert res.status == "ok", res
     assert res.windows, "no POCSAG batches framed"
@@ -200,7 +201,7 @@ def test_pocsag_offair_sync_align(tmp_path: Path) -> None:
         sample_rate=RATE,
         start=IQ,
         workdir=tmp_path,
-        source_io={"path": str(_SLICE)},
+        source=SourceSlice(path=_SLICE),
     )
     assert res.status == "ok", res
     assert res.windows, "no POCSAG batches gated by sync_align"

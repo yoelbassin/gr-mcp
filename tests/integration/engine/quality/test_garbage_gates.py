@@ -8,6 +8,7 @@ from integration.engine.quality._capture import make_clean_capture
 from marconi.engine.backends.gnuradio.runner import ensure_worker_warm
 from marconi.engine.coding.stages_bits import BlockCodeStep, SyncWordStep
 from marconi.engine.io.bitfile import write_bits
+from marconi.engine.io.source import SourceSlice
 from marconi.engine.modulation.css.stages import ChirpSyncStep, DechirpStep
 from marconi.engine.modulation.fsk.stages import FskStep, MfskSoftDemapStep
 from marconi.engine.run import PipelineResult, run_rx
@@ -59,7 +60,7 @@ def _run(modem: Modem, iq: Path, workdir: Path) -> PipelineResult:
         sample_rate=_SR,
         start=IQ,
         workdir=workdir,
-        source_io={"path": str(iq)},
+        source=SourceSlice(path=iq),
     )
 
 
@@ -255,6 +256,6 @@ def test_pure_noise_css_marks_path_is_not_called_decoded(tmp_path: Path) -> None
         sample_rate=_CSS_RATE,
         start=IQ,
         workdir=workdir,
-        source_io={"path": str(iq)},
+        source=SourceSlice(path=iq),
     )
     assert _not_trusted(res), (res.status, res.error, res.quality, res.marks)
