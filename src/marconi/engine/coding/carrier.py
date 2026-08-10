@@ -11,6 +11,7 @@ import numpy.typing as npt
 class Window:
     start: int
     cursor: int
+    end: int | None = None
 
 
 @dataclass(frozen=True)
@@ -41,14 +42,20 @@ class CodingCarrier:
     stats: StepStats | None = None
 
     def window_spans(self) -> list[tuple[int, int]]:
-        """One (lo, hi) bit span per window: each window scopes from its
-        cursor to the next window's cursor, the last to end-of-stream. Equal
-        cursors are legal — a window whose upstream decode emitted nothing
-        scopes an empty span, keeping window counts aligned across stages."""
+        """One (lo, hi) bit span per window: from its cursor to its own end
+        when the seeder fixed one (fixed-length framing), else to the next
+        window's cursor, the last to end-of-stream. Equal cursors are legal —
+        a window whose upstream decode emitted nothing scopes an empty span,
+        keeping window counts aligned across stages; a cursor advanced past
+        its end (realign of a short window) scopes an empty span too."""
         if self.windows is None:
             raise ValueError("window_spans needs a seeded carrier")
         cursors = [int(w.cursor) for w in self.windows]
         bad = [(a, b) for a, b in zip(cursors, cursors[1:]) if b < a]
         if bad:
             raise ValueError(f"windows need non-decreasing cursors: {bad[:5]}")
-        return list(zip(cursors, cursors[1:] + [int(self.bits.size)]))
+        his = [
+            nxt if w.end is None else int(w.end)
+            for w, nxt in zip(self.windows, cursors[1:] + [int(self.bits.size)])
+        ]
+        return [(lo, max(lo, hi)) for lo, hi in zip(cursors, his)]

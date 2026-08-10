@@ -59,7 +59,7 @@ def segment_rx(c: CodingCarrier, *, frame_body_len: int) -> CodingCarrier:
     windows: list[Window] = []
     i = 0
     while i + frame_body_len <= len(c.bits):
-        windows.append(Window(start=i, cursor=i))
+        windows.append(Window(start=i, cursor=i, end=i + frame_body_len))
         i += frame_body_len
     return CodingCarrier(bits=c.bits, windows=windows, marks=c.marks)
 
@@ -361,7 +361,7 @@ def _decode_scoped(
         dec, tally = decode(bits[lo:hi])
         if tally is not None:
             tallies.append(tally)
-        windows.append(Window(start=pos, cursor=pos))
+        windows.append(Window(start=pos, cursor=pos, end=pos + int(dec.size)))
         pieces.append(dec)
         pos += int(dec.size)
     joined = np.concatenate(pieces) if pieces else np.zeros(0, np.uint8)
@@ -450,7 +450,17 @@ def realign_rx(c: CodingCarrier, *, bit_offset: int) -> CodingCarrier:
         return CodingCarrier(
             bits=np.asarray(c.bits, np.uint8)[bit_offset:], marks=marks
         )
-    windows = [Window(start=w.start, cursor=w.cursor + bit_offset) for w in c.windows]
+    # materialize each window's scope end before shifting: the dropped lead
+    # bits belong to this window, never to the previous frame's tail
+    nxt = [w.cursor for w in c.windows[1:]] + [None]
+    windows = [
+        Window(
+            start=w.start,
+            cursor=w.cursor + bit_offset,
+            end=w.end if w.end is not None else nx,
+        )
+        for w, nx in zip(c.windows, nxt)
+    ]
     return replace(c, bits=np.asarray(c.bits, np.uint8), windows=windows)
 
 
