@@ -10,6 +10,8 @@ from multiprocessing.connection import Connection
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+
 from marconi.engine.backends.base import (
     BackendError,
     BlockCensus,
@@ -80,20 +82,26 @@ def _arm_crash_trampoline(tb: Any, crashes: list[str]) -> None:
             blk.forecast = _trampolined_forecast(blk.forecast, tb, crashes)
 
 
+def _diagnostic_row(block: str, key: str, v: int | float | list[int]) -> Diagnostic:
+    if isinstance(v, list):
+        return Diagnostic(block=block, key=key, marks=[int(m) for m in v])
+    if isinstance(v, bool):
+        raise TypeError(f"diagnostic {block}.{key} is a bool; emit an int count")
+    if isinstance(v, (int, np.integer)):
+        return Diagnostic(block=block, key=key, count=int(v))
+    if isinstance(v, (float, np.floating)):
+        return Diagnostic(block=block, key=key, value=float(v))
+    raise TypeError(
+        f"diagnostic {block}.{key} has unharvestable type {type(v).__name__}"
+    )
+
+
 def _harvest_diagnostics(tb: Any) -> list[Diagnostic]:
     rows: list[Diagnostic] = []
     for bid, blk in getattr(tb, "_py_instances", {}).items():
         diag = getattr(blk, "diagnostics", None)
         if isinstance(diag, dict) and diag:
-            for k, v in diag.items():
-                if isinstance(v, list):
-                    rows.append(
-                        Diagnostic(
-                            block=str(bid), key=str(k), marks=[int(m) for m in v]
-                        )
-                    )
-                else:
-                    rows.append(Diagnostic(block=str(bid), key=str(k), count=int(v)))
+            rows.extend(_diagnostic_row(str(bid), str(k), v) for k, v in diag.items())
     return rows
 
 

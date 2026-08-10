@@ -7,7 +7,12 @@ from typing import Any
 import numpy as np
 import numpy.typing as npt
 
-from marconi.engine.backends.gnuradio.embedded.lifecycle import OutQueue, forecast_drain
+from marconi.engine.backends.gnuradio.embedded.lifecycle import (
+    Diagnostics,
+    OutQueue,
+    bump,
+    forecast_drain,
+)
 
 _LOCK_MIN_SCORE = 0.35  # calibrated: synthetic lattice locks ~0.9, noise ~0.1
 
@@ -119,10 +124,10 @@ def make_pilot_lattice_equalizer(
                 in_sig=[(np.complex64, fft_len)],
                 out_sig=[np.complex64],
             )
-            self.diagnostics: dict[str, int] = {
+            self.diagnostics: Diagnostics = {
                 "locks": 0,
                 "relocks": 0,
-                "lock_score_permille": 0,
+                "lock_score": 0.0,
                 "frames_emitted": 0,
             }
             self._out = OutQueue(np.complex64)
@@ -165,7 +170,7 @@ def make_pilot_lattice_equalizer(
                         break
                     if i in resets:
                         if self._ready:
-                            self.diagnostics["relocks"] += 1
+                            bump(self.diagnostics, "relocks")
                         self._reset_lock()
                     self._ingest(np.asarray(vin[i], np.complex128))
                     done += 1
@@ -208,7 +213,7 @@ def make_pilot_lattice_equalizer(
                 pil[:, j] = xp[:, k + dc0 + delta] * np.conj(fp_vals[j])
             theta = float(np.angle(np.sum(pil[1:] * np.conj(pil[:-1]))))
             phi, score = self._estimate_phi(xp, delta)
-            self.diagnostics["lock_score_permille"] = int(score * 1000)
+            self.diagnostics["lock_score"] = score
             if score < lock_min_score:
                 return
             self._delta, self._theta, self._phi = delta, theta, phi
@@ -218,7 +223,7 @@ def make_pilot_lattice_equalizer(
             self._first = 0
             self._m = warmup_syms
             self._ready = True
-            self.diagnostics["locks"] += 1
+            bump(self.diagnostics, "locks")
             for m in range(warmup_syms):
                 self._gather_nodes(m, self._vecs[m])
 
@@ -268,7 +273,7 @@ def make_pilot_lattice_equalizer(
             while self._frames_emitted < avail:
                 self._out.push(self._equalize_frame(self._frames_emitted))
                 self._frames_emitted += 1
-                self.diagnostics["frames_emitted"] += 1
+                bump(self.diagnostics, "frames_emitted")
 
         def _equalize_frame(self, f: int) -> npt.NDArray[np.complex64]:
             base = self._phi + n_frame_syms * f

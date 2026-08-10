@@ -129,34 +129,34 @@ def test_survival_unknown_kind_is_skipped() -> None:
     assert survival_evidence(rows, stage_registry()) == []
 
 
-def _tag_rows(tags: int, chance_micro: int, scanned: int = 60_000) -> list[Diagnostic]:
+def _tag_rows(tags: int, chance: float, scanned: int = 60_000) -> list[Diagnostic]:
     return [
         Diagnostic(block="b6", key="sync_tags", count=tags),
-        Diagnostic(block="b6", key="sync_chance_micro", count=chance_micro),
+        Diagnostic(block="b6", key="sync_chance", value=chance),
         Diagnostic(block="b6", key="sync_items_scanned", count=scanned),
     ]
 
 
 def test_tag_sync_above_chance_is_positive() -> None:
-    ev = tag_sync_evidence(_tag_rows(12, 0))
+    ev = tag_sync_evidence(_tag_rows(12, 0.0))
     assert [e.assessment for e in ev] == ["positive"]
     assert ev[0].metric == "sync_matches"
     assert ev[0].value == 12.0
 
 
 def test_tag_sync_at_chance_level_is_no_evidence() -> None:
-    assert tag_sync_evidence(_tag_rows(233, 234_400_000)) == []
+    assert tag_sync_evidence(_tag_rows(233, 234.4)) == []
 
 
 def test_tag_sync_zero_is_negative() -> None:
-    ev = tag_sync_evidence(_tag_rows(0, 0))
+    ev = tag_sync_evidence(_tag_rows(0, 0.0))
     assert [e.assessment for e in ev] == ["negative"]
 
 
 def test_tag_sync_never_scanned_is_untestable_not_negative() -> None:
     # a stream too short for the correlator consumed nothing: zero tags is
     # not evidence of absence
-    assert tag_sync_evidence(_tag_rows(0, 0, scanned=0)) == []
+    assert tag_sync_evidence(_tag_rows(0, 0.0, scanned=0)) == []
 
 
 def test_unrelated_diagnostics_are_not_tag_sync_evidence() -> None:
@@ -164,13 +164,11 @@ def test_unrelated_diagnostics_are_not_tag_sync_evidence() -> None:
     assert tag_sync_evidence(rows) == []
 
 
-def _dom_rows(
-    dominant: int, total: int, chance_micro: int = 150_000
-) -> list[Diagnostic]:
+def _dom_rows(dominant: int, total: int, chance: float = 0.15) -> list[Diagnostic]:
     return [
         Diagnostic(block="b9", key="dominant_symbols", count=dominant),
         Diagnostic(block="b9", key="symbols_total", count=total),
-        Diagnostic(block="b9", key="dominance_chance_micro", count=chance_micro),
+        Diagnostic(block="b9", key="dominance_chance", value=chance),
     ]
 
 
@@ -220,28 +218,26 @@ def test_marks_positive_only() -> None:
 def test_lock_against_configured_floor() -> None:
     locked = lock_evidence(
         [
-            Diagnostic(block="b4", key="lock_ratio_best_permille", count=2500),
-            Diagnostic(block="b4", key="lock_min_permille", count=2000),
+            Diagnostic(block="b4", key="lock_ratio_best", value=2.5),
+            Diagnostic(block="b4", key="lock_min", value=2.0),
         ]
     )
     unlocked = lock_evidence(
         [
-            Diagnostic(block="b4", key="lock_ratio_best_permille", count=1500),
-            Diagnostic(block="b4", key="lock_min_permille", count=2000),
+            Diagnostic(block="b4", key="lock_ratio_best", value=1.5),
+            Diagnostic(block="b4", key="lock_min", value=2.0),
         ]
     )
     assert [e.assessment for e in locked] == ["positive"]
     assert [e.assessment for e in unlocked] == ["negative"]
 
 
-def test_lock_noise_floor_reading_is_not_positive_without_min() -> None:
-    # cp_symbol_sync's own calibration: pure noise measures 1300-1600 permille;
-    # the C3 hole was a 500-permille bar sitting below that floor
-    noise = lock_evidence(
-        [Diagnostic(block="b4", key="lock_ratio_best_permille", count=1600)]
-    )
-    assert [e.assessment for e in noise] == ["negative"]
-    locked = lock_evidence(
-        [Diagnostic(block="b4", key="lock_ratio_best_permille", count=2400)]
-    )
-    assert [e.assessment for e in locked] == ["positive"]
+def test_lock_without_configured_floor_is_untestable() -> None:
+    # the block always ships lock_min alongside lock_ratio_best; a best-ratio
+    # row arriving alone is a malformed pair and must never be judged against
+    # a smuggled default (the C3 hole was exactly such a default sitting below
+    # the block's own noise calibration)
+    rows = [Diagnostic(block="b4", key="lock_ratio_best", value=1.6)]
+    assert lock_evidence(rows) == []
+    rows = [Diagnostic(block="b4", key="lock_ratio_best", value=2.4)]
+    assert lock_evidence(rows) == []

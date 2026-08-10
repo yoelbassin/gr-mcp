@@ -6,7 +6,12 @@ from typing import Any
 import numpy as np
 import numpy.typing as npt
 
-from marconi.engine.backends.gnuradio.embedded.lifecycle import OutQueue, forecast_drain
+from marconi.engine.backends.gnuradio.embedded.lifecycle import (
+    Diagnostics,
+    OutQueue,
+    bump,
+    forecast_drain,
+)
 from marconi.engine.coding.primitives import gray_decode, gray_encode
 
 
@@ -383,7 +388,7 @@ def make_chirp_sync(
             self._tagq: list[int] = []  # _out indices (absolute) of burst starts
             self.eof_probe: Any = None
             self._eof_padded = False  # FIR tail zeros injected (once, at flush)
-            self.diagnostics = {"locks": 0, "eof_flushed": 0}
+            self.diagnostics: Diagnostics = {"locks": 0, "eof_flushed": 0}
 
         def forecast(self, noutput_items: int, ninputs: int) -> list[int]:
             work = (
@@ -517,7 +522,7 @@ def make_chirp_sync(
             self._det_x = None
             self._tagq.append(self._out.pushed_total)
             self._armed = True
-            self.diagnostics["locks"] += 1
+            bump(self.diagnostics, "locks")
 
         def general_work(self, input_items: Any, output_items: Any) -> int:
             x = input_items[0]
@@ -545,7 +550,7 @@ def make_chirp_sync(
                     self._eof_padded = True
                 flush = self._eof_flushable()
                 if flush > upto:
-                    self.diagnostics["eof_flushed"] += flush - upto
+                    bump(self.diagnostics, "eof_flushed", flush - upto)
                     upto = flush
                 self._fir_to_out(upto)
             elif not self._armed:

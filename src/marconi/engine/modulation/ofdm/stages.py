@@ -212,8 +212,7 @@ class DqpskSoftDemap(RxStage[CompileContext, DqpskSoftDemapStep]):
 
 
 # cp_symbol_sync's calibrated lock threshold (CP-correlation ratio): measured
-# noise ~1.3-1.6, real lock >= 2.0. quality.py derives its permille fallback
-# from this constant.
+# noise ~1.3-1.6, real lock >= 2.0.
 LOCK_MIN_RATIO_DEFAULT = 2.0
 
 

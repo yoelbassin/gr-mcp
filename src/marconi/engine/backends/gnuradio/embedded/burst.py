@@ -41,7 +41,9 @@ import numpy as np
 import numpy.typing as npt
 
 from marconi.engine.backends.gnuradio.embedded.lifecycle import (
+    Diagnostics,
     OutQueue,
+    bump,
     forecast_drain,
 )
 
@@ -132,7 +134,10 @@ def make_burst_sampler(gr: Any, *, sps: float) -> Any:
             self._quiet = 0
             self.eof_probe: Any = None  # set by build wiring; None => no flush
             self._eof_done = False
-            self.diagnostics = {"bursts_flushed": 0, "bursts_truncated_at_eof": 0}
+            self.diagnostics: Diagnostics = {
+                "bursts_flushed": 0,
+                "bursts_truncated_at_eof": 0,
+            }
 
         def forecast(self, noutput_items: int, ninputs: int) -> list[int]:
             return forecast_drain(self._out.pending, ninputs)
@@ -181,7 +186,7 @@ def make_burst_sampler(gr: Any, *, sps: float) -> Any:
                 self._process_block(self._pending)
                 self._pending = np.empty(0, np.float32)
             if self._in_burst:
-                self.diagnostics["bursts_truncated_at_eof"] += 1
+                bump(self.diagnostics, "bursts_truncated_at_eof")
                 self._flush_burst(self._abs)
 
         def _process_block(self, block: npt.NDArray[np.float32]) -> None:
@@ -272,7 +277,7 @@ def make_burst_sampler(gr: Any, *, sps: float) -> Any:
             self._burst_len = 0
             self._in_burst = False
             self._quiet = 0
-            self.diagnostics["bursts_flushed"] += 1
+            bump(self.diagnostics, "bursts_flushed")
             length = len(seg)
             # Global chips this burst owns: base round(k*stride) in [s, end).
             # The count is fixed by s/end (never by the phase below), so no

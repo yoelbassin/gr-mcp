@@ -10,7 +10,6 @@ import numpy.typing as npt
 from pydantic import BaseModel
 
 from marconi.engine.backends.base import BlockCensus, Diagnostic
-from marconi.engine.modulation.ofdm.stages import LOCK_MIN_RATIO_DEFAULT
 from marconi.engine.stages.base import Stage
 from marconi.levels import fit_levels
 
@@ -106,11 +105,6 @@ def _word_excess_significant(valid: int, total: int, chance: float) -> bool:
     return log_odds >= _WORD_EXCESS_MIN_LOG_ODDS
 
 
-# Fallback when a lock diagnostic arrives without its block's configured
-# threshold.
-_LOCK_MIN_FALLBACK_PERMILLE = int(1000 * LOCK_MIN_RATIO_DEFAULT)
-
-
 def _sync_assessment(found: int, expected: float) -> Assessment | None:
     """None = indistinguishable from chance: found something, but no more
     than random bits would match, so it proves nothing either way."""
@@ -155,9 +149,9 @@ def tag_sync_evidence(diagnostics: Sequence[Diagnostic]) -> list[QualityEvidence
     scanned, so GR-native sync paths contribute the same sync_matches
     evidence the coding-lane sync_word does."""
     expected = {
-        d.block: d.count / 1e6
+        d.block: d.value
         for d in diagnostics
-        if d.key == "sync_chance_micro" and d.count is not None
+        if d.key == "sync_chance" and d.value is not None
     }
     scanned = {
         d.block: d.count
@@ -236,21 +230,25 @@ def marks_evidence(marks: Sequence[int]) -> list[QualityEvidence]:
 
 def lock_evidence(diagnostics: Sequence[Diagnostic]) -> list[QualityEvidence]:
     floors = {
-        d.block: d.count
+        d.block: d.value
         for d in diagnostics
-        if d.key == "lock_min_permille" and d.count is not None
+        if d.key == "lock_min" and d.value is not None
     }
     out: list[QualityEvidence] = []
     for d in diagnostics:
-        if d.key != "lock_ratio_best_permille" or d.count is None:
+        if d.key != "lock_ratio_best" or d.value is None:
             continue
-        floor = floors.get(d.block, _LOCK_MIN_FALLBACK_PERMILLE)
+        floor = floors.get(d.block)
+        if floor is None:
+            # a best-ratio row without its block's configured floor is a
+            # malformed pair: untestable, never judged against a default
+            continue
         out.append(
             QualityEvidence(
                 source=d.block,
                 metric="ofdm_lock_ratio",
-                value=d.count / 1000.0,
-                assessment="positive" if d.count >= floor else "negative",
+                value=d.value,
+                assessment="positive" if d.value >= floor else "negative",
             )
         )
     return out
@@ -281,9 +279,9 @@ def dominance_evidence(diagnostics: Sequence[Diagnostic]) -> list[QualityEvidenc
         if d.key == "symbols_total" and d.count is not None
     }
     chances = {
-        d.block: d.count / 1e6
+        d.block: d.value
         for d in diagnostics
-        if d.key == "dominance_chance_micro" and d.count is not None
+        if d.key == "dominance_chance" and d.value is not None
     }
     out: list[QualityEvidence] = []
     for d in diagnostics:
@@ -316,6 +314,10 @@ def dominance_evidence(diagnostics: Sequence[Diagnostic]) -> list[QualityEvidenc
 
 _SOFT_MIN_ITEMS = 1000
 _SOFT_SAMPLE_ITEMS = 65536
+# Evidence values are agent-facing JSON: a degenerate zero-noise stream can
+# score an unbounded separation/ratio, so cap what ships (the verdict bars sit
+# orders of magnitude below the cap; the cap only tames the reported number).
+_SOFT_VALUE_CAP = 1e6
 
 # Measured on a real off-air 4-level FSK capture through a bare demod front
 # end: several real inter-burst noise gaps all read order=2, separation
@@ -444,7 +446,9 @@ def soft_evidence(
         return []
     fit = fit_levels(xa)
     if fit.order > 2 and fit.separation >= _SOFT_MULTILEVEL_SEPARATION:
-        return _emit_soft(float(min(fit.separation, 1e6)), "positive", decode_grade)
+        return _emit_soft(
+            float(min(fit.separation, _SOFT_VALUE_CAP)), "positive", decode_grade
+        )
     mag = np.abs(xa)
     spread = float(mag.std())
     mean = float(mag.mean())
@@ -469,7 +473,7 @@ def soft_evidence(
         assessment = "negative"
     else:
         return []
-    return _emit_soft(float(min(ratio, 1e6)), assessment, decode_grade)
+    return _emit_soft(float(min(ratio, _SOFT_VALUE_CAP)), assessment, decode_grade)
 
 
 def assess_quality(

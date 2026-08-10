@@ -24,6 +24,18 @@ from typing import Any
 
 import numpy as np
 
+# The block-side diagnostics payload the worker harvests into Diagnostic rows:
+# int -> count, float -> value, list[int] -> marks. Any other value type is a
+# harvest-time TypeError, never a silent coercion.
+Diagnostics = dict[str, "int | float | list[int]"]
+
+
+def bump(diag: Diagnostics, key: str, n: int = 1) -> None:
+    cur = diag.get(key, 0)
+    if not isinstance(cur, int):
+        raise TypeError(f"diagnostic {key!r} is not an int counter: {cur!r}")
+    diag[key] = cur + n
+
 
 class OutQueue:
     """Pending-output queue: push whole results as they complete, drain what

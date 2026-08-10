@@ -99,6 +99,6 @@ def test_sync_align_then_fec_decodes_bursts(tmp_path: Path) -> None:
     # the tag_gate census point: one sync tag per burst, chance expectation
     # far below one - this is what feeds sync_matches evidence on GR paths
     tags = next(d for d in r.diagnostics if d.key == "sync_tags")
-    chance = next(d for d in r.diagnostics if d.key == "sync_chance_micro")
+    chance = next(d for d in r.diagnostics if d.key == "sync_chance")
     assert tags.count == len(infos), r.diagnostics
-    assert chance.count is not None and chance.count < 1000
+    assert chance.value is not None and chance.value < 0.001

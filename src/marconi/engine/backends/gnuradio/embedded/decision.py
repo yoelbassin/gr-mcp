@@ -8,6 +8,8 @@ from typing import Any
 
 import numpy as np
 
+from marconi.engine.backends.gnuradio.embedded.lifecycle import Diagnostics, bump
+
 # Peak dominance (peak / median of the decision vector) separates a decisive
 # argmax from one made over noise; the block tallies it per symbol so the
 # quality layer can judge the run's fractions. Measured through this exact
@@ -19,7 +21,7 @@ import numpy as np
 # above the floor — the chance ceiling reported below; every other measured
 # configuration keeps 3% or less.
 _DOMINANCE_MARGIN = 1.35
-_DOMINANCE_CHANCE_MICRO = 150_000
+_DOMINANCE_CHANCE = 0.15
 
 
 def make_peak_decision(gr: Any, *, vlen: int, divisor: int, modulo: int) -> Any:
@@ -33,11 +35,11 @@ def make_peak_decision(gr: Any, *, vlen: int, divisor: int, modulo: int) -> Any:
                 in_sig=[(np.float32, vlen)],
                 out_sig=[np.int16],
             )
-            self.diagnostics = {
+            self.diagnostics: Diagnostics = {
                 "dominant_symbols": 0,
                 "symbols_total": 0,
-                "dominance_floor_permille": int(round(floor * 1000.0)),
-                "dominance_chance_micro": _DOMINANCE_CHANCE_MICRO,
+                "dominance_floor": floor,
+                "dominance_chance": _DOMINANCE_CHANCE,
             }
 
         def work(self, input_items: Any, output_items: Any) -> int:
@@ -50,8 +52,8 @@ def make_peak_decision(gr: Any, *, vlen: int, divisor: int, modulo: int) -> Any:
             peak = v.max(axis=1, initial=0.0)
             med = np.median(v, axis=1) if k else np.zeros(0)
             dominant = np.where(med > 0.0, peak >= floor * med, peak > 0.0)
-            self.diagnostics["dominant_symbols"] += int(np.count_nonzero(dominant))
-            self.diagnostics["symbols_total"] += int(k)
+            bump(self.diagnostics, "dominant_symbols", int(np.count_nonzero(dominant)))
+            bump(self.diagnostics, "symbols_total", int(k))
             return k
 
     return _PeakDecision()

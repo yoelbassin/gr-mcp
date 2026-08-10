@@ -6,6 +6,15 @@ from typing import Any
 import numpy as np
 import numpy.typing as npt
 
+from marconi.errors import register_error
+
+
+class CarrierInvariantError(RuntimeError):
+    """A coding-lane contract breach (engine bug, never a bad user argument)."""
+
+
+register_error(CarrierInvariantError, "internal_error")
+
 
 @dataclass(frozen=True)
 class Window:
@@ -49,11 +58,13 @@ class CodingCarrier:
         keeping window counts aligned across stages; a cursor advanced past
         its end (realign of a short window) scopes an empty span too."""
         if self.windows is None:
-            raise ValueError("window_spans needs a seeded carrier")
+            raise CarrierInvariantError("window_spans needs a seeded carrier")
         cursors = [int(w.cursor) for w in self.windows]
         bad = [(a, b) for a, b in zip(cursors, cursors[1:]) if b < a]
         if bad:
-            raise ValueError(f"windows need non-decreasing cursors: {bad[:5]}")
+            raise CarrierInvariantError(
+                f"windows need non-decreasing cursors: {bad[:5]}"
+            )
         his = [
             nxt if w.end is None else int(w.end)
             for w, nxt in zip(self.windows, cursors[1:] + [int(self.bits.size)])

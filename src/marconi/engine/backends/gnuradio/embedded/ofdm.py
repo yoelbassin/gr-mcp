@@ -5,7 +5,11 @@ from typing import Any
 import numpy as np
 import numpy.typing as npt
 
-from marconi.engine.backends.gnuradio.embedded.lifecycle import OutQueue, forecast_drain
+from marconi.engine.backends.gnuradio.embedded.lifecycle import (
+    Diagnostics,
+    OutQueue,
+    forecast_drain,
+)
 from marconi.engine.modulation.ofdm import primitives as prim
 
 
@@ -84,7 +88,7 @@ def make_ofdm_frame_sync(
             self._out = OutQueue(np.complex64)
             # post-run value = usefuls of the open frame the stream ended
             # short of; the atomic-frame drop at EOF made visible
-            self.diagnostics = {"truncated_frame_items": 0}
+            self.diagnostics: Diagnostics = {"truncated_frame_items": 0}
 
         def forecast(self, noutput_items: int, ninputs: int) -> list[int]:
             usefuls_ready = (

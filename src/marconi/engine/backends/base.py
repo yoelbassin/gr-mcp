@@ -50,6 +50,7 @@ class Diagnostic(BaseModel):
     block: str
     key: str
     count: int | None = None
+    value: float | None = None
     marks: list[int] | None = None
 
 

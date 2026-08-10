@@ -69,9 +69,9 @@ def test_failed_lock_is_legible_via_best_ratio_seen() -> None:
     blk = _blk()
     drive(blk, iq, chunk=1024, out_dtype=np.complex64)
     assert blk.diagnostics["locks"] == 0
-    assert "lock_ratio_best_permille" in blk.diagnostics
-    best = blk.diagnostics["lock_ratio_best_permille"]
-    assert 0 < best < 2000  # saw a ratio, but below the 2.0 (=2000 permille) gate
+    assert "lock_ratio_best" in blk.diagnostics
+    best = blk.diagnostics["lock_ratio_best"]
+    assert 0 < best < 2.0  # saw a ratio, but below the 2.0 gate
 
 
 def test_lock_min_ratio_param_gates_acquisition() -> None:

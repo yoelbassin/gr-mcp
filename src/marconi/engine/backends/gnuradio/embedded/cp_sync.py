@@ -4,7 +4,12 @@ from typing import Any
 
 import numpy as np
 
-from marconi.engine.backends.gnuradio.embedded.lifecycle import OutQueue, forecast_drain
+from marconi.engine.backends.gnuradio.embedded.lifecycle import (
+    Diagnostics,
+    OutQueue,
+    bump,
+    forecast_drain,
+)
 
 _LOCK_MIN_RATIO = 2.0  # calibrated: synthetic lattice ~5-8, pure noise ~1.3-1.6
 _DROP_FRAC = 0.25
@@ -34,11 +39,12 @@ def make_cp_symbol_sync(
                 in_sig=[np.complex64],
                 out_sig=[np.complex64],
             )
-            self.diagnostics: dict[str, int] = {
+            self.diagnostics: Diagnostics = {
                 "locks": 0,
-                "lock_ratio_best_permille": 0,
-                "lock_min_permille": int(lock_min_ratio * 1000),
+                "lock_ratio_best": 0.0,
+                "lock_min": float(lock_min_ratio),
             }
+            self._best_ratio = 0.0
             self._out = OutQueue(np.complex64)
             self._buf = np.empty(0, dtype=np.complex64)
             self._pos = 0
@@ -91,9 +97,8 @@ def make_cp_symbol_sync(
                 )
                 off = int(np.argmax(strength))
                 ratio = float(strength[off] / (np.median(strength) + 1e-12))
-                self.diagnostics["lock_ratio_best_permille"] = max(
-                    self.diagnostics["lock_ratio_best_permille"], int(ratio * 1000)
-                )
+                self._best_ratio = max(self._best_ratio, ratio)
+                self.diagnostics["lock_ratio_best"] = self._best_ratio
                 if ratio < lock_min_ratio:
                     self._pos += need - (fft_len + cp_len)
                     self._trim()
@@ -113,7 +118,7 @@ def make_cp_symbol_sync(
                 self._metric = self._metric_ref
                 self._low = 0
                 self._ready = True
-                self.diagnostics["locks"] += 1
+                bump(self.diagnostics, "locks")
                 return
 
         def _emit_symbols(self) -> None:
