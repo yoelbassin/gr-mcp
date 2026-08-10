@@ -41,6 +41,43 @@ def test_invert_is_iq_to_iq_unity_rate() -> None:
     assert c.rate_factor(step) == 1.0
 
 
+def test_channelize_bounds_center_and_bandwidth_against_rate() -> None:
+    c = Channelize()
+    ok = ChannelizeStep(decim=4, bandwidth_hz=25_000.0, center_hz=100_000.0)
+    assert c.validate_input_rate(ok, 250_000.0) is None
+    wrapped = ChannelizeStep(decim=4, bandwidth_hz=25_000.0, center_hz=490_000.0)
+    assert "Nyquist" in (c.validate_input_rate(wrapped, 250_000.0) or "")
+    folded = ChannelizeStep(decim=4, bandwidth_hz=80_000.0)
+    assert "folds" in (c.validate_input_rate(folded, 250_000.0) or "")
+
+
+def test_translate_bounds_center_against_rate() -> None:
+    from marconi.engine.stages.conditioning import Translate, TranslateStep
+
+    t = Translate()
+    assert t.validate_input_rate(TranslateStep(center_hz=100_000.0), 250_000.0) is None
+    msg = t.validate_input_rate(TranslateStep(center_hz=490_000.0), 250_000.0)
+    assert msg is not None and "Nyquist" in msg
+
+
+def test_compile_rejects_translate_beyond_nyquist() -> None:
+    from marconi.engine.compile.compiler import CompileError, compile_pipeline
+    from marconi.engine.stages.conditioning import TranslateStep
+    from marconi.engine.types.models import Modem
+
+    modem = Modem(symbol_rate=1_000.0, path=[TranslateStep(center_hz=490_000.0)])
+    with pytest.raises(CompileError, match="Nyquist"):
+        compile_pipeline(
+            modem,
+            stage_registry(),
+            direction="rx",
+            sample_rate=250_000.0,
+            start=Descriptor(Level.IQ, ItemType.C),
+            source_io={"path": "in.cf32"},
+            sink_io={"path": "out.cf32"},
+        )
+
+
 def test_rx_only_rejects_tx() -> None:
     b = CompileContext(Descriptor(Level.IQ, ItemType.C), rate=16.0, symbol_rate=1.0)
     with pytest.raises(StageDirectionError):

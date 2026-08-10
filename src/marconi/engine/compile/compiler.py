@@ -202,6 +202,9 @@ def _validate_descriptors(plan: _CompilePlan) -> None:
         problem = stage.validate_input(in_desc, step)
         if problem is not None:
             raise CompileError(f"stage '{step.conv}': {problem}")
+        rate_problem = stage.validate_input_rate(step, rates[i])
+        if rate_problem is not None:
+            raise CompileError(f"stage '{step.conv}': {rate_problem}")
 
 
 def _validate_probe_marks(plan: _CompilePlan, k: int) -> None:

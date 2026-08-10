@@ -98,9 +98,19 @@ def channelize_to_file(
     matching the channelize stage); default passes most of the decimated band."""
     if decim < 1:
         raise ValueError(f"decim must be >= 1, got {decim}")
+    if abs(center_hz) > 0.5 * sample_rate:
+        raise ValueError(
+            f"center_hz {center_hz:g} lies outside the +-{0.5 * sample_rate:g} Hz "
+            f"Nyquist span of the {sample_rate:g} Hz capture; the mixer wraps mod "
+            f"the sample rate and would silently tune an aliased sub-band"
+        )
     out_rate = sample_rate / decim
     cutoff = (bandwidth_hz / 2.0) if bandwidth_hz is not None else 0.45 * out_rate
     cutoff = min(cutoff, 0.5 * out_rate)
+    if cutoff >= 0.5 * sample_rate:
+        # decim=1 translate-only: firwin needs 0 < normalized < 1; the band
+        # passes whole either way
+        cutoff = 0.499 * sample_rate
     taps_per_phase = _CHANNELIZE_TAPS_PER_PHASE
     numtaps = taps_per_phase * decim + 1  # numtaps-1 is a whole number of phases
     h = firwin(numtaps, cutoff / (0.5 * sample_rate))

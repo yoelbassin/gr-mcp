@@ -46,6 +46,16 @@ class InvertStep(Step):
     conv: Literal["invert"] = "invert"
 
 
+def _nyquist_problem(center_hz: float, rate: float) -> str | None:
+    if abs(center_hz) > 0.5 * rate:
+        return (
+            f"center_hz {center_hz:g} lies outside the +-{0.5 * rate:g} Hz "
+            f"Nyquist span of the {rate:g} Hz input; a mixer wraps mod the "
+            f"sample rate and would silently tune an aliased sub-band"
+        )
+    return None
+
+
 class Channelize(RxStage[CompileContext, ChannelizeStep]):
     """Extract a sub-band: frequency-shift center_hz to baseband, low-pass, and
     decimate by `decim` (one freq_xlating_fir_filter). RX-only conditioning. The
@@ -80,6 +90,17 @@ class Channelize(RxStage[CompileContext, ChannelizeStep]):
     def rate_factor(self, step: ChannelizeStep) -> float:
         return 1.0 / int(step.decim)
 
+    def validate_input_rate(self, step: ChannelizeStep, rate: float) -> str | None:
+        if problem := _nyquist_problem(step.center_hz, rate):
+            return problem
+        if step.bandwidth_hz > rate / step.decim:
+            return (
+                f"bandwidth_hz {step.bandwidth_hz:g} exceeds the decimated "
+                f"output rate {rate / step.decim:g}; the passband folds after "
+                f"decimation — reduce bandwidth_hz or decim"
+            )
+        return None
+
 
 class Translate(RxStage[CompileContext, TranslateStep]):
     """Frequency-translate a sub-band to baseband: multiply by a complex rotator so
@@ -97,6 +118,9 @@ class Translate(RxStage[CompileContext, TranslateStep]):
 
     def emit_rx(self, b: CompileContext, step: TranslateStep) -> None:
         b.chain("rotator_cc", phase_inc=-2.0 * math.pi * step.center_hz / b.rate)
+
+    def validate_input_rate(self, step: TranslateStep, rate: float) -> str | None:
+        return _nyquist_problem(step.center_hz, rate)
 
 
 class Invert(RxStage[CompileContext, InvertStep]):

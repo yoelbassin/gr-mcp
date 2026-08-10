@@ -60,6 +60,35 @@ def test_channelize_streaming_matches_single_block(
     assert np.allclose(a, b, atol=1e-4)
 
 
+def test_channelize_decim_one_full_band_passes_through(tmp_path: Path) -> None:
+    # translate-only request with the whole band as passband: the firwin
+    # cutoff must land strictly inside Nyquist, not crash on it
+    fs, n, f1 = 48_000.0, 1 << 15, 4_000.0
+    src = tmp_path / "in.cf32"
+    _tone(fs, f1, n).tofile(src)
+    dst = tmp_path / "out.cf32"
+    written, out_rate = channelize_to_file(
+        src, dst, fs, center_hz=f1, decim=1, bandwidth_hz=fs
+    )
+    assert out_rate == fs
+    y = np.fromfile(dst, np.complex64)
+    assert y.size == written
+    freqs = np.fft.fftfreq(y.size, d=1.0 / out_rate)
+    peak = freqs[int(np.argmax(np.abs(np.fft.fft(y))))]
+    assert abs(peak) < 100.0
+
+
+def test_channelize_rejects_center_beyond_nyquist(tmp_path: Path) -> None:
+    # a mixer wraps mod the sample rate: center_hz past Nyquist would silently
+    # tune an aliased sub-band (a ppm-offset channel spec at the wrong rate)
+    fs, n = 250_000.0, 1 << 14
+    src = tmp_path / "in.cf32"
+    _tone(fs, 10_000.0, n).tofile(src)
+    dst = tmp_path / "out.cf32"
+    with pytest.raises(ValueError, match="Nyquist"):
+        channelize_to_file(src, dst, fs, center_hz=490_000.0, decim=1)
+
+
 def test_channelize_decim_one_is_a_pure_mixer(tmp_path: Path) -> None:
     fs, n, f1 = 48_000.0, 1 << 15, 4_000.0
     src = tmp_path / "in.cf32"

@@ -160,6 +160,12 @@ class Stage(ABC, Generic[B, S]):
         express; a returned message fails the compile."""
         return None
 
+    def validate_input_rate(self, step: S, rate: float) -> str | None:
+        """A stage-specific check against the compiled input sample rate (a
+        Nyquist bound the step model alone cannot know); a returned message
+        fails the compile."""
+        return None
+
 
 class RxStage(Stage[B, S]):
     directions: frozenset[str] = frozenset({"rx"})
