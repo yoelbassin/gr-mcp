@@ -26,13 +26,18 @@ def _resync_base(
     cs = np.concatenate([np.zeros(1), np.cumsum(p)])
     energy = cs[null_len:] - cs[: p.size - null_len + 1]
     j = int(np.argmin(energy))
-    thr = 0.25 * float(np.mean(p))
-    if energy[j] > thr * null_len:
+    floor = float(energy[j]) / null_len
+    rest = (float(np.sum(p)) - float(energy[j])) / (p.size - null_len)
+    # a null is present when the quietest window sits well below the rest of
+    # the buffer — contrast, not an absolute quarter-mean, so a noise-filled
+    # null at low SNR still registers
+    if floor > 0.5 * rest:
         return predicted
-    while j < p.size and p[j] <= thr:
-        j += 1
-    delta = lo + j - predicted
-    return lo + j if tol < abs(delta) <= max_corr else predicted
+    edge = prim.step_boundary(p, j, p.size, floor=floor, sig=rest)
+    if edge is None:
+        return predicted
+    delta = lo + edge - predicted
+    return lo + edge if tol < abs(delta) <= max_corr else predicted
 
 
 def make_ofdm_frame_sync(

@@ -126,6 +126,20 @@ def test_resync_base_snaps_corrects_and_rejects() -> None:
     assert _resync_base(buf, 395, **r) == 395  # insufficient buffer -> keep prediction
 
 
+def test_resync_base_tracks_null_end_in_noise() -> None:
+    # The per-frame resync must follow the null's true end when the null is
+    # noise-filled (6 dB SNR), not stop on the first noise sample inside it.
+    null_len, tol, max_corr = 24, 2, 20
+    for seed in range(5):
+        rng = np.random.default_rng(seed)
+        z = rng.standard_normal(400) + 1j * rng.standard_normal(400)
+        z[107:134] = 0.0  # true next base = 134
+        noise = 0.5 * (rng.standard_normal(400) + 1j * rng.standard_normal(400))
+        buf = (z + noise).astype(np.complex64)
+        got = _resync_base(buf, 127, null_len=null_len, tol=tol, max_corr=max_corr)
+        assert abs(got - 134) <= 2, (seed, got)
+
+
 def test_frame_sync_reports_truncated_final_frame() -> None:
     """A frame whose usefuls never fully arrive (end-of-stream mid-frame) is
     dropped by design — frames are atomic — but the drop must be visible:
