@@ -24,7 +24,7 @@ class CaptureError(Exception):
     pass
 
 
-register_error(CaptureError, "capture")
+register_error(CaptureError, "failed_precondition")
 
 
 class CaptureLevels(BaseModel):

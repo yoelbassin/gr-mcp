@@ -14,9 +14,16 @@ class BackendError(Exception):
     pass
 
 
+class BackendUnavailable(BackendError):
+    pass
+
+
 # Backend wiring/resolution failures (unknown block kind, bad connection): the
-# spec the caller handed in is wrong, not an internal bug.
+# spec the caller handed in is wrong, not an internal bug. A backend whose
+# runtime is missing from the machine is an environment failure, not a spec
+# error, and must not tell the agent to fix its spec.
 register_error(BackendError, "invalid_argument")
+register_error(BackendUnavailable, "failed_precondition")
 
 
 class BlockCensus(BaseModel):

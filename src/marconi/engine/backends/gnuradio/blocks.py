@@ -4,7 +4,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from marconi.engine.backends.base import BackendError
+from marconi.engine.backends.base import BackendError, BackendUnavailable
 from marconi.engine.backends.gnuradio.embedded.burst import make_burst_sampler
 from marconi.engine.backends.gnuradio.embedded.chirp import (
     chirp_prefix,
@@ -85,20 +85,44 @@ def _unflatten(flat: list[int], lens: list[int]) -> list[list[int]]:
     return out
 
 
-def _modules() -> tuple[Any, Any, Any, Any, Any, Any, Any, Any, Any, Any]:
-    """Single gnuradio import gate → (gr, blocks, analog, digital,
-    gr_filter, firdes, pfb, fft, trellis, fec). Called at build time only."""
+@dataclass(frozen=True)
+class _GrModules:
+    gr: Any
+    blocks: Any
+    analog: Any
+    digital: Any
+    gr_filter: Any
+    firdes: Any
+    pfb: Any
+    fft: Any
+    trellis: Any
+    fec: Any
+
+
+def _modules() -> _GrModules:
+    """Single gnuradio import gate. Called at build time only."""
     try:
         from gnuradio import analog, blocks, digital, fec, fft
         from gnuradio import filter as gr_filter
         from gnuradio import gr, trellis
         from gnuradio.filter import firdes, pfb
     except ImportError as e:  # pragma: no cover - environment-dependent
-        raise BackendError(
+        raise BackendUnavailable(
             "GNU Radio is not importable. Install GNU Radio 3.10+ system-wide "
             "and use a `uv venv --system-site-packages` venv."
         ) from e
-    return gr, blocks, analog, digital, gr_filter, firdes, pfb, fft, trellis, fec
+    return _GrModules(
+        gr=gr,
+        blocks=blocks,
+        analog=analog,
+        digital=digital,
+        gr_filter=gr_filter,
+        firdes=firdes,
+        pfb=pfb,
+        fft=fft,
+        trellis=trellis,
+        fec=fec,
+    )
 
 
 @dataclass(frozen=True)
@@ -117,18 +141,18 @@ class _GrCtx:
 
 
 def _make_ctx(rate: float) -> _GrCtx:
-    gr, blocks, analog, digital, gr_filter, firdes, pfb, fft, trellis, fec = _modules()
+    m = _modules()
     return _GrCtx(
-        gr=gr,
-        blocks=blocks,
-        analog=analog,
-        digital=digital,
-        gr_filter=gr_filter,
-        firdes=firdes,
-        pfb=pfb,
-        fft=fft,
-        trellis=trellis,
-        fec=fec,
+        gr=m.gr,
+        blocks=m.blocks,
+        analog=m.analog,
+        digital=m.digital,
+        gr_filter=m.gr_filter,
+        firdes=m.firdes,
+        pfb=m.pfb,
+        fft=m.fft,
+        trellis=m.trellis,
+        fec=m.fec,
         rate=rate,
     )
 

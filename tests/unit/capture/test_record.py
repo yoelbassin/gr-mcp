@@ -17,7 +17,7 @@ from marconi.errors import classify_error
 
 
 def test_capture_error_classified() -> None:
-    assert classify_error(CaptureError("boom")) == ("capture", "boom")
+    assert classify_error(CaptureError("boom")) == ("failed_precondition", "boom")
 
 
 def test_reconcile_exact_match_no_warnings() -> None:

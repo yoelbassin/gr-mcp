@@ -12,7 +12,7 @@ SEG = 4096
 
 
 def _agc2_output(attack_sym: float, decay_sym: float) -> np.ndarray:
-    gr = _modules()[0]
+    gr = _modules().gr
     from gnuradio import blocks
 
     step = np.concatenate(

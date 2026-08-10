@@ -140,7 +140,7 @@ def _run_flowgraph(pipeline: GrPipeline) -> RunResult:
     except Exception as e:  # noqa: BLE001
         return RunResult(
             status="error",
-            error=f"flowgraph raised: {e}",
+            error=f"flowgraph raised: {type(e).__name__}: {e}",
             artifacts=sink_paths(pipeline),
             diagnostics=_harvest_diagnostics(tb),
             census=_harvest_census(tb, pipeline),
