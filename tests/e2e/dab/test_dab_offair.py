@@ -1,8 +1,8 @@
 """Real off-air DAB Mode I, one Modem spanning phy through the coding tail,
 CRC as the oracle, plus the readable ensemble label. Known-good on this slice:
 192 CRC-valid FIBs, measured 10x with byte-identical sink output (variance 0;
-issue 05). The gate is known-good minus 2 — margin only for cross-machine float
-drift, tight enough that the observed regression classes (issue 18's trim
+trim). The gate is known-good minus 2 — margin only for cross-machine float
+drift, tight enough that the observed regression classes (a trim
 192 -> 12; a lost tail frame) cannot pass green.
 
 The PHY (ofdm_demod/dqpsk_soft_demap/deinterleave/depuncture/fec) and the

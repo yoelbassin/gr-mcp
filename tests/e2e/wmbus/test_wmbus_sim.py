@@ -1,7 +1,7 @@
-"""Protocol #4 (issue 07): wireless M-Bus mode T decodes end-to-end through the
+"""Protocol #4: wireless M-Bus mode T decodes end-to-end through the
 GENERIC production coding vocabulary, with every protocol constant supplied
 test-side. wM-Bus is outside the LoRa/AIS/DAB training set; nothing in
-packages/ names it. The decode exercises three primitives the training set
+src/marconi names it. The decode exercises three primitives the training set
 never needed -- the 3-of-6 line code (codebook), sync-word seeding, and
 length-field framing -- plus a CRC as the oracle.
 

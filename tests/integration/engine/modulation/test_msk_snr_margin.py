@@ -1,4 +1,4 @@
-"""First SNR-margin guard in the suite (issues 22/05): the coherent msk RX
+"""First SNR-margin guard in the suite: the coherent msk RX
 holds BER-0 at an AWGN SNR where the non-coherent fsk RX measurably fails.
 
 _SNR_DB pinned from a 7x5 sweep over

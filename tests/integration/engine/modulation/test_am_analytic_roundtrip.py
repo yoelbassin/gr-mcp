@@ -71,7 +71,7 @@ def test_am_afsk_decodes_ber0(tmp_path: Path) -> None:
     n_sent = warm.size + bits.size
     assert out.size >= n_sent - 96, f"tail loss too large: {out.size}/{n_sent}"
     # A residual few-symbol Gardner acquisition offset survives even at
-    # DC_BLOCK_LEN=64, so alignment needs a shift search (issue 05: paired with
+    # DC_BLOCK_LEN=64, so alignment needs a shift search (paired with
     # the length assert above, never aligned_ber alone).
     # global inversion is a legitimate hypothesis: accept either polarity
     assert aligned_ber_best([out, 1 - out], bits) == 0.0

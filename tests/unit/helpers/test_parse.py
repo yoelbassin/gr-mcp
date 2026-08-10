@@ -150,7 +150,7 @@ def test_parse_roundtrip_signed() -> None:
     assert out == msg
 
 
-# parse dispatches on a discriminator field (issue 07): different message
+# parse dispatches on a discriminator field: different message
 # types carry different field layouts, so the wrong-type struct must never be
 # applied. Covers AIS msg_type (types 1/2/3 vs 5 vs others) and the general
 # mechanism (which also un-blobs DAB's messages rung).

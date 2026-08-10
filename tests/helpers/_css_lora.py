@@ -1,5 +1,5 @@
 """LoRa's CSS explicit-header parameters — the protocol constants that used to
-live in production before the agnosticism purge (issue 04). Every value here is
+live in production before the agnosticism purge. Every value here is
 a datasheet/gr-lora fact; production takes them as caller-supplied parameters.
 
 - Hamming(4+cr, 4): data_bits=4, so a byte is 2 nibbles and the CRC is 2 bytes.

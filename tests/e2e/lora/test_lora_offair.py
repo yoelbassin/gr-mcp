@@ -3,7 +3,7 @@ oracle. The slice holds TWO complete frames; both must decode CRC-valid.
 
 Run 1 is the product phy: resample/chirp_sync/dechirp/burst_probe in one
 Modem — chirp_sync re-arms per preamble and burst_probe surfaces both
-burst marks in the same run (issue 03's multi-burst requirement), delivered
+burst marks in the same run (the multi-burst requirement), delivered
 on the symbolstream. The header-driven carve is datasheet work and runs
 test-side (helpers/css_explicit.py, demoted from a registered stage 2026-07):
 it parses each marked burst's declared header and decodes the payload at its

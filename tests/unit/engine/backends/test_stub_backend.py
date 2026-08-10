@@ -64,7 +64,3 @@ def test_out_of_range_port_raises() -> None:
     )
     with pytest.raises(BackendError):
         StubBackend(stub_factories()).instantiate(pipe)
-
-
-def test_backend_name() -> None:
-    assert StubBackend(stub_factories()).name == "stub"

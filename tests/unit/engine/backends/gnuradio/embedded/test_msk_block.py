@@ -4,6 +4,9 @@ wakeups; the real-scheduler path is covered by test_msk_roundtrip."""
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from typing import Any
+
 import numpy as np
 import pytest
 from helpers._dsp import AlignmentNotFound, aligned_ber_best
@@ -103,8 +106,8 @@ def test_no_per_bit_numpy_dispatch_below_crossover(
     # the mechanism: numpy invocations must scale with work calls, not bits.
     calls = {"n": 0}
 
-    def counted(fn):  # type: ignore[no-untyped-def]
-        def wrapper(*a, **k):  # type: ignore[no-untyped-def]
+    def counted(fn: Callable[..., object]) -> Callable[..., object]:
+        def wrapper(*a: object, **k: object) -> object:
             calls["n"] += 1
             return fn(*a, **k)
 
@@ -129,7 +132,7 @@ def test_vectorized_medium_engages_above_crossover(
     calls = {"n": 0}
     real_dot = np.dot
 
-    def counted(*a, **k):  # type: ignore[no-untyped-def]
+    def counted(*a: Any, **k: Any) -> Any:
         calls["n"] += 1
         return real_dot(*a, **k)
 

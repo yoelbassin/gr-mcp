@@ -224,7 +224,7 @@ def aligned_ber(rx: np.ndarray, tx: np.ndarray, max_shift: int = 256) -> float:
     ~0.46 random. Searching both directions is a superset of the forward-only
     search, so it never raises the score of an already-aligned path.
 
-    WARNING (issue 05): the half-overlap floor launders systematic tail
+    WARNING: the half-overlap floor launders systematic tail
     truncation — measured, not hypothetical. Requiring full coverage instead
     fails 19/30 phy round-trips: clock_correct emits 1260/1350 bits (90-bit
     tail lost, scored 0.0 today), and even the clean FSK/OOK paths truncate.

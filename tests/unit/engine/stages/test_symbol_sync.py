@@ -6,7 +6,7 @@ psk_demod fuses matched-filter + Gardner timing + costas and hides the sps
 decimation inside its IQ->SYMBOLS level change (rate_factor 1.0). This stage
 stays at IQ and decimates honestly: an explicit `sps` param drives
 rate_factor = 1/sps, checked against the pipeline's delivered rate exactly as
-Channelize's explicit `decim` is (issue 06).
+Channelize's explicit `decim` is.
 """
 
 from __future__ import annotations

@@ -56,7 +56,7 @@ def _best_ber(out: np.ndarray, bits: np.ndarray) -> float:
     # msk's rail decisions are the NRZI (differential) encoding of a
     # non-precoded MSK TX (the fsk stage at h=0.5 used here) -- see
     # test_msk_block.py's _best_ber for the same law. Decoded test-side so
-    # the production demod stays protocol-agnostic (issue 22).
+    # the production demod stays protocol-agnostic.
     h = out.astype(np.uint8)
     nrzi = (h[1:] ^ h[:-1]).astype(np.uint8)
     return aligned_ber_best([nrzi, 1 - nrzi], bits)

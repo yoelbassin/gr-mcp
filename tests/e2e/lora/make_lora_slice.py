@@ -1,5 +1,5 @@
 """Crop the V1 IQ_2 capture (read-only) to a gitignored ~10 s cf32 window
-holding TWO complete frames (issue 03: multi-burst decode must be exercised
+holding TWO complete frames (multi-burst decode must be exercised
 by the off-air gate, not hidden by a hand-trimmed single frame).
 
 Run once before test_lora_offair.py:

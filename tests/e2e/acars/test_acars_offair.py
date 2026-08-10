@@ -1,6 +1,6 @@
 """Protocol #5: real off-air ACARS decodes end-to-end through one Modem
 spanning phy through the coding tail, matched against an external decoder's
-golden (issues 22/23).
+golden.
 
 Every ARINC-618 constant below is test-side caller data, per CLAUDE.md. External
 oracle: golden_acarsdec.json (acarsdec 3.7 over the same capture; provenance

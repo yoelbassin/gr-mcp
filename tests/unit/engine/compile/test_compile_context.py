@@ -15,7 +15,7 @@ def test_sps_int_accepts_integral_rate_pair() -> None:
 
 def test_sps_int_rejects_fractional_rate_pair() -> None:
     # sample_rate/symbol_rate = 36.75: TX must not silently transmit at 36 or
-    # 37 sps while the rate model says otherwise (issue 10)
+    # 37 sps while the rate model says otherwise
     ctx = CompileContext(IQ, rate=36.75, symbol_rate=1.0)
     with pytest.raises(SampleRateError) as ei:
         ctx.sps_int()

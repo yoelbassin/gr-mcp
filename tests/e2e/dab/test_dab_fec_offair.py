@@ -144,5 +144,5 @@ def test_dab_phy_decodes_crc_valid_fibs(tmp_path: Path) -> None:
                 ok += 1
     assert ok >= 190, (
         "expected >=190 CRC-valid FIBs from the phy chain "
-        f"(known-good 192, 10x var 0; issue 05), got {ok}"
+        f"(known-good 192, 10x var 0), got {ok}"
     )

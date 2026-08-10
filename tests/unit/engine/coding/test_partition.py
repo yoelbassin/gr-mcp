@@ -22,7 +22,7 @@ from marconi.engine.types.step import Step
 IQ = Descriptor(Level.IQ, ItemType.C)
 SOFT_BITS = Descriptor(Level.BITS, ItemType.B, carrier=Carrier.HARD)
 
-# exact POCSAG GR prefix (tests/bits/test_pocsag_offair.py:89-101) so the
+# the e2e POCSAG decode's exact GR prefix (tests/e2e/pocsag) so the
 # rate/amplitude contract checks see a known-good chain
 _BUILDERS: dict[str, Callable[[], Step]] = {
     "channelize": lambda: ChannelizeStep(

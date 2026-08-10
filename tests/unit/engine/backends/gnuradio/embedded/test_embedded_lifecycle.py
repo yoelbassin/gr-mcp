@@ -1,4 +1,4 @@
-"""The shared embedded-block lifecycle (issue 16): one forecast/EOF/drain
+"""The shared embedded-block lifecycle: one forecast/EOF/drain
 discipline in lifecycle.py, and its two load-bearing properties — a large
 pending backlog (built from one big input push) still fully drains across
 many small output-window calls, and a slow consumer bounds chirp_sync's

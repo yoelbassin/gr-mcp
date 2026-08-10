@@ -21,8 +21,8 @@ def test_explicit_decode_yields_rf_fingerpring_payload() -> None:
 
 def test_explicit_decode_loops_back_to_back_frames() -> None:
     """Two frames in one symbol stream decode as two frames — the pre-fix
-    block set _done after frame 1 and consumed-and-discarded the rest
-    (issue 03)."""
+     block set _done after frame 1 and consumed-and-discarded the rest
+    ."""
     one = _run(_SF11_SYMBOLS)
     two = _run(_SF11_SYMBOLS * 2)
     assert len(two) == 2 * len(one)
@@ -67,7 +67,7 @@ def test_explicit_decode_oversize_length_does_not_swallow_later_marks() -> None:
 def test_explicit_decode_corrupt_header_skips_to_next_mark() -> None:
     """A corrupt header is skipped and the next marked burst still decodes —
     the pre-fix block treated a header-parity failure as end-of-stream and
-    reported nothing (issue 03)."""
+    reported nothing."""
     rng = np.random.default_rng(5)
     corrupt = list(_SF11_SYMBOLS)
     corrupt[:8] = [int(v) for v in rng.integers(1, 2048, 8)]

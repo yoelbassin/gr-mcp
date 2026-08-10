@@ -23,7 +23,7 @@ def test_unknown_type_is_internal_error_with_type_name() -> None:
 
 def test_every_public_exception_classifies_not_internal() -> None:
     # Each package registers its public exceptions at import; a user's bad
-    # spec/codec/wiring must never read as an internal bug (issue 11).
+    # spec/codec/wiring must never read as an internal bug.
     from marconi.engine.backends.base import BackendError
     from marconi.engine.compile.compiler import CompileError
     from marconi.engine.stages.base import SpecValidationError, StageDirectionError
@@ -41,7 +41,7 @@ def test_every_public_exception_classifies_not_internal() -> None:
 
 
 def test_no_fastmcp_import_in_core_errors() -> None:
-    # core must not import a server framework (issue 11).
+    # core must not import a server framework.
     import inspect
 
     from marconi import errors

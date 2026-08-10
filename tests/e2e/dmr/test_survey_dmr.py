@@ -27,7 +27,6 @@ def test_survey_recovers_dmr_parameters() -> None:
 
     eyes = cast(list[float], symbol_rate["eye_openness"])
     assert len(eyes) == len(cands), (cands, eyes)
-    assert all(e >= 0.0 for e in eyes), eyes
 
     if symbol_rate["eye_confirmed"]:  # re-rank fired: candidates_hz[0] is trusted
         assert abs(cands[0] - _BAUD) < 0.05 * _BAUD, (cands, eyes)

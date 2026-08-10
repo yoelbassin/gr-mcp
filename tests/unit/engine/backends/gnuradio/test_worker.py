@@ -82,7 +82,7 @@ def test_parent_process_stays_gnuradio_free() -> None:
     assert out.returncode == 0 and "OK" in out.stdout, out.stderr
 
 
-# ─── Failure paths (issue 02) ────────────────────────────────────────────────
+# ─── Failure paths ────────────────────────────────────────────────
 
 
 def _raising_basic_flowgraph(sink: Path) -> Any:
@@ -171,7 +171,7 @@ def test_embedded_raise_reports_error_and_keeps_sink(
 
 def test_scheduler_abort_flags_error() -> None:
     """A block demanding more items than the stream buffer holds aborts the
-    scheduler while tb.run() returns normally (probed, issue 01); the worker
+    scheduler while tb.run() returns normally (probed); the worker
     must convert the captured block_executor message into status=error.
 
     Statistical gate: the abort MESSAGE is racy inside GR itself — probed

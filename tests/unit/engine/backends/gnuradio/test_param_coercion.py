@@ -14,7 +14,7 @@ def test_as_int_accepts_integral_only() -> None:
 
 def test_as_int_rejects_non_integral_float() -> None:
     # a StrictInt spec never produces 2.7, but the IR-direct path skips
-    # pydantic; the backend must not silently truncate (issue 10)
+    # pydantic; the backend must not silently truncate
     with pytest.raises(BackendError):
         _as_int(2.7)
 

@@ -74,7 +74,7 @@ def test_strip_first_lock_intact_replica_rearms(tmp_path: Path) -> None:
     # corr_est_cc tags in stream order, so a 2x-amplitude preamble replica
     # inside the payload cannot retroactively steal the first lock (the old
     # global-argmax failure): the payload head decodes under burst-1's phase.
-    # Since issue 03 every detection re-arms — the replica reads as a new
+    # Every detection re-arms — the replica reads as a new
     # burst: its own span is stripped and the continuation is re-derotated
     # (an exact 64-symbol preamble inside a payload IS a burst boundary).
     pts = _qpsk_points()

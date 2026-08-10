@@ -34,7 +34,7 @@ class _FakePmt:
 
 
 class _BasicBlock:
-    def __init__(self, name: str = "", in_sig: Any = None, out_sig: Any = None):
+    def __init__(self, name: str = "", in_sig: Any = None, out_sig: Any = None) -> None:
         self._nread = 0
         self._nwritten = 0
         self.in_tags: list[FakeTag] = []

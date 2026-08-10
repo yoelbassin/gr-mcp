@@ -113,7 +113,7 @@ def test_preamble_sync_ber0_no_oracle(order: int, tmp_path: Path) -> None:
 
 def test_two_burst_capture_decodes_both(tmp_path: Path) -> None:
     """A capture holding two independent bursts decodes both in one run:
-    sym_strip re-arms on burst 2's phase_est tag (issue 03). The carrier loop
+    sym_strip re-arms on burst 2's phase_est tag. The carrier loop
     re-locks with an arbitrary M-fold ambiguity across the inter-burst gap, so
     burst 2 decodes only if its own tag re-estimates the rotation — the
     pre-fix first-tag latch replays burst 1's phase forever."""

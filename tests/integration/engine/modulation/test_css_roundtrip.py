@@ -97,7 +97,7 @@ def test_css_ber0_impaired(sf: int, osr: int, tmp_path: Path) -> None:
 def test_dechirp_rejects_wrong_input_rate(tmp_path: Path) -> None:
     # dechirp's window is oversample*2^sf samples/symbol, so the input rate must
     # be ~oversample*2^sf*symbol_rate (here 2*128*1.0 = 256). A grossly wrong rate
-    # would dechirp garbage; the compiler must reject it, not emit it (issue 06).
+    # would dechirp garbage; the compiler must reject it, not emit it.
     m = _modem(7, 2)
     with pytest.raises(CompileError) as e:
         _compile(m, "rx", 200.0, tmp_path / "i", tmp_path / "o")
@@ -111,7 +111,7 @@ def test_dechirp_accepts_matching_input_rate(tmp_path: Path) -> None:
 
 def test_dechirp_rate_check_tolerates_clock_correct_ppm(tmp_path: Path) -> None:
     # clock_correct resamples by 1/(1+ppm) — a legitimate sub-percent rate shift
-    # (0.005% at 50 ppm) the tolerance must admit, not reject (issue 06).
+    # (0.005% at 50 ppm) the tolerance must admit, not reject.
     m = Modem(
         symbol_rate=_SYM,
         path=[
@@ -134,7 +134,7 @@ def test_dechirp_rate_check_tolerates_clock_correct_ppm(tmp_path: Path) -> None:
 def test_css_two_burst_capture_decodes_both(tmp_path: Path) -> None:
     """A capture with two CSS bursts — each under a DIFFERENT carrier offset —
     decodes both in one run: chirp_sync re-arms per preamble with fresh
-    CFO/timing estimates (issue 03; the pre-fix block applied burst 1's
+    CFO/timing estimates (the pre-fix block applied burst 1's
     correction to the whole remainder of the capture). Also pins the
     re-lock diagnostics surfaced through RunResult."""
     from helpers._dsp import read_complex
