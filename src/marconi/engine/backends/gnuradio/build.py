@@ -24,14 +24,16 @@ def _wire_eof_probe(pipeline: GrPipeline, instances: dict[str, Any]) -> None:
     ``emitted`` is what the source actually feeds the graph — the file item
     count clipped by the source's own offset/length slice, NOT the raw file
     size (a sliced run stops the source early, so file size never proves
-    finality). A block reached by a single input edge whose compiler rate is
-    an exact integer decimation of the source rate gets an exact
-    ``expected_items = emitted // decim`` — its own read counter then proves
-    finality (see EofProbe). This subsumes the old source-adjacent ``direct``
-    case (decim 1) and now also reaches blocks behind a channelizer. Anything
-    else — non-integer/unknown rate, a fork, a data-dependent stage that can
-    only over-state the rate — conservatively gets None, which can only
-    withhold a tail at EOF, never truncate one early."""
+    finality). Compiler-built pipelines (terminal_sink marked) get an exact
+    ``expected_items = emitted // decim`` for any block whose whole path back
+    to the source is single-edged with non-increasing integer-ratio rate tags
+    — ratio 1 included, so the plain complex_to_mag -> burst_sampler shape
+    flushes its final burst; compiler tags come from the rate model and can
+    only overstate a wire's rate, which withholds, never truncates early.
+    Hand-built IR (no terminal mark) keeps the conservative last-edge rule:
+    decim >= 2 only, since its tags carry no such guarantee. Anything else —
+    interpolation in the path, a fork, unknown rates — gets None, which can
+    only withhold a tail at EOF, never truncate one early."""
     sources = [
         b
         for b in pipeline.blocks
@@ -56,13 +58,16 @@ def _wire_eof_probe(pipeline: GrPipeline, instances: dict[str, Any]) -> None:
         if len(into) == 1:
             if into[0].src_block == spec.id:
                 expected = emitted  # source-adjacent: read counter proves finality
+            elif pipeline.terminal_sink is not None:
+                decim = _integer_decim_path(pipeline, spec.id, bid)
+                if decim is not None:
+                    expected = emitted // decim
             else:
-                # One edge back but not from the source: finality holds only when
-                # the compiler rate is an exact integer DECIMATION (>=2) of the
-                # source. That admits a block behind a channelizer (the whole
-                # point) while excluding an undecimated hop whose rate a
-                # hand-built graph can tag equal to the source (ratio 1) without
-                # its true item count matching - safe by omission, never early.
+                # Hand-built IR carries no rate-model guarantee: finality only
+                # when the last edge's tag is an exact integer DECIMATION
+                # (>=2) of the source — a ratio-1 tag could mislabel an
+                # interpolated wire, and an understated expected would flush
+                # a withheld margin mid-stream.
                 rate = pipeline.block(bid).sample_rate
                 if rate is not None and rate > 0:
                     ratio = src_rate / rate
@@ -70,6 +75,39 @@ def _wire_eof_probe(pipeline: GrPipeline, instances: dict[str, Any]) -> None:
                     if decim >= 2 and abs(ratio - decim) < 1e-6:
                         expected = emitted // decim
         blk.eof_probe = EofProbe(src, emitted, expected)
+
+
+def _integer_decim_path(pipeline: GrPipeline, src_id: str, bid: str) -> int | None:
+    """Net integer decimation from the file source to ``bid`` along a unique
+    single-input path whose rate tags never increase and step by integer
+    ratios (ratio 1 allowed). None when any hop forks, lacks a tag, or lands
+    off-grid — interpolation anywhere upstream disqualifies, because a
+    composed interp/decim chain's true delivered count drifts off the
+    net-ratio arithmetic (floor composition), and an understated expected
+    would flush early."""
+    decim = 1
+    cur = bid
+    while True:
+        into = [c for c in pipeline.connections if c.dst_block == cur]
+        if len(into) != 1:
+            return None
+        prev = into[0].src_block
+        r_cur = pipeline.block(cur).sample_rate
+        if r_cur is None or r_cur <= 0:
+            return None
+        upstream = (
+            pipeline.sample_rate if prev == src_id else pipeline.block(prev).sample_rate
+        )
+        if upstream is None or upstream <= 0:
+            return None
+        step = upstream / r_cur
+        step_i = round(step)
+        if step_i < 1 or abs(step - step_i) > 1e-6:
+            return None
+        decim *= step_i
+        if prev == src_id:
+            return decim
+        cur = prev
 
 
 def _guarded_top_block_cls(gr: Any) -> Any:

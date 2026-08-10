@@ -98,6 +98,74 @@ def test_undecimated_non_direct_block_is_not_sized(tmp_path: Path) -> None:
     assert probe.expected_items is None
 
 
+def _marked(pipe: GrPipeline) -> GrPipeline:
+    return pipe.model_copy(update={"terminal_sink": "any_sink"})
+
+
+def test_compiler_marked_ratio_one_chain_is_sized(tmp_path: Path) -> None:
+    # the shipped live shape: src -> complex_to_mag(1:1) -> burst_sampler, all
+    # truthfully tagged at the source rate; a compiler-built pipeline (terminal
+    # mark present) grants finality through ratio-1 hops so the final burst
+    # can flush at EOF
+    path, src = _source(tmp_path, 3200)
+    pipe = GrPipeline(
+        name="p",
+        sample_rate=_SR,
+        blocks=[
+            GrBlock(
+                id="src",
+                kind="iq_file_source",
+                params={"path": str(path)},
+                sample_rate=_SR,
+            ),
+            GrBlock(id="mag", kind="complex_to_mag", sample_rate=_SR),
+            GrBlock(id="bs", kind="burst_sampler", sample_rate=_SR),
+        ],
+        connections=[
+            GrConnection(src_block="src", dst_block="mag"),
+            GrConnection(src_block="mag", dst_block="bs"),
+        ],
+    )
+    probe = _wire(tmp_path, _marked(pipe), src)
+    assert probe.expected_items == 3200
+
+
+def test_marked_channelized_chain_keeps_emitted_over_decim(tmp_path: Path) -> None:
+    path, src = _source(tmp_path, 3200)
+    probe = _wire(tmp_path, _marked(_channelized_pipeline(path)), src)
+    assert probe.expected_items == 3200 // _DECIM
+
+
+def test_marked_interpolated_path_stays_unsized(tmp_path: Path) -> None:
+    # resample(x2) then decimate(/4): the net last-edge ratio reads as an
+    # integer decimation of 2, but floor composition makes the true delivered
+    # count drift off emitted//2 — the path walk sees the rate INCREASE at the
+    # resampler hop and refuses to size, withholding instead of flushing early
+    path, src = _source(tmp_path, 3200)
+    pipe = GrPipeline(
+        name="p",
+        sample_rate=_SR,
+        blocks=[
+            GrBlock(
+                id="src",
+                kind="iq_file_source",
+                params={"path": str(path)},
+                sample_rate=_SR,
+            ),
+            GrBlock(id="rs", kind="rational_resampler", sample_rate=_SR),
+            GrBlock(id="ch", kind="freq_xlating_fir_filter", sample_rate=2 * _SR),
+            GrBlock(id="bs", kind="burst_sampler", sample_rate=_SR / 2),
+        ],
+        connections=[
+            GrConnection(src_block="src", dst_block="rs"),
+            GrConnection(src_block="rs", dst_block="ch"),
+            GrConnection(src_block="ch", dst_block="bs"),
+        ],
+    )
+    probe = _wire(tmp_path, _marked(pipe), src)
+    assert probe.expected_items is None
+
+
 def test_source_adjacent_block_keeps_direct_behavior(tmp_path: Path) -> None:
     path, src = _source(tmp_path, 3200)
     pipe = GrPipeline(

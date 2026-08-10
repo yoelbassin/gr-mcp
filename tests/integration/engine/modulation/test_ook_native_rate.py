@@ -89,6 +89,28 @@ def _run(workdir: Path, capture: Path) -> np.ndarray:
     return read_bits(r.bitstream.path)
 
 
+def test_final_burst_flushes_on_an_unpadded_capture(tmp_path: Path) -> None:
+    # the shipped live shape: iq_file_source -> complex_to_mag -> burst_sampler
+    # at native rate, every hop ratio 1. A capture that ends AT its last
+    # burst's end has no in-stream fall edge — only EOF finality can flush the
+    # withheld burst, so the probe must be granted through ratio-1 hops.
+    ensure_worker_warm()
+    rng = np.random.default_rng(_SEED)
+    stream = [_ambient(_LEAD, rng)]
+    for phase in _PHASES[:-1]:
+        stream.append(_pulse_pair_burst(_PAYLOAD, phase))
+        stream.append(_ambient(_GAP, rng))
+    stream.append(_pulse_pair_burst(_PAYLOAD, 0))  # ends at the burst's end
+    cap = tmp_path / "unpadded.cf32"
+    np.concatenate(stream).astype(np.complex64).tofile(cap)
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    bits = _run(run_dir, cap)
+    want = _chip_string(_PAYLOAD)
+    found = "".join(str(bit) for bit in bits)
+    assert found.count(want) == len(_PHASES), found.count(want)
+
+
 def test_native_rate_open_loop_recovers_every_burst_at_ber0(tmp_path: Path) -> None:
     ensure_worker_warm()
     env = _synthetic_capture()
