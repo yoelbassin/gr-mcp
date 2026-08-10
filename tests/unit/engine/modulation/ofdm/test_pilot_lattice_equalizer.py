@@ -23,6 +23,19 @@ def test_non_dc_straddling_span_rejected_at_construction() -> None:
         make_pilot_lattice_equalizer(FAKE_GR, **{**_lattice.eq_params(), "kmin": 4})
 
 
+def test_pilot_bins_beyond_fft_reach_rejected_at_construction() -> None:
+    """A dc_search wide enough to push an edge pilot's bin out of the FFT
+    would starve that carrier's channel node forever (np.interp over an empty
+    node kills the flowgraph on the first frame) and wrap negative indices to
+    the opposite spectral edge inside the CFO estimate."""
+    import pytest
+
+    with pytest.raises(ValueError, match="FFT"):
+        make_pilot_lattice_equalizer(
+            FAKE_GR, **{**_lattice.eq_params(), "dc_search": 10}
+        )
+
+
 def test_locks_and_equalizes_with_frame_phase_discovery() -> None:
     start_fs = 2
     grid, spec = _lattice.make_spectra(60, start_fs=start_fs, theta=0.01, seed=3)

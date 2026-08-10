@@ -38,6 +38,19 @@ def test_valid_params_pass() -> None:
     assert OfdmCoherentSyncStep.model_validate(_good()).fft_len == 64
 
 
+def test_edge_pilot_within_dc_search_reach_rejected() -> None:
+    # kmin=-fft_len/2 with any dc_search >= 1: the searched delta can push the
+    # edge pilot's bin below 0 — reject at validation, not crash at frame 1
+    bad = {
+        **_good(),
+        "kmin": -32,
+        "n_carriers": 56,
+        "pilot_carriers": [-32, -23, -22, -21],
+    }
+    with pytest.raises(ValidationError, match="FFT"):
+        OfdmCoherentSyncStep.model_validate(bad)
+
+
 def test_lock_thresholds_default_to_calibrated_values() -> None:
     step = OfdmCoherentSyncStep.model_validate(_good())
     assert step.lock_min_ratio == 2.0

@@ -89,6 +89,17 @@ def make_pilot_lattice_equalizer(
             f"kmin={kmin}, n_carriers={n_carriers}"
         )
     dc0 = fft_len // 2
+    pilots = [k for s in lattice.pilot_sets for k in s]
+    lo = min([kmin, *pilots, *lattice.fp_carriers])
+    hi = max([kmin + n_carriers, *pilots, *lattice.fp_carriers])
+    if lo + dc0 - dc_search < 0 or hi + dc0 + dc_search >= fft_len:
+        raise ValueError(
+            "carrier bins must stay inside the FFT across the DC search: "
+            f"bins [{lo + dc0 - dc_search}, {hi + dc0 + dc_search}] vs "
+            f"fft_len {fft_len}. An out-of-FFT pilot bin starves its channel "
+            "node (the equalizer dies on its first frame) and a wrapped index "
+            "reads the opposite spectral edge into the CFO estimate"
+        )
     pilot_sets = lattice.pilot_sets
     pilot_vals = lattice.pilot_vals
     fp_carriers = lattice.fp_carriers

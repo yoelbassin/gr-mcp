@@ -220,7 +220,16 @@ class OfdmCoherentSyncStep(Step):
     @model_validator(mode="after")
     def _geometry(self) -> "OfdmCoherentSyncStep":
         n = sum(self.pilot_lens)
+        dc0 = self.fft_len // 2
+        span = [self.kmin, self.kmin + self.n_carriers]
+        lo = min(span + self.pilot_carriers + self.fp_carriers)
+        hi = max(span + self.pilot_carriers + self.fp_carriers)
         checks = {
+            "carrier bins must stay inside the FFT across the DC search "
+            "(an out-of-FFT pilot bin starves its channel node)": (
+                lo + dc0 - self.dc_search >= 0
+                and hi + dc0 + self.dc_search < self.fft_len
+            ),
             "sym_len must equal fft_len + cp_len": self.sym_len
             == self.fft_len + self.cp_len,
             "pilot_lens needs one entry per frame symbol": len(self.pilot_lens)
