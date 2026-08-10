@@ -94,19 +94,61 @@ class OfdmDemod(RxStage[CompileContext, OfdmDemodStep]):
         return Descriptor(Level.SYMBOLS, ItemType.C, Carrier.SOFT)
 
 
+def _check_explicit_points(
+    points_i: list[float] | None, points_q: list[float] | None
+) -> None:
+    if points_i is None or points_q is None:
+        raise PydanticCustomError(
+            "value_error", "explicit takes points_i/points_q, not order"
+        )
+    if len(points_q) != len(points_i):
+        raise PydanticCustomError(
+            "value_error", "points_i and points_q must be equal length"
+        )
+    n = len(points_i)
+    if n < 2 or n & (n - 1):
+        raise PydanticCustomError(
+            "value_error",
+            "explicit needs a power-of-two point count >= 2; a "
+            "point's bit pattern is its index",
+        )
+
+
 class DqpskSoftDemapStep(Step):
     conv: Literal["dqpsk_soft_demap"] = "dqpsk_soft_demap"
     data_syms: StrictInt
     n_carriers: StrictInt
     scheme: str = "psk"
     order: StrictInt = 4
+    points_i: list[float] | None = None
+    points_q: list[float] | None = None
+
+    @model_validator(mode="after")
+    def _shaped(self) -> "DqpskSoftDemapStep":
+        if self.scheme == "psk":
+            if self.points_i is not None or self.points_q is not None:
+                raise PydanticCustomError(
+                    "value_error", "named schemes take order, not points"
+                )
+        elif self.scheme == "explicit":
+            _check_explicit_points(self.points_i, self.points_q)
+        else:
+            raise PydanticCustomError("value_error", "scheme must be psk|explicit")
+        return self
+
+    def alphabet(self) -> int:
+        return len(self.points_i) if self.points_i is not None else int(self.order)
 
 
 class DqpskSoftDemap(RxStage[CompileContext, DqpskSoftDemapStep]):
     """Differential-QPSK soft demap, SYMBOLS->BITS soft, from STOCK GR blocks. The
     per-carrier differential is delay + multiply_conjugate; the PRS reference is
-    dropped by keep_m_in_n; the soft decision is constellation_soft_decoder.
-    Generic over differential PSK over symbol-major framed carriers."""
+    dropped by keep_m_in_n; the soft decision is constellation_soft_decoder over
+    the named psk scheme or explicit caller points (a point's bit pattern is its
+    index, MSB-first — the door for protocols whose differential mapping differs
+    from GR's stock constellation). Negates the LLR to this engine's
+    bit-1-negative convention. Generic over differential PSK over symbol-major
+    framed carriers."""
 
     name = "dqpsk_soft_demap"
     from_level = Level.SYMBOLS
@@ -127,7 +169,18 @@ class DqpskSoftDemap(RxStage[CompileContext, DqpskSoftDemapStep]):
         b.connect(dly, mc, dst_port=1)  # delayed   -> mc.1  (c[i]*conj(c[i-nc]))
         b.set_tail(mc)
         b.chain("keep_m_in_n_c", m=ds * nc, n=(ds + 1) * nc, offset=nc)  # drop PRS diff
-        b.chain("constellation_soft_decoder", scheme=step.scheme, order=step.order)
+        if step.scheme == "explicit":
+            b.chain(
+                "constellation_soft_decoder",
+                scheme=step.scheme,
+                points_i=[float(x) for x in step.points_i or []],
+                points_q=[float(x) for x in step.points_q or []],
+            )
+        else:
+            b.chain(
+                "constellation_soft_decoder", scheme=step.scheme, order=step.alphabet()
+            )
+        b.chain("multiply_const_ff", value=-1.0)
 
     def out_descriptor(
         self, in_desc: Descriptor, step: DqpskSoftDemapStep
@@ -135,7 +188,7 @@ class DqpskSoftDemap(RxStage[CompileContext, DqpskSoftDemapStep]):
         return Descriptor(Level.BITS, ItemType.F, Carrier.SOFT)
 
     def required_input_order(self, step: DqpskSoftDemapStep) -> int | None:
-        return int(step.order)
+        return step.alphabet()
 
 
 # cp_symbol_sync's calibrated lock threshold (CP-correlation ratio): measured
@@ -252,22 +305,12 @@ class SoftDemapStep(Step):
                     "clean points decode to 16 distinct values)",
                 )
         elif self.scheme == "explicit":
-            if self.order is not None or self.points_i is None or self.points_q is None:
+            if self.order is not None:
                 raise PydanticCustomError(
                     "value_error",
                     "explicit takes points_i/points_q, not order",
                 )
-            n = len(self.points_i)
-            if len(self.points_q) != n:
-                raise PydanticCustomError(
-                    "value_error", "points_i and points_q must be equal length"
-                )
-            if n < 2 or n & (n - 1):
-                raise PydanticCustomError(
-                    "value_error",
-                    "explicit needs a power-of-two point count >= 2; a "
-                    "point's bit pattern is its index",
-                )
+            _check_explicit_points(self.points_i, self.points_q)
         else:
             raise PydanticCustomError("value_error", "scheme must be psk|qam|explicit")
         return self

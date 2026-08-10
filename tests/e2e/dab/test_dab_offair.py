@@ -124,8 +124,13 @@ def _dab_modem() -> Modem:
             DqpskSoftDemapStep(
                 data_syms=_DS,
                 n_carriers=_NC,
-                scheme="psk",
-                order=4,
+                # DAB's D-QPSK bit mapping (bit 1 <-> negative coordinate,
+                # first bit on Q) complements GR's stock qpsk constellation:
+                # protocol mapping is caller data, declared as explicit points
+                # whose index is the bit pattern (MSB-first)
+                scheme="explicit",
+                points_i=[x / np.sqrt(2) for x in (1.0, -1.0, 1.0, -1.0)],
+                points_q=[x / np.sqrt(2) for x in (1.0, 1.0, -1.0, -1.0)],
             ),
             DeinterleaveStep(perm=_regroup()),
             DepunctureStep(keep_mask=_keep_mask()),

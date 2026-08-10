@@ -93,7 +93,15 @@ def _dab_phy_steps() -> list[Step]:
             n_carriers=_NC,
             bin_perm=_bin_perm(),
         ),
-        DqpskSoftDemapStep(data_syms=_DS, n_carriers=_NC, scheme="psk", order=4),
+        # DAB's D-QPSK mapping complements GR's stock qpsk constellation —
+        # declared as explicit points (index = bit pattern, MSB-first)
+        DqpskSoftDemapStep(
+            data_syms=_DS,
+            n_carriers=_NC,
+            scheme="explicit",
+            points_i=[x / np.sqrt(2) for x in (1.0, -1.0, 1.0, -1.0)],
+            points_q=[x / np.sqrt(2) for x in (1.0, 1.0, -1.0, -1.0)],
+        ),
         DeinterleaveStep(perm=_regroup()),
         DepunctureStep(keep_mask=_keep_mask()),
         FecStep(
