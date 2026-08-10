@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+from marconi.engine.compile.errors import CompileError
 from marconi.engine.compile.ir import GrBlock, GrConnection, GrPipeline
 from marconi.engine.types.descriptor import Descriptor
 from marconi.engine.types.params import ParamValue
 from marconi.errors import register_error
 
 
-class SampleRateError(Exception):
+class SampleRateError(CompileError):
     """The sample_rate/symbol_rate pair does not land on an integer sps, so a
     TX interpolation factor cannot be honored without shifting the symbol rate
     off the compiler's rate model (a silent ground-truth error)."""
