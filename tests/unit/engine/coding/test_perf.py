@@ -18,6 +18,7 @@ from marconi.engine.coding.ops_bits import block_code_rx, bytes_to_bits, sync_wo
 from marconi.engine.coding.ops_symbols import sync_symbols_rx
 from marconi.engine.io import bitfile
 from marconi.engine.io.bitfile import CaptureTooLarge, read_bits
+from marconi.engine.types.enums import EmitMode
 
 _HDLC = np.array([0, 1, 1, 1, 1, 1, 1, 0], dtype=np.uint8)
 
@@ -118,7 +119,7 @@ def test_block_code_correction_makes_input_size_independent_numpy_calls(
         data_bits=4,
         parity_masks=masks,
         correct_single=True,
-        emit="data",
+        emit=EmitMode.DATA,
     )
     small = counter.calls
     counter.calls = 0
@@ -130,7 +131,7 @@ def test_block_code_correction_makes_input_size_independent_numpy_calls(
         data_bits=4,
         parity_masks=masks,
         correct_single=True,
-        emit="data",
+        emit=EmitMode.DATA,
     )
     large = counter.calls
 
@@ -224,7 +225,7 @@ def test_oversized_capture_raises_actionable(
     with pytest.raises(CaptureTooLarge) as e:
         read_bits(path)
     msg = str(e.value)
-    assert "65 bits" in msg and "slice" in msg
+    assert "65 items" in msg and "slice" in msg
 
 
 def test_within_budget_reads_fine(tmp_path: Path) -> None:

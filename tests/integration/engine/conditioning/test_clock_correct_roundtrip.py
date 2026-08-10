@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Literal
 
 import numpy as np
 import pytest
@@ -39,7 +40,7 @@ def _css_steps() -> list[Step]:
 
 
 def _compile(
-    path: list[Step], direction: str, rate: float, src: Path, snk: Path
+    path: list[Step], direction: Literal["rx", "tx"], rate: float, src: Path, snk: Path
 ) -> GrPipeline:
     from marconi.engine.stages.registry import stage_registry
 

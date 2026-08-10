@@ -105,7 +105,8 @@ def test_bad_direction_raises_compile_error() -> None:
         compile_modem(
             _modem(FakeDemodStep(), symbol_rate=1.0),
             fixture_registry(),
-            direction="sideways",
+            # the runtime guard is the subject under test
+            direction="sideways",  # type: ignore[arg-type]
             sample_rate=4.0,
             start=IQ,
             source_io={},

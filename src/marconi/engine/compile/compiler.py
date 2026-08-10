@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from marconi.engine.coding.builder import CodingBuilder
 from marconi.engine.coding.program import CodingProgram
@@ -23,6 +23,8 @@ from marconi.engine.types.levels import Level
 from marconi.engine.types.models import Modem, ValidationIssue
 from marconi.engine.types.params import ParamValue
 from marconi.engine.types.step import Step, stage_label
+
+Direction = Literal["rx", "tx"]
 
 # item_type -> (source_kind, sink_kind). The GR wire type alone selects IO;
 # carrier is decision-hardness (a seam invariant), never a routing knob. Descriptor
@@ -114,7 +116,7 @@ class _CompilePlan:
     rates: Sequence[float]
     symbol_rate: float
     sample_rate: float
-    direction: str
+    direction: Direction
 
 
 def _validate_descriptors(plan: _CompilePlan) -> None:
@@ -225,7 +227,7 @@ def _validate(
     modem: Modem,
     registry: Mapping[str, Stage[Any, Any]],
     start: Descriptor,
-    direction: str,
+    direction: Direction,
 ) -> None:
     issues: list[ValidationIssue] = []
     validate_path(
@@ -301,8 +303,7 @@ def _emit_coding_segment(plan: _CompilePlan, k: int) -> CodingProgram:
     b = CodingBuilder()
     for i in range(k, len(plan.steps)):
         stage = _resolve(plan.steps[i], plan.registry)
-        b.label = stage_label(i, plan.steps[i].conv)
-        b.kind = plan.steps[i].conv
+        b.begin_step(stage_label(i, plan.steps[i].conv), plan.steps[i].conv)
         stage.emit_rx(b, plan.steps[i])
     return CodingProgram(
         steps=b.steps,
@@ -319,7 +320,7 @@ def _known_engine(step: Step, registry: Mapping[str, Stage[Any, Any]]) -> str | 
 
 
 def _split_index(
-    steps: Sequence[Step], registry: Mapping[str, Stage[Any, Any]], direction: str
+    steps: Sequence[Step], registry: Mapping[str, Stage[Any, Any]], direction: Direction
 ) -> int:
     # Unknown names map to None so _validate stays the sole (aggregating)
     # reporter of unknown-stage issues; they neither start the coding segment
@@ -359,7 +360,7 @@ def compile_pipeline(
     modem: Modem,
     registry: Mapping[str, Stage[Any, Any]],
     *,
-    direction: str,
+    direction: Direction,
     sample_rate: float,
     start: Descriptor,
     source_io: Mapping[str, ParamValue],
@@ -427,7 +428,7 @@ def compile_modem(
     modem: Modem,
     registry: Mapping[str, Stage[Any, Any]],
     *,
-    direction: str,
+    direction: Direction,
     sample_rate: float,
     start: Descriptor,
     source_io: Mapping[str, ParamValue],

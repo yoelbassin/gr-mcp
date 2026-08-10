@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Literal
 
 import numpy as np
 import pytest
@@ -41,7 +42,7 @@ def _modem(sf: int, oversample: int = _OS) -> Modem:
 
 
 def _compile(
-    modem: Modem, direction: str, rate: float, src: Path, snk: Path
+    modem: Modem, direction: Literal["rx", "tx"], rate: float, src: Path, snk: Path
 ) -> GrPipeline:
     from marconi.engine.stages.registry import stage_registry
 

@@ -14,7 +14,13 @@ class CodingBuilder:
     label: str = ""
     kind: str = ""
 
+    def begin_step(self, label: str, kind: str) -> None:
+        self.label = label
+        self.kind = kind
+
     def add(self, fn: Callable[..., Any], **params: Any) -> None:
-        name = self.label or getattr(fn, "__name__", "step")
-        kind = self.kind or name
-        self.steps.append(CodingStep(name=name, kind=kind, call=partial(fn, **params)))
+        if not self.label or not self.kind:
+            raise RuntimeError("CodingBuilder.add before begin_step")
+        self.steps.append(
+            CodingStep(name=self.label, kind=self.kind, call=partial(fn, **params))
+        )

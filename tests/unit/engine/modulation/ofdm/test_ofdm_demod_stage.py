@@ -48,7 +48,6 @@ def test_ofdm_demod_symbol_major(tmp_path: Path) -> None:
                 sym_len=SYM,
                 null_len=NULL,
                 frame_len=FRAME,
-                n_frame_syms=4,
                 data_syms=3,
                 n_carriers=NC,
                 bin_perm=BIN_PERM,

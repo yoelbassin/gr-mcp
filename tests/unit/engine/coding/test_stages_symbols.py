@@ -15,7 +15,7 @@ from marconi.engine.coding.stages_symbols import (
 from marconi.engine.stages.base import CodingStage
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Carrier, Descriptor
-from marconi.engine.types.enums import ItemType
+from marconi.engine.types.enums import DcMode, ItemType
 from marconi.engine.types.levels import Level
 
 
@@ -131,7 +131,7 @@ def test_normalize_removes_dc_and_scales_per_span() -> None:
     out = normalize_rx(
         CodingCarrier(bits=np.zeros(0, np.uint8), symbols=sym, marks=(0,)),
         span_symbols=4,
-        dc="median",
+        dc=DcMode.MEDIAN,
         gain_percentile=50.0,
     )
     assert out.symbols is not None
@@ -147,7 +147,7 @@ def test_normalize_mean_removes_mean() -> None:
     out = normalize_rx(
         CodingCarrier(bits=np.zeros(0, np.uint8), symbols=sym, marks=(0,)),
         span_symbols=4,
-        dc="mean",
+        dc=DcMode.MEAN,
         gain_percentile=None,
     )
     assert out.symbols is not None
@@ -160,7 +160,7 @@ def test_normalize_dc_none_leaves_span_uncentered() -> None:
     out = normalize_rx(
         CodingCarrier(bits=np.zeros(0, np.uint8), symbols=sym, marks=(0,)),
         span_symbols=4,
-        dc="none",
+        dc=DcMode.NONE,
         gain_percentile=None,
     )
     assert out.symbols is not None
@@ -173,7 +173,7 @@ def test_normalize_gain_none_skips_rescale() -> None:
     out = normalize_rx(
         CodingCarrier(bits=np.zeros(0, np.uint8), symbols=sym, marks=(0,)),
         span_symbols=4,
-        dc="median",
+        dc=DcMode.MEDIAN,
         gain_percentile=None,
     )
     assert out.symbols is not None
@@ -187,7 +187,7 @@ def test_normalize_empty_gain_selection_produces_no_nan() -> None:
     out = normalize_rx(
         CodingCarrier(bits=np.zeros(0, np.uint8), symbols=sym, marks=(0,)),
         span_symbols=4,
-        dc="median",
+        dc=DcMode.MEDIAN,
         gain_percentile=50.0,
     )
     assert out.symbols is not None
@@ -198,7 +198,7 @@ def test_normalize_empty_gain_selection_produces_no_nan() -> None:
     out2 = normalize_rx(
         CodingCarrier(bits=np.zeros(0, np.uint8), symbols=sym2, marks=(0,)),
         span_symbols=4,
-        dc="median",
+        dc=DcMode.MEDIAN,
         gain_percentile=100.0,
     )
     assert out2.symbols is not None
@@ -213,7 +213,7 @@ def test_normalize_multiple_marks_independently_normalized() -> None:
     out = normalize_rx(
         CodingCarrier(bits=np.zeros(0, np.uint8), symbols=sym, marks=(0, 6)),
         span_symbols=4,
-        dc="median",
+        dc=DcMode.MEDIAN,
     )
     assert out.symbols is not None
     out_sym = out.symbols
@@ -227,7 +227,7 @@ def test_normalize_end_of_array_clamp() -> None:
     out = normalize_rx(
         CodingCarrier(bits=np.zeros(0, np.uint8), symbols=span, marks=(0,)),
         span_symbols=4,  # mark + span_symbols runs past the array end
-        dc="median",
+        dc=DcMode.MEDIAN,
     )
     assert out.symbols is not None
     assert out.symbols.size == 3

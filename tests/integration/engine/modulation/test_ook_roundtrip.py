@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Literal
 
 import numpy as np
 from helpers._dsp import aligned_ber, channel, read_bits, write_bits
@@ -20,13 +21,13 @@ IQ = Descriptor(Level.IQ, ItemType.C)
 _SR, _SYM = 4.0, 1.0
 
 
-def _modem(direction: str) -> Modem:
+def _modem(direction: Literal["rx", "tx"]) -> Modem:
     rx: list[Step] = [AgcStep(), OokEnvelopeStep(), SliceStep()]
     tx: list[Step] = [OokEnvelopeStep(), SliceStep()]
     return Modem(symbol_rate=_SYM, path=rx if direction == "rx" else tx)
 
 
-def _compile(direction: str, src: Path, snk: Path) -> GrPipeline:
+def _compile(direction: Literal["rx", "tx"], src: Path, snk: Path) -> GrPipeline:
     return compile_modem(
         _modem(direction),
         stage_registry(),

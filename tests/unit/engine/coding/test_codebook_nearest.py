@@ -33,7 +33,7 @@ def test_nearest_equals_exact_on_clean_input() -> None:
         code_bits=6,
         data_bits=4,
         table=THREE_OF_SIX,
-        decode="nearest",
+        decode=DecodeMode.NEAREST,
     )
     assert near.bits.tolist() == exact.bits.tolist()
 
@@ -46,7 +46,7 @@ def test_nearest_corrects_single_chip_error() -> None:
         code_bits=6,
         data_bits=4,
         table=THREE_OF_SIX,
-        decode="nearest",
+        decode=DecodeMode.NEAREST,
     )
     assert near.bits.tolist() == _bits_of([3, 12, 7], 4).tolist()
 
@@ -61,7 +61,7 @@ def test_nearest_never_allocates_inverse_table() -> None:
         code_bits=32,
         data_bits=2,
         table=table,
-        decode="nearest",
+        decode=DecodeMode.NEAREST,
     )
     assert near.bits.tolist() == _bits_of([1, 2], 2).tolist()
 
@@ -74,7 +74,7 @@ def test_nearest_tie_breaks_to_lowest_index() -> None:
         code_bits=4,
         data_bits=2,
         table=table,
-        decode="nearest",
+        decode=DecodeMode.NEAREST,
     )
     assert near.bits.tolist() == [0, 0]
 
@@ -124,7 +124,7 @@ def test_nearest_rejects_over_width_table_entries() -> None:
             code_bits=4,
             data_bits=2,
             table=[0, 1, 2, 20],
-            decode="nearest",
+            decode=DecodeMode.NEAREST,
         )
 
 
@@ -138,7 +138,7 @@ def test_nearest_windowed_scope_corrects_and_preserves_window_boundaries() -> No
         code_bits=6,
         data_bits=4,
         table=THREE_OF_SIX,
-        decode="nearest",
+        decode=DecodeMode.NEAREST,
     )
     assert out.bits.tolist() == _bits_of(values, 4).tolist()
     assert [w.start for w in out.windows or []] == [0, 8]
@@ -161,7 +161,7 @@ def test_symbol_input_nearest_corrects_off_table_value() -> None:
         data_bits=2,
         table=table,
         symbol_input=True,
-        decode="nearest",
+        decode=DecodeMode.NEAREST,
     )
     assert exact.bits.tolist() == _bits_of([0], 2).tolist()  # unknown -> degrades to 0
     assert near.bits.tolist() == _bits_of([1], 2).tolist()  # nearest -> table[1]
@@ -171,6 +171,7 @@ def test_symbol_map_stage_forwards_decode_to_nearest() -> None:
     table = [0b000000, 0b000111, 0b111000, 0b111111]
     off_table = 0b000110
     b = CodingBuilder()
+    b.begin_step("symbol_map", "symbol_map")
     SymbolMap().emit_rx(
         b,
         SymbolMapStep(

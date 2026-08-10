@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Literal
 
 import numpy as np
 from helpers._dsp import aligned_ber_best, channel, read_bits, write_bits
@@ -38,7 +39,7 @@ def _rx_modem() -> Modem:
     )
 
 
-def _run(direction: str, modem: Modem, src: Path, snk: Path) -> None:
+def _run(direction: Literal["rx", "tx"], modem: Modem, src: Path, snk: Path) -> None:
     pipe = compile_modem(
         modem,
         stage_registry(),

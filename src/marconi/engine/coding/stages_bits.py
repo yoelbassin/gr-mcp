@@ -91,10 +91,11 @@ def check_codebook_sizing(
             "exact decode builds a 2^code_bits inverse table; beyond 24 "
             "bits use decode='nearest', which never builds it",
         )
-    if decode == DecodeMode.NEAREST and code_bits > 63:
+    if decode == DecodeMode.NEAREST and code_bits > ops_bits.NEAREST_MAX_CODE_BITS:
         raise PydanticCustomError(
             "value_error",
-            "nearest decode packs codewords through int64; 63 bits is " "the ceiling",
+            "nearest decode packs codewords through int64; {max} bits is the ceiling",
+            {"max": ops_bits.NEAREST_MAX_CODE_BITS},
         )
     bad = [x for x in table if x < 0 or x >= (1 << code_bits)]
     if bad:

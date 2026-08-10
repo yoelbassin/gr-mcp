@@ -59,7 +59,6 @@ class OfdmDemodStep(Step):
     sym_len: StrictInt
     null_len: StrictInt
     frame_len: StrictInt
-    n_frame_syms: StrictInt
     data_syms: StrictInt
     n_carriers: StrictInt
     bin_perm: list[int]
@@ -131,7 +130,7 @@ class DqpskSoftDemapStep(Step):
     conv: Literal["dqpsk_soft_demap"] = "dqpsk_soft_demap"
     data_syms: StrictInt
     n_carriers: StrictInt
-    scheme: str = "psk"
+    scheme: Literal["psk", "explicit"] = "psk"
     order: StrictInt = 4
     points_i: list[float] | None = None
     points_q: list[float] | None = None
@@ -193,7 +192,7 @@ class DqpskSoftDemap(RxStage[CompileContext, DqpskSoftDemapStep]):
             b.chain(
                 "constellation_soft_decoder", scheme=step.scheme, order=step.alphabet()
             )
-        b.chain("multiply_const_ff", value=-1.0)
+        b.chain_llr_flip()
 
     def out_descriptor(
         self, in_desc: Descriptor, step: DqpskSoftDemapStep
@@ -297,8 +296,23 @@ class OfdmCoherentSync(RxStage[CompileContext, OfdmCoherentSyncStep]):
         )
         b.chain("stream_to_vector", vlen=step.fft_len)
         b.chain("fft_vcc", fft_len=step.fft_len, shift=True)
-        eq = step.model_dump(exclude={"conv", "cp_len", "sym_len", "lock_min_ratio"})
-        b.chain("pilot_lattice_equalizer", **eq)
+        b.chain(
+            "pilot_lattice_equalizer",
+            fft_len=step.fft_len,
+            n_frame_syms=step.n_frame_syms,
+            n_carriers=step.n_carriers,
+            kmin=step.kmin,
+            dc_search=step.dc_search,
+            warmup_syms=step.warmup_syms,
+            pilot_lens=[int(x) for x in step.pilot_lens],
+            pilot_carriers=[int(x) for x in step.pilot_carriers],
+            pilot_i=step.pilot_i,
+            pilot_q=step.pilot_q,
+            fp_carriers=[int(x) for x in step.fp_carriers],
+            fp_i=step.fp_i,
+            fp_q=step.fp_q,
+            lock_min_score=step.lock_min_score,
+        )
 
     def out_descriptor(
         self, in_desc: Descriptor, step: OfdmCoherentSyncStep
@@ -313,7 +327,7 @@ class OfdmCoherentSync(RxStage[CompileContext, OfdmCoherentSyncStep]):
 
 class SoftDemapStep(Step):
     conv: Literal["soft_demap"] = "soft_demap"
-    scheme: str = "explicit"
+    scheme: Literal["psk", "qam", "explicit"] = "explicit"
     order: StrictInt | None = None
     points_i: list[float] | None = None
     points_q: list[float] | None = None
@@ -380,7 +394,7 @@ class SoftDemap(RxStage[CompileContext, SoftDemapStep]):
             b.chain(
                 "constellation_soft_decoder", scheme=step.scheme, order=step.alphabet()
             )
-        b.chain("multiply_const_ff", value=-1.0)
+        b.chain_llr_flip()
 
     def out_descriptor(self, in_desc: Descriptor, step: SoftDemapStep) -> Descriptor:
         k = step.alphabet().bit_length() - 1

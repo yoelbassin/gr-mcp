@@ -175,7 +175,7 @@ class MfskSoftDemap(RxStage[CompileContext, MfskSoftDemapStep]):
             points_i=list(step.levels),
             points_q=[0.0] * len(step.levels),
         )
-        b.chain("multiply_const_ff", value=-1.0)
+        b.chain_llr_flip()
 
     def out_descriptor(
         self, in_desc: Descriptor, step: MfskSoftDemapStep

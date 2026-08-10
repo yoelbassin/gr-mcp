@@ -95,7 +95,7 @@ def _block_code(
         data_bits=data_bits,
         parity_masks=masks,
         correct_single=True,
-        emit="codeword",
+        emit=EmitMode.CODEWORD,
     ).bits
 
 

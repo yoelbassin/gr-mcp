@@ -5,6 +5,7 @@ upstream emits burst tags."""
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Literal
 
 import numpy as np
 
@@ -33,7 +34,9 @@ _SYM = 1.0
 _RATE = 2 * (1 << _SF) * _SYM
 
 
-def _compile(m: Modem, direction: str, src: Path, dst: Path) -> GrPipeline:
+def _compile(
+    m: Modem, direction: Literal["rx", "tx"], src: Path, dst: Path
+) -> GrPipeline:
     return compile_modem(
         m,
         stage_registry(),

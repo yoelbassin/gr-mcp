@@ -18,6 +18,7 @@ the equalizer's.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Literal
 
 import numpy as np
 from helpers._dsp import channel, read_complex, resolved_ser, tx_sym_indices, write_bits
@@ -54,7 +55,11 @@ def _bpsk_points() -> tuple[np.ndarray, int]:
 
 
 def _compile(
-    modem: Modem, direction: str, start: Descriptor, src: Path, snk: Path
+    modem: Modem,
+    direction: Literal["rx", "tx"],
+    start: Descriptor,
+    src: Path,
+    snk: Path,
 ) -> GrPipeline:
     return compile_modem(
         modem,

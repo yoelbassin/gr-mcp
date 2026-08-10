@@ -127,7 +127,7 @@ class Harden(RxStage[CompileContext, HardenStep]):
     accepts_carrier = Carrier.SOFT
 
     def emit_rx(self, b: CompileContext, step: HardenStep) -> None:
-        b.chain("multiply_const_ff", value=-1.0)
+        b.chain_llr_flip()
         b.chain("binary_slicer")
 
     def out_descriptor(self, in_desc: Descriptor, step: HardenStep) -> Descriptor:
@@ -179,7 +179,7 @@ class SyncAlign(RxStage[CompileContext, SyncAlignStep]):
     def emit_rx(self, b: CompileContext, step: SyncAlignStep) -> None:
         m = len(step.access_code)
         chance = sum(math.comb(m, i) for i in range(step.threshold + 1)) / 2.0**m
-        b.chain("multiply_const_ff", value=-1.0)
+        b.chain_llr_flip()
         b.chain(
             "correlate_access_code_tag_ff",
             access_code=step.access_code,
@@ -192,7 +192,7 @@ class SyncAlign(RxStage[CompileContext, SyncAlignStep]):
             tag_name="frame_sync",
             chance_per_item=chance,
         )
-        b.chain("multiply_const_ff", value=-1.0)
+        b.chain_llr_flip()
 
     def out_descriptor(self, in_desc: Descriptor, step: SyncAlignStep) -> Descriptor:
         return replace(in_desc, frame_len=int(step.frame_len))
@@ -342,7 +342,7 @@ class Polar(RxStage[CompileContext, PolarStep]):
     accepts_carrier = Carrier.SOFT
 
     def emit_rx(self, b: CompileContext, step: PolarStep) -> None:
-        b.chain("multiply_const_ff", value=-1.0)
+        b.chain_llr_flip()
         b.chain(
             "polar_decode",
             block_size=step.block_size,
@@ -424,7 +424,7 @@ class Ldpc(RxStage[CompileContext, LdpcStep]):
     accepts_carrier = Carrier.SOFT
 
     def emit_rx(self, b: CompileContext, step: LdpcStep) -> None:
-        b.chain("multiply_const_ff", value=-1.0)
+        b.chain_llr_flip()
         b.chain(
             "ldpc_decode",
             block_size=step.block_size,

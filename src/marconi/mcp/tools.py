@@ -121,7 +121,7 @@ def _error_row(code: str, message: str, at: str | None = None) -> dict[str, str]
 def validate_modem(
     spec: dict[str, Any],
     sample_rate: float,
-    direction: str = "rx",
+    direction: Literal["rx", "tx"] = "rx",
     input_item_type: str = "c",
     input_level: str | None = None,
 ) -> dict[str, object]:

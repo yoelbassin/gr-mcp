@@ -1,3 +1,5 @@
+from typing import Literal
+
 import pytest
 
 from marconi.engine.coding.stages_symbols import MSliceStep
@@ -34,7 +36,7 @@ _DECHIRP_PARAMS: dict[str, ParamValue] = {"sf": 7, "oversample": 2, "zero_pad": 
 
 def _compile(
     path: list[Step],
-    direction: str = "rx",
+    direction: Literal["rx", "tx"] = "rx",
     start: Descriptor = IQ,
     sample_rate: float = 4.0,
 ) -> GrPipeline:

@@ -38,7 +38,6 @@ from marconi.engine.types.descriptor import Descriptor
 from marconi.engine.types.enums import ItemType
 from marconi.engine.types.levels import Level
 from marconi.engine.types.models import Modem
-from marconi.engine.types.params import OPEN_LOOP
 
 IQ = Descriptor(Level.IQ, ItemType.C)
 RATE = 5_000_000.0
@@ -94,7 +93,7 @@ def _ble_modem() -> Modem:
         symbol_rate=1_000_000.0,
         path=[
             ChannelizeStep(decim=1, bandwidth_hz=2_000_000.0, center_hz=-1_000_000.0),
-            FskStep(deviation=250_000.0, loop_bw=OPEN_LOOP),
+            FskStep(deviation=250_000.0, loop_bw=0.0),
             SliceStep(),
             SyncWordStep(sync=AA_HEX, max_errors=0),
         ],

@@ -5,6 +5,7 @@ from dataclasses import replace
 import numpy as np
 
 from marconi.engine.coding.carrier import CodingCarrier
+from marconi.engine.types.enums import DcMode
 
 
 def sync_symbols_rx(
@@ -45,9 +46,10 @@ def normalize_rx(
     c: CodingCarrier,
     *,
     span_symbols: int,
-    dc: str = "median",
+    dc: DcMode = DcMode.MEDIAN,
     gain_percentile: float | None = None,
 ) -> CodingCarrier:
+    dc = DcMode(dc)
     sym = c.symbols
     if sym is None or not c.marks:
         return c
@@ -57,9 +59,9 @@ def normalize_rx(
         if hi - lo < 1:
             continue
         seg = out[lo:hi].astype(np.float64)
-        if dc == "median":
+        if dc is DcMode.MEDIAN:
             seg = seg - np.median(seg)
-        elif dc == "mean":
+        elif dc is DcMode.MEAN:
             seg = seg - seg.mean()
         if gain_percentile is not None:
             mag = np.abs(seg)

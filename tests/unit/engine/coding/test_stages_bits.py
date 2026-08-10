@@ -47,7 +47,7 @@ def test_block_code_window_scope_decodes_per_window_stride() -> None:
         data_bits=4,
         parity_masks=masks,
         correct_single=True,
-        emit="data",
+        emit=EmitMode.DATA,
     )
     assert out.bits.tolist() == [1, 0, 1, 1, 1, 0, 1, 1]
     assert [w.start for w in _wins(out)] == [0, 4]
@@ -358,7 +358,7 @@ def test_block_code_seeded_decodes_within_window() -> None:
         data_bits=2,
         parity_masks=[0b11],
         correct_single=False,
-        emit="data",
+        emit=EmitMode.DATA,
     )
     assert out.bits.tolist() == [1, 0, 0, 1]
     assert [w.cursor for w in _wins(out)] == [0, 2]  # remapped after shrink
@@ -381,7 +381,7 @@ def _roundtrip(code_bits: int, data_bits: int, masks: list[int]) -> None:
         data_bits=data_bits,
         parity_masks=masks,
         correct_single=True,
-        emit="codeword",
+        emit=EmitMode.CODEWORD,
     ).bits.reshape(-1, code_bits)
     for x in range(1 << code_bits):
         expect = correct_codeword(x, masks, data_bits)
@@ -409,13 +409,14 @@ def test_data_mode_unchanged() -> None:
         data_bits=4,
         parity_masks=[0b1011, 0b1101, 0b1110],
         correct_single=True,
-        emit="data",
+        emit=EmitMode.DATA,
     ).bits
     assert np.array_equal(a, b)
 
 
 def test_block_code_stage_emits_full_codeword() -> None:
     b = CodingBuilder()
+    b.begin_step("block_code", "block_code")
     BlockCode().emit_rx(
         b,
         BlockCodeStep(
@@ -491,6 +492,7 @@ def test_permute_window_scope_permutes_every_stride_not_just_the_first() -> None
 
 def test_permute_stage_wired() -> None:
     b = CodingBuilder()
+    b.begin_step("permute", "permute")
     Permute().emit_rx(b, PermuteStep(perm=[2, 0, 3, 1]))
     out = b.steps[0].call(CodingCarrier(bits=np.array([1, 0, 0, 1], np.uint8))).bits
     assert list(out) == [0, 1, 1, 0]  # in[2], in[0], in[3], in[1]

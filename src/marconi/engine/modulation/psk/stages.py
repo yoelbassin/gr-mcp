@@ -341,7 +341,7 @@ class PskSoftDemap(RxStage[CompileContext, PskSoftDemapStep]):
 
     def emit_rx(self, b: CompileContext, step: PskSoftDemapStep) -> None:
         b.chain("constellation_soft_decoder", scheme="psk", order=step.order)
-        b.chain("multiply_const_ff", value=-1.0)
+        b.chain_llr_flip()
 
     def out_descriptor(self, in_desc: Descriptor, step: PskSoftDemapStep) -> Descriptor:
         return Descriptor(Level.BITS, ItemType.F, Carrier.SOFT)

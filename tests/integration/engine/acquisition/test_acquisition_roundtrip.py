@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Literal
 
 import numpy as np
 import pytest
@@ -40,7 +41,7 @@ def _const_points(order: int) -> np.ndarray:
     return np.asarray(c.points())
 
 
-def _modem(order: int, direction: str) -> Modem:
+def _modem(order: int, direction: Literal["rx", "tx"]) -> Modem:
     pi, pq = make_preamble(_const_points(order))
     demod: list[Step] = [PskDemodStep(order=PskOrder(order))]
     if direction == "rx":
@@ -58,7 +59,9 @@ def _modem(order: int, direction: str) -> Modem:
     )
 
 
-def _compile(modem: Modem, direction: str, src: Path, snk: Path) -> GrPipeline:
+def _compile(
+    modem: Modem, direction: Literal["rx", "tx"], src: Path, snk: Path
+) -> GrPipeline:
     from marconi.engine.stages.registry import stage_registry
 
     return compile_modem(

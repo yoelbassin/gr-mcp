@@ -18,6 +18,7 @@ except ImportError:  # pure-Python fallback, always installed
 from marconi.engine.coding.carrier import CodingCarrier, StepStats, Window
 from marconi.engine.coding.primitives import effective_t, syndrome_table
 from marconi.engine.deadline import check_deadline
+from marconi.engine.types.enums import DecodeMode, EmitMode
 
 
 def _chance_valid_rate(n: int, redundancy: int, t: int, q: int) -> float:
@@ -137,12 +138,16 @@ def _check_table_entries(fwd: npt.NDArray[np.int64], code_bits: int) -> None:
         )
 
 
+NEAREST_MAX_CODE_BITS = 63  # nearest decode packs codewords through int64
+
+
 def _nearest_values(
     grouped: npt.NDArray[np.uint8], table: list[int], code_bits: int
 ) -> npt.NDArray[np.int64]:
-    if code_bits > 63:
+    if code_bits > NEAREST_MAX_CODE_BITS:
         raise ValueError(
-            "nearest decode packs codewords through int64; 63 bits is the " "ceiling"
+            "nearest decode packs codewords through int64; "
+            f"{NEAREST_MAX_CODE_BITS} bits is the ceiling"
         )
     fwd = np.asarray(table, dtype=np.int64)
     _check_table_entries(fwd, code_bits)
@@ -191,16 +196,9 @@ def codebook_rx(
     data_bits: int,
     table: list[int],
     symbol_input: bool = False,
-    decode: str = "exact",
+    decode: DecodeMode = DecodeMode.EXACT,
 ) -> CodingCarrier:
-    """Fixed-width symbol substitution (a line/block code): each ``code_bits``
-    input symbol maps to its ``data_bits`` table value. One op expresses
-    3-of-6, Manchester, PPM chip-pairs — the table and widths are caller data.
-    ``decode="exact"`` is an inverse-table lookup (unknown codewords degrade to
-    0); ``decode="nearest"`` is min-Hamming-distance against the table, ties
-    broken by lowest table index, and never builds the ``2**code_bits``
-    inverse table — the only mode safe for wide chip codes."""
-    if decode == "nearest":
+    if DecodeMode(decode) is DecodeMode.NEAREST:
 
         def _values(
             syms: npt.NDArray[np.signedinteger[Any]],
@@ -268,7 +266,7 @@ def _block_decode(
     data_bits: int,
     parity_masks: list[int],
     t: int,
-    emit: str,
+    emit: EmitMode,
 ) -> tuple[npt.NDArray[np.uint8], tuple[int, int]]:
     # Codeword basis is LSB-first: stream bit j of a stride is codeword bit j,
     # so parity_masks and the emitted data bits are LSB-first too. A caller
@@ -314,7 +312,7 @@ def _block_decode(
                 )
                 words[fixed] ^= flip_bits
                 ok[fixed] = True
-    out = words if emit == "codeword" else words[:, :data_bits]
+    out = words if emit is EmitMode.CODEWORD else words[:, :data_bits]
     return out.reshape(-1), (int(ok.sum()), n_words)
 
 
@@ -326,8 +324,9 @@ def block_code_rx(
     parity_masks: list[int],
     correct_single: bool | None = None,
     correct: int | None = None,
-    emit: str = "data",
+    emit: EmitMode = EmitMode.DATA,
 ) -> CodingCarrier:
+    emit = EmitMode(emit)
     t = effective_t(code_bits - data_bits, data_bits, correct_single, correct)
     return _decode_scoped(
         c,
@@ -386,7 +385,7 @@ def _rs_decode_words(
     symbol_bits: int,
     n: int,
     k: int,
-    emit: str,
+    emit: EmitMode,
 ) -> tuple[npt.NDArray[np.uint8], tuple[int, int]]:
     syms = _unpack_symbols(bits, symbol_bits)
     out: list[int] = []
@@ -403,7 +402,7 @@ def _rs_decode_words(
         except _rs.ReedSolomonError:
             # uncorrectable is detectable, never repaired by guessing: emit the
             # received word unchanged so downstream framing keeps its alignment
-            out.extend(word if emit == "codeword" else word[:k])
+            out.extend(word if emit is EmitMode.CODEWORD else word[:k])
     return _pack_symbols(np.asarray(out, np.int64), symbol_bits), (valid, total)
 
 
@@ -416,8 +415,9 @@ def rs_code_rx(
     prim_poly: int,
     fcr: int = 0,
     generator: int = 2,
-    emit: str = "data",
+    emit: EmitMode = EmitMode.DATA,
 ) -> CodingCarrier:
+    emit = EmitMode(emit)
     codec = _rs.RSCodec(
         nsym=n - k,
         nsize=n,

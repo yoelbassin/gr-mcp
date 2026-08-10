@@ -14,6 +14,7 @@ from marconi.engine.coding.carrier import CodingCarrier, Window
 from marconi.engine.coding.ops_bits import rs_code_rx
 from marconi.engine.coding.stages_bits import RsCodeStep
 from marconi.engine.stages.registry import stage_registry
+from marconi.engine.types.enums import EmitMode
 
 RS15: dict[str, int] = {
     "symbol_bits": 4,
@@ -51,7 +52,9 @@ def _sym_bits(symbols: list[int], width: int) -> np.ndarray:
     return np.array(out, np.uint8)
 
 
-def _decode(c: CodingCarrier, p: dict[str, int], emit: str = "data") -> CodingCarrier:
+def _decode(
+    c: CodingCarrier, p: dict[str, int], emit: EmitMode = EmitMode.DATA
+) -> CodingCarrier:
     return rs_code_rx(
         c,
         symbol_bits=p["symbol_bits"],
@@ -110,7 +113,7 @@ def test_rs_code_emit_codeword_returns_the_corrected_word() -> None:
     clean = _encode(DATA15, **RS15)
     word = list(clean)
     word[2] ^= 9
-    out = _decode(CodingCarrier(bits=_sym_bits(word, 4)), RS15, emit="codeword")
+    out = _decode(CodingCarrier(bits=_sym_bits(word, 4)), RS15, emit=EmitMode.CODEWORD)
     assert np.array_equal(out.bits, _sym_bits(clean, 4))
 
 

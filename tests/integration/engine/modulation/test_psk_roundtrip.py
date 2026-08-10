@@ -1,6 +1,6 @@
 from math import log2
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 import numpy.typing as npt
@@ -71,7 +71,11 @@ def _demod(order: int) -> Modem:
 
 
 def _compile(
-    modem: Modem, direction: str, start: Descriptor, src: Path, snk: Path
+    modem: Modem,
+    direction: Literal["rx", "tx"],
+    start: Descriptor,
+    src: Path,
+    snk: Path,
 ) -> GrPipeline:
     return compile_modem(
         modem,

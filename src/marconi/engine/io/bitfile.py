@@ -25,11 +25,11 @@ class CaptureTooLarge(Exception):
 register_error(CaptureTooLarge, "invalid_argument")
 
 
-def _guard(n_bits: int, path: Path) -> None:
-    if n_bits > _MAX_BITS:
+def _guard(n_items: int, path: Path, item_bytes: int = 1) -> None:
+    if n_items > _MAX_BITS:
         raise CaptureTooLarge(
-            f"{path.name}: {n_bits} bits (~{n_bits >> 20} MiB unpacked) exceeds the "
-            f"bits-layer budget of {_MAX_BITS} bits (~{_MAX_BITS >> 20} MiB); the "
+            f"{path.name}: {n_items} items (~{(n_items * item_bytes) >> 20} MiB in "
+            f"memory) exceeds the bits-layer budget of {_MAX_BITS} items; the "
             f"layer holds the whole capture in memory (~2-3x transient). Decode a "
             f"bounded slice of the capture instead."
         )
@@ -62,9 +62,9 @@ def read_symbols(
     path: Path, item_type: Literal["s", "f"] = "s"
 ) -> npt.NDArray[np.int16] | npt.NDArray[np.float32]:
     if item_type == "f":
-        _guard(path.stat().st_size // 4, path)
+        _guard(path.stat().st_size // 4, path, item_bytes=4)
         return np.fromfile(path, dtype=np.float32)
-    _guard(path.stat().st_size // 2, path)
+    _guard(path.stat().st_size // 2, path, item_bytes=2)
     return np.fromfile(path, dtype=np.int16)
 
 

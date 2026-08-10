@@ -99,7 +99,6 @@ _OFDM_PARAMS: dict[str, Any] = {
     "sym_len": _OFDM_SYM,
     "null_len": _OFDM_NULL,
     "frame_len": _OFDM_NULL + _OFDM_FRAME_SYMS * _OFDM_SYM,
-    "n_frame_syms": _OFDM_FRAME_SYMS,
     "data_syms": _OFDM_FRAME_SYMS - 1,
     "n_carriers": _OFDM_NC,
     "bin_perm": _OFDM_BIN_PERM,
@@ -259,7 +258,7 @@ def _apply(z: np.ndarray, gain: float, condition: str) -> np.ndarray:
 
 
 def _compile_pipeline(
-    direction: str,
+    direction: Literal["rx", "tx"],
     path: list[Step],
     sample_rate: float,
     symbol_rate: float,
@@ -731,7 +730,7 @@ def _ber_at_gain(tmp_path: Path, name: str, gain: float) -> GainResult:
     scaled = tmp_path / f"{name}_{gain}.iq"
     out = tmp_path / f"{name}_{gain}.bits"
 
-    def _compile(direction: str, src: Path, snk: Path) -> GrPipeline:
+    def _compile(direction: Literal["rx", "tx"], src: Path, snk: Path) -> GrPipeline:
         return compile_modem(
             spec,
             stage_registry(),

@@ -9,6 +9,7 @@ file and the operator had no way to tell which stage stopped passing data.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Literal
 
 import numpy as np
 import pytest
@@ -35,7 +36,9 @@ _SR, _SYM, _NBITS = 8.0, 1.0, 4096
 _QPSK = PskOrder.QPSK
 
 
-def _run(path: list[Step], src: Path, snk: Path, direction: str = "rx") -> RunResult:
+def _run(
+    path: list[Step], src: Path, snk: Path, direction: Literal["rx", "tx"] = "rx"
+) -> RunResult:
     pipe = compile_modem(
         Modem(symbol_rate=_SYM, path=path),
         stage_registry(),

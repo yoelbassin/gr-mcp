@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, Literal
 
 import pytest
 from helpers._fixtures import (
@@ -33,7 +33,7 @@ def _modem(*steps: Step, symbol_rate: float) -> Modem:
 
 def _compile(
     modem: Modem,
-    direction: str,
+    direction: Literal["rx", "tx"],
     registry: dict[str, Stage[CompileContext, Any]] | None = None,
 ) -> GrPipeline:
     return compile_modem(

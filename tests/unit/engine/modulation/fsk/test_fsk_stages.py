@@ -130,10 +130,9 @@ def test_fsk_and_ook_accept_open_loop_reject_negative() -> None:
     from pydantic import ValidationError
 
     from marconi.engine.modulation.ook.stages import OokEnvelopeStep
-    from marconi.engine.types.params import OPEN_LOOP
 
-    assert FskStep(deviation=2400.0, loop_bw=OPEN_LOOP).loop_bw == 0.0
-    assert OokEnvelopeStep(loop_bw=OPEN_LOOP).loop_bw == 0.0
+    assert FskStep(deviation=2400.0, loop_bw=0.0).loop_bw == 0.0
+    assert OokEnvelopeStep(loop_bw=0.0).loop_bw == 0.0
     with pytest.raises(ValidationError):
         FskStep(deviation=2400.0, loop_bw=-0.01)
     with pytest.raises(ValidationError):

@@ -19,6 +19,7 @@ Measured SER over this sweep:
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Literal
 
 import numpy as np
 import pytest
@@ -56,7 +57,9 @@ def _points() -> tuple[np.ndarray, int]:
     return np.asarray(c.points()), int(c.bits_per_symbol())
 
 
-def _compile(path: list[Step], direction: str, src: Path, snk: Path) -> GrPipeline:
+def _compile(
+    path: list[Step], direction: Literal["rx", "tx"], src: Path, snk: Path
+) -> GrPipeline:
     return compile_modem(
         Modem(symbol_rate=_SYM, path=path),
         stage_registry(),

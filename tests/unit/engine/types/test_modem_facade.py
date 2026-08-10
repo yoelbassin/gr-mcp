@@ -150,7 +150,6 @@ VALID_STEPS: dict[str, Step] = {
         sym_len=20,
         null_len=24,
         frame_len=100,
-        n_frame_syms=4,
         data_syms=4,
         n_carriers=4,
         bin_perm=_OFDM_BIN_PERM,

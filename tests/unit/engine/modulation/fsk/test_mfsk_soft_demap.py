@@ -11,6 +11,7 @@ coding lane was unreachable for the whole M-ary FSK family.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Literal
 
 import numpy as np
 import pytest
@@ -44,7 +45,7 @@ def _run(
     src: Path,
     snk: Path,
     start: Descriptor,
-    direction: str = "rx",
+    direction: Literal["rx", "tx"] = "rx",
 ) -> Path:
     pipe = compile_modem(
         Modem(symbol_rate=_SYM_RATE, path=path),

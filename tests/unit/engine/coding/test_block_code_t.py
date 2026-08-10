@@ -10,6 +10,7 @@ from marconi.engine.coding import ops_bits
 from marconi.engine.coding.carrier import CodingCarrier
 from marconi.engine.coding.primitives import syndrome_table
 from marconi.engine.coding.stages_bits import BlockCodeStep
+from marconi.engine.types.enums import EmitMode
 
 
 def _decode(bits: np.ndarray, correct: int) -> np.ndarray:
@@ -19,7 +20,7 @@ def _decode(bits: np.ndarray, correct: int) -> np.ndarray:
         data_bits=12,
         parity_masks=golay_masks(),
         correct=correct,
-        emit="data",
+        emit=EmitMode.DATA,
     ).bits
 
 
@@ -98,7 +99,7 @@ def test_t1_via_correct_matches_correct_single() -> None:
         data_bits=4,
         parity_masks=masks,
         correct=1,
-        emit="data",
+        emit=EmitMode.DATA,
     ).bits
     b = ops_bits.block_code_rx(
         CodingCarrier(bits=word),
@@ -106,6 +107,6 @@ def test_t1_via_correct_matches_correct_single() -> None:
         data_bits=4,
         parity_masks=masks,
         correct_single=True,
-        emit="data",
+        emit=EmitMode.DATA,
     ).bits
     assert a.tolist() == b.tolist()

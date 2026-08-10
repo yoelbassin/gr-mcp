@@ -1,3 +1,5 @@
+from typing import Literal
+
 import pytest
 
 from marconi.engine.compile.compiler import CompileError, compile_modem
@@ -19,7 +21,9 @@ IQ = Descriptor(Level.IQ, ItemType.C)
 _AGC = AgcStep(mode=AgcMode.POWER)
 
 
-def _compile(path: list[Step], sample_rate: float, direction: str = "rx") -> GrPipeline:
+def _compile(
+    path: list[Step], sample_rate: float, direction: Literal["rx", "tx"] = "rx"
+) -> GrPipeline:
     return compile_modem(
         Modem(symbol_rate=1.0, path=path),
         stage_registry(),

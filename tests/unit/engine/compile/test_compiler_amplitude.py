@@ -88,7 +88,7 @@ def _registry() -> dict:
     return reg
 
 
-def _compile(path: list[Step], direction: str = "rx") -> GrPipeline:
+def _compile(path: list[Step], direction: Literal["rx", "tx"] = "rx") -> GrPipeline:
     return compile_modem(
         Modem(symbol_rate=1.0, path=path),
         _registry(),

@@ -53,7 +53,6 @@ def test_dab_carriers_lock(tmp_path: Path) -> None:
                 sym_len=2552,
                 null_len=2656,
                 frame_len=196608,
-                n_frame_syms=76,
                 data_syms=_DS,
                 n_carriers=_NC,
                 bin_perm=_bin_perm(),

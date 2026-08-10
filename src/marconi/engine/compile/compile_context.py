@@ -65,6 +65,12 @@ class CompileContext:
             )
         )
 
+    def chain_llr_flip(self) -> str:
+        # the engine-wide soft convention is LLR bit-1-NEGATIVE; stock
+        # correlator/decoder blocks read bit-1-positive. One home for the
+        # sign bracket every soft boundary crosses.
+        return self.chain("multiply_const_ff", value=-1.0)
+
     def chain(self, kind: str, **params: ParamValue) -> str:
         block_id = self.add(kind, **params)
         if self._tail is not None:
