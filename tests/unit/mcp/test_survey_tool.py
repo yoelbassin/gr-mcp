@@ -117,6 +117,27 @@ def test_survey_reports_capture_scale_for_burst_targeting(tmp_path: Path) -> Non
     }
 
 
+def test_survey_capture_scale_survives_dtype_conversion(tmp_path: Path) -> None:
+    # converted (ci16/ci8/cu8) captures bake the requested slice into a cached
+    # cf32 whose own offset is 0 — the reported offset_samples must still be
+    # the caller's capture_offset or the documented burst re-decode formula
+    # targets a region capture_offset samples away from the surveyed burst
+    p = tmp_path / "s.ci16"
+    fs, rate = 48_000.0, 2_400.0
+    sps = int(round(fs / rate))
+    rng = np.random.default_rng(1)
+    syms = np.array([-1.0, 1.0])[rng.integers(0, 2, 8000)]
+    phase = 2 * np.pi * np.cumsum(np.repeat(syms * 1_000.0, sps)) / fs
+    iq = np.exp(1j * phase)
+    inter = np.empty(iq.size * 2, np.int16)
+    inter[0::2] = (iq.real * 3000).astype(np.int16)
+    inter[1::2] = (iq.imag * 3000).astype(np.int16)
+    inter.tofile(p)
+    out = survey(str(p), fs, capture_dtype="ci16", capture_offset=500)
+    scale = cast(dict, cast(dict, out["bursts"])["capture_scale"])
+    assert scale == {"offset_samples": 500, "decim": 1}
+
+
 def test_survey_rejects_bad_decim(tmp_path: Path) -> None:
     p = tmp_path / "s.cf32"
     _fsk4_cf32(p, 48_000.0, 2_400.0, 1_200.0, 8000)

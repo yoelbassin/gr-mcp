@@ -601,7 +601,10 @@ def survey(
             min_symbol_rate=min_symbol_rate,
             max_symbol_rate=max_symbol_rate,
         )
-    return survey_payload(result, offset_samples=src_slice.offset, decim=decim)
+    # NOT src_slice.offset: converted dtypes bake the slice into the cached
+    # cf32 (offset 0) — the analyzed stream starts at capture_offset in the
+    # original capture regardless of conversion
+    return survey_payload(result, offset_samples=capture_offset, decim=decim)
 
 
 def capture_tool(
