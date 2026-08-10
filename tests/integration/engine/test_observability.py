@@ -83,6 +83,31 @@ def test_trace_of_symbol_index_wire_surfaces_symbols_not_bits(
     assert symbols.min() >= 0 and symbols.max() < 16
 
 
+def test_empty_runs_still_carry_quality_and_hints(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # the zero-decode run is exactly where the agent needs the promised
+    # quality verdict and the retry hints — an early return that skips them
+    # breaks the run_rx docstring contract (payload drops None fields, so
+    # quality.verdict became a KeyError)
+    cap = _capture(tmp_path, monkeypatch)
+    spec = {
+        "symbol_rate": 1000.0,
+        "path": [
+            {"conv": "agc"},
+            {"conv": "psk_demod", "order": 4},
+            {"conv": "psk_demap", "order": 4},
+            {"conv": "sync_word", "bits": "01100111010110010110100111000101"},
+            {"conv": "codebook", "code_bits": 1, "data_bits": 1, "table": [0, 1]},
+        ],
+    }
+    res = run_rx_tool(spec, 8000.0, capture_path=cap, timeout=60.0)
+    assert res["status"] == "empty"
+    quality = cast(dict[str, object], res["quality"])
+    assert "verdict" in quality
+    assert "hints" in res
+
+
 def test_trace_absent_by_default(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

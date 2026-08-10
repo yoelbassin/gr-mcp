@@ -237,6 +237,8 @@ def test_empty_gr_run_propagates_status_and_stalled_at(tmp_path: Path) -> None:
         stalled_at="b1",
         census=[BlockCensus(block="b0", kind="soft_bits_file_source", items_out=0)],
     )
+    # a real GR run creates the sink file even when it writes 0 items
+    (tmp_path / "seam.dat").touch()
     res = run_rx(
         _gr_modem(),
         stage_registry(),
@@ -249,8 +251,14 @@ def test_empty_gr_run_propagates_status_and_stalled_at(tmp_path: Path) -> None:
     assert res.status == "empty"
     assert res.stalled_at == "b1"
     assert res.error == canned.error
+    # empty means no product stream — but the run keeps its full report: the
+    # census and the quality verdict the run_rx docstring promises
+    # unconditionally
     assert res.bitstream is None and res.symbolstream is None
-    assert [r.kind for r in res.census] == ["soft_bits_file_source"]
+    assert res.quality is not None
+    # the coding tail now runs (on zero bits) so its census row appears —
+    # the gradient a parameter search needs even on an empty run
+    assert [r.kind for r in res.census] == ["soft_bits_file_source", "sync_word"]
 
 
 def test_soft_symbols_final_round_trips_float_values(tmp_path: Path) -> None:

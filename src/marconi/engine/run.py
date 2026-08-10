@@ -553,6 +553,7 @@ def run_rx(
         trace_rows: list[TraceStage] = []
         marks: list[int] = []
         entry_path = seam
+        gr_empty: PipelineResult | None = None
         if cp.gr is not None:
             if backend is None:
                 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend
@@ -563,7 +564,7 @@ def run_rx(
             census, diagnostics = list(r.census), list(r.diagnostics)
             if trace_dir is not None:
                 trace_rows = _harvest_trace(modem, cp, trace_dir, registry)
-            if r.status != "ok":
+            if r.status in ("error", "timeout"):
                 return PipelineResult(
                     status=r.status,
                     error=r.error,
@@ -571,6 +572,10 @@ def run_rx(
                     census=census,
                     diagnostics=diagnostics,
                     trace=trace_rows,
+                )
+            if r.status == "empty":
+                gr_empty = PipelineResult(
+                    status="empty", error=r.error, stalled_at=r.stalled_at
                 )
             marks = _harvest_marks(diagnostics)
         if input_stream is not None:
@@ -586,9 +591,24 @@ def run_rx(
             result = _flag_empty_coding(
                 _wrap_result(cp.final, out, workdir, marks, census, diagnostics)
             )
-        if result.status != "ok":
-            return result
+        if gr_empty is not None and result.status in ("ok", "empty"):
+            # the worker's stall is the upstream truth; the coding tail's
+            # recomputation over the same census would only echo it less
+            # precisely. Streams null like _flag_empty_coding's: empty means
+            # no product, but the report below still attaches.
+            result = result.model_copy(
+                update={
+                    "status": "empty",
+                    "error": gr_empty.error,
+                    "stalled_at": gr_empty.stalled_at,
+                    "bitstream": None,
+                    "symbolstream": None,
+                }
+            )
         check_deadline()
+        # 'empty' keeps the full report: the zero-decode run is exactly where
+        # the agent needs the quality verdict, the census gradient, and the
+        # open-loop retry hints
         soft = _soft_tap(cp, result, seam, input_stream)
         quality = assess_quality(
             registry=registry,
