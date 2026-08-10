@@ -68,6 +68,8 @@ def test_rejects_fractional_and_low_sps() -> None:
         make_oerder_meyr(FAKE_GR, sps=4.5)
     with pytest.raises(ValueError, match="sps >= 4"):
         make_oerder_meyr(FAKE_GR, sps=2)
+    with pytest.raises(ValueError, match="alpha"):
+        make_oerder_meyr(FAKE_GR, sps=8, alpha=0.05)
 
 
 def _finality_probe(total: int) -> SimpleNamespace:
@@ -223,6 +225,32 @@ def test_gates_a_gap_larger_than_one_detection_block() -> None:
     assert gap_region.size > 0
     max_gap_amp = float(np.max(np.abs(gap_region)))
     assert max_gap_amp == 0.0, max_gap_amp  # idle emits a literal zero
+
+
+def test_low_rolloff_continuous_is_not_zeroed_by_the_gate() -> None:
+    # the clock line weakens ~linearly with rolloff; a fixed threshold of 25
+    # left a 6% margin at alpha=0.1/10 dB, so the gate derates with alpha
+    # (never below the alpha-independent noise ceiling) — a real low-rolloff
+    # continuous signal must decode, not read as noise
+    beta = 0.15
+    h = _rrc(_BURST_SPS, beta=beta)
+    rng = np.random.default_rng(19)
+    up = np.zeros(2000 * _BURST_SPS, complex)
+    up[::_BURST_SPS] = np.exp(1j * (np.pi / 2) * np.cumsum(rng.integers(0, 4, 2000)))
+    x = np.convolve(up, h, "same")
+    p = float(np.mean(np.abs(x) ** 2))
+    x = x + np.sqrt(p / 10.0 / 2) * (
+        rng.standard_normal(x.size) + 1j * rng.standard_normal(x.size)
+    )
+    mf = np.convolve(x, h, "same").astype(np.complex64)
+    blk = make_oerder_meyr(FAKE_GR, sps=_BURST_SPS, alpha=beta)
+    blk.eof_probe = _finality_probe(mf.size)
+    sym = drive(blk, mf, chunk=mf.size, out_dtype=np.complex64)
+    assert blk.diagnostics["regions_zeroed"] == 0, blk.diagnostics
+    z = sym[1:] * np.conj(sym[:-1])
+    # 0.9 is the clean-signal bar elsewhere; at 10 dB the differential R4
+    # ceiling is ~0.9 regardless of timing, so gate at 0.85 with margin
+    assert _r4(z) > 0.85, _r4(z)
 
 
 def test_continuous_signal_loses_no_symbols_at_cap_boundaries() -> None:

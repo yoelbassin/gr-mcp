@@ -104,7 +104,11 @@ _NOISE_GUARD = 12.0  # the peak never decays below this multiple of the
 _FLOOR_RISE = 1.0 / 8.0  # noise-floor EMA rates; the floor learns only from
 _FLOOR_FALL = 1.0 / 4.0  # proven evidence (see _update_floor callers)
 _BURST_CONTRAST = 4.0  # a short flushed region below this multiple of the
-# proven floor is a noise excursion over the guarded threshold, not a burst
+# proven floor is a noise excursion over the guarded threshold, not a
+# burst. NOTE the dead band this creates with _NOISE_GUARD: detection
+# triggers at 3x floor (0.25 * 12), so a genuine burst landing in
+# (3x, 4x) — roughly 5-6 dB SNR — is detected, buffered, then zeroed;
+# bursts_zeroed_low_contrast is its witness
 _SMOOTH_SYMS = 1  # activity-envelope smoothing width
 _RISE_SYMS = 1  # sustained-active symbols confirming a burst START
 _FALL_SYMS = 2  # sustained-INactive symbols confirming a burst END: PSK's
@@ -117,7 +121,13 @@ _CLOCK_GATE_MIN_SYMS = 256  # regions at least this long are clock-line
 # gated. Measured (RRC alpha=0.35, matched): noise ratio p99 ~7 / max ~17
 # over 500 trials at 256-512 symbols; real QPSK >= 42 even at 5 dB SNR.
 # Shorter real bursts cannot clear the bar reliably, so they pass ungated.
-_CLOCK_LINE_MIN_RATIO = 25.0
+_CLOCK_LINE_MIN_RATIO = 25.0  # calibrated at _CLOCK_CAL_ALPHA; the line
+# weakens with pulse-shaping rolloff (512-sym minima at 10 dB: 107/66/46/
+# 33/27 at alpha .35/.25/.20/.15/.10 — roughly linear in alpha), so the
+# threshold derates with alpha but never below the alpha-independent
+# noise ceiling
+_CLOCK_CAL_ALPHA = 0.35
+_CLOCK_LINE_NOISE_CEILING = 20.0
 
 
 def _block_peak(smoothed: np.ndarray) -> float:
@@ -130,7 +140,9 @@ def _activity_mask(smoothed: np.ndarray, peak: float) -> np.ndarray:
     return smoothed > _THRESH_FRAC * peak
 
 
-def make_oerder_meyr(gr: Any, *, sps: float, span: int = 11) -> Any:
+def make_oerder_meyr(
+    gr: Any, *, sps: float, span: int = 11, alpha: float = 0.35
+) -> Any:
     stride = int(round(sps))
     if abs(sps - stride) > 1e-6:
         raise ValueError(f"oerder_meyr needs integer sps, got {sps}; resample upstream")
@@ -141,6 +153,16 @@ def make_oerder_meyr(gr: Any, *, sps: float, span: int = 11) -> Any:
         )
     if span < 1:
         raise ValueError(f"oerder_meyr needs span >= 1, got {span}")
+    if not 0.1 <= alpha <= 1.0:
+        raise ValueError(
+            f"oerder_meyr needs alpha in [0.1, 1]: the |x|^2 clock line "
+            f"scales with excess bandwidth and vanishes as alpha -> 0, "
+            f"got {alpha}"
+        )
+    gate_ratio = max(
+        _CLOCK_LINE_NOISE_CEILING,
+        _CLOCK_LINE_MIN_RATIO * min(1.0, alpha / _CLOCK_CAL_ALPHA),
+    )
     smooth_w = _SMOOTH_SYMS * stride
     rise_run = _RISE_SYMS * stride
     fall_run = _FALL_SYMS * stride
@@ -355,7 +377,7 @@ def make_oerder_meyr(gr: Any, *, sps: float, span: int = 11) -> Any:
                 return False
             power = seg.real.astype(np.float64) ** 2 + seg.imag.astype(np.float64) ** 2
             if seg.size >= gate_min:
-                if _clock_line_ratio(seg, stride) < _CLOCK_LINE_MIN_RATIO:
+                if _clock_line_ratio(seg, stride) < gate_ratio:
                     self.diagnostics["regions_zeroed"] += 1
                     # clock-proven noise: its level seeds/updates the floor,
                     # and via the _NOISE_GUARD clamp lifts the peak clear of

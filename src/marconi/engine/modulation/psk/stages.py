@@ -30,8 +30,10 @@ class SymbolSyncStep(Step):
             "reverse-engineering case, with no known preamble to burn on "
             "acquisition; expect ~1 degraded-or-zeroed symbol at each burst "
             "edge). Open-loop requires sps>=4 (the |x|^2 line collapses "
-            "toward Nyquist at sps=2); the closed loop needs sps>=2. >0 = "
-            "continuous Gardner loop for sustained signals."
+            "toward Nyquist at sps=2) and pulse-shaping excess bandwidth "
+            "(alpha>=0.1); staggered modulations (OQPSK/MSK-like) produce no "
+            "|x|^2 symbol-rate line at all and read as no-signal zeros on "
+            "this path. >0 = continuous Gardner loop for sustained signals."
         ),
     )
     span: StrictInt = 11
@@ -44,6 +46,12 @@ class SymbolSyncStep(Step):
             )
         if not 0.0 < self.alpha <= 1.0:
             raise PydanticCustomError("value_error", "alpha must be in (0, 1]")
+        if self.loop_bw == 0.0 and self.alpha < 0.1:
+            raise PydanticCustomError(
+                "value_error",
+                "open-loop timing (loop_bw=0) rides the |x|^2 clock line, "
+                "which vanishes without excess bandwidth: alpha must be >= 0.1",
+            )
         if self.span < 1:
             raise PydanticCustomError("value_error", "span must be >= 1")
         return self
@@ -90,7 +98,9 @@ class SymbolSync(RxStage[CompileContext, SymbolSyncStep]):
             span=step.span,
         )
         if step.loop_bw == 0.0:
-            b.chain("oerder_meyr_timing", sps=step.sps, span=step.span)
+            b.chain(
+                "oerder_meyr_timing", sps=step.sps, span=step.span, alpha=step.alpha
+            )
         else:
             b.chain("symbol_sync_cc", sps=step.sps, loop_bw=step.loop_bw)
 

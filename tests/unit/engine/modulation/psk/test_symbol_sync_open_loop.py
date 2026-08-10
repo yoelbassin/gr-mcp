@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import pytest
+from pydantic import ValidationError
 
 from marconi.engine.compile.compiler import CompileError, compile_modem
 from marconi.engine.modulation.psk.stages import SymbolSyncStep
@@ -45,3 +46,10 @@ def test_open_loop_requires_sps_ge_4() -> None:
 
 def test_step_accepts_loop_bw_zero() -> None:
     assert SymbolSyncStep(sps=8, loop_bw=0.0).loop_bw == 0.0
+
+
+def test_open_loop_requires_excess_bandwidth() -> None:
+    with pytest.raises(ValidationError, match="excess bandwidth"):
+        SymbolSyncStep(sps=8, loop_bw=0.0, alpha=0.05)
+    # the closed loop has no such physics: low rolloff stays valid there
+    assert SymbolSyncStep(sps=8, loop_bw=0.045, alpha=0.05).alpha == 0.05

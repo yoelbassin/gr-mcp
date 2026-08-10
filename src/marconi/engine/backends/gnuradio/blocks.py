@@ -303,6 +303,7 @@ GR_BLOCKS: dict[str, Callable[[_GrCtx, Params], Any]] = {
         c.gr,
         sps=_as_float(p["sps"]),
         span=_as_int(p.get("span", 11)),
+        alpha=_as_float(p.get("alpha", 0.35)),
     ),
     "symbol_sync_ff": lambda c, p: c.digital.symbol_sync_ff(
         c.digital.TED_GARDNER,
