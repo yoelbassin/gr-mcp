@@ -9,7 +9,7 @@ from pydantic import BaseModel
 from scipy.ndimage import uniform_filter1d
 from scipy.signal import find_peaks, welch
 
-from marconi.levels import fit_levels
+from marconi.levels import fit_levels, percentile_span
 from marconi.survey.iqfile import iter_iq, sample_iq
 
 _SURVEY_NPERSEG = 4096
@@ -504,9 +504,7 @@ def _inst_freq(x: npt.NDArray[np.complex64], sample_rate: float) -> InstFreqStat
     f = np.angle(x[1:] * np.conj(x[:-1])) / (2 * np.pi) * sample_rate
     f = _gate(f, _slot_active_pairs(x, _SURVEY_ACTIVE_FRACTION, _SURVEY_BURST_WINDOW))
     spread = float(f.std())
-    lo, hi = (float(v) for v in np.percentile(f, [0.5, 99.5]))
-    if hi <= lo:
-        hi = lo + 1.0
+    lo, hi = percentile_span(f)
     counts, edges = np.histogram(f, bins=_SURVEY_IFREQ_BINS, range=(lo, hi))
     centers = (edges[:-1] + edges[1:]) / 2
     step = float(edges[1] - edges[0]) if edges.size > 1 else 0.0

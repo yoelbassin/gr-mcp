@@ -10,7 +10,6 @@ from pydantic import ValidationError
 from marconi.capture import capture_iq
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend
 from marconi.engine.compile.compiler import (
-    CompiledPipeline,
     CompileError,
     compile_modem,
     compile_pipeline,
@@ -24,10 +23,16 @@ from marconi.engine.types.descriptor import Carrier, Descriptor
 from marconi.engine.types.enums import ItemType
 from marconi.engine.types.levels import Level
 from marconi.engine.types.models import Bitstream, Modem, Symbolstream
-from marconi.engine.types.step import stage_label
 from marconi.errors import classify_error
 from marconi.mcp.boundary import tool_error_boundary
-from marconi.mcp.payload import pipeline_payload, slim_census, survey_payload
+from marconi.mcp.payload import (
+    ErrorRow,
+    error_rows,
+    pipeline_payload,
+    run_tx_payload,
+    spec_trace_rows,
+    survey_payload,
+)
 from marconi.mcp.streams import (
     _ITEM_DTYPES,
     _require_file,
@@ -57,24 +62,6 @@ def _start_descriptor(item_type: str, level: str | None) -> Descriptor:
         raise ValueError(f"input_level must be one of {sorted(_START_LEVELS)}")
     carrier = Carrier.SOFT if item is ItemType.F else Carrier.HARD
     return Descriptor(_START_LEVELS[level_key], item, carrier)
-
-
-def _trace_rows(modem: Modem, cp: CompiledPipeline) -> list[dict[str, object]]:
-    labels = ["<start>"] + [stage_label(i, s.conv) for i, s in enumerate(modem.path)]
-    rows = [
-        {
-            "after": label,
-            "level": desc.level.value,
-            "item_type": desc.item_type.value,
-            "carrier": desc.carrier.value,
-            "amplitude": desc.amplitude.value,
-            "order": desc.order,
-            "frame_len": desc.frame_len,
-            "sample_rate": rate,
-        }
-        for label, desc, rate in zip(labels, cp.boundaries, cp.rates)
-    ]
-    return [{k: v for k, v in row.items() if v is not None} for row in rows]
 
 
 def _input_stream(path: Path, item_type: str) -> Bitstream | Symbolstream:
@@ -109,13 +96,6 @@ def describe_stages(
     if family is not None:
         return {"stages": stage_details(family_names(family))}
     return {"stages": stage_index(), "envelope": ENVELOPE}
-
-
-def _error_row(code: str, message: str, at: str | None = None) -> dict[str, str]:
-    row = {"code": code, "message": message}
-    if at is not None:
-        row["at"] = at
-    return row
 
 
 def validate_modem(
@@ -154,17 +134,22 @@ def validate_modem(
     except SpecValidationError as exc:
         return {
             "valid": False,
-            "errors": [
-                _error_row("invalid_argument", i.message, at=i.block_id)
-                for i in exc.issues
-            ],
+            "errors": error_rows(
+                [
+                    ErrorRow(code="invalid_argument", message=i.message, at=i.block_id)
+                    for i in exc.issues
+                ]
+            ),
         }
     except (CompileError, ValidationError, ValueError) as exc:
         code, message = classify_error(exc)
-        return {"valid": False, "errors": [_error_row(code, message)]}
+        return {
+            "valid": False,
+            "errors": error_rows([ErrorRow(code=code, message=message)]),
+        }
     return {
         "valid": True,
-        "trace": _trace_rows(modem, cp),
+        "trace": spec_trace_rows(modem, cp),
         "warnings": composition_warnings(modem, stage_registry()),
     }
 
@@ -267,6 +252,7 @@ def run_rx_tool(
     modem = Modem.from_spec(spec, step_models())
     run_dir = new_run_dir("rx")
     if capture_path is not None:
+        _require_file(Path(capture_path))
         # a first-time ci16/ci8/cu8 conversion is real work with no bound of
         # its own; set_deadline here too so it counts against timeout - the
         # min-nesting means engine_run_rx's own inner deadline can't extend it
@@ -341,16 +327,7 @@ def run_tx_tool(
         sink_io={"path": str(out)},
     )
     r = GnuRadioBackend().run_pipeline(gr, timeout=timeout)
-    payload: dict[str, object] = {
-        "status": r.status,
-        "iq_path": str(out),
-        "num_samples": out.stat().st_size // 8 if out.is_file() else 0,
-        "sample_rate": sample_rate,
-        "census": slim_census(r.census),
-    }
-    if r.error is not None:
-        payload["error"] = r.error
-    return payload
+    return run_tx_payload(r, out, sample_rate)
 
 
 def read_stream(

@@ -13,11 +13,11 @@ import numpy.typing as npt
 from marconi.engine.deadline import check_deadline
 from marconi.engine.io.source import SourceSlice
 from marconi.engine.types.enums import ItemType
-from marconi.levels import kmeans_1d
+from marconi.levels import kmeans_1d, percentile_span
 from marconi.mcp.workspace import conversion_cache_dir
 
 _MAX_INLINE_BITS = 1_048_576
-_MAX_PAGE_ITEMS = 65536
+_MAX_PAGE_ITEMS = {"b": 65536, "s": 16384, "f": 16384, "l": 16384, "c": 4096}
 _CHUNK_ITEMS = 1 << 20
 
 # default page sizes hold a default call near a few KB of JSON regardless of
@@ -87,7 +87,7 @@ def render_page(
         count = _DEFAULT_PAGE_ITEMS[kind]
     dtype = _ITEM_DTYPES[kind]
     total = path.stat().st_size // dtype.itemsize
-    count = max(0, min(count, _MAX_PAGE_ITEMS, total - offset))
+    count = max(0, min(count, _MAX_PAGE_ITEMS[kind], total - offset))
     with path.open("rb") as f:
         f.seek(offset * dtype.itemsize)
         items = np.fromfile(f, dtype=dtype, count=count)
@@ -218,9 +218,7 @@ def _sample_stream(
 
 
 def _hist(x: npt.NDArray[np.float64], bins: int) -> dict[str, object]:
-    lo, hi = (float(v) for v in np.percentile(x, [0.5, 99.5]))
-    if hi <= lo:
-        hi = lo + 1.0
+    lo, hi = percentile_span(x)
     edges = np.linspace(lo, hi, bins + 1)
     counts, _ = np.histogram(np.clip(x, lo, hi), bins=edges)
     # bin i's center is start + i*step: the axis is derivable, never shipped
@@ -296,7 +294,8 @@ def stream_stats(
         out["ones_fraction"] = round(ones, 6)
         return out
     if kind == "c":
-        return _constellation_stats(out, sample, clusters, bins)
+        out.update(_constellation_stats(sample, clusters, bins))
+        return out
     x = sample.astype(np.float64)
     x = x[np.isfinite(x)]
     if x.size == 0:
@@ -326,13 +325,13 @@ def stream_stats(
 
 
 def _constellation_stats(
-    out: dict[str, object], sample: npt.NDArray[np.complex64], clusters: int, bins: int
+    sample: npt.NDArray[np.complex64], clusters: int, bins: int
 ) -> dict[str, object]:
     z = sample.astype(np.complex128)
     z = z[np.isfinite(z)]
     if z.size == 0:
         raise ValueError("stream has no finite items to summarize")
-    out["sampled_items"] = int(z.size)
+    out: dict[str, object] = {"sampled_items": int(z.size)}
     mag = np.abs(z)
     mean_mag = float(mag.mean())
     out.update(

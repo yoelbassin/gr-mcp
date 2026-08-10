@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
 import numpy.typing as npt
@@ -17,11 +18,17 @@ def _assign(
     return np.argmin(np.abs(x[:, None] - centers[None, :]), axis=1)
 
 
-def _clip_range(x: npt.NDArray[np.float64]) -> tuple[float, float]:
-    lo, hi = (float(v) for v in np.percentile(x, _CLIP_PERCENTILES))
+def percentile_span(
+    x: npt.NDArray[np.floating[Any]], percentiles: tuple[float, float] = (0.5, 99.5)
+) -> tuple[float, float]:
+    lo, hi = (float(v) for v in np.percentile(x, percentiles))
     if hi <= lo:
         hi = lo + 1.0
     return lo, hi
+
+
+def _clip_range(x: npt.NDArray[np.float64]) -> tuple[float, float]:
+    return percentile_span(x, _CLIP_PERCENTILES)
 
 
 def _seeded_lloyd_1d(

@@ -5,9 +5,14 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+from pydantic import BaseModel
 
-from marconi.engine.backends.base import BlockCensus, Diagnostic
+from marconi.engine.backends.base import BlockCensus, Diagnostic, RunResult
+from marconi.engine.compile.compiler import CompiledPipeline
 from marconi.engine.run import PipelineResult
+from marconi.engine.types.enums import ItemType
+from marconi.engine.types.models import Modem
+from marconi.engine.types.step import stage_label
 from marconi.mcp.streams import stream_stats as _compute_stats
 from marconi.survey import SurveyResult
 
@@ -47,8 +52,8 @@ def capped_int_list(
             f"{key}_total": len(seq),
         }
         if sidecar is not None:
-            # the full list must stay reachable: entries past the cap have no
-            # other home, and a >512-frame carve needs every window offset
+            # entries past the cap have no other home; the sidecar keeps the
+            # full list reachable (a >512-frame carve needs every offset)
             np.asarray(seq, np.int64).tofile(sidecar)
             fields[f"{key}_path"] = str(sidecar)
         return fields
@@ -65,14 +70,78 @@ def slim_census(rows: Sequence[BlockCensus]) -> list[dict[str, object]]:
     return out
 
 
-def slim_diagnostics(rows: Sequence[Diagnostic]) -> list[dict[str, object]]:
+def slim_diagnostics(
+    rows: Sequence[Diagnostic], run_dir: Path | None = None
+) -> list[dict[str, object]]:
     out: list[dict[str, object]] = []
     for d in rows:
         row: dict[str, object] = d.model_dump(mode="json", exclude_none=True)
         if d.marks is not None:
-            row.update(capped_int_list("marks", d.marks))
+            sidecar = (
+                run_dir / f"diag_{d.block}_{d.key}.i64" if run_dir is not None else None
+            )
+            row.update(capped_int_list("marks", d.marks, sidecar))
         out.append(row)
     return out
+
+
+class RunTxPayload(BaseModel):
+    status: str
+    iq_path: str
+    num_samples: int
+    sample_rate: float
+    census: list[dict[str, object]]
+    error: str | None = None
+
+
+def run_tx_payload(r: RunResult, out: Path, sample_rate: float) -> dict[str, object]:
+    n = out.stat().st_size // ItemType.C.item_bytes if out.is_file() else 0
+    return RunTxPayload(
+        status=r.status,
+        iq_path=str(out),
+        num_samples=n,
+        sample_rate=sample_rate,
+        census=slim_census(r.census),
+        error=r.error,
+    ).model_dump(mode="json", exclude_none=True)
+
+
+class ErrorRow(BaseModel):
+    code: str
+    message: str
+    at: str | None = None
+
+
+class SpecTraceRow(BaseModel):
+    after: str
+    level: str
+    item_type: str
+    carrier: str
+    amplitude: str
+    order: int | None = None
+    frame_len: int | None = None
+    sample_rate: float
+
+
+def spec_trace_rows(modem: Modem, cp: CompiledPipeline) -> list[dict[str, object]]:
+    labels = ["<start>"] + [stage_label(i, s.conv) for i, s in enumerate(modem.path)]
+    return [
+        SpecTraceRow(
+            after=label,
+            level=desc.level.value,
+            item_type=desc.item_type.value,
+            carrier=desc.carrier.value,
+            amplitude=desc.amplitude.value,
+            order=desc.order,
+            frame_len=desc.frame_len,
+            sample_rate=rate,
+        ).model_dump(mode="json", exclude_none=True)
+        for label, desc, rate in zip(labels, cp.boundaries, cp.rates)
+    ]
+
+
+def error_rows(rows: Sequence[ErrorRow]) -> list[dict[str, object]]:
+    return [r.model_dump(mode="json", exclude_none=True) for r in rows]
 
 
 def stream_summary(result: PipelineResult) -> dict[str, object] | None:
@@ -146,7 +215,7 @@ def pipeline_payload(result: PipelineResult, run_dir: Path) -> dict[str, object]
         },
     )
     payload["census"] = slim_census(result.census)
-    payload["diagnostics"] = slim_diagnostics(result.diagnostics)
+    payload["diagnostics"] = slim_diagnostics(result.diagnostics, run_dir)
     payload.update(capped_int_list("windows", result.windows, run_dir / "windows.i64"))
     payload.update(capped_int_list("marks", result.marks, run_dir / "marks.i64"))
     if result.trace:
