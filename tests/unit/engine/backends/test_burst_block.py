@@ -8,7 +8,10 @@ Gardner loop railed on. Fractional STO is injected via the phase argument
 
 from __future__ import annotations
 
-from types import SimpleNamespace
+import sys
+from collections.abc import Callable
+from types import FrameType, SimpleNamespace
+from typing import Any
 
 import numpy as np
 import pytest
@@ -212,14 +215,31 @@ def test_amplitude_immune_across_bursts_and_within_a_ramping_burst() -> None:
     assert _chip_string(bits_steady) in found
 
 
-def test_scans_stay_vectorized_against_numpy_control() -> None:
+def test_scans_stay_vectorized() -> None:
     """The idle chip walk and the in-burst fall scan run inside GR's
     scheduler thread: boxed-scalar Python loops there turn a 60 s live
-    capture into seconds of stall. Gate both paths against an in-process
-    numpy control (machine-speed normalized). Measured: idle 8.4x scalar vs
-    4.5x vectorized; dense-burst 17.7x scalar vs 10.3x vectorized (the
-    remainder there is genuine per-burst phase acquisition, not loops)."""
-    import time
+    capture into seconds of stall. A per-sample loop executes >= 3 traced
+    Python lines per sample (12M+ here); the vectorized paths execute
+    O(chunks + bursts) (measured: 980k idle, 1.71M dense). Counting
+    executed lines is deterministic where a wall-clock ratio flaked under
+    xdist contention — the clock measures the machine, the trace measures
+    the code."""
+
+    def traced_lines(fn: Callable[[], object]) -> int:
+        n = 0
+
+        def tracer(frame: FrameType, event: str, arg: Any) -> Any:
+            nonlocal n
+            if event == "line":
+                n += 1
+            return tracer
+
+        sys.settrace(tracer)
+        try:
+            fn()
+        finally:
+            sys.settrace(None)
+        return n
 
     rng = np.random.default_rng(1)
     idle = np.abs(rng.normal(0.0, 0.05, 4_000_000)).astype(np.float32)
@@ -228,17 +248,12 @@ def test_scans_stay_vectorized_against_numpy_control() -> None:
         parts.append((1.0 + 0.3 * np.abs(rng.standard_normal(400))).astype(np.float32))
         parts.append(np.abs(rng.normal(0.0, 0.05, 1648)).astype(np.float32))
     bursty = np.concatenate(parts)
-    for env, min_bursts, gate in ((idle, 0, 6.5), (bursty, 1500, 14.0)):
-        t0 = time.perf_counter()
-        np.median(env)
-        control = time.perf_counter() - t0
+
+    for env, min_bursts in ((idle, 0), (bursty, 1500)):
         blk = make_burst_sampler(FAKE_GR, sps=2.0)
-        t0 = time.perf_counter()
-        drive(blk, env, chunk=65536, out_dtype=np.float32)
-        elapsed = time.perf_counter() - t0
+        lines = traced_lines(lambda: drive(blk, env, chunk=65536, out_dtype=np.float32))
         assert blk.diagnostics["bursts_flushed"] >= min_bursts
-        ratio = elapsed / control
-        assert ratio < gate, f"{ratio=:.1f} (bursts={blk.diagnostics})"
+        assert lines < env.size, f"{lines=} vs {env.size} samples: per-item loop?"
 
 
 def test_unfinished_burst_withheld_at_eof() -> None:
