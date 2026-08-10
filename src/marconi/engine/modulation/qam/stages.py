@@ -15,7 +15,7 @@ from marconi.engine.types.step import Step
 
 class QamDemodStep(Step):
     conv: Literal["qam_demod"] = "qam_demod"
-    order: QamOrder  # required: an explicit QAM order, no silent default
+    order: QamOrder
     alpha: float = 0.35
     loop_bw: float = 0.045  # symbol_sync timing loop
     span: StrictInt = 11
@@ -81,7 +81,7 @@ class QamDemod(DuplexStage[CompileContext, QamDemodStep]):
 
 class QamDemapStep(Step):
     conv: Literal["qam_demap"] = "qam_demap"
-    order: QamOrder  # required
+    order: QamOrder
 
 
 class QamDemap(DuplexStage[CompileContext, QamDemapStep]):

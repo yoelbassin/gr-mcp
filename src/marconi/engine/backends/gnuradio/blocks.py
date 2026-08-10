@@ -32,6 +32,7 @@ from marconi.engine.backends.gnuradio.embedded.preamble import (
 )
 from marconi.engine.backends.gnuradio.embedded.probe import make_burst_probe
 from marconi.engine.backends.gnuradio.embedded.trellis_fec import make_trellis_viterbi
+from marconi.engine.modulation.fsk.stages import MSK_LOOP_BW_DEFAULT
 from marconi.engine.types.params import ParamValue
 
 Params = dict[str, ParamValue]
@@ -288,7 +289,7 @@ GR_BLOCKS: dict[str, Callable[[_GrModules, Params], Any]] = {
     "msk_demod": lambda c, p: make_msk_demod(
         c.gr,
         sps=_as_float(p["sps"]),
-        loop_bw=_as_float(p.get("loop_bw", 0.0038)),
+        loop_bw=_as_float(p.get("loop_bw", MSK_LOOP_BW_DEFAULT)),
         loop_pole=_as_float(p.get("loop_pole", 0.52)),
         mf_oversample=_as_int(p.get("mf_oversample", 12)),
     ),
@@ -347,13 +348,8 @@ GR_BLOCKS: dict[str, Callable[[_GrModules, Params], Any]] = {
     "rotator_cc": lambda c, p: c.blocks.rotator_cc(_as_float(p["phase_inc"])),
     # Polyphase arbitrary resampler (rate=interp/decim). Kept over
     # rational_resampler_ccf because the same block also serves clock_correct's
-    # irrational 1/(1+ppm) ratio, so one kind covers both — NOT because rational
-    # images. rational_resampler_ccf with no taps is spectrally clean (<-56 dBc)
-    # and bit-perfect here; its "BER ~0.46 at 8/7, 8/9" through
-    # test_resample_roundtrip is an aligned_ber artifact, not a DSP fault: its
-    # group delay lands rx ~2 samples EARLY (negative lag) and aligned_ber only
-    # shifts rx forward, so it scores a perfect decode as random. Verified
-    # two-sided 2026-07-25; do not "re-fix" this by distrusting rational.
+    # irrational 1/(1+ppm) ratio, so one kind covers both; rational is equally
+    # clean (see test_resample_roundtrip's alignment note).
     "pfb_arb_resampler_ccf": lambda c, p: c.pfb.arb_resampler_ccf(_as_float(p["rate"])),
     # Integer-ratio resampler (auto-designed anti-imaging taps). Spectrally clean
     # and bit-perfect on this build; see the note above pfb_arb_resampler_ccf.

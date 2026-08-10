@@ -75,9 +75,12 @@ class Fsk(DuplexStage[CompileContext, FskStep]):
         return [FSK_OPEN_LOOP_HINT] if step.loop_bw > 0.0 else []
 
 
+MSK_LOOP_BW_DEFAULT = 0.0038
+
+
 class MskStep(Step):
     conv: Literal["msk"] = "msk"
-    loop_bw: float = 0.0038  # pinned: GR_BLOCKS["msk_demod"]'s registered default
+    loop_bw: float = MSK_LOOP_BW_DEFAULT
     loop_pole: float = Field(default=0.52, ge=0.0, le=1.0)
     mf_oversample: int = Field(default=12, ge=1)
 
@@ -143,9 +146,7 @@ class MfskSoftDemapStep(Step):
 class MfskSoftDemap(RxStage[CompileContext, MfskSoftDemapStep]):
     """M-ary soft demap, SYMBOLS->BITS soft. Turns the one-soft-float-per-symbol
     stream an fsk/msk discriminator emits into log2(M) LLRs per symbol, which is
-    what the coding lane (deinterleave/depuncture/fec) consumes. Before this the
-    only SYMBOLS->BITS stage accepting "f" was the binary `slice`, so every
-    M-ary FSK signal had to leave phy as hard decisions.
+    what the coding lane (deinterleave/depuncture/fec) consumes.
 
     `levels` is the discriminator output value for each symbol index, so the
     bit pattern of a level is its index (MSB-first) and any level->dibit map is

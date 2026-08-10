@@ -62,7 +62,7 @@ def find_diagnostic(
 
 class RunResult(BaseModel):
     # "empty": the graph ran clean but its terminal sink wrote nothing — a
-    # decoded-nothing run is NOT a success, so status stops saying "ok" for it.
+    # decoded-nothing run is never reported as "ok".
     status: Literal["ok", "error", "timeout", "empty"]
     artifacts: list[str] = []
     error: str | None = None

@@ -337,7 +337,7 @@ def composition_warnings(
     modem: Modem, registry: Mapping[str, Stage[Any, Any]]
 ) -> list[str]:
     """Spec-shape smells that compile fine but silently do the wrong thing.
-    Today exactly one rule: a window-seeding stage after another seeder
+    a window-seeding stage after another seeder
     discards the earlier stage's windows (measured trap: sync_word -> segment
     re-tiled from 0 and the sync marks vanished)."""
     warnings: list[str] = []

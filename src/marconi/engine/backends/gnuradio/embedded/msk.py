@@ -12,7 +12,6 @@ sub-sample timing. Coherent detection of a raw (non-precoded) MSK signal
 recovers the payload differentially-encoded — the data rides in the
 ±90°/bit phase step; the per-link differential decode is a bits-layer concern,
 so this block stays protocol-agnostic and emits the rail decisions directly.
-Constants are pinned from the validated reference detector.
 """
 
 from __future__ import annotations
@@ -27,8 +26,8 @@ import numpy.typing as npt
 from marconi.engine.backends.gnuradio.embedded.lifecycle import OutQueue, forecast_drain
 
 # Half-cosine matched-filter oversampling: the number of polyphase branches
-# from which sub-sample timing selects one. Default from the reference detector;
-# caller-overridable via the mf_oversample param.
+# from which sub-sample timing selects one; caller-overridable via the
+# mf_oversample param.
 _MF_OVERSAMPLE = 12
 
 # The decision-directed carrier loop needs BOTH a loop gain (loop_bw) and a

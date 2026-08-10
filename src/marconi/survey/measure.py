@@ -634,9 +634,7 @@ class SurveyResult(BaseModel):
 def _default_rate_floor(n_samples: int, sample_rate: float) -> float:
     """The finest rate the chunked clock spectrum resolves with margin: a line
     below a few of its bins is indistinguishable from DC leakage, so searching
-    there by default would rank noise. Anything above is fair game — a fixed
-    ratio floor (the old sample_rate/1000) hid real sub-floor rates that a
-    long capture resolves cleanly."""
+    there by default would rank noise. Anything above is fair game."""
     per = max(n_samples // _SURVEY_CLOCK_CHUNKS, 1)
     return _SURVEY_RATE_FLOOR_BINS * sample_rate / per
 

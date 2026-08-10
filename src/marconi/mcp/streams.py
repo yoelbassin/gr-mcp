@@ -348,10 +348,7 @@ def _constellation_stats(
         centers = _kmeans_2d(z, clusters)
         labels = _nearest_labels(z, centers)
         counts = np.array([int((labels == j).sum()) for j in range(clusters)])
-        # evm before the keep/order reindex below: dropping empty clusters or
-        # resorting by phase never changes any point's nearest center, so this
-        # is exact either way (verified) - but `labels` is only valid as an
-        # index into `centers` in its current, pre-reindex form
+        # `labels` indexes `centers` only in its current, pre-reindex form
         assigned = centers[labels]
         ref = float(np.sqrt((np.abs(assigned) ** 2).mean()))
         err = float(np.sqrt((np.abs(z - assigned) ** 2).mean()))

@@ -194,7 +194,7 @@ class DifferentialDemod(RxStage[CompileContext, DifferentialDemodStep]):
 
 class PskDemodStep(Step):
     conv: Literal["psk_demod"] = "psk_demod"
-    order: PskOrder  # required: an explicit PSK order, no silent default modulation
+    order: PskOrder
     alpha: float = Field(default=0.35, gt=0.0, le=1.0)
     loop_bw: float = Field(
         default=0.045,
@@ -275,7 +275,7 @@ class PskDemod(DuplexStage[CompileContext, PskDemodStep]):
 
 class PskDemapStep(Step):
     conv: Literal["psk_demap"] = "psk_demap"
-    order: PskOrder  # required
+    order: PskOrder
 
 
 class PskDemap(DuplexStage[CompileContext, PskDemapStep]):
@@ -322,8 +322,7 @@ class PskSoftDemap(RxStage[CompileContext, PskSoftDemapStep]):
     """Constellation soft demap, SYMBOLS->BITS soft. RX-only: stock
     constellation_soft_decoder, one LLR per bit. The soft counterpart of
     psk_demap, and the single-carrier entry point to the soft coding lane
-    (deinterleave/depuncture/fec), which until now only dqpsk_soft_demap could
-    feed.
+    (deinterleave/depuncture/fec).
 
     MEASURED: constellation_soft_decoder emits log P(1)/P(0) -- BPSK point +1
     (hard bit 1) reads +4.0 -- while both soft consumers in this engine use the
