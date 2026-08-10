@@ -73,3 +73,26 @@ def test_demap_tx_packs_then_maps() -> None:
     assert kinds == ["pack_k_bits_bb", "chunks_to_symbols_bc"]
     pack = next(x for x in b.build("t", 4.0).blocks if x.kind == "pack_k_bits_bb")
     assert pack.params["k"] == 3  # log2(8)
+
+
+def test_demod_rejects_loop_bw_zero_pointing_at_symbol_sync() -> None:
+    # loop_bw=0 freezes Gardner AND Costas: a spinning constellation
+    # hard-slices into confident garbage with constant modulus, so the
+    # false-lock check is structurally blind — and the hints teach loop_bw=0
+    # as the open-loop recipe for sibling stages, so the transfer must fail
+    # loudly with a route to the real open-loop path
+    with pytest.raises(ValidationError, match="symbol_sync"):
+        PskDemodStep(order=PskOrder(4), loop_bw=0.0)
+    with pytest.raises(ValidationError, match="symbol_sync"):
+        PskDemodStep(order=PskOrder(4), loop_bw=-0.01)
+
+
+def test_demod_bounds_rrc_alpha() -> None:
+    with pytest.raises(ValidationError):
+        PskDemodStep(order=PskOrder(4), alpha=-0.1)
+    with pytest.raises(ValidationError):
+        PskDemodStep(order=PskOrder(4), alpha=0.0)
+    with pytest.raises(ValidationError):
+        PskDemodStep(order=PskOrder(4), alpha=1.5)
+    with pytest.raises(ValidationError):
+        PskDemodStep(order=PskOrder(4), span=0)

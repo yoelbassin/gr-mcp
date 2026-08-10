@@ -184,9 +184,30 @@ class DifferentialDemod(RxStage[CompileContext, DifferentialDemodStep]):
 class PskDemodStep(Step):
     conv: Literal["psk_demod"] = "psk_demod"
     order: PskOrder  # required: an explicit PSK order, no silent default modulation
-    alpha: float = 0.35
-    loop_bw: float = 0.045
-    span: StrictInt = 11
+    alpha: float = Field(default=0.35, gt=0.0, le=1.0)
+    loop_bw: float = Field(
+        default=0.045,
+        description=(
+            "Closed-loop bandwidth shared by the Gardner timing and Costas "
+            "carrier loops; must be > 0. psk_demod has no open-loop mode — "
+            "for open-loop timing use symbol_sync loop_bw=0 followed by a "
+            "demap, not psk_demod."
+        ),
+    )
+    span: StrictInt = Field(default=11, ge=1)
+
+    @model_validator(mode="after")
+    def _loops_run(self) -> "PskDemodStep":
+        if self.loop_bw <= 0.0:
+            raise PydanticCustomError(
+                "value_error",
+                "psk_demod has no open-loop mode: loop_bw<=0 freezes the "
+                "Gardner and Costas loops, and under residual CFO a spinning "
+                "constellation hard-slices into confident garbage that the "
+                "constant-modulus false-lock check cannot see. For open-loop "
+                "timing use symbol_sync loop_bw=0 followed by a demap",
+            )
+        return self
 
 
 class PskDemod(DuplexStage[CompileContext, PskDemodStep]):
