@@ -7,7 +7,7 @@ from pydantic_core import PydanticCustomError
 
 from marconi.engine.coding import ops_bits
 from marconi.engine.coding.builder import CodingBuilder
-from marconi.engine.coding.primitives import can_correct, syndrome_table
+from marconi.engine.coding.primitives import effective_t, syndrome_table
 from marconi.engine.stages.base import CodingStage, Stage
 from marconi.engine.types.descriptor import Carrier
 from marconi.engine.types.enums import DecodeMode, EmitMode, ItemType
@@ -330,16 +330,13 @@ class BlockCodeStep(Step):
                 raise PydanticCustomError(
                     "value_error", "{msg}", {"msg": str(e)}
                 ) from None
-        single_check = (
-            self.correct == 1
-            if self.correct is not None
-            else (
-                can_correct(self.code_bits - self.data_bits, self.data_bits)
-                if self.correct_single is None
-                else self.correct_single
-            )
+        t = effective_t(
+            self.code_bits - self.data_bits,
+            self.data_bits,
+            self.correct_single,
+            self.correct,
         )
-        if single_check:
+        if t == 1:
             cols = [
                 tuple((mask >> j) & 1 for mask in self.parity_masks)
                 for j in range(self.data_bits)

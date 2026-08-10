@@ -112,6 +112,7 @@ def test_coding_primitives_surface_is_minimal() -> None:
     assert public == {
         "annotations",
         "can_correct",
+        "effective_t",
         "gray_decode",
         "gray_encode",
         "syndrome_table",

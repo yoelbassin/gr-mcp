@@ -15,7 +15,7 @@ except ImportError:  # pure-Python fallback, always installed
     import reedsolo as _rs
 
 from marconi.engine.coding.carrier import CodingCarrier, StepStats, Window
-from marconi.engine.coding.primitives import can_correct, syndrome_table
+from marconi.engine.coding.primitives import effective_t, syndrome_table
 from marconi.engine.deadline import check_deadline
 
 
@@ -219,23 +219,7 @@ def codebook_rx(
     def _decode(bits: np.ndarray) -> np.ndarray:
         return _pack_symbols(_values(_unpack_symbols(bits, code_bits)), data_bits)
 
-    if c.windows is not None:
-        bits_arr = np.asarray(c.bits, np.uint8)
-        cursors = [w.cursor for w in c.windows]
-        if any(b <= a for a, b in zip(cursors, cursors[1:])):
-            raise ValueError("codebook needs strictly increasing window cursors")
-        pieces: list[np.ndarray] = []
-        windows: list[Window] = []
-        pos = 0
-        for w, hi in zip(c.windows, cursors[1:] + [int(bits_arr.size)]):
-            dec = _decode(bits_arr[w.cursor : hi])
-            windows.append(Window(start=pos, cursor=pos))
-            pieces.append(dec)
-            pos += int(dec.size)
-        joined = np.concatenate(pieces) if pieces else np.zeros(0, np.uint8)
-        return CodingCarrier(bits=joined, windows=windows)
-    data = _decode(np.asarray(c.bits, np.uint8))
-    return CodingCarrier(bits=data, windows=c.windows)
+    return _decode_scoped(c, lambda bits: (_decode(bits), None))
 
 
 def _syndromes(
@@ -256,17 +240,6 @@ def _syndromes(
     return s_int
 
 
-def _effective_t(
-    n_parity: int, data_bits: int, correct_single: bool | None, correct: int | None
-) -> int:
-    if correct is not None:
-        return correct
-    do_single = (
-        can_correct(n_parity, data_bits) if correct_single is None else correct_single
-    )
-    return 1 if do_single else 0
-
-
 def _block_decode(
     bits: np.ndarray,
     code_bits: int,
@@ -276,11 +249,9 @@ def _block_decode(
     emit: str,
 ) -> tuple[np.ndarray, tuple[int, int]]:
     # Codeword basis is LSB-first: stream bit j of a stride is codeword bit j,
-    # so parity_masks and the emitted data bits are LSB-first too. The CSS
-    # explicit decoder assembles the same block_fec_decode input MSB-first
-    # (bits/symbols.py, _fec_nibbles); re-expressing that path on this stage
-    # must reconcile the basis (supply masks LSB-first, or reverse each
-    # stride).
+    # so parity_masks and the emitted data bits are LSB-first too. A caller
+    # assembling codewords MSB-first must reconcile the basis (supply masks
+    # LSB-first, or reverse each stride).
     n_parity = code_bits - data_bits
     n_words = bits.size // code_bits
     words = bits[: n_words * code_bits].reshape(n_words, code_bits).copy()
@@ -292,7 +263,7 @@ def _block_decode(
             dtype = _sym_dtype(n_parity)
             rows = [[(m >> b) & 1 for b in range(data_bits)] for m in parity_masks]
             # a column's syndrome signature, data columns then the parity
-            # identity; first ascending match flips, matching the scalar scan
+            # identity; ties resolve to the lowest column index
             weights = np.left_shift(1, np.arange(n_parity - 1, -1, -1, dtype=dtype))
             col_sig = np.concatenate([np.asarray(rows, dtype).T @ weights, weights])
             bad = np.flatnonzero(s_int)
@@ -335,7 +306,7 @@ def block_code_rx(
     correct: int | None = None,
     emit: str = "data",
 ) -> CodingCarrier:
-    t = _effective_t(code_bits - data_bits, data_bits, correct_single, correct)
+    t = effective_t(code_bits - data_bits, data_bits, correct_single, correct)
     return _decode_scoped(
         c,
         lambda bits: _block_decode(bits, code_bits, data_bits, parity_masks, t, emit),
@@ -368,13 +339,11 @@ def _decode_scoped(
             tallies.append(tally)
         return CodingCarrier(bits=out, stats=_word_stats(tallies, chance_word_rate))
     bits = np.asarray(c.bits, np.uint8)
-    cursors = [w.cursor for w in c.windows]
-    bounds = cursors[1:] + [int(bits.size)]
     pieces: list[np.ndarray] = []
     windows: list[Window] = []
     pos = 0
-    for w, hi in zip(c.windows, bounds):
-        dec, tally = decode(bits[w.cursor : hi])
+    for lo, hi in c.window_spans():
+        dec, tally = decode(bits[lo:hi])
         if tally is not None:
             tallies.append(tally)
         windows.append(Window(start=pos, cursor=pos))
@@ -544,34 +513,37 @@ def descramble_rx(
     bits = np.asarray(c.bits, dtype=np.uint8)
     if bits.size == 0:
         return c
-
-    # LFSR mode
     if lfsr_mask is not None:
         assert lfsr_seed is not None and lfsr_len is not None
-        if c.windows is None:
-            lfsr_seq = _lfsr_seq(lfsr_mask, lfsr_seed, lfsr_len, bits.size)
-            return replace(c, bits=np.bitwise_xor(bits, lfsr_seq))
-        out = bits.copy()
-        cursors = [int(w.cursor) for w in c.windows]
-        bounds: list[int] = cursors[1:] + [int(bits.size)]
-        spans = [hi - lo for lo, hi in zip(cursors, bounds)]
-        max_span = max(spans) if spans else 0
-        if max_span > 0:
-            lfsr_seq = _lfsr_seq(lfsr_mask, lfsr_seed, lfsr_len, max_span)
-            for (lo, hi), span_len in zip(zip(cursors, bounds), spans):
-                out[lo:hi] = np.bitwise_xor(bits[lo:hi], lfsr_seq[:span_len])
-        return replace(c, bits=out)
+        return _descramble_lfsr(c, bits, lfsr_mask, lfsr_seed, lfsr_len)
+    return _descramble_sequence(c, bits, sequence)
 
-    # Sequence mode
+
+def _descramble_lfsr(
+    c: CodingCarrier, bits: np.ndarray, mask: int, seed: int, length: int
+) -> CodingCarrier:
+    if c.windows is None:
+        lfsr_seq = _lfsr_seq(mask, seed, length, bits.size)
+        return replace(c, bits=np.bitwise_xor(bits, lfsr_seq))
+    out = bits.copy()
+    spans = c.window_spans()
+    max_span = max((hi - lo for lo, hi in spans), default=0)
+    if max_span > 0:
+        lfsr_seq = _lfsr_seq(mask, seed, length, max_span)
+        for lo, hi in spans:
+            out[lo:hi] = np.bitwise_xor(bits[lo:hi], lfsr_seq[: hi - lo])
+    return replace(c, bits=out)
+
+
+def _descramble_sequence(
+    c: CodingCarrier, bits: np.ndarray, sequence: str
+) -> CodingCarrier:
     seq = _seq_bits(sequence)
     if seq.size == 0:
         return c
     if c.windows is None:
         return replace(c, bits=np.bitwise_xor(bits, np.resize(seq, bits.size)))
     out = bits.copy()
-    cursors = [int(w.cursor) for w in c.windows]
-    bounds_seq: list[int] = cursors[1:] + [int(bits.size)]
-    for lo, hi in zip(cursors, bounds_seq):
-        span: np.ndarray = out[lo:hi]
-        out[lo:hi] = np.bitwise_xor(span, np.resize(seq, span.size))
+    for lo, hi in c.window_spans():
+        out[lo:hi] = np.bitwise_xor(bits[lo:hi], np.resize(seq, hi - lo))
     return replace(c, bits=out)

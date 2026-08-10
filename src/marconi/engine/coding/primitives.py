@@ -20,6 +20,17 @@ def gray_decode(g: int) -> int:
     return x
 
 
+def effective_t(
+    n_parity: int, data_bits: int, correct_single: bool | None, correct: int | None
+) -> int:
+    if correct is not None:
+        return correct
+    do_single = (
+        can_correct(n_parity, data_bits) if correct_single is None else correct_single
+    )
+    return 1 if do_single else 0
+
+
 def can_correct(cr: int, data_bits: int) -> bool:
     """Whether ``cr`` parity bits can locate a single error among the
     ``data_bits + cr`` codeword positions (the Hamming bound). Below it the

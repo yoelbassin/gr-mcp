@@ -97,11 +97,13 @@ def _harvest_trace(
 
 
 def _harvest_marks(diagnostics: Sequence[Diagnostic]) -> list[int]:
-    marks: list[int] = []
-    for d in diagnostics:
+    # a burst probe may re-detect the same position (re-lock); marks are
+    # strictly-increasing offsets (types/models.py), enforced here where raw
+    # GR output enters the typed lane
+    for d in reversed(diagnostics):
         if d.key == "bursts" and d.marks is not None:
-            marks = [int(m) for m in d.marks]
-    return marks
+            return sorted({int(m) for m in d.marks})
+    return []
 
 
 def _entry_carrier(boundary: Descriptor, path: Path, marks: list[int]) -> CodingCarrier:
