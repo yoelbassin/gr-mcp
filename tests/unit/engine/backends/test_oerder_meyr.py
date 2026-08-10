@@ -225,6 +225,18 @@ def test_gates_a_gap_larger_than_one_detection_block() -> None:
     assert max_gap_amp == 0.0, max_gap_amp  # idle emits a literal zero
 
 
+def test_continuous_signal_loses_no_symbols_at_cap_boundaries() -> None:
+    # a cap flush is a mid-region commit: a trailing sub-fall envelope dip at
+    # the cap point belongs to a signal that continues and must NOT be zeroed
+    # as an idle tail (regression: one zeroed real symbol per 512 at exact
+    # cap cadence, invisible to every median-gated quality metric)
+    mf = _matched(_bursty(1, 4000, 0, sto=0.1, sfo_ppm=0.0, snr=25))
+    sym = _drive(mf, _BURST_SPS, chunk=mf.size)
+    interior = sym[20:-20]
+    zeros = np.flatnonzero(np.abs(interior) == 0)
+    assert zeros.size == 0, (zeros + 20)[:10]
+
+
 def test_burst_tail_grid_slots_are_zero() -> None:
     # the confirmed-quiet fall tail is buffered (it is how the fall is
     # detected) but its grid slots hold no burst energy: they must emit the

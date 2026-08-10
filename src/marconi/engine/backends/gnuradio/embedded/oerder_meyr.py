@@ -211,7 +211,7 @@ def make_oerder_meyr(gr: Any, *, sps: float, span: int = 11) -> Any:
                 self._process_block(self._pending)
                 self._pending = np.empty(0, np.complex64)
             if self._in_burst:
-                if self._flush_burst(self._abs):
+                if self._flush_burst(self._abs, self._abs - self._quiet):
                     self.diagnostics["bursts_truncated_at_eof"] += 1
                 self._in_burst = False
 
@@ -266,15 +266,25 @@ def make_oerder_meyr(gr: Any, *, sps: float, span: int = 11) -> Any:
                 self._burst_len += j - i
                 i = j
                 if self._quiet >= fall_run:
-                    self._flush_burst(base + j)
+                    self._flush_burst(base + j, base + j - fall_run)
                     self._in_burst = False
                 elif self._burst_len >= max_region:
                     # still active, just too long to keep buffering: commit
                     # this chunk and continue the SAME region without
-                    # re-detection
-                    if self._flush_burst(base + j):
+                    # re-detection. active_end == end: a trailing sub-fall
+                    # dip here is an envelope dip of a signal that CONTINUES,
+                    # not a confirmed-idle tail — zeroing it would drop one
+                    # real symbol per cap on a continuous signal
+                    if self._flush_burst(base + j, base + j):
                         self.diagnostics["regions_capped"] += 1
-                    self._start_burst(base + j)
+                    # re-seed the next chunk with the last stride samples:
+                    # the boundary symbol's timed instant can precede the
+                    # chunk split (tau < 0 against the grid), and without
+                    # this overlap it would be zeroed at every cap
+                    carry = np.concatenate(self._burst)[-stride:]
+                    self._start_burst(base + j - len(carry))
+                    self._burst = [carry]
+                    self._burst_len = len(carry)
             self._abs = base + n
 
         def _scan_fall(self, active: np.ndarray, i: int) -> int:
@@ -322,11 +332,15 @@ def make_oerder_meyr(gr: Any, *, sps: float, span: int = 11) -> Any:
             lo = excl * stride
             return estimate_tau(seg[lo : seg.size - lo], stride)
 
-        def _flush_burst(self, end: int) -> bool:
-            """Commit whatever's buffered as one tau-estimated chunk; report
-            whether grid positions were consumed. Purely a commit: the caller
-            owns the _in_burst transition, since a flush can mean "region
-            ended" (fall) or "region continues, capped" (fresh chunk)."""
+        def _flush_burst(self, end: int, active_end: int) -> bool:
+            """Commit whatever's buffered as one tau-estimated chunk covering
+            the grid up to `end`; slots at/after `active_end` (the caller's
+            last-known-active sample) emit the idle zero. Returns whether a
+            substantive commit happened — the degenerate branches below
+            still consume and zero-fill their grid slots but report False so
+            callers don't count them as caps/truncations. Purely a commit:
+            the caller owns the _in_burst transition, since a flush can mean
+            "region ended" (fall) or "region continues, capped"."""
             seg = (
                 np.concatenate(self._burst)
                 if self._burst
@@ -368,10 +382,10 @@ def make_oerder_meyr(gr: Any, *, sps: float, span: int = 11) -> Any:
                 bases.size, dtype=np.float64
             ) * stride
             sym = _cubic(seg.astype(np.complex128), instants).astype(np.complex64)
-            # grid slots before the buffer or in the confirmed-quiet fall
-            # tail hold no burst energy: emit the idle zero, not interpolated
+            # grid slots before the buffer or past the last active sample
+            # hold no burst energy: emit the idle zero, not interpolated
             # edge samples / noise
-            sym[(instants < 0.0) | (bases >= end - self._quiet)] = 0
+            sym[(instants < 0.0) | (bases >= active_end)] = 0
             self._out.push(sym)
             return True
 
