@@ -149,3 +149,16 @@ def test_rate_threads_through_channelize_to_demod() -> None:
     qd = next(x for x in pipe.blocks if x.kind == "quadrature_demod")
     # fsk gain = rate / (2*pi*deviation) at the DECIMATED rate 8, not 16
     assert qd.params["gain"] == pytest.approx(8.0 / (2.0 * math.pi * 0.75))
+
+
+def test_a_passband_far_below_the_input_rate_is_refused() -> None:
+    # firdes sizes the FIR as ~rate/transition taps. Tied 1:1 to the
+    # passband, 20 Hz on a 2.048 Msps capture asked for ~493k taps and
+    # compiled clean, then spent the whole run budget in the filter and
+    # returned a timeout naming nothing. A plausible follow-up after survey
+    # reports a very narrow occupied bandwidth.
+    from marconi.engine.stages.conditioning import Channelize, ChannelizeStep
+
+    step = ChannelizeStep(decim=1, bandwidth_hz=20.0)
+    problem = Channelize().validate_input_rate(step, 2_048_000.0)
+    assert problem is not None and "Decimate first" in problem

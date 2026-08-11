@@ -73,7 +73,7 @@ def write_llrs(path: Path, llrs: npt.ArrayLike) -> None:
 
 
 def read_llrs(path: Path) -> npt.NDArray[np.float32]:
-    _guard(path.stat().st_size // 4, path)
+    _guard(path.stat().st_size // 4, path, item_bytes=4)
     return np.fromfile(path, dtype=np.float32)
 
 

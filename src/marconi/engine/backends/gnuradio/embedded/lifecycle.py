@@ -32,10 +32,17 @@ Diagnostics = dict[str, "int | float | list[int]"]
 
 
 def bump(diag: Diagnostics, key: str, n: int = 1) -> None:
+    # np.integer is deliberately accepted and narrowed: numpy's own counting
+    # (np.count_nonzero, a .sum(), an argmax index) hands back np.int64, which
+    # is not an isinstance of int. Rejecting it made a counter poison itself —
+    # the value stored fine and the NEXT bump raised inside general_work, so a
+    # decode that had already run correctly was returned as "embedded block
+    # raised". The guard is here for float counters, and np.floating would
+    # have slipped through the same test anyway.
     cur = diag.get(key, 0)
-    if not isinstance(cur, int):
+    if isinstance(cur, bool) or not isinstance(cur, (int, np.integer)):
         raise TypeError(f"diagnostic {key!r} is not an int counter: {cur!r}")
-    diag[key] = cur + n
+    diag[key] = int(cur) + int(n)
 
 
 class ChunkedBlock(Protocol):

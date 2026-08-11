@@ -54,6 +54,21 @@ class InvertStep(Step):
     conv: Literal["invert"] = "invert"
 
 
+# firdes sizes the FIR as roughly rate/transition taps, so a transition tied
+# 1:1 to a narrow passband is unbounded: 20 Hz on a 2.048 Msps capture asks
+# for ~493k taps (~1e12 MACs over a 2 M-sample run) and compiles clean, then
+# dies on the wall-clock deadline with no indication which parameter did it.
+# The transition is allowed to widen past the passband once the passband is
+# narrow — a channel this much finer than the input rate wants decimation
+# first — and the floor below refuses the rest.
+_MAX_TRANSITION_TAPS = 4096
+_MIN_TRANSITION_FRAC = 1.0e-3
+
+
+def _transition_hz(bandwidth_hz: float, rate: float) -> float:
+    return max(bandwidth_hz / 2.0, rate / _MAX_TRANSITION_TAPS)
+
+
 def _nyquist_problem(center_hz: float, rate: float) -> str | None:
     if abs(center_hz) > 0.5 * rate:
         return (
@@ -83,7 +98,7 @@ class Channelize(RxStage[CompileContext, ChannelizeStep]):
             decim=step.decim,
             center=step.center_hz,
             cutoff=step.bandwidth_hz / 2.0,
-            transition=step.bandwidth_hz / 2.0,
+            transition=_transition_hz(step.bandwidth_hz, b.rate),
             rate=b.rate,
         )
 
@@ -93,6 +108,15 @@ class Channelize(RxStage[CompileContext, ChannelizeStep]):
     def validate_input_rate(self, step: ChannelizeStep, rate: float) -> str | None:
         if problem := _nyquist_problem(step.center_hz, rate):
             return problem
+        if step.bandwidth_hz < _MIN_TRANSITION_FRAC * rate:
+            return (
+                f"bandwidth_hz {step.bandwidth_hz:g} is narrower than "
+                f"{_MIN_TRANSITION_FRAC:g} of the {rate:g} Hz input rate; the "
+                f"anti-alias filter's tap count scales as rate/transition, so "
+                f"this asks for a filter too long to run (the flowgraph would "
+                f"reach its deadline with nothing to show). Decimate first, "
+                f"then channelize the narrow band at the lower rate"
+            )
         if step.bandwidth_hz > rate / step.decim:
             return (
                 f"bandwidth_hz {step.bandwidth_hz:g} exceeds the decimated "

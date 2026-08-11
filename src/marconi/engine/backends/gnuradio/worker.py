@@ -101,11 +101,23 @@ def _diagnostic_row(block: str, key: str, v: int | float | list[int]) -> Diagnos
 
 
 def _harvest_diagnostics(tb: Any) -> list[Diagnostic]:
+    """Same rule as _harvest_census: never let a diagnostic fail a run that
+    otherwise worked. _diagnostic_row raises on a value it cannot represent,
+    and this runs on the ok path AND both error paths — unguarded, one stray
+    value type turned a flowgraph that ran to completion into "worker exited
+    abnormally" with no stream, census or quality, and masked the real error
+    when there was one. A row that cannot be built is dropped; the run and
+    every other diagnostic survive."""
     rows: list[Diagnostic] = []
     for bid, blk in getattr(tb, "_py_instances", {}).items():
         diag = getattr(blk, "diagnostics", None)
-        if isinstance(diag, dict) and diag:
-            rows.extend(_diagnostic_row(str(bid), str(k), v) for k, v in diag.items())
+        if not isinstance(diag, dict):
+            continue
+        for k, v in diag.items():
+            try:
+                rows.append(_diagnostic_row(str(bid), str(k), v))
+            except (TypeError, ValueError):
+                continue
     return rows
 
 
