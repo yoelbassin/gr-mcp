@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Literal
+from typing import Literal, Protocol
 
 import numpy as np
 from pydantic import BaseModel
@@ -46,21 +46,32 @@ class CaptureResult(BaseModel):
     error: str | None = None
 
 
+class DeviceReadback(BaseModel):
+    sample_rate: float
+    center_hz: float
+
+
+class Reconciled(BaseModel):
+    sample_rate: float
+    center_hz: float
+    warnings: list[str] = []
+
+
 def _reconcile(
     requested_rate: float,
     requested_freq: float,
-    probe: tuple[float, float] | None,
-) -> tuple[float, float, list[str]]:
+    probe: DeviceReadback | None,
+) -> Reconciled:
     if probe is None:
-        return (
-            requested_rate,
-            requested_freq,
-            [
+        return Reconciled(
+            sample_rate=requested_rate,
+            center_hz=requested_freq,
+            warnings=[
                 "SoapySDR python bindings unavailable — reported "
                 "sample_rate/center_hz are the requested values, unverified"
             ],
         )
-    actual_rate, actual_freq = probe
+    actual_rate, actual_freq = probe.sample_rate, probe.center_hz
     if abs(actual_freq - requested_freq) > actual_rate / 2:
         raise CaptureError(
             f"device tuned {actual_freq:g} Hz, more than half the sample rate "
@@ -77,7 +88,7 @@ def _reconcile(
         warnings.append(
             f"center_hz: requested {requested_freq:g}, " f"device tuned {actual_freq:g}"
         )
-    return actual_rate, actual_freq, warnings
+    return Reconciled(sample_rate=actual_rate, center_hz=actual_freq, warnings=warnings)
 
 
 def _levels(path: Path) -> CaptureLevels:
@@ -150,9 +161,22 @@ def build_capture_pipeline(
     )
 
 
+class _SoapyDevice(Protocol):
+    def setSampleRate(self, direction: int, channel: int, rate: float) -> None: ...
+    def setFrequency(self, direction: int, channel: int, freq: float) -> None: ...
+
+    def setFrequencyCorrection(
+        self, direction: int, channel: int, ppm: float
+    ) -> None: ...
+
+    def getSampleRate(self, direction: int, channel: int) -> float: ...
+    def getFrequency(self, direction: int, channel: int) -> float: ...
+    def close(self) -> None: ...
+
+
 def _probe_device(
     device: str, sample_rate: float, center_hz: float, ppm: float
-) -> tuple[float, float] | None:
+) -> DeviceReadback | None:
     try:
         import SoapySDR
     except ImportError:
@@ -169,7 +193,7 @@ def _probe_device(
             "with its Soapy driver module installed?"
         )
     try:
-        dev: Any = SoapySDR.Device(device)
+        dev: _SoapyDevice = SoapySDR.Device(device)
     except Exception as e:
         raise CaptureError(f"failed to open SDR (device={device!r}): {e}") from e
     try:
@@ -178,13 +202,24 @@ def _probe_device(
         if ppm:
             dev.setFrequencyCorrection(rx, 0, ppm)
         dev.setFrequency(rx, 0, center_hz)
-        return float(dev.getSampleRate(rx, 0)), float(dev.getFrequency(rx, 0))
+        return DeviceReadback(
+            sample_rate=float(dev.getSampleRate(rx, 0)),
+            center_hz=float(dev.getFrequency(rx, 0)),
+        )
     except CaptureError:
         raise
     except Exception as e:
         raise CaptureError(f"device refused tune/rate: {e}") from e
     finally:
         dev.close()
+
+
+_CAPTURE_STATUS: dict[str, Literal["ok", "error", "timeout"]] = {
+    "ok": "ok",
+    "timeout": "timeout",
+    "error": "error",
+    "empty": "error",
+}
 
 
 def capture_iq(
@@ -202,7 +237,8 @@ def capture_iq(
     if not 0 < duration_s <= _MAX_DURATION_S:
         raise ValueError(f"duration_s must be in (0, {_MAX_DURATION_S:g}]")
     probe = _probe_device(device, sample_rate, center_hz, ppm)
-    rate, freq, warnings = _reconcile(sample_rate, center_hz, probe)
+    settled = _reconcile(sample_rate, center_hz, probe)
+    rate, freq = settled.sample_rate, settled.center_hz
     pipeline = build_capture_pipeline(
         out_path=out_path,
         device=device,
@@ -221,11 +257,7 @@ def capture_iq(
         raise CaptureError(
             f"capture produced no samples: {result.error or result.status}"
         )
-    status: Literal["ok", "error", "timeout"] = (
-        "ok"
-        if result.status == "ok"
-        else ("timeout" if result.status == "timeout" else "error")
-    )
+    status = _CAPTURE_STATUS.get(result.status, "error")
     levels = _levels(out_path)
     return CaptureResult(
         status=status,
@@ -235,6 +267,6 @@ def capture_iq(
         num_samples=num_samples,
         duration_s=round(num_samples / rate, 3),
         levels=levels,
-        warnings=[*warnings, *_level_warnings(levels)],
+        warnings=[*settled.warnings, *_level_warnings(levels)],
         error=result.error,
     )

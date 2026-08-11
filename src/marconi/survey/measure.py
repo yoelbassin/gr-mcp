@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, TypeVar
 
@@ -417,23 +418,27 @@ def _eye_cleared(eyes: list[float]) -> bool:
     return bool(eyes) and max(eyes) >= _CLEAR_EYE
 
 
-def _rerank_by_eye(
-    candidates: list[float], strengths: list[float], eyes: list[float]
-) -> tuple[list[float], list[float], list[float]]:
-    order = list(range(len(candidates)))
-    if _eye_cleared(eyes):
-        thresh = _HARMONIC_FRAC * max(eyes)
-        strong = [i for i in order if eyes[i] >= thresh]
-        primary = min(strong, key=lambda i: candidates[i])
-        rest = sorted(
-            (i for i in order if i != primary), key=lambda i: eyes[i], reverse=True
-        )
-        order = [primary, *rest]
-    return (
-        [candidates[i] for i in order],
-        [strengths[i] for i in order],
-        [eyes[i] for i in order],
+@dataclass(frozen=True)
+class RateCandidate:
+    """One symbol-rate hypothesis with the two measurements that rank it.
+    Kept as one object so the three cannot drift out of correspondence."""
+
+    rate_hz: float
+    strength: float
+    eye: float
+
+
+def _rerank_by_eye(candidates: list[RateCandidate]) -> list[RateCandidate]:
+    eyes = [c.eye for c in candidates]
+    if not _eye_cleared(eyes):
+        return candidates
+    thresh = _HARMONIC_FRAC * max(eyes)
+    strong = [c for c in candidates if c.eye >= thresh]
+    primary = min(strong, key=lambda c: c.rate_hz)
+    rest = sorted(
+        (c for c in candidates if c is not primary), key=lambda c: c.eye, reverse=True
     )
+    return [primary, *rest]
 
 
 def _symbol_rate(
@@ -468,14 +473,22 @@ def _symbol_rate(
     cand = np.concatenate([ca, cg])
     strg = np.concatenate([sa, sg]) / norm
     tol_floor = 2.0 * max(float(dfa), float(dfg))
-    candidates, strengths = _merge_candidates(cand, strg, tol_floor)
-    eyes = [_eye_openness(dphi, active_pairs, sample_rate, r) for r in candidates]
-    candidates, strengths, eyes = _rerank_by_eye(candidates, strengths, eyes)
+    rates, strengths = _merge_candidates(cand, strg, tol_floor)
+    ranked = _rerank_by_eye(
+        [
+            RateCandidate(
+                rate_hz=r,
+                strength=s,
+                eye=_eye_openness(dphi, active_pairs, sample_rate, r),
+            )
+            for r, s in zip(rates, strengths)
+        ]
+    )
     return SymbolRateStats(
-        candidates_hz=[round(c, 1) for c in candidates],
-        strengths=[_sig(s) for s in strengths],
-        eye_openness=[_sig(e) for e in eyes],
-        eye_confirmed=_eye_cleared(eyes),
+        candidates_hz=[round(c.rate_hz, 1) for c in ranked],
+        strengths=[_sig(c.strength) for c in ranked],
+        eye_openness=[_sig(c.eye) for c in ranked],
+        eye_confirmed=_eye_cleared([c.eye for c in ranked]),
         search_lo_hz=round(lo, 1),
         search_hi_hz=round(hi, 1),
         clock_resolution_hz=round(float(dfa), 1),

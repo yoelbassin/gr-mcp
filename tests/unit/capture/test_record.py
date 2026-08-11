@@ -8,6 +8,7 @@ import pytest
 from marconi.capture import CaptureError
 from marconi.capture.record import (
     CaptureLevels,
+    DeviceReadback,
     _level_warnings,
     _levels,
     _reconcile,
@@ -20,33 +21,37 @@ def test_capture_error_classified() -> None:
     assert classify_error(CaptureError("boom")) == ("failed_precondition", "boom")
 
 
+def _readback(sample_rate: float, center_hz: float) -> DeviceReadback:
+    return DeviceReadback(sample_rate=sample_rate, center_hz=center_hz)
+
+
 def test_reconcile_exact_match_no_warnings() -> None:
-    rate, freq, warnings = _reconcile(2.048e6, 100e6, (2.048e6, 100e6))
-    assert (rate, freq, warnings) == (2.048e6, 100e6, [])
+    got = _reconcile(2.048e6, 100e6, _readback(2.048e6, 100e6))
+    assert (got.sample_rate, got.center_hz, got.warnings) == (2.048e6, 100e6, [])
 
 
 def test_reconcile_rate_snap_warns_and_returns_actual() -> None:
-    rate, freq, warnings = _reconcile(1.9e6, 100e6, (1.92e6, 100e6))
-    assert rate == 1.92e6
-    assert freq == 100e6
-    assert len(warnings) == 1 and "sample_rate" in warnings[0]
+    got = _reconcile(1.9e6, 100e6, _readback(1.92e6, 100e6))
+    assert got.sample_rate == 1.92e6
+    assert got.center_hz == 100e6
+    assert len(got.warnings) == 1 and "sample_rate" in got.warnings[0]
 
 
 def test_reconcile_small_freq_offset_warns() -> None:
-    rate, freq, warnings = _reconcile(2.048e6, 100e6, (2.048e6, 100.0001e6))
-    assert freq == 100.0001e6
-    assert len(warnings) == 1 and "center_hz" in warnings[0]
+    got = _reconcile(2.048e6, 100e6, _readback(2.048e6, 100.0001e6))
+    assert got.center_hz == 100.0001e6
+    assert len(got.warnings) == 1 and "center_hz" in got.warnings[0]
 
 
 def test_reconcile_gross_freq_divergence_raises() -> None:
     with pytest.raises(CaptureError):
-        _reconcile(2.048e6, 1.8e9, (2.048e6, 1.766e9))
+        _reconcile(2.048e6, 1.8e9, _readback(2.048e6, 1.766e9))
 
 
 def test_reconcile_no_bindings_falls_back_to_requested() -> None:
-    rate, freq, warnings = _reconcile(2.048e6, 100e6, None)
-    assert (rate, freq) == (2.048e6, 100e6)
-    assert len(warnings) == 1 and "unverified" in warnings[0]
+    got = _reconcile(2.048e6, 100e6, None)
+    assert (got.sample_rate, got.center_hz) == (2.048e6, 100e6)
+    assert len(got.warnings) == 1 and "unverified" in got.warnings[0]
 
 
 def test_level_warnings_flag_heavy_clipping() -> None:

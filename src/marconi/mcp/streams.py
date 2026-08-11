@@ -4,8 +4,9 @@ import hashlib
 import os
 import tempfile
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, BinaryIO, TypeVar
+from typing import Any, BinaryIO, Generic, TypeVar
 
 import numpy as np
 import numpy.typing as npt
@@ -36,10 +37,21 @@ _SUFFIX_TYPES = {".i64": "l"} | {t.suffix: t.value for t in ItemType}
 ITEM_DTYPES: dict[str, np.dtype[Any]] = {"l": np.dtype(np.int64)} | {
     t.value: t.np_dtype for t in ItemType
 }
-_RAW_SCALES: dict[str, tuple[type, float, float]] = {
-    "ci16": (np.int16, 32768.0, 0.0),
-    "ci8": (np.int8, 128.0, 0.0),
-    "cu8": (np.uint8, 127.5, 127.5),
+
+
+@dataclass(frozen=True)
+class RawFormat:
+    """How an interleaved integer capture maps onto unit-scale cf32."""
+
+    np_dtype: type[np.signedinteger[Any] | np.unsignedinteger[Any]]
+    scale: float
+    bias: float
+
+
+_RAW_FORMATS: dict[str, RawFormat] = {
+    "ci16": RawFormat(np.int16, 32768.0, 0.0),
+    "ci8": RawFormat(np.int8, 128.0, 0.0),
+    "cu8": RawFormat(np.uint8, 127.5, 127.5),
 }
 
 
@@ -145,9 +157,9 @@ def ensure_cf32(
     capture must not write a fresh multi-GB copy per run."""
     if dtype == "cf32":
         return SourceSlice(path=src, offset=offset, length=samples)
-    if dtype not in _RAW_SCALES:
+    if dtype not in _RAW_FORMATS:
         raise ValueError(
-            f"capture_dtype must be one of {sorted(('cf32', *_RAW_SCALES))}"
+            f"capture_dtype must be one of {sorted(('cf32', *_RAW_FORMATS))}"
         )
     st = src.stat()
     # mtime_ns keying can serve stale on filesystems with coarse timestamps
@@ -159,7 +171,7 @@ def ensure_cf32(
     if dest.is_file():
         return SourceSlice(path=dest)
     with src.open("rb") as fin:
-        raw_size = np.dtype(_RAW_SCALES[dtype][0]).itemsize
+        raw_size = np.dtype(_RAW_FORMATS[dtype].np_dtype).itemsize
         fin.seek(offset * 2 * raw_size)
         # mkstemp: concurrent converters of the same capture (FastMCP runs
         # tools on worker threads) must never share a tmp path - the loser
@@ -179,7 +191,7 @@ def ensure_cf32(
 
 
 def _convert_slice(fin: BinaryIO, fout: BinaryIO, dtype: str, samples: int) -> None:
-    raw_dtype, scale, bias = _RAW_SCALES[dtype]
+    fmt = _RAW_FORMATS[dtype]
     remaining = samples * 2 if samples > 0 else None
     while True:
         check_deadline()
@@ -189,34 +201,39 @@ def _convert_slice(fin: BinaryIO, fout: BinaryIO, dtype: str, samples: int) -> N
         if want == 0:
             return
         block: npt.NDArray[np.int16] | npt.NDArray[np.int8] | npt.NDArray[np.uint8] = (
-            np.fromfile(fin, dtype=raw_dtype, count=want)
+            np.fromfile(fin, dtype=fmt.np_dtype, count=want)
         )
         if block.size == 0:
             return
         if remaining is not None:
             remaining -= int(block.size)
         pairs = block[: block.size - (block.size % 2)].astype(np.float32)
-        pairs = (pairs - bias) / scale
+        pairs = (pairs - fmt.bias) / fmt.scale
         (pairs[0::2] + 1j * pairs[1::2]).astype(np.complex64).tofile(fout)
 
 
 _S = TypeVar("_S", bound=np.generic)
 
 
-def _sample_stream(
-    path: Path, dtype: np.dtype[_S]
-) -> tuple[npt.NDArray[_S], int, bool]:
+@dataclass(frozen=True)
+class StreamSample(Generic[_S]):
+    items: npt.NDArray[_S]
+    total_items: int
+    strided: bool
+
+
+def _sample_stream(path: Path, dtype: np.dtype[_S]) -> StreamSample[_S]:
     total = path.stat().st_size // dtype.itemsize
     with path.open("rb") as f:
         if total <= _STATS_SAMPLE_ITEMS:
-            return np.fromfile(f, dtype=dtype), total, False
+            return StreamSample(np.fromfile(f, dtype=dtype), total, strided=False)
         per = _STATS_SAMPLE_ITEMS // _STATS_SAMPLE_CHUNKS
         starts = np.linspace(0, total - per, _STATS_SAMPLE_CHUNKS).astype(np.int64)
         parts = []
         for s in starts:
             f.seek(int(s) * dtype.itemsize)
             parts.append(np.fromfile(f, dtype=dtype, count=per))
-    return np.concatenate(parts), total, True
+    return StreamSample(np.concatenate(parts), total, strided=True)
 
 
 def _hist(x: npt.NDArray[np.float64], bins: int) -> dict[str, object]:
@@ -284,12 +301,13 @@ def stream_stats(
     if not 0 <= clusters <= _STATS_MAX_CLUSTERS:
         raise ValueError(f"clusters must be 0..{_STATS_MAX_CLUSTERS}, got {clusters}")
     dtype: np.dtype[Any] = ITEM_DTYPES[kind]
-    sample, total, sampled = _sample_stream(path, dtype)
+    sampled = _sample_stream(path, dtype)
+    sample, total = sampled.items, sampled.total_items
     out: dict[str, object] = {
         "item_type": kind,
         "total_items": int(total),
         "sampled_items": int(sample.size),
-        "sampled": sampled,
+        "sampled": sampled.strided,
     }
     if kind == "b":
         ones = float((sample & np.uint8(1)).mean()) if sample.size else 0.0
