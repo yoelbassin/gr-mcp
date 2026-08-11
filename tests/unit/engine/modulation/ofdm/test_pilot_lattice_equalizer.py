@@ -141,3 +141,25 @@ def test_memory_bounded_under_slow_consumer() -> None:
     cap = 8 * _lattice.NS * (len(_lattice.EMIT) + _lattice.FFT_LEN)
     assert peak <= cap, f"state peaked at {peak} > {cap}"
     assert drained > 100 * len(_lattice.EMIT)
+
+
+def test_lock_statistic_reaches_the_quality_verdict() -> None:
+    # The equalizer computes a decode-grade lock statistic and gates
+    # acquisition on it. Published under a name no extractor reads, it was
+    # harvested, carried through the payload and silently dropped, leaving
+    # ofdm_coherent_sync to score on cp_symbol_sync's evidence alone.
+    from marconi.engine.backends.base import Diagnostic, DiagnosticKey
+    from marconi.engine.quality import lock_evidence
+
+    _, spec = _lattice.make_spectra(60, start_fs=2, theta=0.01, seed=3)
+    blk = make_pilot_lattice_equalizer(FAKE_GR, **_lattice.eq_params())
+    drive(blk, spec, chunk=5, out_dtype=np.complex64)
+
+    rows = [
+        Diagnostic(block="eq[0]", key=str(k), value=float(v))
+        for k, v in blk.diagnostics.items()
+        if k in (DiagnosticKey.LOCK_RATIO_BEST, DiagnosticKey.LOCK_MIN)
+    ]
+    assert len(rows) == 2, sorted(blk.diagnostics)
+    evidence = lock_evidence(rows)
+    assert [e.assessment for e in evidence] == ["positive"]

@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import numpy.typing as npt
 
-from marconi.survey.measure import _carrier
+from marconi.survey.measure import _MPSK_JUMP, _carrier
 
 _FS = 1_000_000.0
 _SPS = 8
@@ -256,3 +256,32 @@ def test_hot_interferer_burst_does_not_gate_out_the_victim() -> None:
     c = _carrier(x, _FS, 30_000.0, _FOFF)
     assert c.psk_order == 4, c.psk_order
     assert abs(c.offset_hz - _FOFF) < 1000.0, c.offset_hz
+
+
+def _fsk(dev_hz: float, snr_db: float = 20.0) -> npt.NDArray[np.complex64]:
+    r = _rng()
+    bits = r.integers(0, 2, _NSYM) * 2 - 1
+    inst = np.repeat(bits.astype(float), _SPS) * dev_hz
+    phase = 2 * np.pi * np.cumsum(inst) / _FS
+    return _noisy(np.exp(1j * phase).astype(np.complex64), 0.0, snr_db)
+
+
+def test_binary_fsk_is_not_claimed_as_a_four_phase_alphabet() -> None:
+    # 2-FSK folds measurably harder at order 4 than order 2, landing in the
+    # band (jump ~5) where only _MPSK_JUMP holds the claim back. Without it
+    # survey reports QPSK/square-QAM phase symmetry for plain frequency
+    # shift keying and the agent builds a coherent PSK chain for it.
+    c = _carrier(_fsk(_FS / 60.0), _FS, 60_000.0, 0.0)
+    pc = c.phase_concentration
+    assert pc.order_4 > pc.order_2, (pc.order_2, pc.order_4)
+    assert pc.order_4 < _MPSK_JUMP * pc.order_2, (pc.order_2, pc.order_4)
+    assert c.psk_order is None
+
+
+def test_signal_half_its_bandwidth_off_channel_is_flagged() -> None:
+    # The only off_center coverage sat at ratio 0.025 (False) and 0.925
+    # (True); a signal squarely between them decides whether the agent is
+    # told to re-centre before a DC-assuming demod misses it.
+    occupied = 30_000.0
+    c = _carrier(_psk(4, foff=occupied / 2.0), _FS, occupied, occupied / 2.0)
+    assert c.off_center

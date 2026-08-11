@@ -13,6 +13,7 @@ from scipy.ndimage import uniform_filter1d
 from marconi.engine.backends.base import (
     BlockCensus,
     Diagnostic,
+    DiagnosticKey,
     DiagnosticRows,
 )
 from marconi.engine.stages.base import Stage
@@ -154,14 +155,19 @@ def tag_sync_evidence(diagnostics: Sequence[Diagnostic]) -> list[QualityEvidence
     scanned, so GR-native sync paths contribute the same sync_matches
     evidence the coding-lane sync_word does."""
     rows = DiagnosticRows(diagnostics)
-    expected = rows.values("sync_chance")
-    scanned = rows.counts("sync_items_scanned")
+    expected = rows.values(DiagnosticKey.SYNC_CHANCE)
+    scanned = rows.counts(DiagnosticKey.SYNC_ITEMS_SCANNED)
     out: list[QualityEvidence] = []
-    for block, tags in rows.counts("sync_tags").items():
-        if not scanned.get(block):
-            # the correlator never consumed anything: untestable, not absent
+    for block, tags in rows.counts(DiagnosticKey.SYNC_TAGS).items():
+        chance = expected.get(block)
+        if not scanned.get(block) or chance is None:
+            # the correlator never consumed anything, or reported tags without
+            # the chance expectation they must be judged against: untestable,
+            # not absent. A smuggled 0.0 default would clear both the sigma
+            # and the ratio bar, promoting a single chance-level hit to
+            # positive sync evidence (lock_evidence refuses the same pairing).
             continue
-        assessment = _sync_assessment(tags, expected.get(block, 0.0))
+        assessment = _sync_assessment(tags, chance)
         if assessment is None:
             continue
         out.append(
@@ -226,9 +232,9 @@ def marks_evidence(marks: Sequence[int]) -> list[QualityEvidence]:
 
 def lock_evidence(diagnostics: Sequence[Diagnostic]) -> list[QualityEvidence]:
     rows = DiagnosticRows(diagnostics)
-    floors = rows.values("lock_min")
+    floors = rows.values(DiagnosticKey.LOCK_MIN)
     out: list[QualityEvidence] = []
-    for block, best in rows.values("lock_ratio_best").items():
+    for block, best in rows.values(DiagnosticKey.LOCK_RATIO_BEST).items():
         floor = floors.get(block)
         if floor is None:
             # a best-ratio row without its block's configured floor is a
@@ -260,20 +266,24 @@ def lock_evidence(diagnostics: Sequence[Diagnostic]) -> list[QualityEvidence]:
 # no_signal — both fail conservative.
 _DOMINANCE_POSITIVE = 0.5
 _DOMINANCE_NEGATIVE = 0.05
-_DOMINANCE_CHANCE_FALLBACK = 0.15
 
 
 def dominance_evidence(diagnostics: Sequence[Diagnostic]) -> list[QualityEvidence]:
     rows = DiagnosticRows(diagnostics)
-    totals = rows.counts("symbols_total")
-    chances = rows.values("dominance_chance")
+    totals = rows.counts(DiagnosticKey.SYMBOLS_TOTAL)
+    chances = rows.values(DiagnosticKey.DOMINANCE_CHANCE)
     out: list[QualityEvidence] = []
-    for block, dominant in rows.counts("dominant_symbols").items():
+    for block, dominant in rows.counts(DiagnosticKey.DOMINANT_SYMBOLS).items():
         total = totals.get(block)
         if not total:
             # the decider never saw a symbol: untestable, not absent
             continue
-        chance = chances.get(block, _DOMINANCE_CHANCE_FALLBACK)
+        chance = chances.get(block)
+        if chance is None:
+            # counts without the chance ceiling they are judged against:
+            # untestable, not absent. The block that owns the ceiling is the
+            # only place it is calibrated, so a copy here could only go stale.
+            continue
         frac = dominant / total
         if frac >= _DOMINANCE_POSITIVE and _word_excess_significant(
             dominant, total, chance

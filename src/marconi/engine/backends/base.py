@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
+from enum import StrEnum
 from typing import Literal
 
 from pydantic import BaseModel
@@ -44,6 +45,28 @@ class BlockCensus(BaseModel):
     words_valid: int | None = None
     words_total: int | None = None
     chance_word_rate: float | None = None
+
+
+class DiagnosticKey(StrEnum):
+    """The whole vocabulary of the block -> verdict channel. Producers
+    (embedded blocks) and consumers (quality extractors, run) both name keys
+    from here: the channel is a bare dict[str, ...] across a process boundary,
+    so a producer-side rename that no consumer follows cannot be caught by
+    types. It degrades every affected verdict to "uncertain" while the run
+    still reports ok — which is exactly how the equalizer's lock statistic
+    went unread. Counters a block keeps for observability only (locks,
+    frames_emitted, bursts_flushed) are deliberately not listed; nothing
+    downstream judges on them."""
+
+    SYNC_TAGS = "sync_tags"
+    SYNC_CHANCE = "sync_chance"
+    SYNC_ITEMS_SCANNED = "sync_items_scanned"
+    LOCK_RATIO_BEST = "lock_ratio_best"
+    LOCK_MIN = "lock_min"
+    DOMINANT_SYMBOLS = "dominant_symbols"
+    SYMBOLS_TOTAL = "symbols_total"
+    DOMINANCE_CHANCE = "dominance_chance"
+    BURSTS = "bursts"
 
 
 class Diagnostic(BaseModel):

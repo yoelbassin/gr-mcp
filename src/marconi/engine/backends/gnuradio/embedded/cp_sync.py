@@ -4,6 +4,7 @@ from typing import Any
 
 import numpy as np
 
+from marconi.engine.backends.base import DiagnosticKey
 from marconi.engine.backends.gnuradio.embedded.lifecycle import (
     Diagnostics,
     OutQueue,
@@ -41,8 +42,8 @@ def make_cp_symbol_sync(
             )
             self.diagnostics: Diagnostics = {
                 "locks": 0,
-                "lock_ratio_best": 0.0,
-                "lock_min": float(lock_min_ratio),
+                DiagnosticKey.LOCK_RATIO_BEST: 0.0,
+                DiagnosticKey.LOCK_MIN: float(lock_min_ratio),
             }
             self._best_ratio = 0.0
             self._out = OutQueue(np.complex64)
@@ -98,7 +99,7 @@ def make_cp_symbol_sync(
                 off = int(np.argmax(strength))
                 ratio = float(strength[off] / (np.median(strength) + 1e-12))
                 self._best_ratio = max(self._best_ratio, ratio)
-                self.diagnostics["lock_ratio_best"] = self._best_ratio
+                self.diagnostics[DiagnosticKey.LOCK_RATIO_BEST] = self._best_ratio
                 if ratio < lock_min_ratio:
                     self._pos += need - (fft_len + cp_len)
                     self._trim()

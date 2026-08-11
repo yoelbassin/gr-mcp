@@ -7,6 +7,7 @@ from typing import Any
 import numpy as np
 import numpy.typing as npt
 
+from marconi.engine.backends.base import DiagnosticKey
 from marconi.engine.backends.gnuradio.embedded.lifecycle import (
     Diagnostics,
     OutQueue,
@@ -127,10 +128,12 @@ def make_pilot_lattice_equalizer(
             self.diagnostics: Diagnostics = {
                 "locks": 0,
                 "relocks": 0,
-                "lock_score": 0.0,
+                DiagnosticKey.LOCK_RATIO_BEST: 0.0,
+                DiagnosticKey.LOCK_MIN: float(lock_min_score),
                 "frames_emitted": 0,
             }
             self._out = OutQueue(np.complex64)
+            self._best_score = 0.0
             self._reset_lock()
 
         def _reset_lock(self) -> None:
@@ -213,7 +216,8 @@ def make_pilot_lattice_equalizer(
                 pil[:, j] = xp[:, k + dc0 + delta] * np.conj(fp_vals[j])
             theta = float(np.angle(np.sum(pil[1:] * np.conj(pil[:-1]))))
             phi, score = self._estimate_phi(xp, delta)
-            self.diagnostics["lock_score"] = score
+            self._best_score = max(self._best_score, score)
+            self.diagnostics[DiagnosticKey.LOCK_RATIO_BEST] = self._best_score
             if score < lock_min_score:
                 return
             self._delta, self._theta, self._phi = delta, theta, phi

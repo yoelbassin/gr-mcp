@@ -241,3 +241,26 @@ def test_lock_without_configured_floor_is_untestable() -> None:
     assert lock_evidence(rows) == []
     rows = [Diagnostic(block="b4", key="lock_ratio_best", value=2.4)]
     assert lock_evidence(rows) == []
+
+
+def test_a_weak_code_cannot_certify_noise_as_decoded() -> None:
+    # A code that accepts half of all random words carries about one check
+    # bit: 100/100 "valid" words is what noise looks like through it, not
+    # evidence of a decode. Coverage stopped at chance 0.0625 and jumped to
+    # the degenerate 1.0 (which _word_excess_significant rejects on its own),
+    # leaving the whole band where _WORD_CHANCE_MAX is the only thing
+    # standing between a chance-level code and a "decoded" verdict.
+    rows = [_row("block_code", words_valid=100, words_total=100, chance_word_rate=0.5)]
+    assert survival_evidence(rows, stage_registry()) == []
+
+
+def test_a_handful_of_tags_over_a_chance_of_one_proves_nothing() -> None:
+    # found=4 against an expectation of 1.0 clears the 3x ratio bar, so only
+    # the Poisson margin withholds the verdict. Every existing case was
+    # decided by the ratio bar, so nothing exercised the margin at all.
+    rows = [
+        Diagnostic(block="gate[1]", key="sync_tags", count=4),
+        Diagnostic(block="gate[1]", key="sync_items_scanned", count=4096),
+        Diagnostic(block="gate[1]", key="sync_chance", value=1.0),
+    ]
+    assert tag_sync_evidence(rows) == []
