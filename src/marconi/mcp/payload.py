@@ -2,14 +2,14 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 from pydantic import BaseModel
 
 from marconi.engine.backends.base import BlockCensus, Diagnostic, RunResult
 from marconi.engine.compile.compiler import CompiledPipeline
-from marconi.engine.run import PipelineResult
+from marconi.engine.run import PipelineResult, TraceStage
 from marconi.engine.types.enums import ItemType
 from marconi.engine.types.models import Modem
 from marconi.engine.types.step import stage_label
@@ -144,57 +144,82 @@ def error_rows(rows: Sequence[ErrorRow]) -> list[dict[str, object]]:
     return [r.model_dump(mode="json", exclude_none=True) for r in rows]
 
 
-def stream_summary(result: PipelineResult) -> dict[str, object] | None:
+class StreamSummary(BaseModel):
+    path: str
+    item_type: str
+    items: int
+
+
+class SoftSummary(BaseModel):
+    path: str
+    item_type: Literal["f"] = "f"
+    items: int
+    level: str
+    bit1_sign: str
+
+
+class TraceRow(BaseModel):
+    after: str
+    level: str
+    item_type: str
+    sample_rate: float
+    path: str
+    items: int
+    stats: dict[str, object] | None = None
+    stats_error: str | None = None
+
+
+def stream_summary(result: PipelineResult) -> StreamSummary | None:
     if result.bitstream is not None:
-        return {
-            "path": str(result.bitstream.path),
-            "item_type": "b",
-            "items": result.bitstream.num_bits,
-        }
+        return StreamSummary(
+            path=str(result.bitstream.path),
+            item_type="b",
+            items=result.bitstream.num_bits,
+        )
     if result.symbolstream is not None:
-        return {
-            "path": str(result.symbolstream.path),
-            "item_type": result.symbolstream.item_type,
-            "items": result.symbolstream.num_symbols,
-        }
+        return StreamSummary(
+            path=str(result.symbolstream.path),
+            item_type=result.symbolstream.item_type,
+            items=result.symbolstream.num_symbols,
+        )
     return None
 
 
-def soft_summary(result: PipelineResult) -> dict[str, object] | None:
+def soft_summary(result: PipelineResult) -> SoftSummary | None:
     if result.softstream is None:
         return None
-    return {
-        "path": str(result.softstream.path),
-        "item_type": "f",
-        "items": result.softstream.num_items,
-        "level": result.softstream.level,
-        "bit1_sign": _SOFT_BIT1_SIGN[result.softstream.level],
-    }
+    return SoftSummary(
+        path=str(result.softstream.path),
+        items=result.softstream.num_items,
+        level=result.softstream.level,
+        bit1_sign=_SOFT_BIT1_SIGN[result.softstream.level],
+    )
+
+
+def _trace_row(st: TraceStage) -> TraceRow:
+    row = TraceRow(
+        after=st.after,
+        level=st.level,
+        item_type=st.item_type,
+        sample_rate=round(st.sample_rate, 3),
+        path=st.path,
+        items=st.items,
+    )
+    keys = _TRACE_STAT_KEYS.get(st.item_type)
+    if not (st.items and keys):
+        return row
+    try:
+        full = _compute_stats(Path(st.path), item_type=st.item_type, clusters=0)
+    except (ValueError, FileNotFoundError) as exc:
+        return row.model_copy(update={"stats_error": f"{type(exc).__name__}: {exc}"})
+    stat = {k: full[k] for k in keys if full.get(k) is not None}
+    return row.model_copy(update={"stats": stat}) if stat else row
 
 
 def trace_payload(result: PipelineResult) -> list[dict[str, object]]:
-    rows: list[dict[str, object]] = []
-    for st in result.trace:
-        row: dict[str, object] = {
-            "after": st.after,
-            "level": st.level,
-            "item_type": st.item_type,
-            "sample_rate": round(st.sample_rate, 3),
-            "path": st.path,
-            "items": st.items,
-        }
-        keys = _TRACE_STAT_KEYS.get(st.item_type)
-        if st.items and keys:
-            try:
-                full = _compute_stats(Path(st.path), item_type=st.item_type, clusters=0)
-            except (ValueError, FileNotFoundError) as exc:
-                row["stats_error"] = f"{type(exc).__name__}: {exc}"
-            else:
-                stat = {k: full[k] for k in keys if full.get(k) is not None}
-                if stat:
-                    row["stats"] = stat
-        rows.append(row)
-    return rows
+    return [
+        _trace_row(st).model_dump(mode="json", exclude_none=True) for st in result.trace
+    ]
 
 
 def pipeline_payload(result: PipelineResult, run_dir: Path) -> dict[str, object]:
@@ -220,8 +245,12 @@ def pipeline_payload(result: PipelineResult, run_dir: Path) -> dict[str, object]
     payload.update(capped_int_list("marks", result.marks, run_dir / "marks.i64"))
     if result.trace:
         payload["trace"] = trace_payload(result)
-    payload["stream"] = stream_summary(result)
-    payload["soft_stream"] = soft_summary(result)
+    stream = stream_summary(result)
+    soft = soft_summary(result)
+    # both keys stay present even when null: their absence would read as "this
+    # run has no such stream" rather than "this field was omitted"
+    payload["stream"] = stream.model_dump(mode="json") if stream else None
+    payload["soft_stream"] = soft.model_dump(mode="json") if soft else None
     return payload
 
 

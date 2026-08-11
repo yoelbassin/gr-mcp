@@ -53,14 +53,16 @@ def test_soft_stream_summary_states_the_sign_convention_per_level() -> None:
             ),
         )
 
-    assert _soft_summary(result("bits")) == {
+    bits = _soft_summary(result("bits"))
+    assert bits is not None and bits.model_dump(mode="json") == {
         "path": "run/soft_tap.f32",
         "item_type": "f",
         "items": 512,
         "level": "bits",
         "bit1_sign": "negative",
     }
-    assert _soft_summary(result("symbols")) == {
+    symbols = _soft_summary(result("symbols"))
+    assert symbols is not None and symbols.model_dump(mode="json") == {
         "path": "run/soft_tap.f32",
         "item_type": "f",
         "items": 512,
