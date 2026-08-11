@@ -60,6 +60,31 @@ def find_diagnostic(
     return next((d for d in rows if d.block == block and d.key == key), None)
 
 
+class DiagnosticRows:
+    """Reads one harvest of diagnostics by key. Blocks emit from a per-block
+    dict, so a (block, key) pair appears at most once and indexing by block is
+    lossless."""
+
+    def __init__(self, rows: Sequence[Diagnostic]) -> None:
+        self._rows = rows
+
+    def counts(self, key: str) -> dict[str, int]:
+        return {
+            d.block: d.count for d in self._rows if d.key == key and d.count is not None
+        }
+
+    def values(self, key: str) -> dict[str, float]:
+        return {
+            d.block: d.value for d in self._rows if d.key == key and d.value is not None
+        }
+
+    def latest_marks(self, key: str) -> list[int]:
+        for d in reversed(self._rows):
+            if d.key == key and d.marks is not None:
+                return sorted({int(m) for m in d.marks})
+        return []
+
+
 class RunResult(BaseModel):
     # "empty": the graph ran clean but its terminal sink wrote nothing — a
     # decoded-nothing run is never reported as "ok".

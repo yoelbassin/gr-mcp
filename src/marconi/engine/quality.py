@@ -9,7 +9,11 @@ import numpy as np
 import numpy.typing as npt
 from pydantic import BaseModel
 
-from marconi.engine.backends.base import BlockCensus, Diagnostic
+from marconi.engine.backends.base import (
+    BlockCensus,
+    Diagnostic,
+    DiagnosticRows,
+)
 from marconi.engine.stages.base import Stage
 from marconi.levels import fit_levels
 
@@ -148,31 +152,22 @@ def tag_sync_evidence(diagnostics: Sequence[Diagnostic]) -> list[QualityEvidence
     correlator's sync tags and the chance expectation for the items it
     scanned, so GR-native sync paths contribute the same sync_matches
     evidence the coding-lane sync_word does."""
-    expected = {
-        d.block: d.value
-        for d in diagnostics
-        if d.key == "sync_chance" and d.value is not None
-    }
-    scanned = {
-        d.block: d.count
-        for d in diagnostics
-        if d.key == "sync_items_scanned" and d.count is not None
-    }
+    rows = DiagnosticRows(diagnostics)
+    expected = rows.values("sync_chance")
+    scanned = rows.counts("sync_items_scanned")
     out: list[QualityEvidence] = []
-    for d in diagnostics:
-        if d.key != "sync_tags" or d.count is None:
-            continue
-        if not scanned.get(d.block):
+    for block, tags in rows.counts("sync_tags").items():
+        if not scanned.get(block):
             # the correlator never consumed anything: untestable, not absent
             continue
-        assessment = _sync_assessment(d.count, expected.get(d.block, 0.0))
+        assessment = _sync_assessment(tags, expected.get(block, 0.0))
         if assessment is None:
             continue
         out.append(
             QualityEvidence(
-                source=d.block,
+                source=block,
                 metric="sync_matches",
-                value=float(d.count),
+                value=float(tags),
                 assessment=assessment,
             )
         )
@@ -229,26 +224,21 @@ def marks_evidence(marks: Sequence[int]) -> list[QualityEvidence]:
 
 
 def lock_evidence(diagnostics: Sequence[Diagnostic]) -> list[QualityEvidence]:
-    floors = {
-        d.block: d.value
-        for d in diagnostics
-        if d.key == "lock_min" and d.value is not None
-    }
+    rows = DiagnosticRows(diagnostics)
+    floors = rows.values("lock_min")
     out: list[QualityEvidence] = []
-    for d in diagnostics:
-        if d.key != "lock_ratio_best" or d.value is None:
-            continue
-        floor = floors.get(d.block)
+    for block, best in rows.values("lock_ratio_best").items():
+        floor = floors.get(block)
         if floor is None:
             # a best-ratio row without its block's configured floor is a
             # malformed pair: untestable, never judged against a default
             continue
         out.append(
             QualityEvidence(
-                source=d.block,
+                source=block,
                 metric="ofdm_lock_ratio",
-                value=d.value,
-                assessment="positive" if d.value >= floor else "negative",
+                value=best,
+                assessment="positive" if best >= floor else "negative",
             )
         )
     return out
@@ -273,28 +263,19 @@ _DOMINANCE_CHANCE_FALLBACK = 0.15
 
 
 def dominance_evidence(diagnostics: Sequence[Diagnostic]) -> list[QualityEvidence]:
-    totals = {
-        d.block: d.count
-        for d in diagnostics
-        if d.key == "symbols_total" and d.count is not None
-    }
-    chances = {
-        d.block: d.value
-        for d in diagnostics
-        if d.key == "dominance_chance" and d.value is not None
-    }
+    rows = DiagnosticRows(diagnostics)
+    totals = rows.counts("symbols_total")
+    chances = rows.values("dominance_chance")
     out: list[QualityEvidence] = []
-    for d in diagnostics:
-        if d.key != "dominant_symbols" or d.count is None:
-            continue
-        total = totals.get(d.block)
+    for block, dominant in rows.counts("dominant_symbols").items():
+        total = totals.get(block)
         if not total:
             # the decider never saw a symbol: untestable, not absent
             continue
-        chance = chances.get(d.block, _DOMINANCE_CHANCE_FALLBACK)
-        frac = d.count / total
+        chance = chances.get(block, _DOMINANCE_CHANCE_FALLBACK)
+        frac = dominant / total
         if frac >= _DOMINANCE_POSITIVE and _word_excess_significant(
-            d.count, total, chance
+            dominant, total, chance
         ):
             assessment: Assessment = "positive"
         elif frac <= _DOMINANCE_NEGATIVE and total >= _WORD_NEGATIVE_MIN_WORDS:
@@ -303,7 +284,7 @@ def dominance_evidence(diagnostics: Sequence[Diagnostic]) -> list[QualityEvidenc
             continue
         out.append(
             QualityEvidence(
-                source=d.block,
+                source=block,
                 metric="peak_dominance",
                 value=frac,
                 assessment=assessment,

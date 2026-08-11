@@ -12,6 +12,7 @@ from marconi.engine.backends.base import (
     Backend,
     BlockCensus,
     Diagnostic,
+    DiagnosticRows,
     find_diagnostic,
 )
 from marconi.engine.coding.carrier import CodingCarrier
@@ -115,12 +116,9 @@ def _harvest_trace(
 
 def _harvest_marks(diagnostics: Sequence[Diagnostic]) -> list[int]:
     # a burst probe may re-detect the same position (re-lock); marks are
-    # strictly-increasing offsets (types/models.py), enforced here where raw
-    # GR output enters the typed lane
-    for d in reversed(diagnostics):
-        if d.key == "bursts" and d.marks is not None:
-            return sorted({int(m) for m in d.marks})
-    return []
+    # strictly-increasing offsets (types/models.py), and latest_marks dedups
+    # here where raw GR output enters the typed lane
+    return DiagnosticRows(diagnostics).latest_marks("bursts")
 
 
 def _entry_carrier(boundary: Descriptor, path: Path, marks: list[int]) -> CodingCarrier:
