@@ -115,5 +115,9 @@ with `@tool_error_boundary`.
 ### Tooling
 
 `isort` (black profile) · `black` · `flake8` (max line 88, `E203`/`W503` ignored) ·
-`mypy` · `pytest`, all under pre-commit. This file is a living document edited in
-place, never a dated copy.
+`mypy` (`strict`; the only exemptions are the stubless external packages and the
+GNU Radio subclassing seam, both named per-module in `pyproject.toml`) ·
+`pytest` — all under pre-commit. The commit hook runs `tests/unit` and
+`tests/integration`; `tests/e2e` needs off-air assets and hardware, so it gates
+the branch, not the keystroke — run the full suite before calling work done.
+This file is a living document edited in place, never a dated copy.

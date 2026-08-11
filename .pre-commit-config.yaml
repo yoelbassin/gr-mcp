@@ -22,12 +22,17 @@ repos:
     rev: 7.3.0
     hooks:
     -   id: flake8
-        args: [--max-line-length=88]
 -   repo: local
     hooks:
     -   id: mypy
         name: mypy
         entry: uv run mypy .
+        language: system
+        pass_filenames: false
+        always_run: true
+    -   id: pytest
+        name: pytest (unit + integration)
+        entry: uv run pytest tests/unit tests/integration -q -n auto
         language: system
         pass_filenames: false
         always_run: true
