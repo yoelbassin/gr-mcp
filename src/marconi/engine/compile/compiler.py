@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
@@ -119,86 +119,137 @@ class _CompilePlan:
     direction: Direction
 
 
+@dataclass(frozen=True)
+class _StepInput:
+    """One step and the stream arriving at it — everything an input check reads."""
+
+    step: Step
+    stage: Stage[Any, Any]
+    desc: Descriptor
+    rate: float
+    producer: str
+    symbol_rate: float
+    direction: Direction
+
+
+def _check_item_type(s: _StepInput) -> str | None:
+    want = s.stage.accepts_item_type
+    if want is None or s.desc.item_type == want:
+        return None
+    return (
+        f"stage '{s.step.conv}' accepts item_type "
+        f"{want.value!r} but '{s.producer}' produces "
+        f"{s.desc.item_type.value!r}"
+    )
+
+
+def _check_carrier(s: _StepInput) -> str | None:
+    want = s.stage.accepts_carrier
+    if want is None or s.desc.carrier == want:
+        return None
+    return (
+        f"stage '{s.step.conv}' accepts {want.value} "
+        f"carrier but '{s.producer}' produces {s.desc.carrier.value}"
+    )
+
+
+def _check_amplitude(s: _StepInput) -> str | None:
+    required = s.stage.accepts_amplitude_for(s.step)
+    if s.direction != "rx" or required is None or s.desc.amplitude in required:
+        return None
+    wanted = ", ".join(sorted(a.value for a in required))
+    mode_hint = " or ".join(f"mode='{m}'" for m in agc_modes_for(required))
+    fix = (
+        f"insert an 'agc' stage ({mode_hint}) after any " "channelization or resampling"
+        if s.desc.amplitude is Amplitude.UNKNOWN
+        else f"set the upstream 'agc' to {mode_hint}"
+    )
+    return (
+        f"stage '{s.step.conv}' requires input amplitude normalized to "
+        f"{wanted} but '{s.producer}' produces {s.desc.amplitude.value}; "
+        f"{fix}"
+    )
+
+
+def _check_alphabet_order(s: _StepInput) -> str | None:
+    required = s.stage.required_input_order(s.step)
+    if required is None or s.desc.order is None or s.desc.order == required:
+        return None
+    return (
+        f"stage '{s.step.conv}' decodes an order-{required} "
+        f"alphabet but '{s.producer}' produces order-{s.desc.order} "
+        f"symbols; align the two stages' order/sf params"
+    )
+
+
+def _check_required_rate(s: _StepInput) -> str | None:
+    required = s.stage.required_input_rate(s.step, s.symbol_rate)
+    if required is None or required <= 0:
+        return None
+    if abs(s.rate - required) <= _RATE_TOL * required:
+        return None
+    return (
+        f"stage '{s.step.conv}' requires input sample rate ~{required:g} "
+        f"but the pipeline delivers {s.rate:g} at that boundary; "
+        f"check resample ratios, oversample, and symbol_rate"
+    )
+
+
+def _check_min_sps(s: _StepInput) -> str | None:
+    min_sps = s.stage.min_input_sps_for(s.step)
+    if s.direction != "rx" or min_sps is None:
+        return None
+    sps = s.rate / s.symbol_rate
+    if sps >= min_sps * (1.0 - _RATE_TOL):
+        return None
+    return (
+        f"stage '{s.step.conv}' recovers symbol timing and needs >= "
+        f"{min_sps:g} samples per symbol but the "
+        f"pipeline delivers {sps:g} ({s.rate:g} into symbol_rate "
+        f"{s.symbol_rate:g}); resample the input or fix symbol_rate"
+    )
+
+
+def _check_stage_input(s: _StepInput) -> str | None:
+    problem = s.stage.validate_input(s.desc, s.step)
+    return None if problem is None else f"stage '{s.step.conv}': {problem}"
+
+
+def _check_stage_input_rate(s: _StepInput) -> str | None:
+    problem = s.stage.validate_input_rate(s.step, s.rate)
+    return None if problem is None else f"stage '{s.step.conv}': {problem}"
+
+
+# Every contract a stage's input must satisfy, each independently answerable
+# from a _StepInput. Order is the order a reader meets them: what the stream is,
+# then how it is scaled, then what the stage says for itself.
+_INPUT_CHECKS: tuple[Callable[[_StepInput], str | None], ...] = (
+    _check_item_type,
+    _check_carrier,
+    _check_amplitude,
+    _check_alphabet_order,
+    _check_required_rate,
+    _check_min_sps,
+    _check_stage_input,
+    _check_stage_input_rate,
+)
+
+
 def _validate_descriptors(plan: _CompilePlan) -> None:
-    steps, registry = plan.steps, plan.registry
-    boundaries, rates = plan.boundaries, plan.rates
-    symbol_rate, direction = plan.symbol_rate, plan.direction
-    for i, step in enumerate(steps):
-        stage = _resolve(step, registry)
-        in_desc = boundaries[i]
-        producer = steps[i - 1].conv if i > 0 else "<source>"
-        if (
-            stage.accepts_item_type is not None
-            and in_desc.item_type != stage.accepts_item_type
-        ):
-            raise CompileError(
-                f"stage '{step.conv}' accepts item_type "
-                f"{stage.accepts_item_type.value!r} but '{producer}' produces "
-                f"{in_desc.item_type.value!r}"
-            )
-        if (
-            stage.accepts_carrier is not None
-            and in_desc.carrier != stage.accepts_carrier
-        ):
-            raise CompileError(
-                f"stage '{step.conv}' accepts {stage.accepts_carrier.value} "
-                f"carrier but '{producer}' produces {in_desc.carrier.value}"
-            )
-        required_amplitude = stage.accepts_amplitude_for(step)
-        if (
-            direction == "rx"
-            and required_amplitude is not None
-            and in_desc.amplitude not in required_amplitude
-        ):
-            wanted = ", ".join(sorted(a.value for a in required_amplitude))
-            modes = agc_modes_for(required_amplitude)
-            mode_hint = " or ".join(f"mode='{m}'" for m in modes)
-            fix = (
-                f"insert an 'agc' stage ({mode_hint}) after any "
-                "channelization or resampling"
-                if in_desc.amplitude is Amplitude.UNKNOWN
-                else f"set the upstream 'agc' to {mode_hint}"
-            )
-            raise CompileError(
-                f"stage '{step.conv}' requires input amplitude normalized to "
-                f"{wanted} but '{producer}' produces {in_desc.amplitude.value}; "
-                f"{fix}"
-            )
-        required_order = stage.required_input_order(step)
-        if (
-            required_order is not None
-            and in_desc.order is not None
-            and in_desc.order != required_order
-        ):
-            raise CompileError(
-                f"stage '{step.conv}' decodes an order-{required_order} "
-                f"alphabet but '{producer}' produces order-{in_desc.order} "
-                f"symbols; align the two stages' order/sf params"
-            )
-        required = stage.required_input_rate(step, symbol_rate)
-        if required is not None and required > 0:
-            if abs(rates[i] - required) > _RATE_TOL * required:
-                raise CompileError(
-                    f"stage '{step.conv}' requires input sample rate ~{required:g} "
-                    f"but the pipeline delivers {rates[i]:g} at that boundary; "
-                    f"check resample ratios, oversample, and symbol_rate"
-                )
-        min_sps = stage.min_input_sps_for(step)
-        if direction == "rx" and min_sps is not None:
-            sps = rates[i] / symbol_rate
-            if sps < min_sps * (1.0 - _RATE_TOL):
-                raise CompileError(
-                    f"stage '{step.conv}' recovers symbol timing and needs >= "
-                    f"{min_sps:g} samples per symbol but the "
-                    f"pipeline delivers {sps:g} ({rates[i]:g} into symbol_rate "
-                    f"{symbol_rate:g}); resample the input or fix symbol_rate"
-                )
-        problem = stage.validate_input(in_desc, step)
-        if problem is not None:
-            raise CompileError(f"stage '{step.conv}': {problem}")
-        rate_problem = stage.validate_input_rate(step, rates[i])
-        if rate_problem is not None:
-            raise CompileError(f"stage '{step.conv}': {rate_problem}")
+    for i, step in enumerate(plan.steps):
+        arriving = _StepInput(
+            step=step,
+            stage=_resolve(step, plan.registry),
+            desc=plan.boundaries[i],
+            rate=plan.rates[i],
+            producer=plan.steps[i - 1].conv if i > 0 else "<source>",
+            symbol_rate=plan.symbol_rate,
+            direction=plan.direction,
+        )
+        for check in _INPUT_CHECKS:
+            problem = check(arriving)
+            if problem is not None:
+                raise CompileError(problem)
 
 
 def _validate_probe_marks(plan: _CompilePlan, k: int) -> None:
