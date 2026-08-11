@@ -18,7 +18,15 @@ from marconi.levels import kmeans_1d, percentile_span
 from marconi.mcp.workspace import conversion_cache_dir
 
 _MAX_INLINE_BITS = 1_048_576
-_MAX_PAGE_ITEMS = {"b": 65536, "s": 16384, "f": 16384, "l": 16384, "c": 4096}
+# Per-type ceilings chosen from what an item COSTS as JSON, not from a round
+# item count: a bit is ~2 bytes, an int64 mark ~11, a complex pair ~21. A flat
+# count therefore priced pages between 82 and 184 KB (21k-47k tokens) — one
+# read_stream call could take a quarter of an agent's context, and the worst
+# of them was the int64 sidecar run_rx explicitly tells the agent to page.
+# Every type now lands under _MAX_PAGE_BYTES; test_streams pins that budget
+# directly, so a future retune is measured against the cost, not the number.
+_MAX_PAGE_BYTES = 48 * 1024
+_MAX_PAGE_ITEMS = {"b": 16384, "s": 8192, "f": 4096, "l": 2048, "c": 2048}
 _CHUNK_ITEMS = 1 << 20
 
 # default page sizes hold a default call near a few KB of JSON regardless of
@@ -66,12 +74,33 @@ def parse_bits(text: str) -> npt.NDArray[np.uint8]:
     return np.frombuffer(text.encode("ascii"), dtype=np.uint8) - ord("0")
 
 
-def require_file(path: Path) -> None:
-    if not path.is_file():
-        raise FileNotFoundError(
-            f"stream output not found at {path}; marconi-runs/ outputs are "
-            f"not auto-cleaned — re-run the spec if the run was removed"
+def require_file(path: Path, what: str = "stream output") -> None:
+    """The remedy depends on who owns the path. A missing run output really
+    was produced by a spec and re-running is the fix; a capture or bits file
+    the caller named was never produced by anything here, and telling them to
+    re-run a spec sends them to edit the one thing that is not wrong."""
+    if path.is_file():
+        return
+    if _under_workspace(path):
+        hint = (
+            "marconi-runs/ outputs are not auto-cleaned — re-run the spec if "
+            "the run was removed"
         )
+    elif path.is_dir():
+        hint = "that path is a directory; name the file itself"
+    else:
+        hint = (
+            "check the path as given — a relative path resolves against the "
+            "server's working directory, not the capture's"
+        )
+    raise FileNotFoundError(f"{what} not found at {path}; {hint}")
+
+
+def _under_workspace(path: Path) -> bool:
+    try:
+        return conversion_cache_dir().parent in path.resolve().parents
+    except OSError:
+        return False
 
 
 def _resolve_item_type(path: Path, item_type: str | None) -> str:

@@ -46,3 +46,28 @@ def test_every_stage_detail_builds() -> None:
 def test_envelope_documents_the_spec_shape() -> None:
     assert "symbol_rate" in str(ENVELOPE)
     assert "path" in str(ENVELOPE)
+
+
+def test_a_step_conditional_contract_is_never_published_as_a_number() -> None:
+    # Stage.accepts_amplitude_for's own docstring says the compiler consults
+    # the METHOD, never the bare attribute. describe_stages published the
+    # attribute, so symbol_sync advertised a 2.0 sps floor while enforcing
+    # 4.0 open-loop and none closed-loop, and ook_envelope advertised an
+    # amplitude contract its open-loop path drops — the exact trap
+    # OOK_AGC_REMOVE_HINT exists to undo after a decode has degraded.
+    from marconi.engine.stages.base import Stage
+    from marconi.engine.stages.registry import stage_registry
+
+    for name, stage in stage_registry().items():
+        detail = stage_details([name])[0]
+        conditional = detail.get("step_conditional") or []
+        for hook, key in (
+            ("min_input_sps_for", "min_input_sps"),
+            ("accepts_amplitude_for", "accepts_amplitude"),
+        ):
+            overrides = getattr(type(stage), hook, None) is not getattr(
+                Stage, hook, None
+            )
+            if overrides:
+                assert key in conditional, f"{name}: {key} published unconditionally"
+                assert detail[key] is None, f"{name}: {key} still carries a value"

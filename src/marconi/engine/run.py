@@ -423,9 +423,10 @@ def _validate_entry(
         )
     if cp.gr is not None and input_stream is not None:
         raise CompileError(
-            "this modem's path has a GR segment fed by source_io; "
-            "input_stream only enters a path that starts with a coding "
-            "stage"
+            "this path starts with a signal-processing stage, so it must be "
+            "fed an IQ capture; an existing bit/symbol stream only enters a "
+            "path that starts with a coding stage. Pass the capture instead "
+            "of the stream, or drop the leading stages"
         )
     if cp.gr is None and input_stream is None:
         raise CompileError(

@@ -154,10 +154,19 @@ def channelize_to_file(
     if decim < 1:
         raise ValueError(f"decim must be >= 1, got {decim}")
     if abs(center_hz) > 0.5 * sample_rate:
+        looks_absolute = abs(center_hz) > 1.0e6 and abs(center_hz) > 10.0 * sample_rate
+        hint = (
+            " — this looks like an absolute RF frequency. survey's center_hz "
+            "is an OFFSET from the capture's own centre, not the frequency the "
+            "radio was tuned to; capture's returned center_hz is the latter. "
+            "Use survey's carrier.offset_hz to re-centre."
+            if looks_absolute
+            else "; the mixer wraps mod the sample rate and would silently "
+            "tune an aliased sub-band"
+        )
         raise ValueError(
             f"center_hz {center_hz:g} lies outside the +-{0.5 * sample_rate:g} Hz "
-            f"Nyquist span of the {sample_rate:g} Hz capture; the mixer wraps mod "
-            f"the sample rate and would silently tune an aliased sub-band"
+            f"Nyquist span of the {sample_rate:g} Hz capture{hint}"
         )
     out_rate = sample_rate / decim
     cutoff = (bandwidth_hz / 2.0) if bandwidth_hz is not None else 0.45 * out_rate

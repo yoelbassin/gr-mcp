@@ -69,7 +69,7 @@ def _input_stream(path: Path, item_type: str) -> Bitstream | Symbolstream:
         raise ValueError(
             "input_item_type must be one of ['b', 'f', 's'] with input_path"
         )
-    require_file(path)
+    require_file(path, "input stream")
     items = path.stat().st_size // _ITEM_BYTES[item_type]
     if item_type == "b":
         return Bitstream(path=path, num_bits=items)
@@ -88,7 +88,13 @@ def describe_stages(
     primer (index call only). Pass stage=<name> or family=<name> for full
     per-stage detail: input contracts (item type, carrier, amplitude,
     minimum samples-per-symbol) and the JSON schema of the stage's spec
-    parameters. Compose a modem spec as {"symbol_rate": <float>, "path":
+    parameters. A contract that varies with the stage's own parameters is
+    reported as null and listed in "step_conditional" — the stage's
+    description states the rule (e.g. symbol_sync needs 4 samples per symbol
+    open-loop and has no floor closed-loop), and the compiler enforces the
+    value for the step you actually write.
+
+    Compose a modem spec as {"symbol_rate": <float>, "path":
     [{"conv": <stage name>, ...params}]}; check it with validate_modem
     before running."""
     if stage is not None:
@@ -172,8 +178,11 @@ def run_rx_tool(
     stream for coding-only paths) and return the full pipeline result.
 
     Pass exactly one of capture_path (raw IQ; capture_dtype one of
-    cf32/ci16/ci8/cu8, non-cf32 converted once per capture into a shared
-    cache) or input_path (+ input_item_type b/s/f, optional input_level).
+    cf32/ci16/ci8/cu8; a non-cf32 capture is converted into a shared cache
+    keyed by capture_path AND the requested slice, so re-running one slice is
+    free but each new capture_offset/capture_samples pair writes another full
+    copy — the cache is never pruned, so prefer a few deliberate slices over
+    sweeping) or input_path (+ input_item_type b/s/f, optional input_level).
     capture_offset/capture_samples (complex samples; 0 samples = to EOF)
     decode a bounded slice while streaming — the answer to a capture too
     large for one run.
@@ -253,7 +262,7 @@ def run_rx_tool(
     modem = Modem.from_spec(spec, step_models())
     run_dir = new_run_dir("rx")
     if capture_path is not None:
-        require_file(Path(capture_path))
+        require_file(Path(capture_path), "capture")
         # a first-time ci16/ci8/cu8 conversion is real work with no bound of
         # its own; set_deadline here too so it counts against timeout - the
         # min-nesting means engine_run_rx's own inner deadline can't extend it
@@ -305,8 +314,10 @@ def run_tx_tool(
     Pass exactly one of bits (a '0'/'1' string) or bits_path (a file of one
     uint8 bit per byte). The path must compile in the tx direction; coding
     stages do not (the engine executes no tx-side coding), so supply bits
-    that already carry any framing/encoding you need. Returns the IQ file
-    path, sample count, and per-block census."""
+    that already carry any framing/encoding you need. out_path names the IQ
+    file to write (default: a fresh file under ./marconi-runs/); its
+    directory must already exist. timeout is the whole-call deadline in
+    seconds. Returns the IQ file path, sample count, and per-block census."""
     if (bits is None) == (bits_path is None):
         raise ValueError("pass exactly one of bits or bits_path")
     modem = Modem.from_spec(spec, step_models())
@@ -317,7 +328,16 @@ def run_tx_tool(
     else:
         assert bits_path is not None
         bits_file = Path(bits_path)
+        # unguarded, a bad path surfaced as a GR construction error naming a
+        # block id, and a DIRECTORY did not fail at all — file_source spun on
+        # fread error until the whole timeout expired
+        require_file(bits_file, "bits input")
     out = Path(out_path) if out_path is not None else run_dir / "out.cf32"
+    if not out.parent.is_dir():
+        raise FileNotFoundError(
+            f"out_path directory does not exist: {out.parent}; create it or "
+            f"omit out_path to write under ./marconi-runs/"
+        )
     gr = compile_modem(
         modem,
         stage_registry(),
@@ -351,7 +371,10 @@ def read_stream(
     "real"/"imag" lists. item_type b/s/f/l/c overrides suffix inference
     (required for suffix-less paths). count defaults per item type to keep a
     page a few KB (b 4096, s 2048, f/l 1024, c 256) and is capped per type
-    (b 65536, s/f/l 16384, c 4096) — a larger count is clamped and the page
+    (b 16384, s 8192, f 4096, l 2048, c 2048) — the ceilings differ because an
+    item's JSON cost does: a bit is ~2 bytes, an int64 mark ~20, so a full
+    page of any type lands near 48 KB rather than a fixed item count. A larger
+    count is clamped and the page
     reports capped_at, so a short page is truncation, not end of stream; use
     offset to walk longer streams — total_items reports the full length.
     Stream files live under ./marconi-runs/ (or $MARCONI_WORKSPACE) until
@@ -558,7 +581,7 @@ def survey(
         raise ValueError("capture_offset and capture_samples must be >= 0")
     if decim < 1:
         raise ValueError("decim must be >= 1")
-    require_file(Path(capture_path))
+    require_file(Path(capture_path), "capture")
     src_slice = ensure_cf32(
         Path(capture_path),
         capture_dtype,
@@ -619,10 +642,15 @@ def capture_tool(
     (None = hardware AGC) and ppm correction, discards a short settle
     transient, and records duration_s seconds (max 300) at sample_rate under
     ./marconi-runs/. The returned sample_rate and center_hz are DEVICE
-    READBACK — what the hardware delivered, not what was requested — always
-    carry the RETURNED values into survey/run_rx; a warnings entry flags any
-    divergence, and a frequency the device cannot place inside the captured
-    span raises instead. "levels" is capture-chain health, not signal
+    READBACK — what the hardware delivered, not what was requested — and a
+    warnings entry flags any divergence. Carry the returned SAMPLE_RATE into
+    survey/run_rx; it is the same quantity there. The returned center_hz is
+    the ABSOLUTE RF frequency the radio tuned, which is NOT what survey and
+    the channelize stage mean by center_hz — theirs is an offset from the
+    capture's own centre, so passing this value there is always out of range.
+    To re-centre, survey the capture and use its carrier.offset_hz.
+
+    "levels" is capture-chain health, not signal
     analysis: rms near zero means gain too low or no antenna; clip_fraction
     > 0 (samples at >= 0.99 full scale) means lower gain_db (a clearly
     railing or dead capture also warns); dc_offset is the usual SDR center

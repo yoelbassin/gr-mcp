@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pytest
@@ -8,6 +10,7 @@ import pytest
 from marconi.engine.io.source import SourceSlice
 from marconi.mcp.streams import (
     _DEFAULT_PAGE_ITEMS,
+    _MAX_PAGE_BYTES,
     _MAX_PAGE_ITEMS,
     ensure_cf32,
     parse_bits,
@@ -64,7 +67,7 @@ def test_page_count_is_clamped(tmp_path: Path) -> None:
     p = tmp_path / "big.u8"
     np.zeros(70000, np.uint8).tofile(p)
     page = render_page(p, offset=0, count=1 << 20, item_type=None)
-    assert page["count"] == 65536
+    assert page["count"] == _MAX_PAGE_ITEMS["b"]
 
 
 def test_ensure_cf32_converts_ci16(
@@ -154,6 +157,40 @@ def test_page_reports_the_ceiling_that_clamped_it(tmp_path: Path) -> None:
     # a page short because the stream ended must NOT claim a cap
     tail = render_page(p, offset=_MAX_PAGE_ITEMS["c"], count=None, item_type=None)
     assert tail["count"] == 32 and "capped_at" not in tail
+
+
+@pytest.mark.parametrize(
+    "suffix,dtype",
+    [
+        (".u8", np.uint8),
+        (".i16", np.int16),
+        (".f32", np.float32),
+        (".i64", np.int64),
+        (".cf32", np.complex64),
+    ],
+)
+def test_a_full_page_of_every_type_fits_the_context_budget(
+    tmp_path: Path, suffix: str, dtype: Any
+) -> None:
+    # The requirement is a SIZE, so the test measures size. Asserting the
+    # clamp equals _MAX_PAGE_ITEMS (both sides imported from the source) let
+    # any retune through: raising the ceilings 256x would have stayed green
+    # while a single call returned ~100 MB of JSON.
+    p = tmp_path / f"page{suffix}"
+    rng = np.random.default_rng(2)
+    n = max(_MAX_PAGE_ITEMS.values()) + 32
+    if np.issubdtype(dtype, np.complexfloating):
+        raw = (rng.standard_normal(n) + 1j * rng.standard_normal(n)).astype(dtype)
+    elif np.issubdtype(dtype, np.floating):
+        raw = rng.standard_normal(n).astype(dtype)
+    else:
+        info = np.iinfo(dtype)
+        raw = rng.integers(info.min // 2, info.max // 2, n).astype(dtype)
+    raw.tofile(p)
+    page = render_page(p, offset=0, count=n, item_type=None)
+    size = len(json.dumps(page, separators=(",", ":")))
+    assert size <= _MAX_PAGE_BYTES, f"{suffix}: {size} bytes > {_MAX_PAGE_BYTES}"
+    assert page["capped_at"] == _MAX_PAGE_ITEMS[str(page["item_type"])]
 
 
 def test_read_stream_docstring_states_every_page_bound() -> None:

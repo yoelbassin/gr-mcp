@@ -370,7 +370,7 @@ def test_pure_coding_path_without_input_stream_is_an_error(tmp_path: Path) -> No
 
 
 def test_gr_segment_with_input_stream_is_an_error(tmp_path: Path) -> None:
-    with pytest.raises(CompileError, match="source_io"):
+    with pytest.raises(CompileError, match="starts with a coding stage"):
         run_rx(
             _gr_modem(),
             stage_registry(),

@@ -72,6 +72,18 @@ def stage_details(names: list[str]) -> list[dict[str, Any]]:
         s = registry[n]
         entry = _index_entry(s)
         entry["family"] = s.family
+        conditional_amp = _overrides(s, "accepts_amplitude_for")
+        conditional_sps = _overrides(s, "min_input_sps_for")
+        step_conditional = sorted(
+            name
+            for name, cond in (
+                ("accepts_amplitude", conditional_amp),
+                ("min_input_sps", conditional_sps),
+            )
+            if cond
+        )
+        if step_conditional:
+            entry["step_conditional"] = step_conditional
         entry.update(
             {
                 "accepts_item_type": (
@@ -82,13 +94,25 @@ def stage_details(names: list[str]) -> list[dict[str, Any]]:
                 ),
                 "accepts_amplitude": (
                     None
-                    if s.accepts_amplitude is None
+                    if conditional_amp or s.accepts_amplitude is None
                     else sorted(a.value for a in s.accepts_amplitude)
                 ),
-                "min_input_sps": s.min_input_sps,
+                "min_input_sps": None if conditional_sps else s.min_input_sps,
                 "seeds_windows": s.seeds_windows,
                 "params_schema": s.step_model.model_json_schema(),
             }
         )
         out.append(entry)
     return out
+
+
+def _overrides(stage: Stage[Any, Any], hook: str) -> bool:
+    """Whether this stage decides the contract per STEP. Stage.base states the
+    rule: "the compiler consults this method, never the bare attribute". A
+    step-free call like describe_stages cannot evaluate it, so publishing the
+    class attribute here is guaranteed to be the wrong number wherever the
+    hook is overridden — symbol_sync advertised a 2.0 floor while enforcing
+    4.0 open-loop and none closed-loop, and ook_envelope advertised an
+    amplitude contract that its open-loop path drops. The key is withheld and
+    named in step_conditional instead; the stage description carries the rule."""
+    return getattr(type(stage), hook, None) is not getattr(Stage, hook, None)

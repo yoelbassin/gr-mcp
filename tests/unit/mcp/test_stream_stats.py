@@ -71,7 +71,7 @@ def test_bits_stream_reports_ones_fraction(tmp_path: Path) -> None:
 
 
 def test_missing_path_is_actionable(tmp_path: Path) -> None:
-    with pytest.raises(FileNotFoundError, match="auto-cleaned"):
+    with pytest.raises(FileNotFoundError, match="resolves against"):
         stream_stats(tmp_path / "gone.f32", item_type=None, clusters=0, bins=8)
 
 
