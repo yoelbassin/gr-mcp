@@ -83,11 +83,11 @@ def render_page(
         raise ValueError(f"offset must be >= 0, got {offset}")
     _require_file(path)
     kind = _resolve_item_type(path, item_type)
-    if count is None:
-        count = _DEFAULT_PAGE_ITEMS[kind]
+    requested = _DEFAULT_PAGE_ITEMS[kind] if count is None else count
+    ceiling = _MAX_PAGE_ITEMS[kind]
     dtype = _ITEM_DTYPES[kind]
     total = path.stat().st_size // dtype.itemsize
-    count = max(0, min(count, _MAX_PAGE_ITEMS[kind], total - offset))
+    count = max(0, min(requested, ceiling, total - offset))
     with path.open("rb") as f:
         f.seek(offset * dtype.itemsize)
         items = np.fromfile(f, dtype=dtype, count=count)
@@ -97,6 +97,8 @@ def render_page(
         "count": int(items.size),
         "total_items": int(total),
     }
+    if requested > ceiling:
+        page["capped_at"] = ceiling
     page.update(_PAGE_FORMATTERS[kind](items))
     return page
 

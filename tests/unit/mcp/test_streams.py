@@ -6,7 +6,14 @@ import numpy as np
 import pytest
 
 from marconi.engine.io.source import SourceSlice
-from marconi.mcp.streams import ensure_cf32, parse_bits, render_page
+from marconi.mcp.streams import (
+    _DEFAULT_PAGE_ITEMS,
+    _MAX_PAGE_ITEMS,
+    ensure_cf32,
+    parse_bits,
+    render_page,
+)
+from marconi.mcp.tools import read_stream
 
 
 def test_parse_bits_roundtrips() -> None:
@@ -136,3 +143,21 @@ def test_ensure_cf32_passthrough_and_unknown(tmp_path: Path) -> None:
     )
     with pytest.raises(ValueError, match="cu8"):
         ensure_cf32(src, "wat")
+
+
+def test_page_reports_the_ceiling_that_clamped_it(tmp_path: Path) -> None:
+    p = tmp_path / "sym.cf32"
+    np.zeros(_MAX_PAGE_ITEMS["c"] + 32, np.complex64).tofile(p)
+    over = render_page(p, offset=0, count=_MAX_PAGE_ITEMS["c"] + 32, item_type=None)
+    assert over["count"] == _MAX_PAGE_ITEMS["c"]
+    assert over["capped_at"] == _MAX_PAGE_ITEMS["c"]
+    # a page short because the stream ended must NOT claim a cap
+    tail = render_page(p, offset=_MAX_PAGE_ITEMS["c"], count=None, item_type=None)
+    assert tail["count"] == 32 and "capped_at" not in tail
+
+
+def test_read_stream_docstring_states_every_page_bound() -> None:
+    doc = read_stream.__doc__ or ""
+    for table in (_DEFAULT_PAGE_ITEMS, _MAX_PAGE_ITEMS):
+        for kind, bound in table.items():
+            assert str(bound) in doc, f"{kind}={bound} missing from read_stream doc"

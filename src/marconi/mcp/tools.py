@@ -349,7 +349,9 @@ def read_stream(
     (.cf32, a path ending at a bare demod, e.g. psk_demod) return
     "real"/"imag" lists. item_type b/s/f/l/c overrides suffix inference
     (required for suffix-less paths). count defaults per item type to keep a
-    page a few KB (b 4096, s 2048, f/l 1024, c 256) and caps at 65536; use
+    page a few KB (b 4096, s 2048, f/l 1024, c 256) and is capped per type
+    (b 65536, s/f/l 16384, c 4096) — a larger count is clamped and the page
+    reports capped_at, so a short page is truncation, not end of stream; use
     offset to walk longer streams — total_items reports the full length.
     Stream files live under ./marconi-runs/ (or $MARCONI_WORKSPACE) until
     externally removed; a missing path returns a [not_found] error asking
