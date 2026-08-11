@@ -16,6 +16,35 @@ from marconi.engine.types.levels import Level
 from marconi.engine.types.step import Step
 
 
+def _frame_geometry_errors(
+    *,
+    fft_len: int,
+    cp_len: int,
+    sym_len: int,
+    null_len: int,
+    frame_len: int,
+    data_syms: int,
+) -> list[str]:
+    """The null-sync + CP-strip contract both RX-only OFDM steps compile to.
+    Each of these reached the embedded block as a live parameter: a zero
+    frame_len leaves its resync branch a no-op, so the buffer never trims and
+    general_work spins until the run's deadline; a zero or negative null_len
+    convolves against an empty kernel; a sym_len that is not fft_len + cp_len
+    was accepted in silence and then stripped the CP at the wrong stride,
+    emitting garbage under status ok."""
+    checks = {
+        "fft_len must be positive": fft_len > 0,
+        "cp_len must be non-negative": cp_len >= 0,
+        "null_len must be positive": null_len > 0,
+        "frame_len must be positive": frame_len > 0,
+        "data_syms must be positive": data_syms > 0,
+        "sym_len must equal fft_len + cp_len": sym_len == fft_len + cp_len,
+        "frame_len must hold the null and its data symbols": frame_len
+        >= null_len + (data_syms + 1) * sym_len,
+    }
+    return [msg for msg, ok in checks.items() if not ok]
+
+
 class OfdmFrameSyncProbeStep(Step):
     conv: Literal["ofdm_frame_sync_probe"] = "ofdm_frame_sync_probe"
     fft_len: StrictInt
@@ -24,6 +53,20 @@ class OfdmFrameSyncProbeStep(Step):
     null_len: StrictInt
     frame_len: StrictInt
     data_syms: StrictInt
+
+    @model_validator(mode="after")
+    def _geometry(self) -> "OfdmFrameSyncProbeStep":
+        bad = _frame_geometry_errors(
+            fft_len=self.fft_len,
+            cp_len=self.cp_len,
+            sym_len=self.sym_len,
+            null_len=self.null_len,
+            frame_len=self.frame_len,
+            data_syms=self.data_syms,
+        )
+        if bad:
+            raise ValueError("; ".join(bad))
+        return self
 
 
 class OfdmFrameSyncProbe(RxStage[CompileContext, OfdmFrameSyncProbeStep]):
@@ -63,6 +106,24 @@ class OfdmDemodStep(Step):
     data_syms: StrictInt
     n_carriers: StrictInt
     bin_perm: list[int]
+
+    @model_validator(mode="after")
+    def _geometry(self) -> "OfdmDemodStep":
+        bad = _frame_geometry_errors(
+            fft_len=self.fft_len,
+            cp_len=self.cp_len,
+            sym_len=self.sym_len,
+            null_len=self.null_len,
+            frame_len=self.frame_len,
+            data_syms=self.data_syms,
+        )
+        if not 0 < self.n_carriers <= self.fft_len:
+            bad.append("n_carriers must be positive and no wider than fft_len")
+        if len(self.bin_perm) != self.fft_len:
+            bad.append("bin_perm needs one entry per FFT bin")
+        if bad:
+            raise ValueError("; ".join(bad))
+        return self
 
 
 class OfdmDemod(RxStage[CompileContext, OfdmDemodStep]):

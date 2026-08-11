@@ -435,3 +435,30 @@ def test_survey_reports_where_it_analyzed(tmp_path: Path) -> None:
     assert res.analyzed_samples < res.span_samples
     assert res.analyzed_start > 0
     assert res.analyzed_start + res.analyzed_samples <= res.span_samples
+
+
+def test_clean_carrier_does_not_crash_the_inst_freq_histogram() -> None:
+    # A perfectly steady tone has a near-zero instantaneous-frequency spread,
+    # and float32 cannot place 65 distinct bin edges across it: numpy raised
+    # "Too many bins for data range" and survey returned invalid_argument for
+    # arguments that were never wrong. Generated waveforms hit this on the
+    # product's own tx -> survey loop.
+    fs, n = 1.0e6, 1 << 16
+    x = np.exp(2j * np.pi * 37_000.0 / fs * np.arange(n)).astype(np.complex64)
+    r = _inst_freq(x, fs)
+    assert len(r.hist_counts) > 0
+    assert sum(r.hist_counts) > 0
+
+
+def test_non_finite_capture_is_rejected_not_described(tmp_path: Path) -> None:
+    # run_rx scans for non-finite input and says the capture is corrupt.
+    # survey is what an operator points at a capture FIRST, and it had no
+    # such scan: one Inf turned mean_amplitude into inf and, via
+    # "std > 0 else 0.0", reported amplitude_kurtosis 0.0 — a confident
+    # "Gaussian" reading fabricated from a NaN.
+    x = np.ones(1 << 14, np.complex64)
+    x[5000] = np.complex64(complex(np.inf, 0.0))
+    p = tmp_path / "corrupt.cf32"
+    x.tofile(p)
+    with pytest.raises(Exception, match="non-finite"):
+        survey_iq(p, 1.0e6)

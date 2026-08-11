@@ -43,8 +43,28 @@ def steps_from_spec(
             raise StepSpecError(
                 index, conv, f"unknown conv; known: {sorted(step_models)}"
             )
+        model = step_models[conv]
         try:
-            out.append(step_models[conv].model_validate(dict(obj)))
+            out.append(model.model_validate(dict(obj)))
         except ValidationError as exc:
-            raise StepSpecError(index, conv, str(exc)) from exc
+            raise StepSpecError(index, conv, _detail(model, exc)) from exc
     return out
+
+
+def _detail(model: type[Step], exc: ValidationError) -> str:
+    """Extra keys get the accepted field list appended. Steps forbid extras so
+    a typo fails loudly, but the bare pydantic text ("Extra inputs are not
+    permitted") reads identically whether the caller misspelled a field or is
+    replaying a recipe whose field this stage no longer takes — and a sibling
+    stage may still accept that very name."""
+    extras = sorted(
+        str(e["loc"][0])
+        for e in exc.errors()
+        if e["type"] == "extra_forbidden" and e["loc"]
+    )
+    if not extras:
+        return str(exc)
+    return (
+        f"{exc}\nrejected field(s) {extras}; {model.__name__} accepts "
+        f"{sorted(model.model_fields)}"
+    )

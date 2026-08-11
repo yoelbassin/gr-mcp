@@ -27,7 +27,12 @@ class CaptureTooShort(Exception):
     pass
 
 
+class CaptureNotFinite(Exception):
+    pass
+
+
 register_error(CaptureTooShort, "invalid_argument")
+register_error(CaptureNotFinite, "invalid_argument")
 
 
 def slice_len(path: Path, offset: int, length: int) -> int:
@@ -92,6 +97,14 @@ def sample_iq(
     with path.open("rb") as f:
         f.seek(start * _ITEMSIZE)
         window = np.fromfile(f, dtype=np.complex64, count=min(span, budget))
+    bad = np.flatnonzero(~np.isfinite(window))
+    if bad.size:
+        raise CaptureNotFinite(
+            f"{path.name}: input contains non-finite samples (first at item "
+            f"{start + int(bad[0])}); the capture is corrupt. Every statistic "
+            f"below would be NaN or a fabricated default — re-record, or slice "
+            f"past the damage with capture_offset/capture_samples."
+        )
     return IqWindow(samples=window, start=start - offset, span=span)
 
 

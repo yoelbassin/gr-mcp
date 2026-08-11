@@ -45,3 +45,16 @@ def test_steps_from_spec_bad_param_raises_eagerly() -> None:
     with pytest.raises(StepSpecError) as exc:
         steps_from_spec([{"conv": "fake", "order": "x"}], {"fake": _FakeStep})
     assert exc.value.index == 0 and exc.value.conv == "fake"
+
+
+def test_rejected_field_names_what_the_stage_does_accept() -> None:
+    # Steps forbid extras so a typo fails loudly, but pydantic's bare text
+    # reads the same whether the caller misspelled a field or is replaying a
+    # saved recipe whose field this stage no longer takes — and a sibling
+    # stage may still accept that very name. The message has to distinguish
+    # them without the caller re-reading describe_stages.
+    with pytest.raises(StepSpecError) as exc:
+        steps_from_spec([{"conv": "fake", "order": 4, "gone": 7}], {"fake": _FakeStep})
+    text = str(exc.value)
+    assert "rejected field(s) ['gone']" in text
+    assert "'order'" in text and "'alpha'" in text

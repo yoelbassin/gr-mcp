@@ -19,11 +19,24 @@ def _assign(
 
 
 def percentile_span(
-    x: npt.NDArray[np.floating[Any]], percentiles: tuple[float, float] = (0.5, 99.5)
+    x: npt.NDArray[np.floating[Any]],
+    percentiles: tuple[float, float] = (0.5, 99.5),
+    bins: int = 1,
 ) -> tuple[float, float]:
+    """Span covering `percentiles` of x, always wide enough to hold `bins`
+    distinct edges in x's OWN dtype. A steady signal's span can be positive
+    yet finer than float32 resolves at that magnitude — a clean carrier's
+    instantaneous frequency sits hundredths of a Hz wide around tens of kHz —
+    and numpy rejects the range outright ("Too many bins for data range")
+    rather than returning one narrow cluster."""
     lo, hi = (float(v) for v in np.percentile(x, percentiles))
     if hi <= lo:
         hi = lo + 1.0
+    scale = np.asarray(max(abs(lo), abs(hi), 1.0), dtype=x.dtype)
+    floor = bins * float(np.spacing(scale))
+    if hi - lo < floor:
+        mid = 0.5 * (lo + hi)
+        lo, hi = mid - 0.5 * floor, mid + 0.5 * floor
     return lo, hi
 
 

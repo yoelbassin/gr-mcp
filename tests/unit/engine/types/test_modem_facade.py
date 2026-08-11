@@ -149,13 +149,13 @@ VALID_STEPS: dict[str, Step] = {
         cp_len=4,
         sym_len=20,
         null_len=24,
-        frame_len=100,
+        frame_len=124,
         data_syms=4,
         n_carriers=4,
         bin_perm=_OFDM_BIN_PERM,
     ),
     "ofdm_frame_sync_probe": OfdmFrameSyncProbeStep(
-        fft_len=16, cp_len=4, sym_len=20, null_len=24, frame_len=100, data_syms=4
+        fft_len=16, cp_len=4, sym_len=20, null_len=24, frame_len=124, data_syms=4
     ),
     "ook_envelope": OokEnvelopeStep(),
     "permute": PermuteStep(perm=[0, 1, 2, 3]),

@@ -519,10 +519,13 @@ def _merge_candidates(
 
 
 def _inst_freq(x: npt.NDArray[np.complex64], sample_rate: float) -> InstFreqStats:
-    f = np.angle(x[1:] * np.conj(x[:-1])) / (2 * np.pi) * sample_rate
+    # float64: numpy takes the bin dtype from the data, and a steady tone's
+    # frequency span at tens of kHz is finer than float32 resolves there, so
+    # 65 bins across it collapse into a "Too many bins for data range" raise.
+    f = np.angle(x[1:] * np.conj(x[:-1])).astype(np.float64) / (2 * np.pi) * sample_rate
     f = _gate(f, _slot_active_pairs(x, _SURVEY_ACTIVE_FRACTION, _SURVEY_BURST_WINDOW))
     spread = float(f.std())
-    lo, hi = percentile_span(f)
+    lo, hi = percentile_span(f, bins=_SURVEY_IFREQ_BINS)
     counts, edges = np.histogram(f, bins=_SURVEY_IFREQ_BINS, range=(lo, hi))
     centers = (edges[:-1] + edges[1:]) / 2
     step = float(edges[1] - edges[0]) if edges.size > 1 else 0.0
