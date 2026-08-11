@@ -75,7 +75,12 @@ def slim_diagnostics(
 ) -> list[dict[str, object]]:
     out: list[dict[str, object]] = []
     for d in rows:
-        row: dict[str, object] = d.model_dump(mode="json", exclude_none=True)
+        # exclude marks from the dump: it is capped below, and materializing
+        # the whole list here only to overwrite the key builds a second
+        # full-size Python int list per row (the worker already built one)
+        row: dict[str, object] = d.model_dump(
+            mode="json", exclude_none=True, exclude={"marks"}
+        )
         if d.marks is not None:
             sidecar = (
                 run_dir / f"diag_{d.block}_{d.key}.i64" if run_dir is not None else None

@@ -398,7 +398,7 @@ def _rs_decode_words(
         word = [int(s) for s in syms[w * n : (w + 1) * n]]
         try:
             data, full, _ = codec.decode(word)
-            out.extend(full if emit == "codeword" else data)
+            out.extend(full if emit is EmitMode.CODEWORD else data)
             valid += 1
         except _rs.ReedSolomonError:
             # uncorrectable is detectable, never repaired by guessing: emit the

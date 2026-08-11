@@ -11,12 +11,8 @@ from marconi.engine.backends.gnuradio.blocks import (
     _modules,
 )
 from marconi.engine.backends.gnuradio.embedded.lifecycle import EofProbe
-from marconi.engine.compile.ir import GrPipeline
+from marconi.engine.compile.ir import FILE_SOURCE_KINDS, GrPipeline
 from marconi.engine.io.source import SourceSlice
-
-_FILE_SOURCE_KINDS = frozenset(
-    {"iq_file_source", "bits_file_source", "soft_bits_file_source"}
-)
 
 
 def _wire_eof_probe(pipeline: GrPipeline, instances: dict[str, Any]) -> None:
@@ -41,7 +37,7 @@ def _wire_eof_probe(pipeline: GrPipeline, instances: dict[str, Any]) -> None:
     sources = [
         b
         for b in pipeline.blocks
-        if b.kind in _FILE_SOURCE_KINDS and not bool(b.params.get("repeat", False))
+        if b.kind in FILE_SOURCE_KINDS and not bool(b.params.get("repeat", False))
     ]
     consenting = {
         bid: inst for bid, inst in instances.items() if hasattr(inst, "eof_probe")

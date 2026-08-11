@@ -18,14 +18,7 @@ from marconi.engine.backends.base import (
     Diagnostic,
     RunResult,
 )
-from marconi.engine.compile.ir import GrPipeline
-
-_SINK_KINDS = {
-    "iq_file_sink",
-    "bits_file_sink",
-    "soft_bits_file_sink",
-    "symbols_file_sink",
-}
+from marconi.engine.compile.ir import FILE_SINK_KINDS, GrPipeline
 
 _SCHED_ABORT = re.compile(
     r"block_executor.*error|caught unhandled exception", re.IGNORECASE
@@ -36,7 +29,7 @@ def sink_paths(pipeline: GrPipeline) -> list[str]:
     return [
         str(b.params["path"])
         for b in pipeline.blocks
-        if b.kind in _SINK_KINDS and "path" in b.params
+        if b.kind in FILE_SINK_KINDS and "path" in b.params
     ]
 
 
@@ -234,7 +227,7 @@ def _flag_empty_sink(result: RunResult, pipeline: GrPipeline) -> RunResult:
     if pipeline.terminal_sink is not None:
         sink_ids = {pipeline.terminal_sink}
     else:
-        sink_ids = {b.id for b in pipeline.blocks if b.kind in _SINK_KINDS}
+        sink_ids = {b.id for b in pipeline.blocks if b.kind in FILE_SINK_KINDS}
     sinks = [c for c in result.census if c.block in sink_ids]
     if not sinks or any(c.items_in is None or c.items_in > 0 for c in sinks):
         return result

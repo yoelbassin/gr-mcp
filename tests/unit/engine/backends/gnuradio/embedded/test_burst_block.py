@@ -234,11 +234,16 @@ def test_scans_stay_vectorized() -> None:
                 n += 1
             return tracer
 
+        # restore whatever was tracing, not None: under pytest --cov this
+        # runs inside coverage's tracer, and evicting it leaves every later
+        # test in this xdist worker recording nothing — a large phantom
+        # coverage regression with no failing test pointing at it
+        previous = sys.gettrace()
         sys.settrace(tracer)
         try:
             fn()
         finally:
-            sys.settrace(None)
+            sys.settrace(previous)
         return n
 
     rng = np.random.default_rng(1)

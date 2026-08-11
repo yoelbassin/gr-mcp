@@ -9,7 +9,7 @@ from marconi.engine.coding.builder import CodingBuilder
 from marconi.engine.coding.program import CodingProgram
 from marconi.engine.compile.compile_context import CompileContext
 from marconi.engine.compile.errors import CompileError
-from marconi.engine.compile.ir import GrPipeline
+from marconi.engine.compile.ir import _IO_BLOCKS, GrPipeline
 from marconi.engine.stages.base import (
     CodingStage,
     SpecValidationError,
@@ -25,16 +25,6 @@ from marconi.engine.types.params import ParamValue
 from marconi.engine.types.step import Step, stage_label
 
 Direction = Literal["rx", "tx"]
-
-# item_type -> (source_kind, sink_kind). The GR wire type alone selects IO;
-# carrier is decision-hardness (a seam invariant), never a routing knob. Descriptor
-# data, never stage names.
-_IO_BLOCKS: dict[ItemType, tuple[str | None, str]] = {
-    ItemType.C: ("iq_file_source", "iq_file_sink"),
-    ItemType.S: (None, "symbols_file_sink"),
-    ItemType.B: ("bits_file_source", "bits_file_sink"),
-    ItemType.F: ("soft_bits_file_source", "soft_bits_file_sink"),
-}
 
 
 def _io_kinds(desc: Descriptor) -> tuple[str | None, str]:

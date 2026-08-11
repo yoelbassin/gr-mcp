@@ -4,7 +4,29 @@ from collections import Counter
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from marconi.engine.types.enums import ItemType
 from marconi.engine.types.params import ParamValue
+
+# item_type -> (source_kind, sink_kind). The GR wire type alone selects IO;
+# carrier is decision-hardness (a seam invariant), never a routing knob.
+# Descriptor data, never stage names. It lives with the IR rather than in the
+# compiler because it names the blocks the IR is allowed to contain, and both
+# the compiler that emits them and the backend that recognises them read it.
+_IO_BLOCKS: dict[ItemType, tuple[str | None, str]] = {
+    ItemType.C: ("iq_file_source", "iq_file_sink"),
+    ItemType.S: (None, "symbols_file_sink"),
+    ItemType.B: ("bits_file_source", "bits_file_sink"),
+    ItemType.F: ("soft_bits_file_source", "soft_bits_file_sink"),
+}
+
+# Derived, never retyped: the backend needs the same two sets to find the one
+# file source (for the EOF probe) and to tell a sink from any other block.
+# Held as three hand-written lists they could only diverge, and the failure is
+# silent — an unrecognised source drops every chunked block's expected_items,
+# so eof_final never fires and each withholds its tail forever, which reads as
+# a short output stream rather than an error.
+FILE_SOURCE_KINDS = frozenset(src for src, _ in _IO_BLOCKS.values() if src)
+FILE_SINK_KINDS = frozenset(sink for _, sink in _IO_BLOCKS.values())
 
 
 class GrBlock(BaseModel):
