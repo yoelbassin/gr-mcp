@@ -31,7 +31,7 @@ def make_cp_symbol_sync(
     buf_cap = need + 8 * sym_len
     pmt = gr.pmt
 
-    class _CpSymbolSync(gr.basic_block):  # type: ignore[misc, name-defined]
+    class _CpSymbolSync(gr.basic_block):
         def __init__(self) -> None:
             gr.basic_block.__init__(
                 self,

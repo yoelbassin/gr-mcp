@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
+import numpy.typing as npt
 
 from marconi.engine.io.source import SourceSlice
 from marconi.engine.run import run_rx
@@ -21,15 +22,16 @@ def _rrc(sps: int, span: int = 11, beta: float = 0.35) -> np.ndarray:
     num = np.sin(np.pi * t * (1 - beta)) + 4 * beta * t * np.cos(np.pi * t * (1 + beta))
     den = np.pi * t * (1 - (4 * beta * t) ** 2)
     h = np.where(np.abs(t) < 1e-8, 1 - beta + 4 * beta / np.pi, num / den)
-    return (h / np.sqrt(np.sum(h**2))).astype(float)
+    taps: npt.NDArray[np.float64] = (h / np.sqrt(np.sum(h**2))).astype(np.float64)
+    return taps
 
 
 def _bursty_dqpsk(
     nb: int, L: int, G: int, sto: float, sfo_ppm: float, snr: float, seed: int
-) -> np.ndarray:
+) -> npt.NDArray[np.complex64]:
     rng = np.random.default_rng(seed)
     H = _rrc(SPS)
-    seq: list = []
+    seq: list[complex] = []
     for _ in range(nb):
         k = rng.integers(0, 4, L)
         seq.extend(np.exp(1j * np.cumsum(k) * (np.pi / 2)).tolist())
@@ -46,7 +48,8 @@ def _bursty_dqpsk(
     x = x + np.sqrt(pw / 10 ** (snr / 10) / 2) * (
         rng.standard_normal(x.size) + 1j * rng.standard_normal(x.size)
     )
-    return x.astype(np.complex64)
+    out: npt.NDArray[np.complex64] = x.astype(np.complex64)
+    return out
 
 
 def _r4(z: np.ndarray) -> float:

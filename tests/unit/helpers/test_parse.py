@@ -54,7 +54,9 @@ def test_default_six_bit_charset_unchanged() -> None:
     assert f.char_bits == 6 and f.rest is False
 
 
-def _rest_roundtrip(charset: str, char_bits: int, header_bits: int, msg: dict) -> dict:
+def _rest_roundtrip(
+    charset: str, char_bits: int, header_bits: int, msg: parse.Message
+) -> parse.Message | None:
     fields = [
         {"name": "kind", "bits": header_bits},
         {
@@ -72,7 +74,7 @@ def _rest_roundtrip(charset: str, char_bits: int, header_bits: int, msg: dict) -
 
 
 def test_rest_round_trips_through_tx_then_rx() -> None:
-    msg = {"kind": 0x7E, "text": "MARCONI!"}
+    msg: parse.Message = {"kind": 0x7E, "text": "MARCONI!"}
     assert _rest_roundtrip(_ASCII7, 7, 8, msg) == msg
 
 
@@ -84,7 +86,7 @@ def test_rest_round_trips_exactly_across_lengths(charset: str, char_bits: int) -
     alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"  # in both charsets, no trailing space
     for length in range(1, 11):
         text = alphabet[:length]
-        msg = {"kind": 0x5A, "text": text}
+        msg: parse.Message = {"kind": 0x5A, "text": text}
         got = _rest_roundtrip(charset, char_bits, 8, msg)
         assert got == msg, f"char_bits={char_bits} length={length}: {got} != {msg}"
 
@@ -144,7 +146,7 @@ def test_parse_roundtrip_signed() -> None:
         {"name": "b", "bits": 28, "signed": True},
         {"name": "c", "bits": 2},
     ]
-    msg = {"a": 5, "b": -1234, "c": 1}
+    msg: parse.Message = {"a": 5, "b": -1234, "c": 1}
     built = parse.build_message(msg, fields)
     out = parse.parse_message(built, fields)
     assert out == msg
@@ -164,14 +166,14 @@ _CASES = [
 
 
 def test_type1_parses_its_own_body() -> None:
-    msg = {"kind": 1, "id": 7, "speed": 300, "course": 900}
+    msg: parse.Message = {"kind": 1, "id": 7, "speed": 300, "course": 900}
     payload = parse.build_message(msg, _COMMON + _TYPE1_FIELDS)
     out = parse.parse_message(payload, _COMMON, discriminator="kind", cases=_CASES)
     assert out == msg
 
 
 def test_type5_parses_its_own_body_not_type1() -> None:
-    msg = {"kind": 5, "id": 9, "callsign": 0x1FF, "draught": 42}
+    msg: parse.Message = {"kind": 5, "id": 9, "callsign": 0x1FF, "draught": 42}
     payload = parse.build_message(msg, _COMMON + _TYPE5_FIELDS)
     out = parse.parse_message(payload, _COMMON, discriminator="kind", cases=_CASES)
     assert out == msg

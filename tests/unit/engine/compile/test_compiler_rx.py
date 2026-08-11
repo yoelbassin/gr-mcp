@@ -8,11 +8,11 @@ from helpers._fixtures import (
 )
 
 from marconi.engine.compile.compiler import (
-    CompileError,
     _sink_kind,
     _source_kind,
     compile_modem,
 )
+from marconi.engine.compile.errors import CompileError
 from marconi.engine.compile.ir import GrPipeline
 from marconi.engine.types.descriptor import Carrier, Descriptor
 from marconi.engine.types.enums import ItemType

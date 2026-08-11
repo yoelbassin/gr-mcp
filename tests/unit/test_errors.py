@@ -25,7 +25,7 @@ def test_every_public_exception_classifies_not_internal() -> None:
     # Each package registers its public exceptions at import; a user's bad
     # spec/codec/wiring must never read as an internal bug.
     from marconi.engine.backends.base import BackendError
-    from marconi.engine.compile.compiler import CompileError
+    from marconi.engine.compile.errors import CompileError
     from marconi.engine.stages.base import SpecValidationError, StageDirectionError
     from marconi.engine.types.models import ValidationIssue
 

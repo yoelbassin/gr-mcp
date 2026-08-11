@@ -14,7 +14,7 @@ from marconi.engine.types.enums import ItemType
 from marconi.engine.types.levels import Level
 
 
-def _good() -> dict:
+def _good() -> dict[str, object]:
     return {
         "fft_len": 64,
         "cp_len": 16,
@@ -84,6 +84,6 @@ def test_emit_rx_passes_lock_thresholds_to_their_blocks() -> None:
         {"kmin": -60},  # span -60..-12 excludes DC
     ],
 )
-def test_inconsistent_geometry_rejected(patch: dict) -> None:
+def test_inconsistent_geometry_rejected(patch: dict[str, object]) -> None:
     with pytest.raises(ValidationError):
         OfdmCoherentSyncStep.model_validate({**_good(), **patch})

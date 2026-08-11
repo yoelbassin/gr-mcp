@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 from fastmcp.exceptions import ToolError
 
-from marconi.engine.compile.compiler import CompileError
+from marconi.engine.compile.errors import CompileError
 from marconi.mcp.boundary import tool_error_boundary
 
 

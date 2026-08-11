@@ -212,7 +212,8 @@ def codebook_rx(
         def _values(
             syms: npt.NDArray[np.signedinteger[Any]],
         ) -> npt.NDArray[np.int64]:
-            return inv[syms]
+            picked: npt.NDArray[np.int64] = inv[syms]
+            return picked
 
     if symbol_input:
         if c.symbols is None:

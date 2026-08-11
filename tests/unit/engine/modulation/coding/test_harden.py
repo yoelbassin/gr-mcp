@@ -3,7 +3,8 @@ from pathlib import Path
 import numpy as np
 
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
-from marconi.engine.compile.compiler import CompileError, compile_modem
+from marconi.engine.compile.compiler import compile_modem
+from marconi.engine.compile.errors import CompileError
 from marconi.engine.io.bitfile import read_bits
 from marconi.engine.modulation.coding.stages import HardenStep
 from marconi.engine.stages.registry import stage_registry

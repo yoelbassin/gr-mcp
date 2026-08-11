@@ -51,7 +51,8 @@ def _fetch() -> bytes:
         return Path(sys.argv[1]).read_bytes()
     req = urllib.request.Request(URL, headers={"User-Agent": "Mozilla/5.0"})
     try:
-        return urllib.request.urlopen(req, timeout=300).read()  # noqa: S310
+        payload: bytes = urllib.request.urlopen(req, timeout=300).read()  # noqa: S310
+        return payload
     except urllib.error.URLError as e:
         code = getattr(e, "code", "?")
         raise SystemExit(

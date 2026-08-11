@@ -64,7 +64,7 @@ _SLICE = (
 )
 
 
-def _pocsag_spec() -> dict:
+def _pocsag_spec() -> dict[str, object]:
     return {
         "symbol_rate": 1200.0,
         "path": [

@@ -1,11 +1,12 @@
 import numpy as np
+import numpy.typing as npt
 
 from marconi.survey.measure import _eye_openness
 
 
 def _fsk_instfreq(
     n_sym: int, sps: float, levels: list[float], sfo: float, seed: int
-) -> np.ndarray:
+) -> npt.NDArray[np.float64]:
     rng = np.random.default_rng(seed)
     syms = rng.choice(levels, size=n_sym)
     # fractional samples-per-symbol with mild clock drift (SFO) -> real impairment
@@ -16,7 +17,8 @@ def _fsk_instfreq(
     x = syms[sym_index].astype(np.float64)
     x += rng.normal(0.0, 0.06, x.size)  # discriminator noise
     x = np.roll(x, 3)  # fractional-ish STO
-    return x
+    out: npt.NDArray[np.float64] = x.astype(np.float64)
+    return out
 
 
 def test_eye_opens_at_true_rate_not_at_spurious_rates() -> None:

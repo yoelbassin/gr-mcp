@@ -95,7 +95,7 @@ def _raising_basic_flowgraph(sink: Path) -> Any:
                 self, name="boom", in_sig=[np.complex64], out_sig=[np.complex64]
             )
 
-        def forecast(self, noutput_items: int, ninputs: int) -> list:
+        def forecast(self, noutput_items: int, ninputs: int) -> list[int]:
             return [1] * ninputs
 
         def general_work(self, input_items: Any, output_items: Any) -> int:
@@ -153,7 +153,7 @@ def test_embedded_raise_reports_error_and_keeps_sink(
         blocks=[GrBlock(id="k", kind="iq_file_sink", params={"path": str(sink)})],
         connections=[],
     )
-    box: dict = {}
+    box: dict[str, RunResult] = {}
     t = threading.Thread(
         target=lambda: box.setdefault("r", worker_mod._run_flowgraph(pipe)),
         daemon=True,

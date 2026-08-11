@@ -6,7 +6,8 @@ import pytest
 from helpers._dsp import aligned_ber, channel, read_bits, write_bits
 
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
-from marconi.engine.compile.compiler import CompileError, compile_modem
+from marconi.engine.compile.compiler import compile_modem
+from marconi.engine.compile.errors import CompileError
 from marconi.engine.compile.ir import GrPipeline
 from marconi.engine.modulation.css.stages import (
     ChirpSyncStep,

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
+import numpy.typing as npt
 
 from marconi.survey.measure import _carrier
 
@@ -20,7 +21,9 @@ def _upsample(sym: np.ndarray) -> np.ndarray:
     return np.convolve(x, np.ones(_SPS), "same")
 
 
-def _noisy(x: np.ndarray, foff: float, snr_db: float) -> np.ndarray:
+def _noisy(
+    x: npt.NDArray[np.complex64], foff: float, snr_db: float
+) -> npt.NDArray[np.complex64]:
     r = _rng()
     x = x * np.exp(1j * 2 * np.pi * foff / _FS * np.arange(x.size))
     p = float(np.mean(np.abs(x) ** 2))
@@ -28,10 +31,13 @@ def _noisy(x: np.ndarray, foff: float, snr_db: float) -> np.ndarray:
     noise = np.sqrt(npow / 2) * (
         r.standard_normal(x.size) + 1j * r.standard_normal(x.size)
     )
-    return (x + noise).astype(np.complex64)
+    out: npt.NDArray[np.complex64] = (x + noise).astype(np.complex64)
+    return out
 
 
-def _psk(order: int, snr_db: float = 15.0, foff: float = _FOFF) -> np.ndarray:
+def _psk(
+    order: int, snr_db: float = 15.0, foff: float = _FOFF
+) -> npt.NDArray[np.complex64]:
     k = _rng().integers(0, order, _NSYM)
     return _noisy(_upsample(np.exp(1j * 2 * np.pi * k / order)), foff, snr_db)
 
@@ -54,10 +60,13 @@ def _psk_seeded(order: int, snr_db: float, foff: float, seed: int) -> np.ndarray
     p = float(np.mean(np.abs(x) ** 2))
     npow = p / (10 ** (snr_db / 10))
     n = np.sqrt(npow / 2) * (g.standard_normal(x.size) + 1j * g.standard_normal(x.size))
-    return (x + n).astype(np.complex64)
+    out: npt.NDArray[np.complex64] = (x + n).astype(np.complex64)
+    return out
 
 
-def _qam(levels: np.ndarray, snr_db: float, foff: float, seed: int) -> np.ndarray:
+def _qam(
+    levels: npt.NDArray[np.float64], snr_db: float, foff: float, seed: int
+) -> npt.NDArray[np.complex64]:
     g = np.random.default_rng(seed)
     k = levels.size
     sym = levels[g.integers(0, k, _NSYM)] + 1j * levels[g.integers(0, k, _NSYM)]
@@ -68,7 +77,8 @@ def _qam(levels: np.ndarray, snr_db: float, foff: float, seed: int) -> np.ndarra
     p = float(np.mean(np.abs(x) ** 2))
     npow = p / (10 ** (snr_db / 10))
     n = np.sqrt(npow / 2) * (g.standard_normal(x.size) + 1j * g.standard_normal(x.size))
-    return (x + n).astype(np.complex64)
+    out: npt.NDArray[np.complex64] = (x + n).astype(np.complex64)
+    return out
 
 
 def _bursty_psk(
@@ -84,7 +94,8 @@ def _bursty_psk(
     p = float(np.mean(np.abs(x[on]) ** 2))
     npow = p / (10 ** (snr_db / 10))
     n = np.sqrt(npow / 2) * (g.standard_normal(x.size) + 1j * g.standard_normal(x.size))
-    return (x + n).astype(np.complex64)
+    out: npt.NDArray[np.complex64] = (x + n).astype(np.complex64)
+    return out
 
 
 def test_qpsk_reads_order_4_with_precise_offset() -> None:

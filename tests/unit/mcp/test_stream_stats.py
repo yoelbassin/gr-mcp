@@ -30,7 +30,8 @@ def test_four_level_clusters_recovered(tmp_path: Path) -> None:
     assert centers[0] < -2.0 and centers[-1] > 2.0
     assert out["levels"] == centers
     cluster_counts = out["cluster_counts"]
-    assert sum(cluster_counts) == out["sampled_items"]  # type: ignore[call-overload]
+    assert isinstance(cluster_counts, list)
+    assert sum(cluster_counts) == out["sampled_items"]
 
 
 def test_histogram_length_and_totals(tmp_path: Path) -> None:
@@ -84,7 +85,7 @@ def test_tiny_stream_clamps_clusters_without_crash(tmp_path: Path) -> None:
     assert isinstance(centers, list) and 1 <= len(centers) <= x.size
     cluster_counts = out["cluster_counts"]
     assert isinstance(cluster_counts, list) and len(cluster_counts) == len(centers)
-    assert sum(cluster_counts) == out["sampled_items"]  # type: ignore[call-overload]
+    assert sum(cluster_counts) == out["sampled_items"]
     assert out["levels"] == centers
 
 
@@ -101,7 +102,9 @@ def test_over_requested_clusters_drops_phantoms(tmp_path: Path) -> None:
         clusters=3,
         bins=41,
     )
-    assert len(out["levels"]) == 2  # type: ignore[arg-type]
+    levels = out["levels"]
+    assert isinstance(levels, list) and len(levels) == 2
     counts = out["cluster_counts"]
-    assert all(c > 0 for c in counts)  # type: ignore[attr-defined]
-    assert sum(counts) == out["sampled_items"]  # type: ignore[call-overload]
+    assert isinstance(counts, list)
+    assert all(c > 0 for c in counts)
+    assert sum(counts) == out["sampled_items"]

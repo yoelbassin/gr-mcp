@@ -22,6 +22,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
+import numpy.typing as npt
 from helpers import bitops, crc, framing, parse
 
 from marconi.engine.coding.stages_bits import CodebookStep, SyncWordStep
@@ -55,7 +56,12 @@ FIELDS = [
 ]
 
 # body = C + M(2) + A(6) = 9 bytes; length counts the bytes after the L-field
-_MSG = {"length": 9, "c_field": 0x44, "m_field": 0x2D2C, "address": 0x112233445566}
+_MSG: parse.Message = {
+    "length": 9,
+    "c_field": 0x44,
+    "m_field": 0x2D2C,
+    "address": 0x112233445566,
+}
 
 
 def _wmbus_modem() -> Modem:
@@ -79,10 +85,13 @@ def _codebook_encode(bits: np.ndarray, table: list[int]) -> np.ndarray:
     values = nibbles @ in_weights
     codewords = np.asarray(table, dtype=np.int64)[values]
     out_shifts = np.arange(code_bits - 1, -1, -1, dtype=np.int64)
-    return ((codewords[:, None] >> out_shifts) & 1).reshape(-1).astype(np.uint8)
+    chips: npt.NDArray[np.uint8] = (
+        ((codewords[:, None] >> out_shifts) & 1).reshape(-1).astype(np.uint8)
+    )
+    return chips
 
 
-def _encode(msg: dict[str, int]) -> np.ndarray:
+def _encode(msg: parse.Message) -> npt.NDArray[np.uint8]:
     # old TX chain order (compile_codec walked [codebook, sync_word,
     # length_frame, crc, parse] in reverse for TX): parse -> crc -> sync
     # prepend -> codebook encode. length_frame contributed nothing on TX (the

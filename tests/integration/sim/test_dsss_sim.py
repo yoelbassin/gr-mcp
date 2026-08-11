@@ -53,7 +53,7 @@ CHIPS = [
     0b01011101011011001010111010010000,
 ]
 SYNC = "00a7"  # SFD-like sync at the data level
-CRC_PARAMS = {"poly": 0x1021, "bits": 16, "init": 0x0000, "xorout": 0x0000}
+CRC = crc.CrcSpec(poly=0x1021, bits=16)
 _PAYLOAD = bytes.fromhex("48656c6c6f20444553530000")
 
 
@@ -67,7 +67,7 @@ def _spread(bits: np.ndarray) -> np.ndarray:
 
 
 def _wire(chip_errors_per_symbol: int, seed: int) -> np.ndarray:
-    framed = crc.crc_append(_PAYLOAD, **CRC_PARAMS)
+    framed = CRC.append(_PAYLOAD)
     payload_bits = np.concatenate(
         [bitops.bytes_to_bits(bytes.fromhex(SYNC)), bitops.bytes_to_bits(framed)]
     ).astype(np.uint8)
@@ -113,7 +113,7 @@ def _decode(tmp_path: Path, wire: np.ndarray) -> list[bytes]:
     for w in res.windows:
         if w + want > bits.size:
             continue
-        ok, body = crc.crc_check(bitops.bits_to_bytes(bits[w : w + want]), **CRC_PARAMS)
+        ok, body = CRC.check(bitops.bits_to_bytes(bits[w : w + want]))
         if ok:
             out.append(body)
     return out

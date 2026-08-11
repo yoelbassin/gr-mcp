@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
+import numpy.typing as npt
 from helpers.bitops import bits_to_bytes, bytes_to_bits, read_uint
 
 
@@ -125,9 +126,10 @@ def xor_payload(payload: bytes, sequence_hex: str) -> bytes:
     return bytes(b ^ seq[i] for i, b in enumerate(payload))
 
 
-def xor_bits(bits: np.ndarray, sequence_hex: str) -> np.ndarray:
+def xor_bits(bits: npt.NDArray[np.uint8], sequence_hex: str) -> npt.NDArray[np.uint8]:
     seq = bytes_to_bits(bytes.fromhex(sequence_hex))
     bits = np.asarray(bits, dtype=np.uint8)
     if seq.size == 0 or bits.size == 0:
         return bits
-    return np.bitwise_xor(bits, np.resize(seq, bits.size))
+    xored: npt.NDArray[np.uint8] = np.bitwise_xor(bits, np.resize(seq, bits.size))
+    return xored

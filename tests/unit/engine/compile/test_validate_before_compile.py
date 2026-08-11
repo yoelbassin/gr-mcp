@@ -15,7 +15,8 @@ from helpers._fixtures import (
 from pydantic import ValidationError
 
 from marconi.engine.compile.compile_context import CompileContext
-from marconi.engine.compile.compiler import CompileError, compile_modem
+from marconi.engine.compile.compiler import compile_modem
+from marconi.engine.compile.errors import CompileError
 from marconi.engine.compile.ir import GrPipeline
 from marconi.engine.stages.base import Stage
 from marconi.engine.types.descriptor import Descriptor
@@ -61,7 +62,7 @@ def test_missing_param_names_the_field() -> None:
     # this from a compile-time check to pydantic construction), so the error is
     # a ValidationError raised while building the step, not a CompileError.
     with pytest.raises(ValidationError) as e:
-        FakeResamplerStep(decim=1)
+        FakeResamplerStep(decim=1)  # type: ignore[call-arg]  # the omission IS the case
     assert "interp" in str(e.value)
 
 

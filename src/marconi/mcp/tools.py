@@ -10,10 +10,10 @@ from pydantic import ValidationError
 from marconi.capture import capture_iq
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend
 from marconi.engine.compile.compiler import (
-    CompileError,
     compile_modem,
     compile_pipeline,
 )
+from marconi.engine.compile.errors import CompileError
 from marconi.engine.deadline import set_deadline
 from marconi.engine.run import composition_warnings
 from marconi.engine.run import run_rx as engine_run_rx

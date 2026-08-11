@@ -4,6 +4,7 @@ from collections.abc import Iterable
 from pathlib import Path
 
 import numpy as np
+import numpy.typing as npt
 
 NO_LOCK = 0.4
 
@@ -95,23 +96,25 @@ def write_bits(path: Path, bits: np.ndarray) -> Path:
     return path
 
 
-def read_bits(path: Path) -> np.ndarray:
+def read_bits(path: Path) -> npt.NDArray[np.uint8]:
     return np.fromfile(path, dtype=np.uint8)
 
 
-def read_complex(path: Path) -> np.ndarray:
+def read_complex(path: Path) -> npt.NDArray[np.complex64]:
     return np.fromfile(path, dtype=np.complex64)
 
 
-def nearest_syms(z: np.ndarray, points: np.ndarray) -> np.ndarray:
+def nearest_syms(z: np.ndarray, points: np.ndarray) -> npt.NDArray[np.intp]:
     pts = np.asarray(points)
-    return np.argmin(np.abs(z[:, None] - pts[None, :]), axis=1)
+    out: npt.NDArray[np.intp] = np.argmin(np.abs(z[:, None] - pts[None, :]), axis=1)
+    return out
 
 
-def tx_sym_indices(bits: np.ndarray, k: int) -> np.ndarray:
+def tx_sym_indices(bits: np.ndarray, k: int) -> npt.NDArray[np.int64]:
     """Group bits into k-bit symbol indices, MSB first (matches pack_k_bits_bb)."""
-    b = np.asarray(bits, dtype=int)[: (len(bits) // k) * k].reshape(-1, k)
-    return b.dot(1 << np.arange(k)[::-1])
+    b = np.asarray(bits, dtype=np.int64)[: (len(bits) // k) * k].reshape(-1, k)
+    out: npt.NDArray[np.int64] = b.dot(1 << np.arange(k)[::-1])
+    return out
 
 
 def resolved_ser(

@@ -35,7 +35,7 @@ def _make_expander(gr: Any, block_in: int, block_out: int) -> Any:
             self._buf = np.empty(0, dtype=np.float32)
             self._out = OutQueue(np.float32)
 
-        def forecast(self, noutput_items: int, ninputs: int) -> list:
+        def forecast(self, noutput_items: int, ninputs: int) -> list[int]:
             return forecast_drain(self._out.pending, ninputs)
 
         def general_work(self, input_items: Any, output_items: Any) -> int:

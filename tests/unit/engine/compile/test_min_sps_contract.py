@@ -2,7 +2,8 @@ from typing import Literal
 
 import pytest
 
-from marconi.engine.compile.compiler import CompileError, compile_modem
+from marconi.engine.compile.compiler import compile_modem
+from marconi.engine.compile.errors import CompileError
 from marconi.engine.compile.ir import GrPipeline
 from marconi.engine.modulation.fsk.stages import FskStep, MskStep
 from marconi.engine.modulation.ook.stages import OokEnvelopeStep

@@ -95,7 +95,7 @@ def _parse_stage_header(
         "has_crc": p["field_has_crc"],
         "parity": p["field_parity"],
     }
-    raw: list[dict] = []
+    raw: list[parse.FieldSpec] = []
     pos = 0
     for name, (start, length) in sorted(spans.items(), key=lambda kv: kv[1][0]):
         if start > pos:

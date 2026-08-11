@@ -111,7 +111,7 @@ def _integer_decim_path(pipeline: GrPipeline, src_id: str, bid: str) -> int | No
 
 
 def _guarded_top_block_cls(gr: Any) -> Any:
-    class _GuardedTopBlock(gr.top_block):  # type: ignore[misc]
+    class _GuardedTopBlock(gr.top_block):
         _uint8_py_blocks = False
 
         def run(self, *args: Any, **kwargs: Any) -> None:

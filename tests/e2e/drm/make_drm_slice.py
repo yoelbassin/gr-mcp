@@ -20,6 +20,7 @@ import wave
 from pathlib import Path
 
 import numpy as np
+import numpy.typing as npt
 
 _DIR = Path(__file__).resolve().parents[2] / "artifacts" / "assets" / "DRM"
 SRC = _DIR / "DW_ModeB_10kHz.flac"
@@ -41,11 +42,12 @@ def _read_mono_pcm16(flac: Path) -> tuple[np.ndarray, int]:
     return pcm.astype(np.float64) / 32768.0, fs
 
 
-def _lowpass_taps(cutoff_hz: float, fs: int, n_taps: int) -> np.ndarray:
+def _lowpass_taps(cutoff_hz: float, fs: int, n_taps: int) -> npt.NDArray[np.float64]:
     mid = (n_taps - 1) / 2
     h = np.sinc(2 * (cutoff_hz / fs) * (np.arange(n_taps) - mid))
     h *= np.hamming(n_taps)
-    return h / h.sum()
+    taps: npt.NDArray[np.float64] = h / h.sum()
+    return taps
 
 
 def _to_baseband(x: np.ndarray, fs: int) -> np.ndarray:

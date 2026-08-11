@@ -22,7 +22,8 @@ from helpers._paths import SRC_MARCONI
 
 from marconi.engine.coding.stages_bits import SyncWordStep
 from marconi.engine.coding.stages_symbols import SymbolMapStep
-from marconi.engine.compile.compiler import CompileError, compile_pipeline
+from marconi.engine.compile.compiler import compile_pipeline
+from marconi.engine.compile.errors import CompileError
 from marconi.engine.stages.base import CodingStage
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Carrier, Descriptor

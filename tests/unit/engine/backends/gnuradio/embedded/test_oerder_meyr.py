@@ -3,6 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import numpy as np
+import numpy.typing as npt
 import pytest
 from helpers._fakegr import FAKE_GR, drive
 
@@ -22,7 +23,8 @@ def _rrc(sps: int, span: int = 11, beta: float = 0.35) -> np.ndarray:
         )
         h = num / (np.pi * t * (1 - (4 * beta * t) ** 2))
     h[np.abs(t) < 1e-8] = 1 - beta + 4 * beta / np.pi
-    return (h / np.sqrt(np.sum(h**2))).astype(float)
+    taps: npt.NDArray[np.float64] = (h / np.sqrt(np.sum(h**2))).astype(np.float64)
+    return taps
 
 
 def _shaped_qpsk(nsym: int, sps: int, tau: float, seed: int = 0) -> np.ndarray:
@@ -32,9 +34,10 @@ def _shaped_qpsk(nsym: int, sps: int, tau: float, seed: int = 0) -> np.ndarray:
     up[::sps] = syms
     x = np.convolve(up, _rrc(sps), "same")
     n = np.arange(x.size)
-    return (
+    shifted: npt.NDArray[np.complex64] = (
         np.interp(n - tau * sps, n, x.real) + 1j * np.interp(n - tau * sps, n, x.imag)
     ).astype(np.complex64)
+    return shifted
 
 
 def _resample_symbols(samples: np.ndarray, sps: int, tau: float) -> np.ndarray:
@@ -179,7 +182,8 @@ def _bursty(
     noise = np.sqrt(pw / 10 ** (snr / 10) / 2) * (
         rng.standard_normal(xw.size) + 1j * rng.standard_normal(xw.size)
     )
-    return (xw + noise).astype(np.complex64)
+    out: npt.NDArray[np.complex64] = (xw + noise).astype(np.complex64)
+    return out
 
 
 def _matched(iq: np.ndarray) -> np.ndarray:

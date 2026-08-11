@@ -61,7 +61,8 @@ def test_translate_bounds_center_against_rate() -> None:
 
 
 def test_compile_rejects_translate_beyond_nyquist() -> None:
-    from marconi.engine.compile.compiler import CompileError, compile_pipeline
+    from marconi.engine.compile.compiler import compile_pipeline
+    from marconi.engine.compile.errors import CompileError
     from marconi.engine.stages.conditioning import TranslateStep
     from marconi.engine.types.models import Modem
 

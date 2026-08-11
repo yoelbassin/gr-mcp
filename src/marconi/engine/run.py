@@ -18,11 +18,11 @@ from marconi.engine.coding.carrier import CodingCarrier
 from marconi.engine.coding.program import run_coding
 from marconi.engine.compile.compiler import (
     CompiledPipeline,
-    CompileError,
     compile_pipeline,
     trace_item_type,
     trace_sink_path,
 )
+from marconi.engine.compile.errors import CompileError
 from marconi.engine.deadline import check_deadline, remaining, set_deadline
 from marconi.engine.io.bitfile import (
     read_bits,

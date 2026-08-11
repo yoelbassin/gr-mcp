@@ -104,14 +104,14 @@ def test_survey_reports_capture_scale_for_burst_targeting(tmp_path: Path) -> Non
     _two_tone_cf32(p, fs, n)
     # non-channelized survey over an offset slice: scale maps 1:1 from the offset
     agg = survey(str(p), fs, capture_offset=1000)
-    assert cast(dict, agg["bursts"])["capture_scale"] == {
+    assert cast(dict[str, object], agg["bursts"])["capture_scale"] == {
         "offset_samples": 1000,
         "decim": 1,
     }
     # channelized survey: segment indices are at the decimated rate, so decim
     # scales them back to original capture samples
     ch = survey(str(p), fs, center_hz=30_000.0, decim=4, capture_offset=1000)
-    assert cast(dict, ch["bursts"])["capture_scale"] == {
+    assert cast(dict[str, object], ch["bursts"])["capture_scale"] == {
         "offset_samples": 1000,
         "decim": 4,
     }
@@ -134,7 +134,8 @@ def test_survey_capture_scale_survives_dtype_conversion(tmp_path: Path) -> None:
     inter[1::2] = (iq.imag * 3000).astype(np.int16)
     inter.tofile(p)
     out = survey(str(p), fs, capture_dtype="ci16", capture_offset=500)
-    scale = cast(dict, cast(dict, out["bursts"])["capture_scale"])
+    bursts = cast(dict[str, object], out["bursts"])
+    scale = cast(dict[str, object], bursts["capture_scale"])
     assert scale == {"offset_samples": 500, "decim": 1}
 
 

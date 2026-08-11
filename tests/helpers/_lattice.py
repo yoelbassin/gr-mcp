@@ -7,6 +7,7 @@ from __future__ import annotations
 from typing import Any
 
 import numpy as np
+import numpy.typing as npt
 
 from marconi.engine.backends.gnuradio.embedded.pilot_lattice import PilotLattice
 
@@ -84,7 +85,7 @@ def eq_params() -> dict[str, Any]:
     return p
 
 
-def truth_grid(n_syms: int, start_fs: int, seed: int) -> np.ndarray:
+def truth_grid(n_syms: int, start_fs: int, seed: int) -> npt.NDArray[np.complex64]:
     rng = np.random.default_rng(seed)
     carriers, values = pilot_tables()
     grid = _QPSK[rng.integers(0, 4, (n_syms, len(EMIT)))]
@@ -95,7 +96,8 @@ def truth_grid(n_syms: int, start_fs: int, seed: int) -> np.ndarray:
             grid[i, kidx[k]] = v
         for k, v in zip(FP_CARRIERS, FP_VALUES):
             grid[i, kidx[k]] = v
-    return grid
+    out: npt.NDArray[np.complex64] = grid.astype(np.complex64)
+    return out
 
 
 def clean_symbols(n_syms: int, seed: int = 1) -> np.ndarray:

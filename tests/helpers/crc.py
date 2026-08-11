@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from functools import lru_cache
 from typing import Literal
 
@@ -146,3 +147,40 @@ def crc_append(
         fold_tail=fold_tail,
     )
     return body + checksum.to_bytes(n, endian)
+
+
+@dataclass(frozen=True)
+class CrcSpec:
+    poly: int
+    bits: int
+    init: int = 0
+    reflected: bool = False
+    xorout: int = 0
+    bit_order: str = "msb"
+    fold_tail: int = 0
+    checksum_le: bool = False
+
+    def append(self, body: bytes) -> bytes:
+        return crc_append(
+            body,
+            poly=self.poly,
+            bits=self.bits,
+            init=self.init,
+            reflected=self.reflected,
+            xorout=self.xorout,
+            fold_tail=self.fold_tail,
+            checksum_le=self.checksum_le,
+        )
+
+    def check(self, payload: bytes) -> tuple[bool, bytes]:
+        return crc_check(
+            payload,
+            poly=self.poly,
+            bits=self.bits,
+            init=self.init,
+            reflected=self.reflected,
+            xorout=self.xorout,
+            bit_order=self.bit_order,
+            fold_tail=self.fold_tail,
+            checksum_le=self.checksum_le,
+        )

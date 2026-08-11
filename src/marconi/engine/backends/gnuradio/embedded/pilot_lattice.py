@@ -116,7 +116,7 @@ def make_pilot_lattice_equalizer(
     keep_margin = n_frame_syms + gap
     vec_cap = 4 * n_frame_syms + keep_margin + warmup_syms
 
-    class _PilotLatticeEqualizer(gr.basic_block):  # type: ignore[misc, name-defined]
+    class _PilotLatticeEqualizer(gr.basic_block):
         def __init__(self) -> None:
             gr.basic_block.__init__(
                 self,

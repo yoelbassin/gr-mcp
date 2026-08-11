@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any, Literal, cast
 
 import numpy as np
+import numpy.typing as npt
 import pytest
 from helpers import _lattice
 from helpers._dsp import (
@@ -22,7 +23,8 @@ from marconi.engine.backends.gnuradio.runner import (
     GnuRadioBackend,
     ensure_worker_warm,
 )
-from marconi.engine.compile.compiler import CompileError, compile_modem
+from marconi.engine.compile.compiler import compile_modem
+from marconi.engine.compile.errors import CompileError
 from marconi.engine.compile.ir import GrPipeline
 from marconi.engine.modulation.css.stages import (
     ChirpSyncStep,
@@ -250,10 +252,12 @@ def _apply(z: np.ndarray, gain: float, condition: str) -> np.ndarray:
         return z * gain
     if condition == "fade":
         envelope = np.linspace(1.0, 0.05, z.size)
-        return z * gain * envelope
+        faded: npt.NDArray[np.complex64] = (z * gain * envelope).astype(np.complex64)
+        return faded
     if condition == "burst":
         keep = (np.arange(z.size) // 512) % 2 == 0
-        return z * gain * keep
+        gated: npt.NDArray[np.complex64] = (z * gain * keep).astype(np.complex64)
+        return gated
     raise AssertionError(condition)
 
 

@@ -1,13 +1,19 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from typing import Any
 
 import numpy as np
+import numpy.typing as npt
 from construct import BitsInteger, BitStruct, ConstructError, Padding
 from helpers.bitops import bits_to_bytes, bytes_to_bits
 from pydantic import BaseModel, model_validator
 
 _BITREV = bytes(int(format(i, "08b")[::-1], 2) for i in range(256))
+
+
+FieldSpec = dict[str, object]
+Message = dict[str, int | str]
 
 
 class ParseField(BaseModel):
@@ -28,6 +34,11 @@ class ParseField(BaseModel):
         return self
 
 
+class ParseCase(BaseModel):
+    when: int
+    fields: list[ParseField]
+
+
 def _lsb(data: bytes, bit_order: str) -> bytes:
     return data.translate(_BITREV) if bit_order == "lsb" else data
 
@@ -42,7 +53,7 @@ def _fixed_bits(fields: list[ParseField]) -> int:
 
 def build_struct(fields: list[ParseField]) -> BitStruct:
     fixed = [f for f in fields if not f.rest]
-    items: list = [f.name / BitsInteger(f.bits, signed=f.signed) for f in fixed]
+    items: list[Any] = [f.name / BitsInteger(f.bits, signed=f.signed) for f in fixed]
     pad = (-_fixed_bits(fields)) % 8
     if pad:
         items.append(Padding(pad))
@@ -84,9 +95,7 @@ def _encode_charset(text: str, bits: int, table: str, char_bits: int) -> int:
     return value
 
 
-def _apply_fields_rx(
-    message: dict[str, int | str], fields: list[ParseField]
-) -> dict[str, int | str]:
+def _apply_fields_rx(message: Message, fields: list[ParseField]) -> Message:
     for f in fields:
         if f.rest:
             continue
@@ -99,7 +108,7 @@ def _apply_fields_rx(
     return message
 
 
-def _apply_fields_tx(message: dict, fields: list[ParseField]) -> dict:
+def _apply_fields_tx(message: Message, fields: list[ParseField]) -> Message:
     out = dict(message)
     for f in fields:
         if f.rest:
@@ -109,8 +118,10 @@ def _apply_fields_tx(message: dict, fields: list[ParseField]) -> dict:
                 str(out[f.name]), f.bits, f.charset, f.char_bits
             )
         elif f.enum is not None:
-            rev = {label: code for code, label in f.enum.items()}
-            out[f.name] = rev.get(out[f.name], out[f.name])
+            label = out[f.name]
+            if isinstance(label, str):
+                rev = {name: code for code, name in f.enum.items()}
+                out[f.name] = rev.get(label, label)
     return out
 
 
@@ -123,32 +134,31 @@ def _need_bytes(fields: list[ParseField]) -> int:
 
 def _decode_struct(
     struct: BitStruct, payload: bytes, bit_order: str, fields: list[ParseField]
-) -> dict[str, int | str]:
+) -> Message:
     parsed = struct.parse(_lsb(payload, bit_order))
-    msg: dict[str, int | str] = {
-        k: int(v) for k, v in parsed.items() if not k.startswith("_")
-    }
+    msg: Message = {k: int(v) for k, v in parsed.items() if not k.startswith("_")}
     return _apply_fields_rx(msg, fields)
 
 
-def _unpack_symbols(bits: np.ndarray, width: int) -> np.ndarray:
+def _unpack_symbols(bits: npt.NDArray[np.uint8], width: int) -> npt.NDArray[np.int64]:
     n = bits.size // width
     g = np.asarray(bits[: n * width], dtype=np.int64).reshape(n, width)
     weights = 1 << np.arange(width - 1, -1, -1, dtype=np.int64)
-    return g @ weights
+    values: npt.NDArray[np.int64] = g @ weights
+    return values
 
 
-def _pack_symbols(values: np.ndarray, width: int) -> np.ndarray:
+def _pack_symbols(values: npt.NDArray[np.int64], width: int) -> npt.NDArray[np.uint8]:
     shifts = np.arange(width - 1, -1, -1, dtype=np.int64)
     return ((values[:, None] >> shifts) & 1).reshape(-1).astype(np.uint8)
 
 
 def _apply_rest(
-    msg: dict[str, int | str],
+    msg: Message,
     payload: bytes,
     fields: list[ParseField],
     bit_order: str,
-) -> dict[str, int | str]:
+) -> Message:
     # Rest recovers trailing chars only up to byte-packing granularity: the char
     # count comes from the payload's *byte* length, so for an externally-produced
     # payload whose true bit length isn't a byte multiple the final partial group
@@ -185,7 +195,7 @@ def _rest_char_count(fixed_bits: int, char_bits: int, text_len: int) -> int:
     return text_len
 
 
-def _append_rest(built: bytes, message: dict, fields: list[ParseField]) -> bytes:
+def _append_rest(built: bytes, message: Message, fields: list[ParseField]) -> bytes:
     rest = [f for f in fields if f.rest]
     if not rest:
         return built
@@ -213,27 +223,27 @@ def _reject_misplaced_rest(fields: list[ParseField]) -> None:
 
 
 def _build_cases(
-    fields: list[ParseField], cases: list[dict] | None
+    fields: list[ParseField], cases: list[FieldSpec] | None
 ) -> dict[int, _Case]:
     out: dict[int, _Case] = {}
-    for case in cases or []:
-        case_fields = parse_fields(case["fields"])
-        if any(f.rest for f in case_fields):
+    for raw in cases or []:
+        case = ParseCase.model_validate(raw)
+        if any(f.rest for f in case.fields):
             raise ValueError("rest fields are not allowed inside cases")
-        body = fields + case_fields
+        body = fields + case.fields
         _reject_misplaced_rest(body)
-        out[int(case["when"])] = (build_struct(body), body)
+        out[case.when] = (build_struct(body), body)
     return out
 
 
 def parse_message(
     payload: bytes,
-    fields: list[dict],
+    fields: list[FieldSpec],
     *,
     bit_order: str = "msb",
     discriminator: str | None = None,
-    cases: list[dict] | None = None,
-) -> dict[str, int | str] | None:
+    cases: list[FieldSpec] | None = None,
+) -> Message | None:
     pf = parse_fields(fields)
     _reject_misplaced_rest(pf)
     case_map = _build_cases(pf, cases)
@@ -257,7 +267,7 @@ def parse_message(
 
 
 def build_message(
-    message: dict, fields: list[dict], *, bit_order: str = "msb"
+    message: Message, fields: list[FieldSpec], *, bit_order: str = "msb"
 ) -> bytes:
     pf = parse_fields(fields)
     _reject_misplaced_rest(pf)

@@ -151,7 +151,7 @@ def _parabolic(f: npt.NDArray[np.floating[Any]], p: int) -> float:
     if 0 < p < len(f) - 1:
         denom = f[p - 1] - 2.0 * f[p] + f[p + 1]
         if denom != 0.0:
-            return p + 0.5 * (f[p - 1] - f[p + 1]) / denom
+            return float(p + 0.5 * (f[p - 1] - f[p + 1]) / denom)
     return float(p)
 
 

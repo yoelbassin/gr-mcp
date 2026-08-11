@@ -8,7 +8,9 @@ from marconi.engine.stages.conditioning import AgcStep, SquelchStep
 
 
 def _field_desc(model: type[Any], field: str) -> str:
-    return model.model_json_schema()["properties"][field].get("description", "")
+    desc = model.model_json_schema()["properties"][field].get("description", "")
+    assert isinstance(desc, str)
+    return desc
 
 
 def test_ook_loop_bw_names_open_loop() -> None:

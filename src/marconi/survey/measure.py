@@ -327,7 +327,9 @@ def _active_pairs(
 def _slot_active_mask(
     x: npt.NDArray[np.complex64], fraction: float, window: int
 ) -> npt.NDArray[np.bool_]:
-    power = uniform_filter1d(np.abs(x).astype(np.float64) ** 2, window)
+    power: npt.NDArray[np.float64] = uniform_filter1d(
+        np.abs(x).astype(np.float64) ** 2, window
+    )
     # reference the top-decile median, not the max: a single hot interferer
     # burst inside the span would otherwise set the threshold and gate the
     # actual signal of interest out of the mask entirely
@@ -364,8 +366,10 @@ def _active_mean(
 def _comb_harmonic_mask(
     freqs: npt.NDArray[np.floating[Any]], fundamental: float, bin_hz: float
 ) -> npt.NDArray[np.bool_]:
-    orders = np.round(freqs / fundamental)
-    tol = np.maximum(_SURVEY_COMB_REL_TOL * freqs, _SURVEY_COMB_TOL_FLOOR_BINS * bin_hz)
+    orders: npt.NDArray[np.float64] = np.round(freqs / fundamental)
+    tol: npt.NDArray[np.floating[Any]] = np.maximum(
+        _SURVEY_COMB_REL_TOL * freqs, _SURVEY_COMB_TOL_FLOOR_BINS * bin_hz
+    )
     in_range = (orders >= _SURVEY_COMB_MIN_ORDER) & (orders <= _SURVEY_COMB_ORDER_CAP)
     return in_range & (np.abs(freqs - orders * fundamental) < tol)
 

@@ -1,12 +1,13 @@
-from typing import Literal
+from typing import Any, Literal
 
 import pytest
 
 from marconi.engine.compile.compile_context import CompileContext
-from marconi.engine.compile.compiler import CompileError, compile_modem
+from marconi.engine.compile.compiler import compile_modem
+from marconi.engine.compile.errors import CompileError
 from marconi.engine.compile.ir import GrPipeline
 from marconi.engine.modulation.ook.stages import OokEnvelopeStep
-from marconi.engine.stages.base import DuplexStage, RxStage
+from marconi.engine.stages.base import DuplexStage, RxStage, Stage
 from marconi.engine.stages.conditioning import AgcStep, ChannelizeStep
 from marconi.engine.stages.general import SliceStep
 from marconi.engine.stages.registry import stage_registry
@@ -80,7 +81,7 @@ class _NeedsPeak(DuplexStage[CompileContext, _NeedsPeakStep]):
         b.chain("float_to_complex")
 
 
-def _registry() -> dict:
+def _registry() -> dict[str, Stage[Any, Any]]:
     reg = dict(stage_registry())
     reg["needs_normalized"] = _NeedsNormalized()
     reg["establishes"] = _Establishes()

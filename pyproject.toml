@@ -40,11 +40,35 @@ profile = "black"
 known_first_party = ["marconi"]
 
 [tool.mypy]
-ignore_missing_imports = true
 explicit_package_bases = true
-mypy_path = "src"
-disallow_incomplete_defs = true
-disallow_untyped_defs = true
+mypy_path = "src:tests"
+strict = true
+
+# The external packages that ship no stubs and no py.typed. Named one by one so
+# a newly-untyped import fails the gate instead of being absorbed by it.
+[[tool.mypy.overrides]]
+module = [
+    "scipy.*",
+    "gnuradio.*",
+    "SoapySDR",
+    "reedsolo",
+    "creedsolo",
+    "construct",
+]
+ignore_missing_imports = true
+
+# GNU Radio ships no stubs, so gr.basic_block/sync_block/top_block are Any and
+# the blocks that extend them cannot satisfy disallow_subclassing_any. The
+# exemption names the seam instead of weakening the whole tree.
+[[tool.mypy.overrides]]
+module = [
+    "marconi.engine.backends.gnuradio.build",
+    "marconi.engine.backends.gnuradio.embedded.*",
+    "unit.engine.backends.gnuradio.*",
+    "unit.engine.modulation.coding.test_fec_conv",
+    "unit.engine.modulation.coding.test_sync_align",
+]
+disallow_subclassing_any = false
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

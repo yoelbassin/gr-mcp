@@ -1,11 +1,13 @@
 from pathlib import Path
 
 import numpy as np
+import numpy.typing as npt
 import pytest
 
 from marconi.engine.backends.gnuradio.blocks import GR_BLOCKS, _modules
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
 from marconi.engine.compile.ir import GrBlock, GrConnection, GrPipeline
+from marconi.engine.types.params import ParamValue
 
 
 def test_agc2_applies_max_gain() -> None:
@@ -31,7 +33,9 @@ def _two_level_signal() -> np.ndarray:
     return (mags * phase).astype(np.complex64)
 
 
-def _run_block(tmp_path: Path, kind: str, params: dict) -> np.ndarray:
+def _run_block(
+    tmp_path: Path, kind: str, params: dict[str, ParamValue]
+) -> npt.NDArray[np.complex64]:
     src = tmp_path / "in.cf32"
     snk = tmp_path / "out.cf32"
     _two_level_signal().tofile(src)

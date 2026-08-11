@@ -26,7 +26,7 @@ from marconi.engine.types.step import Step
 BITS = Descriptor(Level.BITS, ItemType.B)
 SYNC = "5c3b"
 MASK, SEED, LEN = 0b0000011, 0x55, 7
-CRC_PARAMS = {"poly": 0x1021, "bits": 16, "init": 0xFFFF, "xorout": 0x0000}
+CRC = crc.CrcSpec(poly=0x1021, bits=16, init=0xFFFF)
 _PAYLOADS = [bytes.fromhex("c0ffee00112233"), bytes.fromhex("deadbeef445566")]
 FRAME_BODY_BYTES = 7 + 2  # payload + CRC-16
 
@@ -41,7 +41,7 @@ def _lfsr(n: int) -> np.ndarray:
 
 
 def _frame(payload: bytes) -> np.ndarray:
-    body = bitops.bytes_to_bits(crc.crc_append(payload, **CRC_PARAMS))
+    body = bitops.bytes_to_bits(CRC.append(payload))
     whitened = body ^ _lfsr(body.size)
     return np.concatenate([bitops.bytes_to_bits(bytes.fromhex(SYNC)), whitened]).astype(
         np.uint8
@@ -82,7 +82,7 @@ def _run(tmp_path: Path, steps: list[Step]) -> list[bytes]:
         want = FRAME_BODY_BYTES * 8
         if w + want > bits.size:
             continue
-        ok, body = crc.crc_check(bitops.bits_to_bytes(bits[w : w + want]), **CRC_PARAMS)
+        ok, body = CRC.check(bitops.bits_to_bytes(bits[w : w + want]))
         if ok:
             out.append(body)
     return out

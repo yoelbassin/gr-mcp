@@ -5,10 +5,10 @@ from pydantic import ValidationError
 
 from marconi.engine.coding.stages_bits import SyncWordStep
 from marconi.engine.compile.compiler import (
-    CompileError,
     compile_modem,
     compile_pipeline,
 )
+from marconi.engine.compile.errors import CompileError
 from marconi.engine.modulation.fsk.stages import FskStep
 from marconi.engine.stages.conditioning import AgcStep, ChannelizeStep
 from marconi.engine.stages.general import SliceStep

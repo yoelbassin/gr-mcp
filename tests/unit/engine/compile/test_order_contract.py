@@ -4,10 +4,10 @@ import pytest
 
 from marconi.engine.coding.stages_symbols import MSliceStep
 from marconi.engine.compile.compiler import (
-    CompileError,
     compile_modem,
     compile_pipeline,
 )
+from marconi.engine.compile.errors import CompileError
 from marconi.engine.compile.ir import GrPipeline
 from marconi.engine.modulation.css.stages import CssDemapStep, DechirpStep
 from marconi.engine.modulation.fsk.stages import FskStep, MfskSoftDemapStep

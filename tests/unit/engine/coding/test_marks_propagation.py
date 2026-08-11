@@ -13,7 +13,8 @@ from marconi.engine.coding import ops_bits
 from marconi.engine.coding.carrier import CodingCarrier, Window
 from marconi.engine.coding.stages_bits import MarkFrameStep
 from marconi.engine.coding.stages_symbols import SymbolMapStep
-from marconi.engine.compile.compiler import CompileError, compile_pipeline
+from marconi.engine.compile.compiler import compile_pipeline
+from marconi.engine.compile.errors import CompileError
 from marconi.engine.modulation.css.stages import CssDemapStep, DechirpStep
 from marconi.engine.stages.probes import BurstProbeStep
 from marconi.engine.stages.registry import stage_registry
