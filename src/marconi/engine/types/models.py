@@ -37,16 +37,6 @@ class Bitstream(BaseModel):
     symbol_rate: float | None = None
 
 
-class SoftBitstream(BaseModel):
-    """Soft bits at the BITS rung: a float32 file of one log-likelihood ratio per
-    coded bit. Sibling to Bitstream, never an optional field on it."""
-
-    path: Path
-    num_bits: int = Field(ge=0)
-    source_capture: Path | None = None
-    symbol_rate: float | None = None
-
-
 class Softstream(BaseModel):
     """The soft float32 stream a decode exposes for soft-decision work, wherever
     it lives: a demod tap sidecar, a soft coding seam, or the terminal stream

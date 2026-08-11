@@ -358,8 +358,6 @@ def _emit_coding_segment(plan: _CompilePlan, k: int) -> CodingProgram:
         stage.emit_rx(b, plan.steps[i])
     return CodingProgram(
         steps=b.steps,
-        entry_level=plan.boundaries[k].level,
-        entry_item_type=plan.boundaries[k].item_type,
     )
 
 

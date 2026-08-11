@@ -81,19 +81,20 @@ def test_survey_channelize_isolates_a_subband(tmp_path: Path) -> None:
     assert ch["sample_rate"] == fs / 4  # decimated rate is reported
 
 
-def test_survey_channelize_leaves_no_workspace_files(tmp_path: Path) -> None:
+def test_survey_channelize_leaves_no_workspace_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # monkeypatch.setenv, not a raw os.environ update with a pop in finally:
+    # the pop DELETES the variable rather than restoring it, so running the
+    # suite with MARCONI_WORKSPACE set (the documented way to relocate the
+    # workspace) destroyed it for every later test in the same xdist worker,
+    # silently falling back to Path(".") and writing into the repo.
     fs, n = 96_000.0, 1 << 16
     p = tmp_path / "wide.cf32"
     _two_tone_cf32(p, fs, n)
     runs = tmp_path / "marconi-runs"
-    monkey_env = {"MARCONI_WORKSPACE": str(tmp_path)}
-    import os
-
-    os.environ.update(monkey_env)
-    try:
-        survey(str(p), fs, center_hz=30_000.0, decim=4)
-    finally:
-        os.environ.pop("MARCONI_WORKSPACE", None)
+    monkeypatch.setenv("MARCONI_WORKSPACE", str(tmp_path))
+    survey(str(p), fs, center_hz=30_000.0, decim=4)
     leftover = list(runs.glob("survey-*")) if runs.exists() else []
     assert leftover == []
 

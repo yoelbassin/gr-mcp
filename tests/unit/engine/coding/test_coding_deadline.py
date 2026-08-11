@@ -7,14 +7,11 @@ from marconi.engine.coding.carrier import CodingCarrier
 from marconi.engine.coding.ops_bits import rs_code_rx
 from marconi.engine.coding.program import CodingProgram, CodingStep, run_coding
 from marconi.engine.deadline import RunTimeout, set_deadline
-from marconi.engine.types.levels import Level
 
 
 def test_run_coding_honors_deadline() -> None:
     prog = CodingProgram(
         steps=[CodingStep(name="noop", kind="noop", call=lambda c: c)],
-        entry_level=Level.BITS,
-        entry_item_type="b",
     )
     carrier = CodingCarrier(bits=np.zeros(16, np.uint8))
     with set_deadline(0.0):

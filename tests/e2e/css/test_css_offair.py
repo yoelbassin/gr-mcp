@@ -17,6 +17,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from helpers._paths import REPO_ARTIFACTS
 
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
 from marconi.engine.compile.compiler import compile_modem
@@ -93,10 +94,8 @@ _LORA_SF7_ORACLE = [
     120,
 ]
 
-_IQ2_BIN = Path("/Users/joel/Clones/gr-mcp-rebuild/artifacts/captures/IQ_2.sigmf-data")
-_IQ12_BIN = Path(
-    "/Users/joel/Clones/gr-mcp-rebuild/artifacts/assets/CSS/LoRa/IQ_12/IQ_12.dat"
-)
+_IQ2_BIN = REPO_ARTIFACTS / "captures" / "IQ_2.sigmf-data"
+_IQ12_BIN = REPO_ARTIFACTS / "assets" / "CSS" / "LoRa" / "IQ_12" / "IQ_12.dat"
 
 # Real WINeS SF11/BW125/CR4-5/LDRO LoPy4 frames, raw dechirp argmax bins (293).
 # The bar is LDRO bin//4 (CRC-equivalent): a real long frame carries

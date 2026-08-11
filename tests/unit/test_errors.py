@@ -1,3 +1,5 @@
+import pytest
+
 from marconi.errors import classify_error, register_error
 
 
@@ -11,7 +13,12 @@ def test_known_types_get_stable_codes() -> None:
     assert classify_error(RuntimeError("x"))[0] == "runtime_error"
 
 
-def test_registered_type_wins() -> None:
+def test_registered_type_wins(monkeypatch: pytest.MonkeyPatch) -> None:
+    # the registry is process-global; leaving _Custom in it would outlive
+    # this test for the rest of the xdist worker
+    import marconi.errors as errors
+
+    monkeypatch.setattr(errors, "_REGISTRY", dict(errors._REGISTRY))
     register_error(_Custom, "custom_code")
     assert classify_error(_Custom("x"))[0] == "custom_code"
 

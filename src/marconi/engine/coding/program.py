@@ -8,7 +8,6 @@ import numpy as np
 from marconi.engine.backends.base import BlockCensus
 from marconi.engine.coding.carrier import CodingCarrier
 from marconi.engine.deadline import check_deadline
-from marconi.engine.types.levels import Level
 
 
 @dataclass(frozen=True)
@@ -21,8 +20,6 @@ class CodingStep:
 @dataclass(frozen=True)
 class CodingProgram:
     steps: list[CodingStep]
-    entry_level: Level
-    entry_item_type: str
 
 
 def _items(c: CodingCarrier) -> int:

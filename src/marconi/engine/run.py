@@ -124,7 +124,7 @@ def _harvest_marks(diagnostics: Sequence[Diagnostic]) -> list[int]:
 
 
 def _entry_carrier(boundary: Descriptor, path: Path, marks: list[int]) -> CodingCarrier:
-    if boundary.item_type == "b":
+    if boundary.item_type is ItemType.B:
         return CodingCarrier(bits=read_bits(path), marks=tuple(marks))
     item_type = boundary.item_type.require_symbol()
     return CodingCarrier(
@@ -160,7 +160,7 @@ def _ok(stream: Bitstream | Symbolstream, out: RunOutputs) -> PipelineResult:
 def _gr_only_stream(
     cp: CompiledPipeline, path: Path, marks: list[int]
 ) -> Bitstream | Symbolstream:
-    if cp.final.item_type == "b" and cp.final.level is Level.SYMBOLS:
+    if cp.final.item_type is ItemType.B and cp.final.level is Level.SYMBOLS:
         # hard symbol indices on the u8 wire (a qam-class demod final): a
         # Bitstream label would invite bitwise parsing of symbol indices
         symbols = read_bits(path).astype(np.int16)
@@ -170,9 +170,9 @@ def _gr_only_stream(
         return Symbolstream(
             path=sym_path, num_symbols=int(symbols.size), item_type="s", marks=marks
         )
-    if cp.final.item_type == "b":
+    if cp.final.item_type is ItemType.B:
         return Bitstream(path=path, num_bits=int(read_bits(path).size))
-    if cp.final.item_type == "c":
+    if cp.final.item_type is ItemType.C:
         num = int(path.stat().st_size // ItemType.C.item_bytes)
         return Symbolstream(path=path, num_symbols=num, item_type="c", marks=marks)
     item_type = cp.final.item_type.require_symbol()
@@ -209,7 +209,7 @@ def _coded_stream(
         return Bitstream(path=path, num_bits=int(carrier.bits.size))
     symbols = carrier.symbols if carrier.symbols is not None else np.zeros(0, np.int16)
     item_type = final.item_type.require_symbol()
-    if item_type == "f":
+    if final.item_type is ItemType.F:
         path = workdir / "out.f32"
         write_llrs(path, symbols)
     else:
@@ -396,7 +396,11 @@ def _soft_tap(
     confidence that can certify or reject a decode. A symbols-level demod tap (a
     bare fsk/msk front end) is a per-symbol eye -- signal-present evidence only
     (see marconi.engine.quality._emit_soft)."""
-    if result.symbolstream is not None and result.symbolstream.item_type == "f":
+    soft_symbols = (
+        result.symbolstream is not None
+        and result.symbolstream.item_type == ItemType.F.value
+    )
+    if soft_symbols and result.symbolstream is not None:
         return _soft_file(result.symbolstream.path, cp.final.level)
     if cp.soft_seam is not None and cp.soft_seam.is_file():
         tapped_level = next(
@@ -433,19 +437,19 @@ def _validate_entry(
             "this modem's path starts with a coding stage, so no GR "
             "segment writes the seam file; supply input_stream"
         )
-    if isinstance(input_stream, Bitstream) and cp.boundary.item_type != "b":
+    if isinstance(input_stream, Bitstream) and cp.boundary.item_type is not ItemType.B:
         raise CompileError(
             f"input_stream is a Bitstream (item_type 'b') but the entry "
             f"boundary is item_type {cp.boundary.item_type.value!r}"
         )
     if isinstance(input_stream, Symbolstream):
-        if cp.boundary.item_type not in ("s", "f"):
+        if cp.boundary.item_type not in (ItemType.S, ItemType.F):
             raise CompileError(
                 f"input_stream is a Symbolstream (item_type "
                 f"{input_stream.item_type!r}) but the entry boundary is "
                 f"item_type {cp.boundary.item_type.value!r}"
             )
-        if input_stream.item_type != cp.boundary.item_type:
+        if input_stream.item_type != cp.boundary.item_type.value:
             raise CompileError(
                 f"input_stream item_type {input_stream.item_type!r} does "
                 "not match the entry boundary item_type "
@@ -459,7 +463,11 @@ def _reject_nonfinite(
     source: SourceSlice | None,
     input_stream: Bitstream | Symbolstream | None,
 ) -> PipelineResult | None:
-    if isinstance(input_stream, Symbolstream) and input_stream.item_type == "f":
+    soft_in = (
+        isinstance(input_stream, Symbolstream)
+        and input_stream.item_type == ItemType.F.value
+    )
+    if soft_in and input_stream is not None:
         return _nonfinite_input(input_stream.path, "f")
     if cp.gr is not None and source is not None:
         return _nonfinite_input(

@@ -4,7 +4,6 @@ from marconi.engine.backends.base import BlockCensus
 from marconi.engine.coding.builder import CodingBuilder
 from marconi.engine.coding.carrier import CodingCarrier, Window
 from marconi.engine.coding.program import CodingProgram, run_coding
-from marconi.engine.types.levels import Level
 
 
 def _drop_half(c: CodingCarrier) -> CodingCarrier:
@@ -21,7 +20,7 @@ def _program() -> CodingProgram:
     b.add(_seed_one)
     b.label, b.kind = "half[1]", "half"
     b.add(_drop_half)
-    return CodingProgram(steps=b.steps, entry_level=Level.BITS, entry_item_type="b")
+    return CodingProgram(steps=b.steps)
 
 
 def test_run_coding_applies_steps_in_order() -> None:
@@ -42,7 +41,7 @@ def test_census_counts_symbols_when_bits_empty() -> None:
     b = CodingBuilder()
     b.label, b.kind = "id[0]", "id"
     b.add(lambda c: c)
-    prog = CodingProgram(steps=b.steps, entry_level=Level.SYMBOLS, entry_item_type="f")
+    prog = CodingProgram(steps=b.steps)
     census: list[BlockCensus] = []
     carrier = CodingCarrier(bits=np.zeros(0, np.uint8), symbols=np.zeros(7, np.float32))
     run_coding(prog, carrier, census)
