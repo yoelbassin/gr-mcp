@@ -8,6 +8,11 @@ from typing import Any
 import numpy as np
 import numpy.typing as npt
 
+# Lock threshold for cp_symbol_sync's CP-correlation ratio. Measured: noise
+# 1.3-1.6, real lock >= 2.0. Lives here because both the stage default and the
+# block's own fallback must move together.
+LOCK_MIN_RATIO_DEFAULT = 2.0
+
 
 def step_boundary(
     p: npt.NDArray[np.floating[Any]],

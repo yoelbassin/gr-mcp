@@ -351,16 +351,11 @@ _SOFT_NEGATIVE = 1.45
 _SOFT_MIN_POLARITY_FRACTION = 0.02
 _SOFT_MAX_SIGN_CORR = 0.15
 
-# Calibrated on a synthetic ~50%-idle bursty stream (TDMA-style +-2 rail
-# bursts / zero idle): windowed power blurs ~half the window width of idle
-# into each burst edge, so the literal ~0.5 duty cycle still needs FRACTION
-# above ~0.3 before that leaked idle stops dragging the active-set ratio
-# under the 2.0 positive bar (measured 0.25 -> 1.94, 0.35 -> 2.46). Flat and
-# continuous streams are insensitive to this knob by design: the 7dB
-# noisy-but-decodable capture measures ratio 3.94 at 0.35, unchanged from
-# its pre-active-gating baseline (~3.9).
 _SOFT_ACTIVE_WINDOW = 64
 _SOFT_ACTIVE_HI_PCTILE = 90.0
+# Windowed power blurs about half a window of idle into each burst edge, so a
+# ~50%-duty stream needs the gate above ~0.3 before that leaked idle drags the
+# active-set ratio under _SOFT_POSITIVE.
 _SOFT_ACTIVE_FRACTION = 0.35
 
 

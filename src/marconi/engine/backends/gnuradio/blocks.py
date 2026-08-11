@@ -348,8 +348,7 @@ GR_BLOCKS: dict[str, Callable[[_GrModules, Params], Any]] = {
     "rotator_cc": lambda c, p: c.blocks.rotator_cc(_as_float(p["phase_inc"])),
     # Polyphase arbitrary resampler (rate=interp/decim). Kept over
     # rational_resampler_ccf because the same block also serves clock_correct's
-    # irrational 1/(1+ppm) ratio, so one kind covers both; rational is equally
-    # clean (see test_resample_roundtrip's alignment note).
+    # irrational 1/(1+ppm) ratio, so one kind covers both.
     "pfb_arb_resampler_ccf": lambda c, p: c.pfb.arb_resampler_ccf(_as_float(p["rate"])),
     # Integer-ratio resampler (auto-designed anti-imaging taps). Spectrally clean
     # and bit-perfect on this build; see the note above pfb_arb_resampler_ccf.

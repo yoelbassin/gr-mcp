@@ -3,9 +3,16 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
+import pytest
 
+from marconi.engine import quality
 from marconi.engine.io.bitfile import write_llrs
-from marconi.engine.quality import _SOFT_SAMPLE_ITEMS, _sample_soft, soft_evidence
+from marconi.engine.quality import (
+    _SOFT_POSITIVE,
+    _SOFT_SAMPLE_ITEMS,
+    _sample_soft,
+    soft_evidence,
+)
 
 
 def _llr_file(tmp_path: Path, values: np.ndarray) -> Path:
@@ -189,3 +196,31 @@ def test_symbols_level_noise_is_suppressed_not_negative(tmp_path: Path) -> None:
 def test_symbols_level_all_zero_is_suppressed_not_negative(tmp_path: Path) -> None:
     ev = soft_evidence(_llr_file(tmp_path, np.zeros(4000)), decode_grade=False)
     assert ev == []
+
+
+def test_active_gate_keeps_bursty_llrs_above_the_positive_bar(tmp_path: Path) -> None:
+    # _SOFT_ACTIVE_FRACTION is calibrated so a ~50%-idle bursty stream is judged
+    # on its bursts: windowed power leaks idle into each burst edge, and a lower
+    # gate keeps more of that idle, widening the magnitude spread and pushing the
+    # ratio down toward the noise bar. Pins the direction and the margin, so a
+    # retune that re-admits idle fails here instead of silently degrading a
+    # decode verdict.
+    rng = np.random.default_rng(0)
+    parts: list[np.ndarray] = []
+    for _ in range(16):
+        rails = rng.choice([-2.0, 2.0], 1024) + rng.normal(0.0, 0.25, 1024)
+        parts.append(rails)
+        parts.append(rng.normal(0.0, 0.02, 1024))  # idle between bursts
+    path = _llr_file(tmp_path, np.concatenate(parts))
+
+    def ratio_at(fraction: float) -> float:
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(quality, "_SOFT_ACTIVE_FRACTION", fraction)
+            (ev,) = [e for e in soft_evidence(path) if e.metric == "soft_confidence"]
+            assert ev.assessment == "positive"
+            return ev.value
+
+    shipped = ratio_at(quality._SOFT_ACTIVE_FRACTION)
+    assert shipped >= _SOFT_POSITIVE * 2.0, shipped  # measured 5.5, bar 2.0
+    # every step down the gate admits more idle and costs ratio
+    assert shipped > ratio_at(0.25) > ratio_at(0.10) > ratio_at(0.02)

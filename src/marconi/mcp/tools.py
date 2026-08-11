@@ -34,11 +34,11 @@ from marconi.mcp.payload import (
     survey_payload,
 )
 from marconi.mcp.streams import (
-    _ITEM_DTYPES,
-    _require_file,
+    ITEM_DTYPES,
     ensure_cf32,
     parse_bits,
     render_page,
+    require_file,
 )
 from marconi.mcp.streams import stream_stats as _compute_stats
 from marconi.mcp.vocab import ENVELOPE, family_names, stage_details, stage_index
@@ -47,7 +47,7 @@ from marconi.survey import channelize_to_file, survey_iq
 
 _START_LEVELS = {"iq": Level.IQ, "symbols": Level.SYMBOLS, "bits": Level.BITS}
 _DEFAULT_LEVEL = {"c": "iq", "b": "bits", "s": "symbols", "f": "symbols"}
-_ITEM_BYTES: dict[str, int] = {k: v.itemsize for k, v in _ITEM_DTYPES.items()}
+_ITEM_BYTES: dict[str, int] = {k: v.itemsize for k, v in ITEM_DTYPES.items()}
 
 
 def _start_descriptor(item_type: str, level: str | None) -> Descriptor:
@@ -69,7 +69,7 @@ def _input_stream(path: Path, item_type: str) -> Bitstream | Symbolstream:
         raise ValueError(
             "input_item_type must be one of ['b', 'f', 's'] with input_path"
         )
-    _require_file(path)
+    require_file(path)
     items = path.stat().st_size // _ITEM_BYTES[item_type]
     if item_type == "b":
         return Bitstream(path=path, num_bits=items)
@@ -132,11 +132,12 @@ def validate_modem(
             sink_io={"path": "unused"},
         )
     except SpecValidationError as exc:
+        code, _ = classify_error(exc)
         return {
             "valid": False,
             "errors": error_rows(
                 [
-                    ErrorRow(code="invalid_argument", message=i.message, at=i.block_id)
+                    ErrorRow(code=code, message=i.message, at=i.block_id)
                     for i in exc.issues
                 ]
             ),
@@ -252,7 +253,7 @@ def run_rx_tool(
     modem = Modem.from_spec(spec, step_models())
     run_dir = new_run_dir("rx")
     if capture_path is not None:
-        _require_file(Path(capture_path))
+        require_file(Path(capture_path))
         # a first-time ci16/ci8/cu8 conversion is real work with no bound of
         # its own; set_deadline here too so it counts against timeout - the
         # min-nesting means engine_run_rx's own inner deadline can't extend it
@@ -544,7 +545,7 @@ def survey(
         raise ValueError("capture_offset and capture_samples must be >= 0")
     if decim < 1:
         raise ValueError("decim must be >= 1")
-    _require_file(Path(capture_path))
+    require_file(Path(capture_path))
     src_slice = ensure_cf32(
         Path(capture_path),
         capture_dtype,

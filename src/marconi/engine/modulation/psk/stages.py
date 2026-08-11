@@ -16,7 +16,11 @@ from marconi.engine.types.step import Step
 
 class SymbolSyncStep(Step):
     conv: Literal["symbol_sync"] = "symbol_sync"
-    sps: StrictInt  # explicit: rate_factor (1/sps) must be params-derivable
+    # explicit rather than derived: the compiler needs rate_factor (1/sps)
+    # from the params alone, before any stream exists
+    sps: StrictInt = Field(
+        description="input samples per symbol the timing loop decimates by"
+    )
     alpha: float = 0.35
     loop_bw: float = Field(
         default=0.045,

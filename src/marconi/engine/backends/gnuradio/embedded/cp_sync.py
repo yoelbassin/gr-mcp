@@ -10,8 +10,8 @@ from marconi.engine.backends.gnuradio.embedded.lifecycle import (
     bump,
     forecast_drain,
 )
+from marconi.engine.modulation.ofdm.primitives import LOCK_MIN_RATIO_DEFAULT
 
-_LOCK_MIN_RATIO = 2.0  # calibrated: synthetic lattice ~5-8, pure noise ~1.3-1.6
 _DROP_FRAC = 0.25
 _DROP_SYMS = 8
 _EMA = 0.05
@@ -24,7 +24,7 @@ def make_cp_symbol_sync(
     fft_len: int,
     cp_len: int,
     warmup_syms: int,
-    lock_min_ratio: float = _LOCK_MIN_RATIO,
+    lock_min_ratio: float = LOCK_MIN_RATIO_DEFAULT,
 ) -> Any:
     sym_len = fft_len + cp_len
     need = warmup_syms * sym_len + fft_len + cp_len

@@ -33,7 +33,7 @@ _STATS_KMEANS_ITERS = 100
 # "l" (int64) is a paging-only type for run sidecars (windows/marks offsets),
 # never an engine wire type
 _SUFFIX_TYPES = {".i64": "l"} | {t.suffix: t.value for t in ItemType}
-_ITEM_DTYPES: dict[str, np.dtype[Any]] = {"l": np.dtype(np.int64)} | {
+ITEM_DTYPES: dict[str, np.dtype[Any]] = {"l": np.dtype(np.int64)} | {
     t.value: t.np_dtype for t in ItemType
 }
 _RAW_SCALES: dict[str, tuple[type, float, float]] = {
@@ -54,7 +54,7 @@ def parse_bits(text: str) -> npt.NDArray[np.uint8]:
     return np.frombuffer(text.encode("ascii"), dtype=np.uint8) - ord("0")
 
 
-def _require_file(path: Path) -> None:
+def require_file(path: Path) -> None:
     if not path.is_file():
         raise FileNotFoundError(
             f"stream output not found at {path}; marconi-runs/ outputs are "
@@ -64,8 +64,8 @@ def _require_file(path: Path) -> None:
 
 def _resolve_item_type(path: Path, item_type: str | None) -> str:
     if item_type is not None:
-        if item_type not in _ITEM_DTYPES:
-            raise ValueError(f"item_type must be one of {sorted(_ITEM_DTYPES)}")
+        if item_type not in ITEM_DTYPES:
+            raise ValueError(f"item_type must be one of {sorted(ITEM_DTYPES)}")
         return item_type
     inferred = _SUFFIX_TYPES.get(path.suffix)
     if inferred is None:
@@ -81,11 +81,11 @@ def render_page(
 ) -> dict[str, object]:
     if offset < 0:
         raise ValueError(f"offset must be >= 0, got {offset}")
-    _require_file(path)
+    require_file(path)
     kind = _resolve_item_type(path, item_type)
     requested = _DEFAULT_PAGE_ITEMS[kind] if count is None else count
     ceiling = _MAX_PAGE_ITEMS[kind]
-    dtype = _ITEM_DTYPES[kind]
+    dtype = ITEM_DTYPES[kind]
     total = path.stat().st_size // dtype.itemsize
     count = max(0, min(requested, ceiling, total - offset))
     with path.open("rb") as f:
@@ -277,13 +277,13 @@ def _kmeans_2d(
 def stream_stats(
     path: Path, *, item_type: str | None, clusters: int, bins: int = 41
 ) -> dict[str, object]:
-    _require_file(path)
+    require_file(path)
     kind = _resolve_item_type(path, item_type)
     if not 1 <= bins <= _STATS_MAX_BINS:
         raise ValueError(f"bins must be 1..{_STATS_MAX_BINS}, got {bins}")
     if not 0 <= clusters <= _STATS_MAX_CLUSTERS:
         raise ValueError(f"clusters must be 0..{_STATS_MAX_CLUSTERS}, got {clusters}")
-    dtype: np.dtype[Any] = _ITEM_DTYPES[kind]
+    dtype: np.dtype[Any] = ITEM_DTYPES[kind]
     sample, total, sampled = _sample_stream(path, dtype)
     out: dict[str, object] = {
         "item_type": kind,

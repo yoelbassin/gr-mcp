@@ -8,6 +8,7 @@ from pydantic import Field, StrictInt, model_validator
 from pydantic_core import PydanticCustomError
 
 from marconi.engine.compile.compile_context import CompileContext
+from marconi.engine.modulation.ofdm.primitives import LOCK_MIN_RATIO_DEFAULT
 from marconi.engine.stages.base import RxStage, Stage
 from marconi.engine.types.descriptor import Carrier, Descriptor
 from marconi.engine.types.enums import ItemType
@@ -208,11 +209,6 @@ class DqpskSoftDemap(RxStage[CompileContext, DqpskSoftDemapStep]):
         # reference symbol dropped, then log2(alphabet) LLRs per kept carrier
         kept = step.data_syms / (step.data_syms + 1)
         return in_rate * kept * math.log2(step.alphabet())
-
-
-# cp_symbol_sync's calibrated lock threshold (CP-correlation ratio): measured
-# noise ~1.3-1.6, real lock >= 2.0.
-LOCK_MIN_RATIO_DEFAULT = 2.0
 
 
 class OfdmCoherentSyncStep(Step):

@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 from typing import Any, Literal
 
-from pydantic import StrictInt
+from pydantic import Field, StrictInt
 
 from marconi.engine.compile.compile_context import CompileContext
 from marconi.engine.stages.base import DuplexStage, Stage
@@ -17,7 +17,9 @@ class QamDemodStep(Step):
     conv: Literal["qam_demod"] = "qam_demod"
     order: QamOrder
     alpha: float = 0.35
-    loop_bw: float = 0.045  # symbol_sync timing loop
+    loop_bw: float = Field(
+        default=0.045, description="symbol_sync timing-loop bandwidth"
+    )
     span: StrictInt = 11
 
 

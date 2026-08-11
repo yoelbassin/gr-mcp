@@ -45,7 +45,9 @@ class ChannelizeStep(Step):
 
 class TranslateStep(Step):
     conv: Literal["translate"] = "translate"
-    center_hz: float  # the offset frequency shifted to DC (signed)
+    center_hz: float = Field(
+        description="the offset frequency shifted to DC; signed, in Hz"
+    )
 
 
 class InvertStep(Step):
@@ -172,7 +174,12 @@ class Resample(RxStage[CompileContext, ResampleStep]):
 
 class ClockCorrectStep(Step):
     conv: Literal["clock_correct"] = "clock_correct"
-    ppm: float  # transmitter clock offset in parts-per-million (signed)
+    ppm: float = Field(
+        description=(
+            "transmitter clock offset in parts-per-million; signed, and the "
+            "sample rate is corrected by 1/(1+ppm*1e-6)"
+        )
+    )
 
     @model_validator(mode="after")
     def _ok(self) -> "ClockCorrectStep":
@@ -359,7 +366,13 @@ class SquelchStep(Step):
             "loop_bw=0, which detects bursts itself."
         ),
     )
-    ramp_symbols: float = 0.0  # cosine edge, suppresses the switching transient
+    ramp_symbols: float = Field(
+        default=0.0,
+        description=(
+            "cosine edge length in symbols applied at each gate opening and "
+            "closing; suppresses the switching transient"
+        ),
+    )
 
     @model_validator(mode="after")
     def _ok(self) -> "SquelchStep":
@@ -407,9 +420,18 @@ class Squelch(RxStage[CompileContext, SquelchStep]):
 
 class EqualizerStep(Step):
     conv: Literal["equalizer"] = "equalizer"
-    num_taps: StrictInt = 15  # FIR length; must span the channel's delay spread
-    step_size: float = 0.01  # CMA adaptation rate (mu)
-    modulus: float = 1.0  # target constant modulus the taps drive |y| toward
+    num_taps: StrictInt = Field(
+        default=15,
+        description="FIR length in taps; must span the channel's delay spread",
+    )
+    step_size: float = Field(
+        default=0.01,
+        description="CMA adaptation rate (mu); larger converges "
+        "faster and tracks worse",
+    )
+    modulus: float = Field(
+        default=1.0, description="target constant modulus the taps drive |y| toward"
+    )
 
     @model_validator(mode="after")
     def _ok(self) -> "EqualizerStep":
