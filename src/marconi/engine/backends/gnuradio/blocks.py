@@ -43,6 +43,19 @@ _INSERT_ONCE = 1 << 30
 
 _MISSING = object()
 
+# digital.symbol_sync_*'s positional tail. These are GR 3.10's own defaults,
+# passed explicitly so a GR upgrade cannot shift timing behaviour underneath an
+# already-validated spec — pybind11 rejects keywords here, so they are named
+# rather than commented.
+_TED_DAMPING = 1.0
+_TED_GAIN = 1.0
+_TED_MAX_DEVIATION = 1.5
+_SYNC_OUT_SPS = 1
+_SYNC_N_FILTERS = 128
+_SYNC_TAPS: list[float] = []
+# Gardner is non-data-aided: it times off the signal itself and needs no slicer.
+_NO_SLICER = None
+
 
 @dataclass(frozen=True)
 class BlockParams:
@@ -355,14 +368,14 @@ GR_BLOCKS: dict[str, Callable[[_GrModules, BlockParams], Any]] = {
         c.digital.TED_GARDNER,
         p.f("sps"),
         p.f("loop_bw", 0.045),
-        1.0,  # damping
-        1.0,  # ted_gain
-        1.5,  # max_deviation
-        1,  # output samples per symbol
+        _TED_DAMPING,
+        _TED_GAIN,
+        _TED_MAX_DEVIATION,
+        _SYNC_OUT_SPS,
         c.digital.constellation_bpsk().base(),
         c.digital.IR_MMSE_8TAP,
-        128,  # n_filters
-        [],  # taps
+        _SYNC_N_FILTERS,
+        _SYNC_TAPS,
     ),
     "binary_slicer": lambda c, p: c.digital.binary_slicer_fb(),
     "chunks_to_symbols": lambda c, p: c.digital.chunks_to_symbols_bf(
@@ -411,14 +424,14 @@ GR_BLOCKS: dict[str, Callable[[_GrModules, BlockParams], Any]] = {
         c.digital.TED_GARDNER,
         p.f("sps"),
         p.f("loop_bw", 0.045),
-        1.0,  # damping
-        1.0,  # ted_gain
-        1.5,  # max_deviation
-        1,  # output sps
-        None,  # non-data-aided (Gardner): no constellation
+        _TED_DAMPING,
+        _TED_GAIN,
+        _TED_MAX_DEVIATION,
+        _SYNC_OUT_SPS,
+        _NO_SLICER,
         c.digital.IR_MMSE_8TAP,
-        128,
-        [],
+        _SYNC_N_FILTERS,
+        _SYNC_TAPS,
     ),
     "costas_loop_cc": lambda c, p: c.digital.costas_loop_cc(
         p.f("loop_bw", 0.045), p.i("order"), False

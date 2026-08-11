@@ -40,6 +40,10 @@ def sink_paths(pipeline: GrPipeline) -> list[str]:
     ]
 
 
+# gr::block::WORK_DONE: this block will produce nothing further.
+_WORK_DONE = -1
+
+
 def _trampolined_work(
     fn: Callable[[Any, Any], int], tb: Any, crashes: list[str]
 ) -> Callable[[Any, Any], int]:
@@ -49,7 +53,7 @@ def _trampolined_work(
         except Exception:  # noqa: BLE001
             crashes.append(traceback.format_exc())
             tb.stop()
-            return -1  # WORK_DONE
+            return _WORK_DONE
 
     return wrapped
 

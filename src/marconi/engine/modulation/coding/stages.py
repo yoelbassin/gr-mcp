@@ -80,7 +80,7 @@ class Depuncture(RxStage[CompileContext, DepunctureStep]):
     accepts_carrier = Carrier.SOFT
 
     def emit_rx(self, b: CompileContext, step: DepunctureStep) -> None:
-        src = b.tail  # incoming soft stream (never None after IO source)
+        src = b.tail
         assert src is not None
         il = b.add(
             "patterned_interleaver_f",

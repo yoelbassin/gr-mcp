@@ -174,12 +174,13 @@ class DqpskSoftDemap(RxStage[CompileContext, DqpskSoftDemapStep]):
     def emit_rx(self, b: CompileContext, step: DqpskSoftDemapStep) -> None:
         nc = step.n_carriers
         ds = step.data_syms
-        src = b.tail  # incoming carrier stream (never None after IO source)
+        src = b.tail
         assert src is not None
-        dly = b.chain("delay_cc", samples=nc)  # src -> delay, tail=delay
+        dly = b.chain("delay_cc", samples=nc)
         mc = b.add("multiply_conjugate_cc")
-        b.connect(src, mc, dst_port=0)  # carriers  -> mc.0
-        b.connect(dly, mc, dst_port=1)  # delayed   -> mc.1  (c[i]*conj(c[i-nc]))
+        # c[i] * conj(c[i-nc]): differential across one carrier spacing
+        b.connect(src, mc, dst_port=0)
+        b.connect(dly, mc, dst_port=1)
         b.set_tail(mc)
         b.chain("keep_m_in_n_c", m=ds * nc, n=(ds + 1) * nc, offset=nc)
         if step.scheme == "explicit":

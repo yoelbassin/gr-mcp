@@ -17,19 +17,22 @@ class Amplitude(str, Enum):
     alone is not a contract: a demod with absolute decision boundaries needs a
     specific statistic, and the wrong one is silent garbage rather than a
     tolerable offset (measured: qam_demod is SER 0.91 at every gain on a
-    peak-normalized stream, SER 0 on an RMS-normalized one)."""
+    peak-normalized stream, SER 0 on an RMS-normalized one).
+
+    The statistic each one drives to the reference: PEAK_UNITY max |x|,
+    MEAN_MAG_UNITY mean |x|, RMS_UNITY sqrt(mean |x|^2)."""
 
     UNKNOWN = "unknown"
-    PEAK_UNITY = "peak_unity"  # max |x| -> reference
-    MEAN_MAG_UNITY = "mean_mag_unity"  # mean |x| -> reference
-    RMS_UNITY = "rms_unity"  # sqrt(mean |x|^2) -> reference
+    PEAK_UNITY = "peak_unity"
+    MEAN_MAG_UNITY = "mean_mag_unity"
+    RMS_UNITY = "rms_unity"
 
 
 @dataclass(frozen=True)
 class Descriptor:
     level: Level
-    item_type: ItemType  # GR wire type c/f/b/s; selects IO blocks
-    carrier: Carrier = Carrier.HARD  # decision-hardness, a seam invariant
+    item_type: ItemType
+    carrier: Carrier = Carrier.HARD
     amplitude: Amplitude = Amplitude.UNKNOWN
     order: int | None = None
     # Items per frame when the stream is back-to-back framed (a framing stage

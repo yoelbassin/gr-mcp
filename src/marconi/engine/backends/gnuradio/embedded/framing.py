@@ -61,19 +61,22 @@ def make_tag_gate(
             w = 0
             while r < n and w < len(out):
                 abs_r = base + r
-                if abs_r < self._end:  # inside a frame: emit up to its end
+                inside_frame = abs_r < self._end
+                if inside_frame:
                     hi = min(self._end - base, n)
                     k = min(hi - r, len(out) - w)
                     out[w : w + k] = x[r : r + k]
                     w += k
                     r += k
                     continue
-                nxt = next((o for o in starts if o >= abs_r and o >= self._end), None)
-                if nxt is None:  # no further frame opens in this window: drop rest
+                next_frame = next(
+                    (o for o in starts if o >= abs_r and o >= self._end), None
+                )
+                if next_frame is None:
                     r = n
                     break
-                r = nxt - base  # drop the inter-frame gap
-                self._end = nxt + frame_len
+                r = next_frame - base  # skip the inter-frame gap
+                self._end = next_frame + frame_len
             self.consume(0, r)
             self._scanned += r
             # only consumed-region tags: the unconsumed remainder reappears

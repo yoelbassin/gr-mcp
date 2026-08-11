@@ -9,7 +9,7 @@ from marconi.errors import register_error
 
 
 class RunTimeout(Exception):
-    """A run exceeded its wall-clock deadline."""
+    pass
 
 
 _deadline: ContextVar[float | None] = ContextVar("marconi_run_deadline", default=None)

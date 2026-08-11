@@ -471,7 +471,6 @@ def make_chirp_sync(
             return payload_start, cfo_bins, sto_bins
 
         def _fir_to_out(self, upto: int) -> None:
-            """Move _buf[:upto] through the current FIR+CFO into _out."""
             if upto <= 0:
                 return
             ext = np.concatenate([self._hist, self._buf[:upto]])
