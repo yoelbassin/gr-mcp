@@ -1,7 +1,12 @@
 import pytest
 
 from marconi.engine.backends.base import BackendError
-from marconi.engine.backends.gnuradio.blocks import GR_BLOCKS, _factories, _modules
+from marconi.engine.backends.gnuradio.blocks import (
+    GR_BLOCKS,
+    BlockParams,
+    _factories,
+    _modules,
+)
 
 
 def test_unknown_kind_absent() -> None:
@@ -15,13 +20,15 @@ def test_rrc_filter_accepts_fractional_sps() -> None:
     ctx = _modules()
     block = GR_BLOCKS["rrc_filter_ccf"](
         ctx,
-        {
-            "interpolation": 1,
-            "rate": 10.0,
-            "sps": 10.0 / 3.0,
-            "alpha": 0.35,
-            "span": 11,
-        },
+        BlockParams(
+            {
+                "interpolation": 1,
+                "rate": 10.0,
+                "sps": 10.0 / 3.0,
+                "alpha": 0.35,
+                "span": 11,
+            }
+        ),
     )
     assert block is not None
 
@@ -29,13 +36,17 @@ def test_rrc_filter_accepts_fractional_sps() -> None:
 def test_const_rejects_unknown_order() -> None:
     ctx = _modules()
     with pytest.raises(BackendError):
-        GR_BLOCKS["chunks_to_symbols_bc"](ctx, {"scheme": "psk", "order": 5})
+        GR_BLOCKS["chunks_to_symbols_bc"](
+            ctx, BlockParams({"scheme": "psk", "order": 5})
+        )
 
 
 def test_qam_const_rejects_unknown_order() -> None:
     ctx = _modules()
     with pytest.raises(BackendError):
-        GR_BLOCKS["chunks_to_symbols_bc"](ctx, {"scheme": "qam", "order": 32})
+        GR_BLOCKS["chunks_to_symbols_bc"](
+            ctx, BlockParams({"scheme": "qam", "order": 32})
+        )
 
 
 def test_ctx_exposes_trellis() -> None:

@@ -5,7 +5,11 @@ import threading
 import numpy as np
 import pytest
 
-from marconi.engine.backends.gnuradio.blocks import _factories, _modules
+from marconi.engine.backends.gnuradio.blocks import (
+    BlockParams,
+    _factories,
+    _modules,
+)
 
 SPS = 4.0
 SEG = 4096
@@ -22,12 +26,14 @@ def _agc2_output(attack_sym: float, decay_sym: float) -> np.ndarray:
         ]
     )
     agc = _factories()["agc2_cc"](
-        {
-            "attack_rate": 1.0 / (attack_sym * SPS),
-            "decay_rate": 1.0 / (decay_sym * SPS),
-            "reference": 1.0,
-            "max_gain": 0.0,
-        }
+        BlockParams(
+            {
+                "attack_rate": 1.0 / (attack_sym * SPS),
+                "decay_rate": 1.0 / (decay_sym * SPS),
+                "reference": 1.0,
+                "max_gain": 0.0,
+            }
+        )
     )
     tb = gr.top_block("agc2_settle")
     src = blocks.vector_source_c(step.tolist(), False)

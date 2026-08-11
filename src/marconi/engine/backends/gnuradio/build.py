@@ -5,7 +5,11 @@ import threading
 from typing import Any
 
 from marconi.engine.backends.base import BackendError
-from marconi.engine.backends.gnuradio.blocks import _factories, _modules
+from marconi.engine.backends.gnuradio.blocks import (
+    BlockParams,
+    _factories,
+    _modules,
+)
 from marconi.engine.backends.gnuradio.embedded.lifecycle import EofProbe
 from marconi.engine.compile.ir import GrPipeline
 from marconi.engine.io.source import SourceSlice
@@ -142,7 +146,7 @@ def build_top_block(pipeline: GrPipeline) -> Any:
                 f"block '{b.id}': kind '{b.kind}' has no GNU Radio factory"
             )
         try:
-            instances[b.id] = factory(dict(b.params))
+            instances[b.id] = factory(BlockParams(dict(b.params)))
         except Exception as e:  # noqa: BLE001
             raise BackendError(
                 f"block '{b.id}' ({b.kind}) failed to construct: {e}"

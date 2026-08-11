@@ -1,27 +1,65 @@
 import pytest
 
 from marconi.engine.backends.base import BackendError
-from marconi.engine.backends.gnuradio.blocks import _as_float, _as_int
+from marconi.engine.backends.gnuradio.blocks import BlockParams
+from marconi.engine.types.params import ParamValue
 
 
-def test_as_float_accepts_numbers() -> None:
-    assert _as_float(2) == 2.0 and _as_float(2.5) == 2.5
+def _p(**values: ParamValue) -> BlockParams:
+    return BlockParams(dict(values))
 
 
-def test_as_int_accepts_integral_only() -> None:
-    assert _as_int(4.0) == 4 and _as_int(7) == 7
+def test_reads_numbers_by_type() -> None:
+    p = _p(a=2, b=2.5)
+    assert p.f("a") == 2.0 and p.f("b") == 2.5
+    assert p.i("a") == 2
 
 
-def test_as_int_rejects_non_integral_float() -> None:
+def test_int_read_accepts_integral_float_only() -> None:
+    assert _p(n=4.0).i("n") == 4 and _p(n=7).i("n") == 7
+
+
+def test_int_read_rejects_non_integral_float() -> None:
     # a StrictInt spec never produces 2.7, but the IR-direct path skips
     # pydantic; the backend must not silently truncate
-    with pytest.raises(BackendError):
-        _as_int(2.7)
+    with pytest.raises(BackendError, match="sps"):
+        _p(sps=2.7).i("sps")
 
 
-@pytest.mark.parametrize("bad", [True, "x", [1.0], None])
-def test_coercion_rejects_non_numbers(bad: object) -> None:
-    with pytest.raises(BackendError):
-        _as_float(bad)  # type: ignore[arg-type]
-    with pytest.raises(BackendError):
-        _as_int(bad)  # type: ignore[arg-type]
+@pytest.mark.parametrize("bad", [True, "x", [1.0]])
+def test_number_reads_reject_non_numbers(bad: ParamValue) -> None:
+    for read in (BlockParams.f, BlockParams.i):
+        with pytest.raises(BackendError, match="gain"):
+            read(_p(gain=bad), "gain")
+
+
+def test_string_read_rejects_a_non_string() -> None:
+    # str(v) would have stringified a list into a plausible-looking path
+    with pytest.raises(BackendError, match="path"):
+        _p(path=[1.0, 2.0]).s("path")
+
+
+def test_bool_read_rejects_a_non_bool() -> None:
+    with pytest.raises(BackendError, match="repeat"):
+        _p(repeat=1).b("repeat")
+
+
+def test_missing_required_param_names_itself() -> None:
+    with pytest.raises(BackendError, match="phase_inc"):
+        _p().f("phase_inc")
+
+
+def test_defaults_apply_only_when_absent() -> None:
+    assert _p().f("alpha", 0.35) == 0.35
+    assert _p(alpha=0.2).f("alpha", 0.35) == 0.2
+    assert _p().b("repeat", False) is False
+    assert _p().s("device", "") == ""
+
+
+def test_list_reads_validate_every_element() -> None:
+    assert _p(taps=[1, 2.0]).floats("taps") == [1.0, 2.0]
+    assert _p(lens=[2, 4.0]).ints("lens") == [2, 4]
+    with pytest.raises(BackendError, match="lens"):
+        _p(lens=[2, 4.5]).ints("lens")
+    with pytest.raises(BackendError, match="taps"):
+        _p(taps=3.0).floats("taps")

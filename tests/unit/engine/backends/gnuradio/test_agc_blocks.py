@@ -4,7 +4,7 @@ import numpy as np
 import numpy.typing as npt
 import pytest
 
-from marconi.engine.backends.gnuradio.blocks import GR_BLOCKS, _modules
+from marconi.engine.backends.gnuradio.blocks import GR_BLOCKS, BlockParams, _modules
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
 from marconi.engine.compile.ir import GrBlock, GrConnection, GrPipeline
 from marconi.engine.types.params import ParamValue
@@ -13,12 +13,14 @@ from marconi.engine.types.params import ParamValue
 def test_agc2_applies_max_gain() -> None:
     blk = GR_BLOCKS["agc2_cc"](
         _modules(),
-        {
-            "attack_rate": 0.01,
-            "decay_rate": 0.001,
-            "reference": 1.0,
-            "max_gain": 7.5,
-        },
+        BlockParams(
+            {
+                "attack_rate": 0.01,
+                "decay_rate": 0.001,
+                "reference": 1.0,
+                "max_gain": 7.5,
+            }
+        ),
     )
     assert blk.max_gain() == pytest.approx(7.5)
 
