@@ -5,7 +5,9 @@ src/marconi names it. The decode exercises three primitives the training set
 never needed -- the 3-of-6 line code (codebook), sync-word seeding, and
 length-field framing -- plus a CRC as the oracle.
 
-A SIM round-trip, not an off-air capture: the modem's coding tail is just
+A SIM round-trip, not an off-air capture, which is why it sits in
+integration alongside the dsss and whitening sims rather than in e2e: the
+oracle is the CRC over a wire this file built itself. The modem's coding tail is just
 [codebook, sync_word] -- the coded-TX path was retired
 (tests/integration/engine/coding/test_partition.py::
 test_tx_with_coding_stage_is_a_compile_error), so the wire fixture is built
