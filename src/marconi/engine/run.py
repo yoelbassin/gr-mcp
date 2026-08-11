@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
@@ -132,6 +133,56 @@ def _entry_carrier(boundary: Descriptor, path: Path, marks: list[int]) -> Coding
     )
 
 
+@dataclass(frozen=True)
+class RunOutputs:
+    """What every successful run reports alongside its output stream. One
+    object so a new per-run field reaches both wrap paths at once."""
+
+    marks: list[int]
+    census: list[BlockCensus]
+    diagnostics: list[Diagnostic]
+    windows: list[int] = field(default_factory=list)
+
+
+def _ok(stream: Bitstream | Symbolstream, out: RunOutputs) -> PipelineResult:
+    return PipelineResult(
+        status="ok",
+        bitstream=stream if isinstance(stream, Bitstream) else None,
+        symbolstream=stream if isinstance(stream, Symbolstream) else None,
+        windows=out.windows,
+        marks=out.marks,
+        census=out.census,
+        diagnostics=out.diagnostics,
+    )
+
+
+def _gr_only_stream(
+    cp: CompiledPipeline, path: Path, marks: list[int]
+) -> Bitstream | Symbolstream:
+    if cp.final.item_type == "b" and cp.final.level is Level.SYMBOLS:
+        # hard symbol indices on the u8 wire (a qam-class demod final): a
+        # Bitstream label would invite bitwise parsing of symbol indices
+        symbols = read_bits(path).astype(np.int16)
+        sym_path = path.with_suffix(".i16")
+        write_symbols(sym_path, symbols)
+        path.unlink()
+        return Symbolstream(
+            path=sym_path, num_symbols=int(symbols.size), item_type="s", marks=marks
+        )
+    if cp.final.item_type == "b":
+        return Bitstream(path=path, num_bits=int(read_bits(path).size))
+    if cp.final.item_type == "c":
+        num = int(path.stat().st_size // ItemType.C.item_bytes)
+        return Symbolstream(path=path, num_symbols=num, item_type="c", marks=marks)
+    item_type = cp.final.item_type.require_symbol()
+    stream: npt.NDArray[np.int16] | npt.NDArray[np.float32] = read_symbols(
+        path, item_type
+    )
+    return Symbolstream(
+        path=path, num_symbols=int(stream.size), item_type=item_type, marks=marks
+    )
+
+
 def _wrap_gr_only(
     cp: CompiledPipeline,
     seam: Path,
@@ -142,58 +193,32 @@ def _wrap_gr_only(
     path = seam.with_suffix(cp.final.item_type.suffix)
     if path != seam:
         seam.replace(path)
-    if cp.final.item_type == "b" and cp.final.level is Level.SYMBOLS:
-        # hard symbol indices on the u8 wire (a qam-class demod final): a
-        # Bitstream label would invite bitwise parsing of symbol indices
-        symbols = read_bits(path).astype(np.int16)
-        sym_path = path.with_suffix(".i16")
-        write_symbols(sym_path, symbols)
-        path.unlink()
-        return PipelineResult(
-            status="ok",
-            symbolstream=Symbolstream(
-                path=sym_path,
-                num_symbols=int(symbols.size),
-                item_type="s",
-                marks=marks,
-            ),
-            marks=marks,
-            census=census,
-            diagnostics=diagnostics,
-        )
-    if cp.final.item_type == "b":
-        bitstream = Bitstream(path=path, num_bits=int(read_bits(path).size))
-        return PipelineResult(
-            status="ok",
-            bitstream=bitstream,
-            marks=marks,
-            census=census,
-            diagnostics=diagnostics,
-        )
-    if cp.final.item_type == "c":
-        num = int(path.stat().st_size // ItemType.C.item_bytes)
-        return PipelineResult(
-            status="ok",
-            symbolstream=Symbolstream(
-                path=path, num_symbols=num, item_type="c", marks=marks
-            ),
-            marks=marks,
-            census=census,
-            diagnostics=diagnostics,
-        )
-    item_type = cp.final.item_type.require_symbol()
-    stream: npt.NDArray[np.int16] | npt.NDArray[np.float32] = read_symbols(
-        path, item_type
+    return _ok(
+        _gr_only_stream(cp, path, marks),
+        RunOutputs(marks=marks, census=census, diagnostics=diagnostics),
     )
-    symbolstream = Symbolstream(
-        path=path, num_symbols=int(stream.size), item_type=item_type, marks=marks
-    )
-    return PipelineResult(
-        status="ok",
-        symbolstream=symbolstream,
-        marks=marks,
-        census=census,
-        diagnostics=diagnostics,
+
+
+def _coded_stream(
+    final: Descriptor, carrier: CodingCarrier, workdir: Path
+) -> Bitstream | Symbolstream:
+    if final.level is Level.BITS:
+        path = workdir / "out.u8"
+        write_bits(path, carrier.bits)
+        return Bitstream(path=path, num_bits=int(carrier.bits.size))
+    symbols = carrier.symbols if carrier.symbols is not None else np.zeros(0, np.int16)
+    item_type = final.item_type.require_symbol()
+    if item_type == "f":
+        path = workdir / "out.f32"
+        write_llrs(path, symbols)
+    else:
+        path = workdir / "out.i16"
+        write_symbols(path, symbols)
+    return Symbolstream(
+        path=path,
+        num_symbols=int(np.asarray(symbols).size),
+        item_type=item_type,
+        marks=list(carrier.marks),
     )
 
 
@@ -205,40 +230,14 @@ def _wrap_result(
     census: list[BlockCensus],
     diagnostics: list[Diagnostic],
 ) -> PipelineResult:
-    windows = [w.start for w in carrier.windows or []]
-    if final.level is Level.BITS:
-        path = workdir / "out.u8"
-        write_bits(path, carrier.bits)
-        bitstream = Bitstream(path=path, num_bits=int(carrier.bits.size))
-        return PipelineResult(
-            status="ok",
-            bitstream=bitstream,
-            windows=windows,
+    return _ok(
+        _coded_stream(final, carrier, workdir),
+        RunOutputs(
             marks=marks,
             census=census,
             diagnostics=diagnostics,
-        )
-    symbols = carrier.symbols if carrier.symbols is not None else np.zeros(0, np.int16)
-    item_type = final.item_type.require_symbol()
-    if item_type == "f":
-        path = workdir / "out.f32"
-        write_llrs(path, symbols)
-    else:
-        path = workdir / "out.i16"
-        write_symbols(path, symbols)
-    symbolstream = Symbolstream(
-        path=path,
-        num_symbols=int(np.asarray(symbols).size),
-        item_type=item_type,
-        marks=list(carrier.marks),
-    )
-    return PipelineResult(
-        status="ok",
-        symbolstream=symbolstream,
-        windows=windows,
-        marks=marks,
-        census=census,
-        diagnostics=diagnostics,
+            windows=[w.start for w in carrier.windows or []],
+        ),
     )
 
 
