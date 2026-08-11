@@ -12,7 +12,7 @@ from scipy.signal import find_peaks, welch
 from scipy.stats import kurtosis
 
 from marconi.levels import fit_levels, percentile_span
-from marconi.survey.iqfile import iter_iq, sample_iq
+from marconi.survey.iqfile import iter_iq, iter_probes, sample_iq
 
 _SURVEY_NPERSEG = 4096
 # Agent-facing arrays stay small: a coarse PSD conveys the spectral shape, and
@@ -576,7 +576,10 @@ def _eye_openness(
     return best
 
 
-_SURVEY_BURST_FRACTION = 0.35
+_SURVEY_BURST_FLOOR_PCTL = 25.0  # low percentile of smoothed power = the
+# noise floor, sampled across the whole slice
+_SURVEY_BURST_RATIO = 4.0  # activity bar above that floor; matches the rise
+# ratio burst_sampler detects on, so survey and the demod agree on "active"
 
 
 class BurstStats(BaseModel):
@@ -599,19 +602,33 @@ def _find_runs(mask: npt.NDArray[np.bool_]) -> list[tuple[int, int]]:
     return list(zip(starts, ends))
 
 
-def _bursts(
-    sample_x: npt.NDArray[np.complex64], path: Path, offset: int, length: int
-) -> BurstStats:
-    thr = _SURVEY_BURST_FRACTION * float(np.percentile(np.abs(sample_x) ** 2, 90))
+def _burst_threshold(path: Path, offset: int, length: int) -> float:
+    """Activity bar, referenced to the slice's own noise floor. Referenced
+    instead to the loudest emitter's level, every transmission an order of
+    magnitude below it fell under the bar and was reported as absent."""
+    lows = [
+        float(np.percentile(_smooth_power(block), _SURVEY_BURST_FLOOR_PCTL))
+        for block in iter_probes(path, offset, length)
+    ]
+    floor = float(np.median(lows)) if lows else 0.0
+    return _SURVEY_BURST_RATIO * floor
+
+
+def _smooth_power(block: npt.NDArray[np.complex64]) -> npt.NDArray[np.float64]:
+    power: npt.NDArray[np.float64] = uniform_filter1d(
+        np.abs(block).astype(np.float64) ** 2, _SURVEY_BURST_WINDOW
+    )
+    return power
+
+
+def _bursts(path: Path, offset: int, length: int) -> BurstStats:
+    thr = _burst_threshold(path, offset, length)
     segs: list[tuple[int, int]] = []
     active_total = 0
     pos = 0
     pending: list[int] | None = None
     for block in iter_iq(path, offset, length):
-        p = uniform_filter1d(
-            np.abs(block).astype(np.float64) ** 2, _SURVEY_BURST_WINDOW
-        )
-        mask = p > thr
+        mask = _smooth_power(block) > thr
         active_total += int(mask.sum())
         for s, e in _find_runs(mask):
             gs, ge = pos + s, pos + e
@@ -639,6 +656,7 @@ class SurveyResult(BaseModel):
     sample_rate: float
     span_samples: int
     analyzed_samples: int
+    analyzed_start: int
     spectrum: SpectrumStats
     carrier: CarrierStats
     envelope: EnvelopeStats
@@ -664,7 +682,8 @@ def survey_iq(
     min_symbol_rate: float | None = None,
     max_symbol_rate: float | None = None,
 ) -> SurveyResult:
-    x, analyzed, span = sample_iq(path, offset, length)
+    window = sample_iq(path, offset, length)
+    x = window.samples
     hi = max_symbol_rate if max_symbol_rate is not None else sample_rate / 2
     if min_symbol_rate is not None:
         lo = min_symbol_rate
@@ -675,8 +694,9 @@ def survey_iq(
     spectrum = _spectrum(x, sample_rate)
     return SurveyResult(
         sample_rate=sample_rate,
-        span_samples=span,
-        analyzed_samples=analyzed,
+        span_samples=window.span,
+        analyzed_samples=window.analyzed,
+        analyzed_start=window.start,
         spectrum=spectrum,
         carrier=_carrier(
             x, sample_rate, spectrum.occupied_bw_hz, spectrum.center_offset_hz
@@ -684,5 +704,5 @@ def survey_iq(
         envelope=_envelope(x),
         symbol_rate=_symbol_rate(x, sample_rate, lo, hi),
         inst_freq=_inst_freq(x, sample_rate),
-        bursts=_bursts(x, path, offset, length),
+        bursts=_bursts(path, offset, length),
     )

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -16,6 +17,8 @@ _SURVEY_SCAN_BLOCK = 1 << 16
 # search self-limits via its resolution-derived floor. Below this a slice is
 # too small for even a coarse PSD.
 _SURVEY_MIN_ITEMS = 1 << 10
+_SURVEY_PROBE_COUNT = 64  # span-wide statistics read this many small blocks
+_SURVEY_PROBE_ITEMS = 1 << 14  # ... of this size, instead of a full extra pass
 _ITEMSIZE = np.dtype(np.complex64).itemsize
 _CHANNELIZE_TAPS_PER_PHASE = 8
 
@@ -60,20 +63,59 @@ def _most_active_start(path: Path, offset: int, span: int, budget: int) -> int:
     return min(offset + best * _SURVEY_SCAN_BLOCK, offset + span - budget)
 
 
+@dataclass(frozen=True)
+class IqWindow:
+    """The samples measurement actually ran on, and where inside the requested
+    slice they came from. `start` is slice-relative, the same frame burst
+    segments are reported in, so the two can be lined up."""
+
+    samples: npt.NDArray[np.complex64]
+    start: int
+    span: int
+
+    @property
+    def analyzed(self) -> int:
+        return int(self.samples.size)
+
+
 def sample_iq(
     path: Path, offset: int = 0, length: int = 0, budget: int = _SURVEY_SAMPLE_ITEMS
-) -> tuple[npt.NDArray[np.complex64], int, int]:
+) -> IqWindow:
     span = slice_len(path, offset, length)
     if span < _SURVEY_MIN_ITEMS:
         raise CaptureTooShort(
             f"{path.name}: slice of {span} complex samples is below the survey "
-            f"floor of {_SURVEY_MIN_ITEMS}; widen capture_samples or the slice."
+            f"floor of {_SURVEY_MIN_ITEMS}; widen capture_samples, lower "
+            f"capture_offset, or point at a longer capture."
         )
     start = offset if span <= budget else _most_active_start(path, offset, span, budget)
     with path.open("rb") as f:
         f.seek(start * _ITEMSIZE)
         window = np.fromfile(f, dtype=np.complex64, count=min(span, budget))
-    return window, window.size, span
+    return IqWindow(samples=window, start=start - offset, span=span)
+
+
+def iter_probes(
+    path: Path,
+    offset: int,
+    length: int,
+    probes: int = _SURVEY_PROBE_COUNT,
+    items: int = _SURVEY_PROBE_ITEMS,
+) -> Iterator[npt.NDArray[np.complex64]]:
+    """Evenly spaced small reads spanning the WHOLE slice. A statistic that
+    must describe the entire capture — the noise floor an activity test is
+    referenced to — cannot be taken from one contiguous window, and streaming
+    the whole slice to get it would double the read."""
+    span = slice_len(path, offset, length)
+    if span <= 0:
+        return
+    step = max(span // max(probes, 1), items)
+    with path.open("rb") as f:
+        for start in range(0, span, step):
+            f.seek((offset + start) * _ITEMSIZE)
+            block = np.fromfile(f, dtype=np.complex64, count=min(items, span - start))
+            if block.size:
+                yield block
 
 
 def channelize_to_file(

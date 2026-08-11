@@ -369,7 +369,7 @@ def test_bursts_recovers_periodic_cadence(tmp_path: Path) -> None:
     x = np.tile(slot, reps)
     p = tmp_path / "bursty.cf32"
     x.tofile(p)
-    b = _bursts(x, p, 0, 0)
+    b = _bursts(p, 0, 0)
     assert abs(b.count - reps) <= 1
     assert 0.4 < b.duty_cycle < 0.6
     assert b.dominant_period_samples is not None
@@ -393,8 +393,45 @@ def test_bursts_stitches_across_chunk_boundaries(
         "iter_iq",
         lambda path, offset, length: iqfile.iter_iq(path, offset, length, chunk=500),
     )
-    b = _bursts(x, p, 0, 0)
+    b = _bursts(p, 0, 0)
     assert abs(b.count - reps) <= 1
     assert b.dominant_period_samples is not None
     assert abs(b.dominant_period_samples - (on + off)) < 40
     assert 0.4 < b.duty_cycle < 0.6
+
+
+def _weak_and_strong_capture(tmp_path: Path, sps_gap: int = 100_000) -> Path:
+    # 20 weak bursts spread over the capture, then one emitter an order of
+    # magnitude louder at the end. The weak ones are far above the noise
+    # floor; they are only "quiet" relative to the loud one.
+    rng = np.random.default_rng(4)
+    n = 3_000_000
+    x = (0.01 * (rng.standard_normal(n) + 1j * rng.standard_normal(n))).astype(
+        np.complex64
+    )
+    for k in range(20):
+        s = 20_000 + k * sps_gap
+        x[s : s + 15_000] += np.complex64(0.3)
+    x[2_400_000:2_700_000] += np.complex64(3.0)
+    p = tmp_path / "weak_and_strong.cf32"
+    x.tofile(p)
+    return p
+
+
+def test_bursts_find_weak_transmissions_beside_a_strong_one(tmp_path: Path) -> None:
+    # The activity bar must be referenced to the noise floor of the whole
+    # slice. Referenced to the loudest emitter's own level instead, every
+    # burst below it vanished with nothing in the payload to say so.
+    res = survey_iq(_weak_and_strong_capture(tmp_path), 1.0e6)
+    assert res.bursts.count >= 20, res.bursts.count
+
+
+def test_survey_reports_where_it_analyzed(tmp_path: Path) -> None:
+    # Over budget, the measured window is relocated to the most active
+    # megasample; without its start the agent cannot tell which part of the
+    # capture spectrum/carrier/symbol_rate describe, nor line them up with
+    # bursts.segments (which are indexed from the slice origin).
+    res = survey_iq(_weak_and_strong_capture(tmp_path), 1.0e6)
+    assert res.analyzed_samples < res.span_samples
+    assert res.analyzed_start > 0
+    assert res.analyzed_start + res.analyzed_samples <= res.span_samples

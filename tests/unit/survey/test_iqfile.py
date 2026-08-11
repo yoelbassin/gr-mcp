@@ -21,7 +21,8 @@ def test_sample_iq_reads_whole_small_slice(tmp_path: Path) -> None:
     x = (np.arange(1 << 14) + 1j * np.arange(1 << 14)).astype(np.complex64)
     p = tmp_path / "s.cf32"
     _write(p, x)
-    got, analyzed, span = sample_iq(p, 0, 0)
+    w = sample_iq(p, 0, 0)
+    got, analyzed, span = w.samples, w.analyzed, w.span
     assert span == x.size and analyzed == x.size
     np.testing.assert_array_equal(got, x)
 
@@ -36,7 +37,8 @@ def test_sample_iq_reads_contiguous_active_window_over_budget(tmp_path: Path) ->
     amp[1 << 21 : (1 << 21) + burst_len] = 5.0
     p = tmp_path / "big.cf32"
     _write(p, amp.astype(np.complex64))
-    got, analyzed, got_span = sample_iq(p, 0, 0, budget=1 << 20)
+    w = sample_iq(p, 0, 0, budget=1 << 20)
+    got, analyzed, got_span = w.samples, w.analyzed, w.span
     assert got_span == span
     assert got.size == analyzed == (1 << 20)
     assert got.dtype == np.complex64
@@ -68,9 +70,10 @@ def test_short_single_burst_is_accepted(tmp_path: Path) -> None:
     # packet can be characterized without stitching in its idle neighbors
     p = tmp_path / "burst.cf32"
     _write(p, (np.arange(1500) + 1j).astype(np.complex64))
-    window, analyzed, span = sample_iq(p, 0, 0)
-    assert span == 1500
-    assert analyzed == 1500
+    w = sample_iq(p, 0, 0)
+    assert w.span == 1500
+    assert w.analyzed == 1500
+    assert w.start == 0
 
 
 def test_negative_offset_raises(tmp_path: Path) -> None:

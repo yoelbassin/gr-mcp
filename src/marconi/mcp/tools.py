@@ -425,6 +425,16 @@ def survey(
     complex samples, 0 = to EOF; capture_dtype cf32/ci16/ci8/cu8, matching
     run_rx).
 
+    WHICH SAMPLES: "bursts" streams the whole slice; every other block
+    measures ONE contiguous window of at most 2^20 samples. When the slice is
+    larger, that window is relocated to the most active megasample inside it,
+    so spectrum/carrier/envelope/symbol_rate/inst_freq can describe a
+    different part of the capture than you asked for. "analyzed_start" (with
+    "analyzed_samples" and "span_samples") reports where it landed, indexed
+    from the slice origin — the same frame as bursts.segments, so the two line
+    up. analyzed_start > 0 means a strong emitter pulled the window: re-window
+    with capture_offset/capture_samples to measure a span deliberately.
+
     SUB-BAND: center_hz (offset from the capture centre) and/or decim (>1)
     characterize ONE channel of a wideband capture: the slice is shifted so
     center_hz lands at DC, low-passed (bandwidth_hz sets the passband,
@@ -533,8 +543,11 @@ def survey(
     "bursts" — activity segments, duty_cycle, and dominant_period_samples
     from burst spacing (the TDMA cadence). segments is capped at 512 with a
     segments_total count and no sidecar — re-window with capture_offset/
-    capture_samples to inspect a busier span. Each [start, length] is in
-    analyzed-stream samples; "capture_scale" {offset_samples, decim} maps
+    capture_samples to inspect a busier span. The activity bar is referenced
+    to the slice's own noise floor, so a loud emitter does not hide weaker
+    transmissions elsewhere in the capture. Each [start, length] is in
+    slice samples (NOT the analyzed window — see analyzed_start above);
+    "capture_scale" {offset_samples, decim} maps
     back to the original capture (capture_offset = offset_samples +
     start*decim, capture_samples = length*decim) to re-decode one burst.
 
