@@ -8,6 +8,7 @@ from typing import Any, Literal
 import numpy as np
 import numpy.typing as npt
 from pydantic import BaseModel
+from scipy.ndimage import uniform_filter1d
 
 from marconi.engine.backends.base import (
     BlockCensus,
@@ -373,8 +374,9 @@ def _active_mask(x: npt.NDArray[np.float32]) -> npt.NDArray[np.bool_]:
     noise samples."""
     if x.size <= _SOFT_ACTIVE_WINDOW:
         return np.ones(x.size, dtype=bool)
-    window = np.ones(_SOFT_ACTIVE_WINDOW) / _SOFT_ACTIVE_WINDOW
-    power = np.convolve(x * x, window, mode="same")
+    power: npt.NDArray[np.float64] = uniform_filter1d(
+        (x * x).astype(np.float64), _SOFT_ACTIVE_WINDOW, mode="constant", cval=0.0
+    )
     threshold = _SOFT_ACTIVE_FRACTION * float(
         np.percentile(power, _SOFT_ACTIVE_HI_PCTILE)
     )

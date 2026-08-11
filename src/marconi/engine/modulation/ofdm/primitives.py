@@ -7,6 +7,7 @@ from typing import Any
 
 import numpy as np
 import numpy.typing as npt
+from scipy.ndimage import uniform_filter1d
 
 # Lock threshold for cp_symbol_sync's CP-correlation ratio. Measured: noise
 # 1.3-1.6, real lock >= 2.0. Lives here because both the stage default and the
@@ -55,7 +56,7 @@ def find_null(
     """
     p = np.abs(x) ** 2
     w = min(win, null_len)
-    env = np.convolve(p, np.ones(w) / w, mode="same")
+    env = uniform_filter1d(p, w, mode="constant", cval=0.0)
     thresh = 0.25 * np.median(env)
     low = env < thresh
     # run detection in one pass - the acquisition ladder re-calls this per

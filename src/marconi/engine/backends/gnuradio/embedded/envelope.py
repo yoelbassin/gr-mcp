@@ -4,6 +4,7 @@ from typing import Any
 
 import numpy as np
 import numpy.typing as npt
+from scipy.ndimage import uniform_filter1d
 
 
 def sustained_runs(
@@ -30,6 +31,7 @@ def trailing_mean(
     do not see a false dip toward zero from implicit zero-padding)."""
     if window <= 1:
         return block
-    kernel = np.full(window, 1.0 / window, dtype=np.float64)
-    padded = np.concatenate([np.full(window - 1, block[0], dtype=np.float64), block])
-    return np.convolve(padded, kernel, mode="valid")
+    smoothed: npt.NDArray[np.float64] = uniform_filter1d(
+        block.astype(np.float64), window, mode="nearest", origin=(window - 1) // 2
+    )
+    return smoothed

@@ -8,6 +8,7 @@ import numpy.typing as npt
 from pydantic import BaseModel
 from scipy.ndimage import uniform_filter1d
 from scipy.signal import find_peaks, welch
+from scipy.stats import kurtosis
 
 from marconi.levels import fit_levels, percentile_span
 from marconi.survey.iqfile import iter_iq, sample_iq
@@ -221,7 +222,7 @@ def _envelope(x: npt.NDArray[np.complex64]) -> EnvelopeStats:
     a = np.abs(_gate(x, active)).astype(np.float64)
     mean = float(a.mean())
     std = float(a.std())
-    kurt = float(((a - mean) ** 4).mean() / std**4 - 3.0) if std > 0 else 0.0
+    kurt = float(kurtosis(a)) if std > 0 else 0.0
     return EnvelopeStats(
         const_envelope_ratio=_sig(std / mean) if mean > 0 else 0.0,
         amplitude_kurtosis=_sig(kurt),
