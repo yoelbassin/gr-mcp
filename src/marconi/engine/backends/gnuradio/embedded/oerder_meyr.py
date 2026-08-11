@@ -94,7 +94,15 @@ def _clock_line_ratio(seg: npt.NDArray[np.complex64], sps: int) -> float:
     return float(spec[b]) / med if med > 0.0 else 0.0
 
 
-_FLOOR_BLOCK = 1024  # fixed detection granularity (chunk-independent)
+_FLOOR_BLOCK = 1024  # detection granularity, and the processing-block
+# minimum. The block is sized up to hold the windows one _process_block call
+# evaluates locally — the rise hunt (sustained_runs finds nothing in a mask
+# shorter than its run) and the activity smoothing — with room to spare, so
+# the trailing mean averages real history instead of mode="nearest" edge
+# extension. Both scale with sps; a block pinned here emitted nothing but
+# zeros past it. self._quiet carries the fall run across blocks, so fall_run
+# is deliberately not part of the bound.
+_BLOCK_WINDOW_MARGIN = 2
 _THRESH_FRAC = 0.25  # active threshold vs the TRACKED peak; a per-block peak
 # reads a gap's own noise top-decile as "active" (verified on pure AWGN)
 _PEAK_RISE = 1.0 / 8.0  # fast, so a burst's true level is captured in ~1 block
@@ -175,6 +183,7 @@ def make_oerder_meyr(
     fall_run = _FALL_SYMS * stride
     max_region = _MAX_REGION_SYMS * stride
     gate_min = _CLOCK_GATE_MIN_SYMS * stride
+    block_floor = max(_FLOOR_BLOCK, _BLOCK_WINDOW_MARGIN * smooth_w, rise_run)
 
     class _OerderMeyr(gr.basic_block):
         def __init__(self) -> None:
@@ -185,7 +194,7 @@ def make_oerder_meyr(
                 out_sig=[np.complex64],
             )
             self._out = OutQueue(np.complex64)
-            self._pending = np.empty(0, np.complex64)  # < _FLOOR_BLOCK carryover
+            self._pending = np.empty(0, np.complex64)  # < block_floor carryover
             self._abs = 0  # absolute index of the next input sample to classify
             self._m = 0  # next global symbol index; its base is m*stride
             self._burst: list[npt.NDArray[np.complex64]] = []
@@ -211,7 +220,7 @@ def make_oerder_meyr(
 
         def general_work(self, input_items: Any, output_items: Any) -> int:
             return drain_chunked(
-                self, input_items, output_items, floor=_FLOOR_BLOCK, dtype=np.complex64
+                self, input_items, output_items, floor=block_floor, dtype=np.complex64
             )
 
         def _flush_tail(self) -> None:

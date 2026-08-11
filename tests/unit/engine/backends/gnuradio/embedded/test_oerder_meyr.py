@@ -357,3 +357,14 @@ def test_long_gap_decayed_peak_noise_is_zeroed() -> None:
     b2 = sym[(burst.size + gap_n) // _BURST_SPS :]
     z = b2[1:] * np.conj(b2[:-1])
     assert _r4(z) > 0.9, _r4(z)
+
+
+@pytest.mark.parametrize("sps", [512, 1030])
+def test_emits_symbols_at_every_sps_the_factory_accepts(sps: int) -> None:
+    # The activity smoothing and the rise hunt are evaluated inside ONE
+    # processing block and both scale with sps, so a block pinned at
+    # _FLOOR_BLOCK stopped detecting anything once they outgrew it: every
+    # symbol came out zero with no burst ever flushed and no diagnostic.
+    x = _shaped_qpsk(60, sps, tau=0.25, seed=3)
+    out = _drive(x, sps, chunk=1 << 13)
+    assert np.count_nonzero(out) > out.size // 2

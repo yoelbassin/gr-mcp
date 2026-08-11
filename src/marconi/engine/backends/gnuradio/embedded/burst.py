@@ -53,7 +53,17 @@ from marconi.engine.backends.gnuradio.embedded.lifecycle import (
     forecast_drain,
 )
 
-_FLOOR_BLOCK = 1024  # fixed floor-update granularity (chunk-independent)
+_FLOOR_BLOCK = 1024  # floor-update granularity, and the processing-block
+# minimum. The block is sized up to hold the widest window a single call to
+# _process_block evaluates locally: the rise hunt (sustained_runs returns
+# nothing when the mask is shorter than its run) and the fall smoothing
+# (trailing_mean degenerates toward a block-wide constant). Both scale with
+# sps, so a block pinned here silently stopped detecting any burst at all
+# once they outgrew it. self._quiet carries the fall RUN across blocks, so
+# fall_run is deliberately not part of the bound.
+_BLOCK_WINDOW_MARGIN = 2  # ... and holds that many of the widest window, so
+# the trailing mean is an average over real history rather than the boundary
+# extension mode="nearest" supplies when the window spans the whole block
 _FLOOR_UP = 1.0 / 64.0  # EMA rate when the floor estimate rises
 _FLOOR_DOWN = 1.0 / 4.0  # faster fall: never let a burst inflate the floor
 _RISE_RATIO = 4.0  # burst starts above 4x floor ...
@@ -92,6 +102,7 @@ def make_burst_sampler(gr: Any, *, sps: float) -> Any:
     fall_run = _FALL_CHIPS * phases
     fall_smooth = _FALL_SMOOTH_CHIPS * phases
     max_burst = _MAX_BURST_CHIPS * phases
+    block_floor = max(_FLOOR_BLOCK, _BLOCK_WINDOW_MARGIN * fall_smooth, rise_run)
 
     class _BurstSampler(gr.basic_block):
         def __init__(self) -> None:
@@ -99,7 +110,7 @@ def make_burst_sampler(gr: Any, *, sps: float) -> Any:
                 self, name="burst_sampler", in_sig=[np.float32], out_sig=[np.float32]
             )
             self._out = OutQueue(np.float32)
-            self._pending = np.empty(0, np.float32)  # < _FLOOR_BLOCK carryover
+            self._pending = np.empty(0, np.float32)  # < block_floor carryover
             self._floor = 0.0
             self._abs = 0  # absolute index of the next input sample to classify
             self._k = 0  # next global chip index; its base is round(k*stride)
@@ -121,7 +132,7 @@ def make_burst_sampler(gr: Any, *, sps: float) -> Any:
 
         def general_work(self, input_items: Any, output_items: Any) -> int:
             return drain_chunked(
-                self, input_items, output_items, floor=_FLOOR_BLOCK, dtype=np.float32
+                self, input_items, output_items, floor=block_floor, dtype=np.float32
             )
 
         def _flush_tail(self) -> None:

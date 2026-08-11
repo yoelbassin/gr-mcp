@@ -501,3 +501,25 @@ def test_real_scheduler_runs_to_completion_without_deadlock() -> None:
     hard = (out > 0.5).astype(np.uint8)
     want = _chip_string(bits)
     assert want in "".join(map(str, hard))
+
+
+@pytest.mark.parametrize("sps", [256, 1024, 1025, 2048])
+def test_detects_bursts_at_every_sps_the_factory_accepts(sps: int) -> None:
+    # The block-local detector windows scale with sps: the rise hunt needs
+    # rise_run consecutive samples inside ONE processing block, and the fall
+    # smoothing needs fall_smooth. A processing block pinned at _FLOOR_BLOCK
+    # made both unreachable once they outgrew it, so no burst could ever be
+    # detected and every chip fell through the idle path at noise scale.
+    # _FALL_CHIPS of quiet must fit AFTER the burst for it to close normally.
+    rng = np.random.default_rng(11)
+    env = np.concatenate(
+        [
+            _noise(16 * sps, rng),
+            np.ones(16 * sps, np.float32),
+            _noise(128 * sps, rng),
+        ]
+    )
+    blk = make_burst_sampler(FAKE_GR, sps=float(sps))
+    out = drive(blk, env, chunk=_FLOOR_BLOCK, out_dtype=np.float32)
+    assert blk.diagnostics["bursts_flushed"] == 1
+    assert float(np.max(out)) > 0.5
