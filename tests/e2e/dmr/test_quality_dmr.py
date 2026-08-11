@@ -5,14 +5,17 @@ straight out of test_dmr_offair's full-decode modem (same channelize/fsk
 params that gate already validates end-to-end via CRC), so no deviation or
 bandwidth literal is duplicated here.
 
-BURST_SEGMENTS are the 7 activity windows survey_iq's own burst detector
-finds in this capture (offset, length in complex samples) — measured once,
-not re-derived per run. Every burst's soft-stream fit_levels order is 4
-(genuine 4-level separation), with separation ~5.07-8.12 against the
-quality module's 4.0 multilevel bar — all 7 currently clear it with
-margin. The gate still checks all 7 and asserts any non-no_signal verdict,
-rather than betting on one hardcoded window, as insurance against a future
-demod or threshold change narrowing any single burst's margin."""
+The external truth this gates against is not the burst windows but the
+capture's proven content: test_dmr_offair decodes CRC-valid frames out of
+this same file, so signal IS present in it. A quality layer that reads any
+of these windows as no_signal is therefore wrong, and every window must
+say so. BURST_SEGMENTS are the 7 activity windows survey_iq found (offset,
+length in complex samples), measured once as fixtures. Every burst's
+soft-stream fit_levels order is 4 with separation ~5.07-8.12 against the
+4.0 multilevel bar, so all 7 clear it with margin — which is exactly what
+the assertion says, so a demod or threshold change that narrows any single
+burst below the bar fails here instead of hiding behind its six
+neighbours."""
 
 from __future__ import annotations
 
@@ -56,7 +59,7 @@ def _bare_fsk_modem() -> Modem:
 def test_bare_fsk_reads_as_signal(tmp_path: Path) -> None:
     ensure_worker_warm()
     modem = _bare_fsk_modem()
-    verdicts: list[str] = []
+    verdicts: list[tuple[int, str]] = []
     for offset, length in BURST_SEGMENTS:
         res = run_rx(
             modem,
@@ -68,5 +71,6 @@ def test_bare_fsk_reads_as_signal(tmp_path: Path) -> None:
             timeout=60.0,
         )
         assert res.quality is not None
-        verdicts.append(res.quality.verdict)
-    assert any(v != "no_signal" for v in verdicts), verdicts
+        verdicts.append((offset, res.quality.verdict))
+    blind = [(off, v) for off, v in verdicts if v == "no_signal"]
+    assert not blind, f"real signal read as no_signal at {blind} (all: {verdicts})"

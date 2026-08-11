@@ -6,7 +6,7 @@ memory via backpressure instead of unbounded buffering."""
 
 from __future__ import annotations
 
-import re
+import ast
 from typing import Any
 
 import numpy as np
@@ -179,24 +179,48 @@ def test_chirp_sync_eof_probe_flushes_withheld_tail() -> None:
 
 def test_lifecycle_owned_by_shared_module() -> None:
     """The forecast/EOF/drain discipline lives in lifecycle.py alone: every
-    embedded module with pending-output state uses OutQueue/forecast_drain
-    rather than a hand-rolled dialect. css_map/css_demap (fixed small-ratio
-    converters) and sym_strip (streaming pass-through) are the documented
-    exceptions with no pending state."""
-    users = {
-        "chirp.py",
-        "msk.py",
-        "ofdm.py",
-        "cp_sync.py",
-        "pilot_lattice.py",
-    }
+    embedded module with pending-output state binds it to OutQueue and gets its
+    forecast from forecast_drain rather than a hand-rolled dialect. Checked on
+    the parsed module, not its text, so the invariant is about what the code
+    binds and imports — a renamed local or a reflowed line cannot fake it, and
+    a new hand-rolled queue cannot slip past a substring. css_map/css_demap
+    (fixed small-ratio converters) and sym_strip (streaming pass-through) are
+    the documented exceptions with no pending state."""
+    users = {"chirp.py", "msk.py", "ofdm.py", "cp_sync.py", "pilot_lattice.py"}
     for name in users:
-        src = (_EMBEDDED / name).read_text()
-        assert "forecast_drain" in src, f"{name} does not use the shared forecast"
+        tree = ast.parse((_EMBEDDED / name).read_text())
+        imported = {
+            alias.name
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ImportFrom)
+            and (node.module or "").endswith("lifecycle")
+            for alias in node.names
+        }
+        assert "forecast_drain" in imported, f"{name} does not share the forecast"
+
     for path in _EMBEDDED.glob("*.py"):
         if path.name == "lifecycle.py":
             continue
-        src = path.read_text()
-        assert not re.search(
-            r"np\.concatenate\(\[self\._out", src
-        ), f"{path.name} re-implements the pending-output queue"
+        tree = ast.parse(path.read_text())
+        for node in ast.walk(tree):
+            # every pending-output attribute must be constructed from OutQueue
+            if not isinstance(node, ast.Assign):
+                continue
+            targets = [
+                tgt
+                for tgt in node.targets
+                if isinstance(tgt, ast.Attribute) and tgt.attr == "_out"
+            ]
+            if not targets:
+                continue
+            call = node.value
+            built_by = (
+                call.func.id
+                if isinstance(call, ast.Call) and isinstance(call.func, ast.Name)
+                else None
+            )
+            assert built_by == "OutQueue", (
+                f"{path.name}:{node.lineno} binds self._out to "
+                f"{ast.unparse(node.value)} — the pending-output queue is "
+                f"lifecycle.OutQueue, not a per-block dialect"
+            )

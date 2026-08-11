@@ -31,10 +31,14 @@ def _css_demap_pipeline(tmp_path: Path) -> GrPipeline:
     )
 
 
-def _complex_only_pipeline(tmp_path: Path) -> GrPipeline:
+def _complex_only_pipeline(tmp_path: Path) -> tuple[GrPipeline, Path]:
     iq_in = tmp_path / "in.iq"
     iq_out = tmp_path / "out.iq"
     np.ones(16, dtype=np.complex64).tofile(iq_in)
+    return _complex_only_graph(iq_in, iq_out), iq_out
+
+
+def _complex_only_graph(iq_in: Path, iq_out: Path) -> GrPipeline:
     return GrPipeline(
         name="complex_only_guard",
         sample_rate=1.0,
@@ -47,8 +51,14 @@ def _complex_only_pipeline(tmp_path: Path) -> GrPipeline:
 
 
 def test_complex_only_pipeline_runs_on_main_thread(tmp_path: Path) -> None:
-    tb = build_top_block(_complex_only_pipeline(tmp_path))
+    # the guard admits a GR-only graph to the main thread; "admitted" is only
+    # meaningful if the graph actually moved its samples through
+    pipe, sink = _complex_only_pipeline(tmp_path)
+    tb = build_top_block(pipe)
     tb.run()
+    assert np.array_equal(
+        np.fromfile(sink, np.complex64), np.ones(16, dtype=np.complex64)
+    )
 
 
 def test_uint8_python_block_rejects_main_thread_run(tmp_path: Path) -> None:
