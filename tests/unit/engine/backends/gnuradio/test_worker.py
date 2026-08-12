@@ -18,6 +18,7 @@ from marconi.engine.backends.gnuradio.runner import (
     ensure_worker_warm,
 )
 from marconi.engine.compile.ir import GrBlock, GrConnection, GrPipeline
+from marconi.engine.types.enums import RunStatus
 
 
 def _passthrough(src: Path, dst: Path) -> GrPipeline:
@@ -219,10 +220,10 @@ def test_scheduler_abort_flags_error() -> None:
         if "block_executor" in text:
             break
     assert "block_executor" in text, "no scheduler abort on stdio in 8 attempts"
-    flagged = worker_mod._flag_scheduler_abort(RunResult(status="ok"), text)
+    flagged = worker_mod._flag_scheduler_abort(RunResult(status=RunStatus.OK), text)
     assert flagged.status == "error"
     assert "scheduler abort" in (flagged.error or "")
-    clean = worker_mod._flag_scheduler_abort(RunResult(status="ok"), "")
+    clean = worker_mod._flag_scheduler_abort(RunResult(status=RunStatus.OK), "")
     assert clean.status == "ok"
 
 
@@ -269,7 +270,8 @@ def test_abnormal_worker_exit_is_error_with_cause() -> None:
 def _bulky_result_worker(payload_json: str, conn: Any, capture_path: str) -> None:
     marks = list(range(60_000))
     result = RunResult(
-        status="ok", diagnostics=[Diagnostic(block="probe", key="marks", marks=marks)]
+        status=RunStatus.OK,
+        diagnostics=[Diagnostic(block="probe", key="marks", marks=marks)],
     )
     conn.send(result.model_dump_json())
     conn.close()
@@ -291,7 +293,7 @@ def test_result_larger_than_pipe_buffer_is_not_a_timeout() -> None:
 
 
 def _wedged_teardown_worker(payload_json: str, conn: Any, capture_path: str) -> None:
-    conn.send(RunResult(status="ok").model_dump_json())
+    conn.send(RunResult(status=RunStatus.OK).model_dump_json())
     conn.close()
     time.sleep(120.0)  # a GR destructor hang after the result was delivered
 
@@ -311,7 +313,7 @@ def test_delivered_result_is_not_held_to_the_full_deadline() -> None:
 def test_result_pipe_outranks_timeout_kill() -> None:
     """A worker that reported ok but lingered in GR teardown past the deadline
     is killed — its completed result (and artifacts) must survive."""
-    ok = RunResult(status="ok", artifacts=["/tmp/x.iq"]).model_dump_json()
+    ok = RunResult(status=RunStatus.OK, artifacts=["/tmp/x.iq"]).model_dump_json()
     kept = _resolve_result(True, ok, -15, "")
     assert kept.status == "ok"
     assert kept.artifacts == ["/tmp/x.iq"]
@@ -347,7 +349,7 @@ def test_empty_terminal_verdict_survives_item_bearing_taps() -> None:
     """Trace/soft taps share the sink block kinds and DO carry items on the
     conditioning stages; only the compiler-marked terminal decides empty."""
     result = RunResult(
-        status="ok",
+        status=RunStatus.OK,
         artifacts=[],
         census=[
             _census("iq_file_source_0", "iq_file_source", items_out=100),
@@ -365,7 +367,7 @@ def test_empty_aggregate_rule_holds_for_unmarked_ir() -> None:
     # hand-built dev IR never marks a terminal: the all-sinks rule remains,
     # so an item-bearing sink keeps the run ok
     result = RunResult(
-        status="ok",
+        status=RunStatus.OK,
         artifacts=[],
         census=[
             _census("iq_file_sink_0", "iq_file_sink", items_in=100),

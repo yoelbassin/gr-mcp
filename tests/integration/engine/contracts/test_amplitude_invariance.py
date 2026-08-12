@@ -55,6 +55,7 @@ from marconi.engine.types.enums import (
     ItemType,
     PskOrder,
     QamOrder,
+    RunStatus,
 )
 from marconi.engine.types.levels import Level
 from marconi.engine.types.models import Modem
@@ -702,12 +703,11 @@ def test_amplitude_acceptance_matches_the_declared_set(name: str) -> None:
 # __future__ import annotations`, so its Literal is stored unevaluated (a
 # string) and isn't reachable as a reusable static alias without a source
 # change -- this duplication is intentional and test-side only.
-_Status = Literal["ok", "error", "timeout", "empty"]
 
 
 @dataclass(frozen=True)
 class GainResult:
-    status: _Status
+    status: RunStatus
     ber: float
 
 
@@ -750,14 +750,16 @@ def _ber_at_gain(tmp_path: Path, name: str, gain: float) -> GainResult:
     rx = be.run_pipeline(_compile("rx", scaled, out))
     # A non-ok RX run (e.g. a hung loop) never decodes anything: worst-case BER,
     # but the status itself is kept so a crash is never mistaken for a decode.
-    if rx.status != "ok":
+    if rx.status is not RunStatus.OK:
         return GainResult(status=rx.status, ber=1.0)
-    return GainResult(status="ok", ber=aligned_ber(read_bits(out), bits))
+    return GainResult(status=RunStatus.OK, ber=aligned_ber(read_bits(out), bits))
 
 
 def _assert_level_invariant(name: str, table: dict[float, GainResult]) -> None:
     for gain, result in table.items():
-        assert result.status == "ok", f"{name}@{gain} status {result.status}: {table}"
+        assert (
+            result.status is RunStatus.OK
+        ), f"{name}@{gain} status {result.status}: {table}"
     assert all(
         r.ber == 0.0 for r in table.values()
     ), f"{name} is level-sensitive: {table}"

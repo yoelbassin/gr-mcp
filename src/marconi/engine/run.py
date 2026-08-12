@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 import numpy as np
 import numpy.typing as npt
@@ -38,10 +38,17 @@ from marconi.engine.io.source import SourceSlice
 from marconi.engine.quality import QualityReport, Verdict, assess_quality
 from marconi.engine.stages.base import Stage
 from marconi.engine.types.descriptor import Descriptor
-from marconi.engine.types.enums import ItemType
+from marconi.engine.types.enums import ItemType, RunStatus
 from marconi.engine.types.levels import Level
-from marconi.engine.types.models import Bitstream, Modem, Softstream, Symbolstream
+from marconi.engine.types.models import (
+    SOFT_LEVELS,
+    Bitstream,
+    Modem,
+    Softstream,
+    Symbolstream,
+)
 from marconi.engine.types.step import stage_label
+from marconi.wire import replace
 
 
 class TraceStage(BaseModel):
@@ -58,7 +65,7 @@ class TraceStage(BaseModel):
 
 
 class PipelineResult(BaseModel):
-    status: Literal["ok", "error", "timeout", "empty"]
+    status: RunStatus
     bitstream: Bitstream | None = None
     symbolstream: Symbolstream | None = None
     softstream: Softstream | None = None
@@ -74,6 +81,38 @@ class PipelineResult(BaseModel):
 
     def diagnostic(self, block: str, key: str) -> Diagnostic | None:
         return find_diagnostic(self.diagnostics, block, key)
+
+    def as_empty(
+        self, *, error: str | None, stalled_at: str | None
+    ) -> "PipelineResult":
+        """The same run, reported as having decoded nothing. The streams drop
+        with the status: "empty" means no product, while the census, marks,
+        diagnostics and quality report stay — a zero-decode run is exactly where
+        the agent needs the gradient."""
+        return replace(
+            self,
+            status=RunStatus.EMPTY,
+            error=error,
+            stalled_at=stalled_at,
+            bitstream=None,
+            symbolstream=None,
+        )
+
+    def with_report(
+        self,
+        *,
+        softstream: Softstream | None,
+        quality: QualityReport,
+        hints: list[str],
+        trace: list[TraceStage],
+    ) -> "PipelineResult":
+        return replace(
+            self,
+            softstream=softstream,
+            quality=quality,
+            hints=hints,
+            trace=trace,
+        )
 
 
 def _harvest_trace(
@@ -147,7 +186,7 @@ class RunOutputs:
 
 def _ok(stream: Bitstream | Symbolstream, out: RunOutputs) -> PipelineResult:
     return PipelineResult(
-        status="ok",
+        status=RunStatus.OK,
         bitstream=stream if isinstance(stream, Bitstream) else None,
         symbolstream=stream if isinstance(stream, Symbolstream) else None,
         windows=out.windows,
@@ -168,13 +207,18 @@ def _gr_only_stream(
         write_symbols(sym_path, symbols)
         path.unlink()
         return Symbolstream(
-            path=sym_path, num_symbols=int(symbols.size), item_type="s", marks=marks
+            path=sym_path,
+            num_symbols=int(symbols.size),
+            item_type=ItemType.S,
+            marks=marks,
         )
     if cp.final.item_type is ItemType.B:
         return Bitstream(path=path, num_bits=int(read_bits(path).size))
     if cp.final.item_type is ItemType.C:
         num = int(path.stat().st_size // ItemType.C.item_bytes)
-        return Symbolstream(path=path, num_symbols=num, item_type="c", marks=marks)
+        return Symbolstream(
+            path=path, num_symbols=num, item_type=ItemType.C, marks=marks
+        )
     item_type = cp.final.item_type.require_symbol()
     stream: npt.NDArray[np.int16] | npt.NDArray[np.float32] = read_symbols(
         path, item_type
@@ -284,7 +328,7 @@ def _nonfinite_input(
     if bad is None:
         return None
     return PipelineResult(
-        status="error",
+        status=RunStatus.ERROR,
         error=f"input contains non-finite samples (first at item {bad}); the "
         "capture is corrupt — repair or re-record it before decoding",
     )
@@ -295,7 +339,7 @@ def _flag_empty_coding(result: PipelineResult) -> PipelineResult:
     final stream holds zero items decoded nothing, and 'ok' would be a lie.
     Name the first census row whose items or windows fell to zero — the
     gradient a parameter search needs."""
-    if result.status != "ok":
+    if result.status is not RunStatus.OK:
         return result
     items = (
         result.bitstream.num_bits
@@ -311,14 +355,9 @@ def _flag_empty_coding(result: PipelineResult) -> PipelineResult:
     if stall is not None:
         what = "windows" if stall.windows_out == 0 and stall.items_out else "items"
         where = f" (no {what} past {stall.kind})"
-    return result.model_copy(
-        update={
-            "status": "empty",
-            "stalled_at": stall.block if stall else None,
-            "error": f"coding tail produced 0 items{where}",
-            "bitstream": None,
-            "symbolstream": None,
-        }
+    return result.as_empty(
+        error=f"coding tail produced 0 items{where}",
+        stalled_at=stall.block if stall else None,
     )
 
 
@@ -360,7 +399,7 @@ def _hints(
     modem: Modem,
     registry: Mapping[str, Stage[Any, Any]],
     final: Descriptor,
-    verdict: Verdict = "decoded",
+    verdict: Verdict = Verdict.DECODED,
 ) -> list[str]:
     hints: list[str] = list(composition_warnings(modem, registry))
     stages = [registry.get(s.conv) for s in modem.path]
@@ -368,7 +407,7 @@ def _hints(
         st is not None and st.polarity_ambiguous for st in stages
     ):
         hints.append(_POLARITY_HINT)
-    if verdict != "decoded":
+    if verdict is not Verdict.DECODED:
         path_convs = frozenset(s.conv for s in modem.path)
         for s in modem.path:
             stage = registry.get(s.conv)
@@ -380,8 +419,10 @@ def _hints(
 def _soft_file(path: Path, level: Level | None) -> Softstream:
     return Softstream(
         path=path,
-        num_items=path.stat().st_size // 4 if path.is_file() else 0,
-        level="bits" if level is Level.BITS else "symbols",
+        num_items=(
+            path.stat().st_size // ItemType.F.item_bytes if path.is_file() else 0
+        ),
+        level=level if level in SOFT_LEVELS else Level.SYMBOLS,
     )
 
 
@@ -397,8 +438,7 @@ def _soft_tap(
     bare fsk/msk front end) is a per-symbol eye -- signal-present evidence only
     (see marconi.engine.quality._emit_soft)."""
     soft_symbols = (
-        result.symbolstream is not None
-        and result.symbolstream.item_type == ItemType.F.value
+        result.symbolstream is not None and result.symbolstream.item_type is ItemType.F
     )
     if soft_symbols and result.symbolstream is not None:
         return _soft_file(result.symbolstream.path, cp.final.level)
@@ -464,8 +504,7 @@ def _reject_nonfinite(
     input_stream: Bitstream | Symbolstream | None,
 ) -> PipelineResult | None:
     soft_in = (
-        isinstance(input_stream, Symbolstream)
-        and input_stream.item_type == ItemType.F.value
+        isinstance(input_stream, Symbolstream) and input_stream.item_type is ItemType.F
     )
     if soft_in and input_stream is not None:
         return _nonfinite_input(input_stream.path, ItemType.F)
@@ -527,7 +566,7 @@ def run_rx(
             census, diagnostics = list(r.census), list(r.diagnostics)
             if trace_dir is not None:
                 trace_rows = _harvest_trace(modem, cp, trace_dir, registry)
-            if r.status in ("error", "timeout"):
+            if r.status in (RunStatus.ERROR, RunStatus.TIMEOUT):
                 return PipelineResult(
                     status=r.status,
                     error=r.error,
@@ -536,9 +575,9 @@ def run_rx(
                     diagnostics=diagnostics,
                     trace=trace_rows,
                 )
-            if r.status == "empty":
+            if r.status is RunStatus.EMPTY:
                 gr_empty = PipelineResult(
-                    status="empty", error=r.error, stalled_at=r.stalled_at
+                    status=RunStatus.EMPTY, error=r.error, stalled_at=r.stalled_at
                 )
             marks = _harvest_marks(diagnostics)
         if input_stream is not None:
@@ -554,19 +593,12 @@ def run_rx(
             result = _flag_empty_coding(
                 _wrap_result(cp.final, out, workdir, marks, census, diagnostics)
             )
-        if gr_empty is not None and result.status in ("ok", "empty"):
+        if gr_empty is not None and result.status in (RunStatus.OK, RunStatus.EMPTY):
             # the worker's stall is the upstream truth; the coding tail's
             # recomputation over the same census would only echo it less
-            # precisely. Streams null like _flag_empty_coding's: empty means
-            # no product, but the report below still attaches.
-            result = result.model_copy(
-                update={
-                    "status": "empty",
-                    "error": gr_empty.error,
-                    "stalled_at": gr_empty.stalled_at,
-                    "bitstream": None,
-                    "symbolstream": None,
-                }
+            # precisely.
+            result = result.as_empty(
+                error=gr_empty.error, stalled_at=gr_empty.stalled_at
             )
         check_deadline()
         # 'empty' keeps the full report: the zero-decode run is exactly where
@@ -579,13 +611,11 @@ def run_rx(
             diagnostics=result.diagnostics,
             marks=result.marks,
             soft_stream=soft.path if soft is not None else None,
-            soft_decode_grade=soft.level == "bits" if soft is not None else True,
+            soft_decode_grade=soft.level is Level.BITS if soft is not None else True,
         )
-        return result.model_copy(
-            update={
-                "softstream": soft,
-                "quality": quality,
-                "hints": _hints(modem, registry, cp.final, quality.verdict),
-                "trace": trace_rows,
-            }
+        return result.with_report(
+            softstream=soft,
+            quality=quality,
+            hints=_hints(modem, registry, cp.final, quality.verdict),
+            trace=trace_rows,
         )

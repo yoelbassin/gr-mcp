@@ -7,7 +7,7 @@ from marconi.engine.stages.base import Stage
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.enums import ItemType
 from marconi.engine.types.levels import Level
-from marconi.mcp.wire import Payload
+from marconi.wire import Payload
 
 __all__ = ["ENVELOPE", "family_names", "stage_index", "stage_details"]
 

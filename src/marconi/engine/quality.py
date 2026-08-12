@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import math
 from collections.abc import Mapping, Sequence
+from enum import StrEnum
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 import numpy as np
 import numpy.typing as npt
@@ -18,17 +19,71 @@ from marconi.engine.backends.base import (
     DiagnosticRows,
 )
 from marconi.engine.stages.base import Stage
+from marconi.engine.types.enums import ItemType
 from marconi.levelfit import fit_levels
 
-Assessment = Literal["positive", "negative"]
-Verdict = Literal["decoded", "uncertain", "no_signal"]
+
+class Assessment(StrEnum):
+    POSITIVE = "positive"
+    NEGATIVE = "negative"
+
+
+class Verdict(StrEnum):
+    DECODED = "decoded"
+    UNCERTAIN = "uncertain"
+    NO_SIGNAL = "no_signal"
+
+
+class QualityMetric(StrEnum):
+    """Every measure that can become evidence. An enum rather than the string
+    literals each producer used to spell out, because _TIERS below decides from
+    these names which evidence may reach "decoded" — a typo in either half
+    silently promoted detection evidence to decode-grade, with nothing to fail."""
+
+    SYNC_MATCHES = "sync_matches"
+    WORD_VALIDITY = "word_validity"
+    BURST_MARKS = "burst_marks"
+    OFDM_LOCK_RATIO = "ofdm_lock_ratio"
+    PEAK_DOMINANCE = "peak_dominance"
+    SOFT_CONFIDENCE = "soft_confidence"
+    SOFT_EYE = "soft_eye"
+
+
+class Tier(StrEnum):
+    """DETECTION proves a signal is PRESENT (energy/preamble events), not that
+    the decode is right: a chirp detector firing on real chirps says nothing
+    about the symbols decoded after it. Only DECODE positives reach "decoded";
+    detection alone stays uncertain."""
+
+    DETECTION = "detection"
+    DECODE = "decode"
+
+
+_TIERS: dict[QualityMetric, Tier] = {
+    QualityMetric.SYNC_MATCHES: Tier.DECODE,
+    QualityMetric.WORD_VALIDITY: Tier.DECODE,
+    QualityMetric.OFDM_LOCK_RATIO: Tier.DECODE,
+    QualityMetric.PEAK_DOMINANCE: Tier.DECODE,
+    QualityMetric.SOFT_CONFIDENCE: Tier.DECODE,
+    # a burst mark, and a bare demod's per-symbol soft eye
+    QualityMetric.BURST_MARKS: Tier.DETECTION,
+    QualityMetric.SOFT_EYE: Tier.DETECTION,
+}
+
+_untiered = sorted(m.value for m in QualityMetric if m not in _TIERS)
+if _untiered:
+    raise RuntimeError(f"quality metrics with no evidence tier: {_untiered}")
 
 
 class QualityEvidence(BaseModel):
     source: str
-    metric: str
+    metric: QualityMetric
     value: float
     assessment: Assessment
+
+    @property
+    def tier(self) -> Tier:
+        return _TIERS[self.metric]
 
 
 class QualityReport(BaseModel):
@@ -37,40 +92,30 @@ class QualityReport(BaseModel):
     rationale: str
 
 
-# Detection-tier metrics prove a signal is PRESENT (energy/preamble events),
-# not that the decode is right: a chirp detector firing on real chirps says
-# nothing about the symbols decoded after it. Only decode-tier positives
-# (sync matches, word validity, bits-level soft confidence, coherent lock)
-# reach "decoded"; detection alone -- a burst mark, or a bare demod's
-# per-symbol soft eye (soft_eye) -- stays uncertain.
-_DETECTION_METRICS = frozenset({"burst_marks", "soft_eye"})
-
-
 def verdict_from(evidence: Sequence[QualityEvidence]) -> tuple[Verdict, str]:
-    positives = [e for e in evidence if e.assessment == "positive"]
-    negatives = [e for e in evidence if e.assessment == "negative"]
+    positives = [e for e in evidence if e.assessment is Assessment.POSITIVE]
+    negatives = [e for e in evidence if e.assessment is Assessment.NEGATIVE]
     if not evidence:
-        return "uncertain", (
+        return Verdict.UNCERTAIN, (
             "path produces no checkable evidence (no sync matches beyond "
             "chance, no soft stream, no validating decoder); bits out does "
             "not mean signal in"
         )
     if positives and negatives:
-        names = ", ".join(sorted({e.metric for e in negatives}))
-        return "uncertain", f"conflicting evidence; negative: {names}"
+        return Verdict.UNCERTAIN, f"conflicting evidence; negative: {_names(negatives)}"
     if negatives:
-        names = ", ".join(sorted({e.metric for e in negatives}))
-        return "no_signal", f"negative evidence: {names}"
-    decode_grade = [e for e in positives if e.metric not in _DETECTION_METRICS]
-    if not decode_grade:
-        names = ", ".join(sorted({e.metric for e in positives}))
-        return "uncertain", (
-            f"detection only ({names}): a signal is present but nothing "
-            "validated the decoded bits; add a sync/validating/soft stage "
-            "to confirm"
+        return Verdict.NO_SIGNAL, f"negative evidence: {_names(negatives)}"
+    if not any(e.tier is Tier.DECODE for e in positives):
+        return Verdict.UNCERTAIN, (
+            f"detection only ({_names(positives)}): a signal is present but "
+            "nothing validated the decoded bits; add a sync/validating/soft "
+            "stage to confirm"
         )
-    names = ", ".join(sorted({e.metric for e in positives}))
-    return "decoded", f"positive evidence: {names}"
+    return Verdict.DECODED, f"positive evidence: {_names(positives)}"
+
+
+def _names(evidence: Sequence[QualityEvidence]) -> str:
+    return ", ".join(sorted({e.metric.value for e in evidence}))
 
 
 # A sync count is only evidence once it clears what pure chance would find on
@@ -116,12 +161,12 @@ def _sync_assessment(found: int, expected: float) -> Assessment | None:
     """None = indistinguishable from chance: found something, but no more
     than random bits would match, so it proves nothing either way."""
     if found == 0:
-        return "negative"
+        return Assessment.NEGATIVE
     if found <= expected + _SYNC_CHANCE_SIGMA * math.sqrt(expected):
         return None
     if found < _SYNC_CHANCE_RATIO * expected:
         return None
-    return "positive"
+    return Assessment.POSITIVE
 
 
 def sync_evidence(
@@ -142,7 +187,7 @@ def sync_evidence(
         out.append(
             QualityEvidence(
                 source=row.block,
-                metric="sync_matches",
+                metric=QualityMetric.SYNC_MATCHES,
                 value=float(row.windows_out),
                 assessment=assessment,
             )
@@ -174,7 +219,7 @@ def tag_sync_evidence(diagnostics: Sequence[Diagnostic]) -> list[QualityEvidence
         out.append(
             QualityEvidence(
                 source=block,
-                metric="sync_matches",
+                metric=QualityMetric.SYNC_MATCHES,
                 value=float(tags),
                 assessment=assessment,
             )
@@ -199,18 +244,18 @@ def survival_evidence(
         if ratio >= _WORD_VALIDITY_POSITIVE and _word_excess_significant(
             row.words_valid, row.words_total, chance
         ):
-            assessment: Assessment = "positive"
+            assessment = Assessment.POSITIVE
         elif (
             ratio <= max(_WORD_VALIDITY_NEGATIVE, 2.0 * chance)
             and row.words_total >= _WORD_NEGATIVE_MIN_WORDS
         ):
-            assessment = "negative"
+            assessment = Assessment.NEGATIVE
         else:
             continue
         out.append(
             QualityEvidence(
                 source=row.block,
-                metric="word_validity",
+                metric=QualityMetric.WORD_VALIDITY,
                 value=ratio,
                 assessment=assessment,
             )
@@ -224,9 +269,9 @@ def marks_evidence(marks: Sequence[int]) -> list[QualityEvidence]:
     return [
         QualityEvidence(
             source="acquisition",
-            metric="burst_marks",
+            metric=QualityMetric.BURST_MARKS,
             value=float(len(marks)),
-            assessment="positive",
+            assessment=Assessment.POSITIVE,
         )
     ]
 
@@ -244,9 +289,11 @@ def lock_evidence(diagnostics: Sequence[Diagnostic]) -> list[QualityEvidence]:
         out.append(
             QualityEvidence(
                 source=block,
-                metric="ofdm_lock_ratio",
+                metric=QualityMetric.OFDM_LOCK_RATIO,
                 value=best,
-                assessment="positive" if best >= floor else "negative",
+                assessment=(
+                    Assessment.POSITIVE if best >= floor else Assessment.NEGATIVE
+                ),
             )
         )
     return out
@@ -289,15 +336,15 @@ def dominance_evidence(diagnostics: Sequence[Diagnostic]) -> list[QualityEvidenc
         if frac >= _DOMINANCE_POSITIVE and _word_excess_significant(
             dominant, total, chance
         ):
-            assessment: Assessment = "positive"
+            assessment = Assessment.POSITIVE
         elif frac <= _DOMINANCE_NEGATIVE and total >= _WORD_NEGATIVE_MIN_WORDS:
-            assessment = "negative"
+            assessment = Assessment.NEGATIVE
         else:
             continue
         out.append(
             QualityEvidence(
                 source=block,
-                metric="peak_dominance",
+                metric=QualityMetric.PEAK_DOMINANCE,
                 value=frac,
                 assessment=assessment,
             )
@@ -358,7 +405,7 @@ def _sample_soft(path: Path) -> npt.NDArray[np.float32]:
     it decoded, not the lead) and never strided chunks stitched together (which
     break the consecutive decisions the whitening/level statistics rely on). A
     coarse per-block power scan locates the window; it is then read contiguously."""
-    total = path.stat().st_size // 4
+    total = path.stat().st_size // ItemType.F.item_bytes
     with path.open("rb") as f:
         if total <= _SOFT_SAMPLE_ITEMS:
             return np.fromfile(f, dtype=np.float32)
@@ -372,7 +419,7 @@ def _sample_soft(path: Path) -> npt.NDArray[np.float32]:
         start = min(
             int(np.argmax(powers)) * _SOFT_SAMPLE_ITEMS, total - _SOFT_SAMPLE_ITEMS
         )
-        f.seek(start * 4)
+        f.seek(start * ItemType.F.item_bytes)
         return np.fromfile(f, dtype=np.float32, count=_SOFT_SAMPLE_ITEMS)
 
 
@@ -407,12 +454,16 @@ def _emit_soft(
     their ABSENCE -- a correct discriminator decode of a bursty capture reads
     below the noise floor. So it rides the detection tier (metric soft_eye) and
     never contributes a negative."""
-    if assessment == "negative" and not decode_grade:
+    if assessment is Assessment.NEGATIVE and not decode_grade:
         return []
     return [
         QualityEvidence(
             source="soft_stream",
-            metric="soft_confidence" if decode_grade else "soft_eye",
+            metric=(
+                QualityMetric.SOFT_CONFIDENCE
+                if decode_grade
+                else QualityMetric.SOFT_EYE
+            ),
             value=value,
             assessment=assessment,
         )
@@ -430,14 +481,16 @@ def soft_evidence(
         return []
     active = _active_mask(x)
     if not active.any():
-        return _emit_soft(0.0, "negative", decode_grade)
+        return _emit_soft(0.0, Assessment.NEGATIVE, decode_grade)
     xa = x[active]
     if xa.size < _SOFT_MIN_ITEMS:
         return []
     fit = fit_levels(xa)
     if fit.order > 2 and fit.separation >= _SOFT_MULTILEVEL_SEPARATION:
         return _emit_soft(
-            float(min(fit.separation, _SOFT_VALUE_CAP)), "positive", decode_grade
+            float(min(fit.separation, _SOFT_VALUE_CAP)),
+            Assessment.POSITIVE,
+            decode_grade,
         )
     mag = np.abs(xa)
     spread = float(mag.std())
@@ -458,9 +511,9 @@ def soft_evidence(
     sign_corr = float(np.mean((signs[1:] * signs[:-1])[pair])) if pair.any() else 0.0
     whitened = abs(sign_corr) <= _SOFT_MAX_SIGN_CORR
     if ratio >= _SOFT_POSITIVE and both_polarities and whitened:
-        assessment: Assessment = "positive"
+        assessment = Assessment.POSITIVE
     elif ratio <= _SOFT_NEGATIVE:
-        assessment = "negative"
+        assessment = Assessment.NEGATIVE
     else:
         return []
     return _emit_soft(float(min(ratio, _SOFT_VALUE_CAP)), assessment, decode_grade)

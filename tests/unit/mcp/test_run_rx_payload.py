@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Literal, cast
+from typing import cast
 
 import numpy as np
 import pytest
 
+from marconi.engine.types.enums import RunStatus
+from marconi.engine.types.levels import Level
 from marconi.mcp.tools import run_rx_tool
 
 
@@ -45,15 +47,15 @@ def test_soft_stream_summary_states_the_sign_convention_per_level() -> None:
     from marconi.engine.types.models import Softstream
     from marconi.mcp.payload import soft_summary as _soft_summary
 
-    def result(level: Literal["symbols", "bits"]) -> PipelineResult:
+    def result(level: Level) -> PipelineResult:
         return PipelineResult(
-            status="ok",
+            status=RunStatus.OK,
             softstream=Softstream(
                 path=Path("run/soft_tap.f32"), num_items=512, level=level
             ),
         )
 
-    bits = _soft_summary(result("bits"))
+    bits = _soft_summary(result(Level.BITS))
     assert bits is not None and bits.model_dump(mode="json") == {
         "path": "run/soft_tap.f32",
         "item_type": "f",
@@ -61,7 +63,7 @@ def test_soft_stream_summary_states_the_sign_convention_per_level() -> None:
         "level": "bits",
         "bit1_sign": "negative",
     }
-    symbols = _soft_summary(result("symbols"))
+    symbols = _soft_summary(result(Level.SYMBOLS))
     assert symbols is not None and symbols.model_dump(mode="json") == {
         "path": "run/soft_tap.f32",
         "item_type": "f",
@@ -69,7 +71,7 @@ def test_soft_stream_summary_states_the_sign_convention_per_level() -> None:
         "level": "symbols",
         "bit1_sign": "positive",
     }
-    assert _soft_summary(PipelineResult(status="ok")) is None
+    assert _soft_summary(PipelineResult(status=RunStatus.OK)) is None
 
 
 def test_capture_slice_params_reject_input_path_mode(

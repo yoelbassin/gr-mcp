@@ -152,8 +152,8 @@ def test_lora_offair(tmp_path: Path) -> None:
     )
     assert res.status == "ok", res
     assert len(res.marks) >= 2, res.diagnostics
-    assert res.symbolstream is not None and res.symbolstream.item_type == "s"
-    symbols = read_symbols(res.symbolstream.path, "s")
+    assert res.symbolstream is not None and res.symbolstream.item_type is ItemType.S
+    symbols = read_symbols(res.symbolstream.path, ItemType.S)
 
     fec_bits = css_explicit_decode(symbols, res.symbolstream.marks, _HEADER)
     assert fec_bits.size, "no frame decoded from the marked bursts"

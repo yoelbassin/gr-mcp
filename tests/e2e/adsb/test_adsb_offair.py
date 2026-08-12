@@ -153,7 +153,7 @@ def test_adsb_offair(tmp_path: Path, name: str) -> None:
     )
     assert res.status == "ok", res
     assert res.symbolstream is not None
-    soft = read_symbols(res.symbolstream.path, "f")
+    soft = read_symbols(res.symbolstream.path, ItemType.F)
     unique = _unique_valid(soft)
     assert (
         unique >= case["floor"]

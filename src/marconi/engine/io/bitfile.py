@@ -6,6 +6,7 @@ from typing import Literal, overload
 import numpy as np
 import numpy.typing as npt
 
+from marconi.engine.types.enums import ItemType
 from marconi.errors import register_error
 
 # The bits layer holds the whole capture unpacked (1 byte/bit) and each op
@@ -25,7 +26,9 @@ class CaptureTooLarge(Exception):
 register_error(CaptureTooLarge, "invalid_argument")
 
 
-def _guard(n_items: int, path: Path, item_bytes: int = 1) -> None:
+def _guard_items(path: Path, item_type: ItemType) -> None:
+    item_bytes = item_type.item_bytes
+    n_items = path.stat().st_size // item_bytes
     if n_items > _MAX_BITS:
         raise CaptureTooLarge(
             f"{path.name}: {n_items} items (~{(n_items * item_bytes) >> 20} MiB in "
@@ -40,7 +43,7 @@ def write_bits(path: Path, bits: npt.ArrayLike) -> None:
 
 
 def read_bits(path: Path) -> npt.NDArray[np.uint8]:
-    _guard(path.stat().st_size, path)
+    _guard_items(path, ItemType.B)
     return np.fromfile(path, dtype=np.uint8)
 
 
@@ -50,21 +53,22 @@ def write_symbols(path: Path, symbols: npt.ArrayLike) -> None:
 
 @overload
 def read_symbols(
-    path: Path, item_type: Literal["s"] = ...
+    path: Path, item_type: Literal[ItemType.S] = ...
 ) -> npt.NDArray[np.int16]: ...
 
 
 @overload
-def read_symbols(path: Path, item_type: Literal["f"]) -> npt.NDArray[np.float32]: ...
+def read_symbols(
+    path: Path, item_type: Literal[ItemType.F]
+) -> npt.NDArray[np.float32]: ...
 
 
 def read_symbols(
-    path: Path, item_type: Literal["s", "f"] = "s"
+    path: Path, item_type: ItemType = ItemType.S
 ) -> npt.NDArray[np.int16] | npt.NDArray[np.float32]:
-    if item_type == "f":
-        _guard(path.stat().st_size // 4, path, item_bytes=4)
-        return np.fromfile(path, dtype=np.float32)
-    _guard(path.stat().st_size // 2, path, item_bytes=2)
+    if item_type is ItemType.F:
+        return read_llrs(path)
+    _guard_items(path, ItemType.S)
     return np.fromfile(path, dtype=np.int16)
 
 
@@ -73,7 +77,7 @@ def write_llrs(path: Path, llrs: npt.ArrayLike) -> None:
 
 
 def read_llrs(path: Path) -> npt.NDArray[np.float32]:
-    _guard(path.stat().st_size // 4, path, item_bytes=4)
+    _guard_items(path, ItemType.F)
     return np.fromfile(path, dtype=np.float32)
 
 

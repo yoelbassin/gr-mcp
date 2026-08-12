@@ -2,11 +2,17 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, SerializeAsAny, model_validator
 
+from marconi.engine.types.enums import ItemType
+from marconi.engine.types.levels import Level
 from marconi.engine.types.step import Step, steps_from_spec
+
+# The rungs a float32 soft stream can sit on. Level owns the vocabulary; this
+# names the subset a Softstream may claim, so the sign convention keyed off it
+# (marconi.mcp.payload) has one home and cannot be handed a rung with no rule.
+SOFT_LEVELS: frozenset[Level] = frozenset({Level.SYMBOLS, Level.BITS})
 
 
 class ValidationIssue(BaseModel):
@@ -15,26 +21,9 @@ class ValidationIssue(BaseModel):
     message: str
 
 
-CaptureDtype = Literal["cf32_le", "ci16_le", "cf64_le", "ci8"]
-
-
-class CaptureRef(BaseModel):
-    path: Path
-    center_freq: float
-    sample_rate: float = Field(gt=0)
-    num_samples: int = Field(ge=0)
-    datatype: CaptureDtype = "cf32_le"
-
-    @property
-    def duration(self) -> float:
-        return self.num_samples / self.sample_rate
-
-
 class Bitstream(BaseModel):
     path: Path
     num_bits: int = Field(ge=0)
-    source_capture: Path | None = None
-    symbol_rate: float | None = None
 
 
 class Softstream(BaseModel):
@@ -45,7 +34,15 @@ class Softstream(BaseModel):
 
     path: Path
     num_items: int = Field(ge=0)
-    level: Literal["symbols", "bits"]
+    level: Level
+
+    @model_validator(mode="after")
+    def _level_is_soft_bearing(self) -> "Softstream":
+        if self.level not in SOFT_LEVELS:
+            raise ValueError(
+                f"a soft stream sits at {sorted(SOFT_LEVELS)}, not {self.level!r}"
+            )
+        return self
 
 
 class Symbolstream(BaseModel):
@@ -56,10 +53,16 @@ class Symbolstream(BaseModel):
 
     path: Path
     num_symbols: int = Field(ge=0)
-    item_type: Literal["s", "f", "c"] = "s"
+    item_type: ItemType = ItemType.S
     marks: list[int] = []
-    source_capture: Path | None = None
-    symbol_rate: float | None = None
+
+    @model_validator(mode="after")
+    def _item_type_is_carryable(self) -> "Symbolstream":
+        if self.item_type is ItemType.B:
+            raise ValueError(
+                "a bit wire is a Bitstream, not a Symbolstream with item_type 'b'"
+            )
+        return self
 
     @model_validator(mode="after")
     def _marks_are_stream_positions(self) -> "Symbolstream":

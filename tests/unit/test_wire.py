@@ -17,7 +17,7 @@ from marconi.mcp.payload import (
     capped_int_list,
 )
 from marconi.mcp.streams import StreamPage, StreamStats
-from marconi.mcp.wire import Payload, Ramp
+from marconi.wire import Payload, Ramp
 
 
 class _Sample(Payload):

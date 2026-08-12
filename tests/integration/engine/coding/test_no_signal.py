@@ -213,7 +213,7 @@ def _symbol_stream(kind: str, rng: np.random.Generator, tmp_path: Path) -> Symbo
     }[kind]
     p = tmp_path / f"{kind}.f32"
     data.tofile(p)
-    return Symbolstream(path=p, num_symbols=int(data.size), item_type="f")
+    return Symbolstream(path=p, num_symbols=int(data.size), item_type=ItemType.F)
 
 
 def _input_stream(

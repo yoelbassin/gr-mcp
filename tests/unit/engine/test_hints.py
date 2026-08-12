@@ -7,6 +7,7 @@ from marconi.engine.modulation.ook.stages import (
 from marconi.engine.modulation.ook.stages import (
     OokEnvelopeStep,
 )
+from marconi.engine.quality import Verdict
 from marconi.engine.run import _hints, composition_warnings
 from marconi.engine.stages.conditioning import AgcStep
 from marconi.engine.stages.general import SliceStep
@@ -44,7 +45,7 @@ def test_hints_suggest_open_loop_retry_for_weak_closed_loop_fsk() -> None:
     modem = Modem(
         symbol_rate=1_000_000.0, path=[FskStep(deviation=250_000.0), SliceStep()]
     )
-    hints = _hints(modem, stage_registry(), BITS, "no_signal")
+    hints = _hints(modem, stage_registry(), BITS, Verdict.NO_SIGNAL)
     assert any("loop_bw" in h and "open-loop" in h.lower() for h in hints)
 
 
@@ -57,8 +58,8 @@ def test_hints_silent_when_fsk_decoded_or_already_open_loop() -> None:
         path=[FskStep(deviation=250_000.0, loop_bw=0.0), SliceStep()],
     )
     # a decoded run needs no retry; an already-open-loop run has none to offer
-    assert _hints(closed, stage_registry(), BITS, "decoded") == []
-    assert _hints(open_loop, stage_registry(), BITS, "no_signal") == []
+    assert _hints(closed, stage_registry(), BITS, Verdict.DECODED) == []
+    assert _hints(open_loop, stage_registry(), BITS, Verdict.NO_SIGNAL) == []
 
 
 def test_symbol_sync_closed_loop_hint_on_undecoded() -> None:
@@ -69,18 +70,18 @@ def test_symbol_sync_closed_loop_hint_on_undecoded() -> None:
     from marconi.engine.modulation.psk.stages import SymbolSyncStep
 
     closed = Modem(symbol_rate=1000.0, path=[SymbolSyncStep(sps=4)])
-    hints = _hints(closed, stage_registry(), BITS, "no_signal")
+    hints = _hints(closed, stage_registry(), BITS, Verdict.NO_SIGNAL)
     assert any("symbol_sync" in h and "loop_bw" in h for h in hints)
     open_loop = Modem(symbol_rate=1000.0, path=[SymbolSyncStep(sps=4, loop_bw=0.0)])
-    assert _hints(open_loop, stage_registry(), BITS, "no_signal") == []
-    assert _hints(closed, stage_registry(), BITS, "decoded") == []
+    assert _hints(open_loop, stage_registry(), BITS, Verdict.NO_SIGNAL) == []
+    assert _hints(closed, stage_registry(), BITS, Verdict.DECODED) == []
 
 
 def test_ook_closed_loop_hint_on_undecoded() -> None:
     modem = Modem(
         symbol_rate=2400.0, path=[OokEnvelopeStep(loop_bw=0.045), SliceStep()]
     )
-    hints = _hints(modem, stage_registry(), BITS, verdict="uncertain")
+    hints = _hints(modem, stage_registry(), BITS, verdict=Verdict.UNCERTAIN)
     assert any("ook_envelope" in h and "open-loop" in h.lower() for h in hints)
 
 
@@ -90,13 +91,14 @@ def test_no_ook_hint_when_open_loop_or_decoded() -> None:
     )
     assert not any(
         "ook_envelope" in h
-        for h in _hints(open_loop, stage_registry(), BITS, "uncertain")
+        for h in _hints(open_loop, stage_registry(), BITS, Verdict.UNCERTAIN)
     )
     closed = Modem(
         symbol_rate=2400.0, path=[OokEnvelopeStep(loop_bw=0.045), SliceStep()]
     )
     assert not any(
-        "ook_envelope" in h for h in _hints(closed, stage_registry(), BITS, "decoded")
+        "ook_envelope" in h
+        for h in _hints(closed, stage_registry(), BITS, Verdict.DECODED)
     )
 
 
@@ -105,7 +107,7 @@ def test_remove_agc_hint_for_open_loop_ook_with_agc_in_path() -> None:
         symbol_rate=2400.0,
         path=[AgcStep(), OokEnvelopeStep(loop_bw=0.0), SliceStep()],
     )
-    present = _hints(open_with_agc, stage_registry(), BITS, verdict="uncertain")
+    present = _hints(open_with_agc, stage_registry(), BITS, verdict=Verdict.UNCERTAIN)
     assert _OOK_AGC_REMOVE_HINT in present
     assert all(s in _OOK_AGC_REMOVE_HINT for s in ("ook_envelope", "agc", "remove"))
 
@@ -114,7 +116,7 @@ def test_remove_agc_hint_for_open_loop_ook_with_agc_in_path() -> None:
         symbol_rate=2400.0, path=[OokEnvelopeStep(loop_bw=0.0), SliceStep()]
     )
     assert _OOK_AGC_REMOVE_HINT not in _hints(
-        open_no_agc, stage_registry(), BITS, verdict="uncertain"
+        open_no_agc, stage_registry(), BITS, verdict=Verdict.UNCERTAIN
     )
 
     # closed-loop + agc is the CORRECT pairing: the remove-agc hint must stay
@@ -123,7 +125,9 @@ def test_remove_agc_hint_for_open_loop_ook_with_agc_in_path() -> None:
         symbol_rate=2400.0,
         path=[AgcStep(), OokEnvelopeStep(loop_bw=0.045), SliceStep()],
     )
-    closed_hints = _hints(closed_with_agc, stage_registry(), BITS, verdict="uncertain")
+    closed_hints = _hints(
+        closed_with_agc, stage_registry(), BITS, verdict=Verdict.UNCERTAIN
+    )
     assert _OOK_AGC_REMOVE_HINT not in closed_hints
     assert any("ook_envelope" in h and "open-loop" in h.lower() for h in closed_hints)
 

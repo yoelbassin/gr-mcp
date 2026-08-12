@@ -26,7 +26,7 @@ from marconi.engine.stages.conditioning import InvertStep
 from marconi.engine.stages.general import SliceStep
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Carrier, Descriptor
-from marconi.engine.types.enums import ItemType
+from marconi.engine.types.enums import ItemType, RunStatus
 from marconi.engine.types.levels import Level
 from marconi.engine.types.models import Bitstream, Modem, Symbolstream
 
@@ -128,7 +128,7 @@ def _soft_symbolstream(tmp_path: Path, marks: list[int]) -> Symbolstream:
     p = tmp_path / "syms.f32"
     _SOFT_VALUES.tofile(p)
     return Symbolstream(
-        path=p, num_symbols=int(_SOFT_VALUES.size), item_type="f", marks=marks
+        path=p, num_symbols=int(_SOFT_VALUES.size), item_type=ItemType.F, marks=marks
     )
 
 
@@ -233,7 +233,7 @@ def test_gr_only_hard_symbols_final_get_i16_suffix(tmp_path: Path) -> None:
 
 def test_empty_gr_run_propagates_status_and_stalled_at(tmp_path: Path) -> None:
     canned = RunResult(
-        status="empty",
+        status=RunStatus.EMPTY,
         error="terminal sink wrote 0 items (no items past slice)",
         stalled_at="b1",
         census=[BlockCensus(block="b0", kind="soft_bits_file_source", items_out=0)],
@@ -335,7 +335,7 @@ def test_nonfinite_iq_source_is_an_error_before_the_gr_run(tmp_path: Path) -> No
         start=Descriptor(Level.IQ, ItemType.C),
         workdir=tmp_path,
         source=SourceSlice(path=p),
-        backend=_CannedBackend(RunResult(status="ok")),
+        backend=_CannedBackend(RunResult(status=RunStatus.OK)),
     )
     assert res.status == "error"
     assert res.error is not None and "non-finite" in res.error and "3" in res.error
@@ -345,7 +345,7 @@ def test_nonfinite_soft_symbol_input_is_an_error(tmp_path: Path) -> None:
     soft = np.array([0.5, -1.0, np.inf, 1.0], np.float32)
     p = tmp_path / "syms.f32"
     soft.tofile(p)
-    stream = Symbolstream(path=p, num_symbols=int(soft.size), item_type="f")
+    stream = Symbolstream(path=p, num_symbols=int(soft.size), item_type=ItemType.F)
     res = run_rx(
         _sync_symbols_modem(),
         stage_registry(),

@@ -23,6 +23,22 @@ def test_registered_type_wins(monkeypatch: pytest.MonkeyPatch) -> None:
     assert classify_error(_Custom("x"))[0] == "custom_code"
 
 
+def test_fallback_codes_resolve_most_derived_not_table_order(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # a broader builtin registered "before" FileNotFoundError must not shadow
+    # it: the fallbacks walk the raised class's MRO, they are not a scan
+    import marconi.errors as errors
+
+    shadowed: dict[type[Exception], str] = {
+        OSError: "io_error",
+        **errors._FALLBACK_CODES,
+    }
+    monkeypatch.setattr(errors, "_FALLBACK_CODES", shadowed)
+    assert classify_error(FileNotFoundError("x"))[0] == "not_found"
+    assert classify_error(OSError("x"))[0] == "io_error"
+
+
 def test_unknown_type_is_internal_error_with_type_name() -> None:
     code, msg = classify_error(KeyError("k"))
     assert code == "internal_error" and "KeyError" in msg

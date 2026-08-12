@@ -19,6 +19,8 @@ from marconi.engine.backends.base import (
     RunResult,
 )
 from marconi.engine.compile.ir import FILE_SINK_KINDS, GrPipeline
+from marconi.engine.types.enums import RunStatus
+from marconi.wire import replace
 
 _SCHED_ABORT = re.compile(
     r"block_executor.*error|caught unhandled exception", re.IGNORECASE
@@ -149,14 +151,14 @@ def _run_flowgraph(pipeline: GrPipeline) -> RunResult:
     try:
         tb = build_top_block(pipeline)
     except BackendError as e:
-        return RunResult(status="error", error=str(e))
+        return RunResult(status=RunStatus.ERROR, error=str(e))
     crashes: list[str] = []
     _arm_crash_trampoline(tb, crashes)
     try:
         tb.run()
     except Exception as e:  # noqa: BLE001
         return RunResult(
-            status="error",
+            status=RunStatus.ERROR,
             error=f"flowgraph raised: {type(e).__name__}: {e}",
             artifacts=sink_paths(pipeline),
             diagnostics=_harvest_diagnostics(tb),
@@ -164,14 +166,14 @@ def _run_flowgraph(pipeline: GrPipeline) -> RunResult:
         )
     if crashes:
         return RunResult(
-            status="error",
+            status=RunStatus.ERROR,
             error="embedded block raised:\n" + "\n".join(crashes),
             artifacts=sink_paths(pipeline),
             diagnostics=_harvest_diagnostics(tb),
             census=_harvest_census(tb, pipeline),
         )
     return RunResult(
-        status="ok",
+        status=RunStatus.OK,
         artifacts=sink_paths(pipeline),
         diagnostics=_harvest_diagnostics(tb),
         census=_harvest_census(tb, pipeline),
@@ -199,13 +201,13 @@ def _flag_scheduler_abort(result: RunResult, captured: str) -> RunResult:
     measurement, not contract: under load GR sometimes never prints the
     message at all (probed 2026-07: 9/20 immediate-exit runs, 2/20 even after
     a 1s settle), so ok + an empty sink is not proven-clean."""
-    if result.status != "ok":
+    if result.status is not RunStatus.OK:
         return result
     hits = [ln.strip() for ln in captured.splitlines() if _SCHED_ABORT.search(ln)]
     if not hits:
         return result
     return RunResult(
-        status="error",
+        status=RunStatus.ERROR,
         error="scheduler abort: " + "\n".join(hits),
         artifacts=result.artifacts,
         diagnostics=result.diagnostics,
@@ -219,7 +221,7 @@ def _flag_empty_sink(result: RunResult, pipeline: GrPipeline) -> RunResult:
     items_out fell to zero — the census gradient a parameter search needs. Runs
     only after the error/abort checks, so a real failure still outranks it and a
     missing census never fabricates an empty verdict."""
-    if result.status != "ok" or not result.census:
+    if result.status is not RunStatus.OK or not result.census:
         return result
     # taps share the sink kinds and DO carry items on conditioning stages —
     # only the compiler-marked terminal decides; the aggregate rule covers
@@ -233,12 +235,11 @@ def _flag_empty_sink(result: RunResult, pipeline: GrPipeline) -> RunResult:
         return result
     stall = next((c for c in result.census if c.items_out == 0), None)
     where = f" (no items past {stall.kind})" if stall else ""
-    return result.model_copy(
-        update={
-            "status": "empty",
-            "stalled_at": stall.block if stall else None,
-            "error": f"terminal sink wrote 0 items{where}",
-        }
+    return replace(
+        result,
+        status=RunStatus.EMPTY,
+        stalled_at=stall.block if stall else None,
+        error=f"terminal sink wrote 0 items{where}",
     )
 
 

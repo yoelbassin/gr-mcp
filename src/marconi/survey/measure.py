@@ -6,7 +6,6 @@ from typing import Any, Literal, TypeVar
 
 import numpy as np
 import numpy.typing as npt
-from pydantic import BaseModel
 from scipy.ndimage import uniform_filter1d
 from scipy.signal import find_peaks, welch
 from scipy.stats import kurtosis
@@ -14,6 +13,7 @@ from scipy.stats import kurtosis
 from marconi.deadline import check_deadline
 from marconi.levelfit import fit_levels, percentile_span
 from marconi.survey.iqfile import iter_iq, iter_probes, sample_iq
+from marconi.wire import Payload, replace
 
 _SURVEY_NPERSEG = 4096
 # Agent-facing arrays stay small: a coarse PSD conveys the spectral shape, and
@@ -24,14 +24,14 @@ _SURVEY_ACTIVE_FRACTION = 0.3
 _SURVEY_BURST_WINDOW = 64
 
 
-class EnvelopeStats(BaseModel):
+class EnvelopeStats(Payload):
     const_envelope_ratio: float
     amplitude_kurtosis: float
     mean_amplitude: float
     std_amplitude: float
 
 
-class SpectrumStats(BaseModel):
+class SpectrumStats(Payload):
     psd_db: list[float]
     freq_start_hz: float
     freq_step_hz: float
@@ -42,13 +42,13 @@ class SpectrumStats(BaseModel):
     occupied_hi_hz: float
 
 
-class PhaseConcentration(BaseModel):
+class PhaseConcentration(Payload):
     order_2: float
     order_4: float
     order_8: float
 
 
-class CarrierStats(BaseModel):
+class CarrierStats(Payload):
     offset_hz: float
     psk_order: int | None
     phase_concentration: PhaseConcentration
@@ -261,7 +261,7 @@ _CLEAR_EYE = 8.0  # measured: unimodal / wrong-rate smear tops out ~3.6; a real 
 _HARMONIC_FRAC = 0.6
 
 
-class InstFreqStats(BaseModel):
+class InstFreqStats(Payload):
     hist_counts: list[int]
     hist_start_hz: float
     hist_step_hz: float
@@ -269,7 +269,7 @@ class InstFreqStats(BaseModel):
     spread_hz: float
 
 
-class SymbolRateStats(BaseModel):
+class SymbolRateStats(Payload):
     candidates_hz: list[float]
     strengths: list[float]
     eye_openness: list[float]
@@ -597,11 +597,52 @@ _SURVEY_BURST_RATIO = 4.0  # activity bar above that floor; matches the rise
 # ratio burst_sampler detects on, so survey and the demod agree on "active"
 
 
-class BurstStats(BaseModel):
+_MAX_INLINE_SEGMENTS = 512
+
+
+class CaptureScale(Payload):
+    """Maps a burst segment back onto the ORIGINAL capture so it can be
+    re-decoded with a targeted slice: capture_offset = offset_samples +
+    start*decim, capture_samples = length*decim."""
+
+    offset_samples: int
+    decim: int
+
+
+class BurstStats(Payload):
+    """The activity measurement, and — once `for_capture` has placed it — how to
+    map a segment back onto the capture it came from. The last two fields are
+    the wire's, set by the tool that knows the slice the measurement ran on."""
+
+    # a measured-but-undefined period is a different answer from "not measured"
+    always_present = frozenset({"dominant_period_samples"})
+
     count: int
     duty_cycle: float
     dominant_period_samples: int | None
     segments: list[tuple[int, int]]
+    segments_total: int | None = None
+    capture_scale: CaptureScale | None = None
+
+    def for_capture(self, *, offset_samples: int, decim: int) -> "BurstStats":
+        """Bounded for the agent's context and anchored to the original capture.
+        Segments cap with a total and no sidecar: re-window to inspect a busier
+        span, which is the answer a truncated list should push toward anyway."""
+        # build(), not the plain constructor: segments_total is ABSENT on an
+        # uncapped list rather than an explicit null, and dominant_period_samples
+        # keeps the null it was measured with (always_present)
+        return BurstStats.build(
+            count=self.count,
+            duty_cycle=self.duty_cycle,
+            dominant_period_samples=self.dominant_period_samples,
+            segments=list(self.segments[:_MAX_INLINE_SEGMENTS]),
+            segments_total=(
+                len(self.segments)
+                if len(self.segments) > _MAX_INLINE_SEGMENTS
+                else None
+            ),
+            capture_scale=CaptureScale(offset_samples=offset_samples, decim=decim),
+        )
 
 
 def _find_runs(mask: npt.NDArray[np.bool_]) -> list[tuple[int, int]]:
@@ -667,7 +708,13 @@ def _bursts(path: Path, offset: int, length: int) -> BurstStats:
     )
 
 
-class SurveyResult(BaseModel):
+class SurveyResult(Payload):
+    """survey's measurement AND its wire shape — the same ten fields, so there
+    is nothing to keep in step. A separate payload model used to restate all of
+    them and reach the wire via a dump/re-validate round trip; a field added
+    here then failed `extra="forbid"` over there and reached the agent as
+    [invalid_argument], blaming the caller for our own drift."""
+
     sample_rate: float
     span_samples: int
     analyzed_samples: int
@@ -678,6 +725,12 @@ class SurveyResult(BaseModel):
     symbol_rate: SymbolRateStats
     inst_freq: InstFreqStats
     bursts: BurstStats
+
+    def for_capture(self, *, offset_samples: int, decim: int) -> "SurveyResult":
+        return replace(
+            self,
+            bursts=self.bursts.for_capture(offset_samples=offset_samples, decim=decim),
+        )
 
 
 def _default_rate_floor(n_samples: int, sample_rate: float) -> float:

@@ -36,9 +36,9 @@ from marconi.mcp.payload import (
 from marconi.mcp.streams import ensure_cf32, parse_bits, render_page, require_file
 from marconi.mcp.streams import stream_stats as _compute_stats
 from marconi.mcp.vocab import ENVELOPE, family_names, stage_details, stage_index
-from marconi.mcp.wire import Payload
 from marconi.mcp.workspace import new_run_dir
 from marconi.survey import channelize_to_file, survey_iq
+from marconi.wire import Payload
 
 # A pipeline is only ever entered at a stream the caller holds; AUDIO is a
 # terminal rung nothing produces on disk, so it is excluded by name rather
@@ -731,7 +731,7 @@ def capture_tool(
         except OSError:
             pass
         raise
-    return result.model_dump(mode="json")
+    return result.as_payload()
 
 
 TOOLS: dict[str, Callable[..., object]] = {

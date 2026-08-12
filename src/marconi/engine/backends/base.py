@@ -3,11 +3,11 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from enum import StrEnum
-from typing import Literal
 
 from pydantic import BaseModel
 
 from marconi.engine.compile.ir import GrPipeline
+from marconi.engine.types.enums import RunStatus
 from marconi.errors import register_error
 
 
@@ -113,9 +113,7 @@ class DiagnosticRows:
 
 
 class RunResult(BaseModel):
-    # "empty": the graph ran clean but its terminal sink wrote nothing — a
-    # decoded-nothing run is never reported as "ok".
-    status: Literal["ok", "error", "timeout", "empty"]
+    status: RunStatus
     artifacts: list[str] = []
     error: str | None = None
     # the block id where the signal died on an "empty" run (first stage whose

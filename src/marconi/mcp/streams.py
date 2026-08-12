@@ -14,14 +14,14 @@ import numpy.typing as npt
 
 from marconi.deadline import check_deadline
 from marconi.engine.io.source import SourceSlice
-from marconi.engine.types.enums import ItemType
+from marconi.engine.types.enums import CaptureDtype, ItemType
 from marconi.levelfit import kmeans_1d, percentile_span
-from marconi.mcp.wire import Histogram, Payload
 from marconi.mcp.workspace import (
     conversion_cache_dir,
     evict_conversion_cache,
     touch_cache_entry,
 )
+from marconi.wire import Histogram, Payload
 
 _MAX_INLINE_BITS = 1_048_576
 # Per-type ceilings chosen from what an item COSTS as JSON, not from a round
@@ -132,11 +132,30 @@ class RawFormat:
     bias: float
 
 
-_RAW_FORMATS: dict[str, RawFormat] = {
-    "ci16": RawFormat(np.int16, 32768.0, 0.0),
-    "ci8": RawFormat(np.int8, 128.0, 0.0),
-    "cu8": RawFormat(np.uint8, 127.5, 127.5),
+# Keyed by the enum and checked for completeness at import: CF32 is the native
+# wire and needs no conversion, every other member must name how it maps.
+_RAW_FORMATS: dict[CaptureDtype, RawFormat] = {
+    CaptureDtype.CI16: RawFormat(np.int16, 32768.0, 0.0),
+    CaptureDtype.CI8: RawFormat(np.int8, 128.0, 0.0),
+    CaptureDtype.CU8: RawFormat(np.uint8, 127.5, 127.5),
 }
+
+_unconvertible = sorted(
+    d.value
+    for d in CaptureDtype
+    if d is not CaptureDtype.CF32 and d not in _RAW_FORMATS
+)
+if _unconvertible:
+    raise RuntimeError(f"CaptureDtype members with no RawFormat: {_unconvertible}")
+
+
+def resolve_capture_dtype(dtype: str) -> CaptureDtype:
+    try:
+        return CaptureDtype(dtype)
+    except ValueError:
+        raise ValueError(
+            f"capture_dtype must be one of {sorted(d.value for d in CaptureDtype)}"
+        ) from None
 
 
 def parse_bits(text: str) -> npt.NDArray[np.uint8]:
@@ -289,16 +308,13 @@ def ensure_cf32(
     content-keyed LRU cache shared across runs: iterating specs against one
     capture must not write a fresh multi-GB copy per run, and the cache must
     not grow without bound as the requested slices vary."""
-    if dtype == "cf32":
+    kind = resolve_capture_dtype(dtype)
+    if kind is CaptureDtype.CF32:
         return SourceSlice(path=src, offset=offset, length=samples)
-    if dtype not in _RAW_FORMATS:
-        raise ValueError(
-            f"capture_dtype must be one of {sorted(('cf32', *_RAW_FORMATS))}"
-        )
     st = src.stat()
     # mtime_ns keying can serve stale on filesystems with coarse timestamps
     # if a capture is overwritten same-size within one tick; acceptable
-    key = f"{src.resolve()}|{st.st_size}|{st.st_mtime_ns}|{dtype}|{offset}|{samples}"
+    key = f"{src.resolve()}|{st.st_size}|{st.st_mtime_ns}|{kind}|{offset}|{samples}"
     dest = conversion_cache_dir() / (
         hashlib.sha1(key.encode()).hexdigest()[:24] + ".cf32"
     )
@@ -309,7 +325,7 @@ def ensure_cf32(
     # about to be published is never itself a candidate
     evict_conversion_cache()
     with src.open("rb") as fin:
-        raw_size = np.dtype(_RAW_FORMATS[dtype].np_dtype).itemsize
+        raw_size = np.dtype(_RAW_FORMATS[kind].np_dtype).itemsize
         fin.seek(offset * 2 * raw_size)
         # mkstemp: concurrent converters of the same capture (FastMCP runs
         # tools on worker threads) must never share a tmp path - the loser
@@ -317,7 +333,7 @@ def ensure_cf32(
         fd, tmp_name = tempfile.mkstemp(dir=dest.parent, suffix=".cf32.tmp")
         try:
             with os.fdopen(fd, "wb") as fout:
-                _convert_slice(fin, fout, dtype, samples)
+                _convert_slice(fin, fout, kind, samples)
             os.replace(tmp_name, dest)
         except BaseException:
             try:
@@ -328,7 +344,9 @@ def ensure_cf32(
     return SourceSlice(path=dest)
 
 
-def _convert_slice(fin: BinaryIO, fout: BinaryIO, dtype: str, samples: int) -> None:
+def _convert_slice(
+    fin: BinaryIO, fout: BinaryIO, dtype: CaptureDtype, samples: int
+) -> None:
     fmt = _RAW_FORMATS[dtype]
     remaining = samples * 2 if samples > 0 else None
     while True:

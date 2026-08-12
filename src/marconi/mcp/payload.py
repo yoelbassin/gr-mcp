@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Literal
 
 import numpy as np
 
@@ -11,24 +10,29 @@ from marconi.engine.compile.compiler import CompiledPipeline
 from marconi.engine.quality import QualityReport
 from marconi.engine.run import PipelineResult, TraceStage
 from marconi.engine.types.descriptor import Descriptor
-from marconi.engine.types.enums import ItemType
-from marconi.engine.types.models import Modem
+from marconi.engine.types.enums import ItemType, RunStatus
+from marconi.engine.types.levels import Level
+from marconi.engine.types.models import SOFT_LEVELS, Modem
 from marconi.engine.types.step import stage_label
 from marconi.mcp.streams import stream_stats_payload as _stats_model
-from marconi.mcp.wire import Payload, Ramp
-from marconi.survey import (
-    CarrierStats,
-    EnvelopeStats,
-    InstFreqStats,
-    SpectrumStats,
-    SurveyResult,
-    SymbolRateStats,
-)
+from marconi.survey import SurveyResult
+from marconi.wire import Payload, Ramp
 
 _MAX_INLINE_LIST = 512
 _RAMP_MIN_LEN = 64
 
-_SOFT_BIT1_SIGN = {"symbols": "positive", "bits": "negative"}
+# Which way a soft value slices to bit 1, per rung. Keyed by the enum and
+# checked for completeness at import against the rungs a Softstream may claim,
+# so a new soft-bearing level cannot reach the wire as a bare KeyError inside a
+# tool call (which the agent only ever sees as an opaque [internal_error]).
+_SOFT_BIT1_SIGN: dict[Level, str] = {
+    Level.SYMBOLS: "positive",
+    Level.BITS: "negative",
+}
+
+_unsigned_levels = sorted(lv.value for lv in SOFT_LEVELS if lv not in _SOFT_BIT1_SIGN)
+if _unsigned_levels:
+    raise RuntimeError(f"soft levels with no bit-1 sign rule: {_unsigned_levels}")
 
 # The compact per-stage stats a trace row carries, by the item type the tap
 # wrote. Keyed by the enum so a new wire type fails the check below rather
@@ -113,13 +117,21 @@ class CensusRow(Payload):
 
 
 def census_rows(rows: Sequence[BlockCensus]) -> list[CensusRow]:
-    out: list[CensusRow] = []
-    for c in rows:
-        fields = c.model_dump(exclude_none=True)
-        if c.block.startswith(c.kind):
-            del fields["kind"]
-        out.append(CensusRow.model_validate(fields))
-    return out
+    return [
+        CensusRow.build(
+            block=c.block,
+            kind=None if c.block.startswith(c.kind) else c.kind,
+            items_in=c.items_in,
+            items_out=c.items_out,
+            windows_in=c.windows_in,
+            windows_out=c.windows_out,
+            chance_windows=c.chance_windows,
+            words_valid=c.words_valid,
+            words_total=c.words_total,
+            chance_word_rate=c.chance_word_rate,
+        )
+        for c in rows
+    ]
 
 
 def slim_census(rows: Sequence[BlockCensus]) -> list[dict[str, object]]:
@@ -144,16 +156,17 @@ def diagnostic_rows(
 ) -> list[DiagnosticRow]:
     out: list[DiagnosticRow] = []
     for d in rows:
-        # exclude marks from the dump: it is capped below, and materializing
-        # the whole list here only to overwrite the key builds a second
-        # full-size Python int list per row (the worker already built one)
-        fields = d.model_dump(exclude_none=True, exclude={"marks"})
+        marks: dict[str, object] = {}
         if d.marks is not None:
             sidecar = (
                 run_dir / f"diag_{d.block}_{d.key}.i64" if run_dir is not None else None
             )
-            fields.update(capped_int_list("marks", d.marks, sidecar))
-        out.append(DiagnosticRow.model_validate(fields))
+            marks = capped_int_list("marks", d.marks, sidecar)
+        out.append(
+            DiagnosticRow.build(
+                block=d.block, key=d.key, count=d.count, value=d.value, **marks
+            )
+        )
     return out
 
 
@@ -202,22 +215,18 @@ class SpecTraceRow(Payload):
 
 
 def _spec_trace_row(label: str, desc: Descriptor, rate: float) -> SpecTraceRow:
-    # order/frame_len are LEFT OUT when a boundary pins neither, rather than
-    # passed as None: an unset field is omitted from the row, an explicit null
-    # would ship (marconi.mcp.wire.Payload)
-    fields: dict[str, object] = {
-        "after": label,
-        "level": desc.level.value,
-        "item_type": desc.item_type.value,
-        "carrier": desc.carrier.value,
-        "amplitude": desc.amplitude.value,
-        "sample_rate": rate,
-    }
-    if desc.order is not None:
-        fields["order"] = desc.order
-    if desc.frame_len is not None:
-        fields["frame_len"] = desc.frame_len
-    return SpecTraceRow.model_validate(fields)
+    # build() drops the None fields: order/frame_len are omitted where a
+    # boundary pins neither, rather than shipping as explicit nulls
+    return SpecTraceRow.build(
+        after=label,
+        level=desc.level.value,
+        item_type=desc.item_type.value,
+        carrier=desc.carrier.value,
+        amplitude=desc.amplitude.value,
+        sample_rate=rate,
+        order=desc.order,
+        frame_len=desc.frame_len,
+    )
 
 
 def spec_trace_rows(modem: Modem, cp: CompiledPipeline) -> list[dict[str, object]]:
@@ -234,15 +243,15 @@ def error_rows(rows: Sequence[ErrorRow]) -> list[dict[str, object]]:
 
 class StreamSummary(Payload):
     path: str
-    item_type: str
+    item_type: ItemType
     items: int
 
 
 class SoftSummary(Payload):
     path: str
-    item_type: Literal["f"] = "f"
+    item_type: ItemType = ItemType.F
     items: int
-    level: str
+    level: Level
     bit1_sign: str
 
 
@@ -275,7 +284,7 @@ def stream_summary(result: PipelineResult) -> StreamSummary | None:
     if result.bitstream is not None:
         return StreamSummary(
             path=str(result.bitstream.path),
-            item_type="b",
+            item_type=ItemType.B,
             items=result.bitstream.num_bits,
         )
     if result.symbolstream is not None:
@@ -298,27 +307,30 @@ def soft_summary(result: PipelineResult) -> SoftSummary | None:
     )
 
 
-def _trace_row(st: TraceStage) -> TraceRow:
-    fields: dict[str, object] = {
-        "after": st.after,
-        "level": st.level,
-        "item_type": st.item_type,
-        "sample_rate": round(st.sample_rate, 3),
-        "path": st.path,
-        "items": st.items,
-    }
+def _trace_stats(st: TraceStage) -> tuple[TraceStats | None, str | None]:
     keys = _TRACE_STAT_KEYS.get(ItemType(st.item_type))
     if not (st.items and keys):
-        return TraceRow.model_validate(fields)
+        return None, None
     try:
         full = _stats_model(Path(st.path), item_type=st.item_type, clusters=0)
     except (ValueError, FileNotFoundError) as exc:
-        fields["stats_error"] = f"{type(exc).__name__}: {exc}"
-        return TraceRow.model_validate(fields)
+        return None, f"{type(exc).__name__}: {exc}"
     measured = {k: getattr(full, k) for k in keys if getattr(full, k) is not None}
-    if measured:
-        fields["stats"] = TraceStats.model_validate(measured)
-    return TraceRow.model_validate(fields)
+    return (TraceStats.model_validate(measured) if measured else None), None
+
+
+def _trace_row(st: TraceStage) -> TraceRow:
+    stats, stats_error = _trace_stats(st)
+    return TraceRow.build(
+        after=st.after,
+        level=st.level,
+        item_type=st.item_type,
+        sample_rate=round(st.sample_rate, 3),
+        path=st.path,
+        items=st.items,
+        stats=stats,
+        stats_error=stats_error,
+    )
 
 
 def trace_payload(result: PipelineResult) -> list[dict[str, object]]:
@@ -333,7 +345,9 @@ class PipelinePayload(Payload):
     their absence would read as "this run has no such stream" rather than
     "this field was omitted"."""
 
-    status: str
+    always_present = frozenset({"stream", "soft_stream"})
+
+    status: RunStatus
     stalled_at: str | None = None
     error: str | None = None
     hints: list[str] = []
@@ -354,69 +368,23 @@ class PipelinePayload(Payload):
 
 
 def pipeline_payload(result: PipelineResult, run_dir: Path) -> dict[str, object]:
-    fields: dict[str, object] = {
-        "status": result.status,
-        "hints": result.hints,
-        "census": census_rows(result.census),
-        "diagnostics": diagnostic_rows(result.diagnostics, run_dir),
-        # explicitly set even when null — see PipelinePayload
-        "stream": stream_summary(result),
-        "soft_stream": soft_summary(result),
-    }
-    if result.stalled_at is not None:
-        fields["stalled_at"] = result.stalled_at
-    if result.error is not None:
-        fields["error"] = result.error
-    if result.quality is not None:
-        fields["quality"] = result.quality
-    fields.update(capped_int_list("windows", result.windows, run_dir / "windows.i64"))
-    fields.update(capped_int_list("marks", result.marks, run_dir / "marks.i64"))
-    if result.trace:
-        fields["trace"] = [_trace_row(st) for st in result.trace]
-    return PipelinePayload.model_validate(fields).as_payload()
-
-
-class CaptureScale(Payload):
-    """Maps a burst segment back onto the ORIGINAL capture so it can be
-    re-decoded with a targeted slice: capture_offset = offset_samples +
-    start*decim, capture_samples = length*decim."""
-
-    offset_samples: int
-    decim: int
-
-
-class BurstsPayload(Payload):
-    count: int
-    duty_cycle: float
-    dominant_period_samples: int | None = None
-    segments: list[tuple[int, int]]
-    segments_total: int | None = None
-    capture_scale: CaptureScale
-
-
-class SurveyPayload(Payload):
-    sample_rate: float
-    span_samples: int
-    analyzed_samples: int
-    analyzed_start: int
-    spectrum: SpectrumStats
-    carrier: CarrierStats
-    envelope: EnvelopeStats
-    symbol_rate: SymbolRateStats
-    inst_freq: InstFreqStats
-    bursts: BurstsPayload
+    return PipelinePayload.build(
+        status=result.status,
+        hints=result.hints,
+        census=census_rows(result.census),
+        diagnostics=diagnostic_rows(result.diagnostics, run_dir),
+        stream=stream_summary(result),
+        soft_stream=soft_summary(result),
+        stalled_at=result.stalled_at,
+        error=result.error,
+        quality=result.quality,
+        trace=[_trace_row(st) for st in result.trace] or None,
+        **capped_int_list("windows", result.windows, run_dir / "windows.i64"),
+        **capped_int_list("marks", result.marks, run_dir / "marks.i64"),
+    ).as_payload()
 
 
 def survey_payload(
     result: SurveyResult, *, offset_samples: int, decim: int
 ) -> dict[str, object]:
-    segments = result.bursts.segments
-    bursts: dict[str, object] = {
-        **result.bursts.model_dump(exclude={"segments"}),
-        "segments": list(segments[:_MAX_INLINE_LIST]),
-        "capture_scale": CaptureScale(offset_samples=offset_samples, decim=decim),
-    }
-    if len(segments) > _MAX_INLINE_LIST:
-        bursts["segments_total"] = len(segments)
-    fields = result.model_dump(exclude={"bursts"}) | {"bursts": bursts}
-    return SurveyPayload.model_validate(fields).as_payload()
+    return result.for_capture(offset_samples=offset_samples, decim=decim).as_payload()

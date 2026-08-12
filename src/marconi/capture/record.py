@@ -1,15 +1,17 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Literal, Protocol
+from typing import Protocol
 
 import numpy as np
 from pydantic import BaseModel
 
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend
 from marconi.engine.compile.ir import GrBlock, GrConnection, GrPipeline
+from marconi.engine.types.enums import CaptureDtype, RunStatus
 from marconi.engine.types.params import ParamValue
 from marconi.errors import register_error
+from marconi.wire import Payload
 
 _SETTLE_S = 0.2
 _MAX_DURATION_S = 300.0
@@ -27,16 +29,20 @@ class CaptureError(Exception):
 register_error(CaptureError, "failed_precondition")
 
 
-class CaptureLevels(BaseModel):
+class CaptureLevels(Payload):
     rms: float
     dc_offset: float
     clip_fraction: float
 
 
-class CaptureResult(BaseModel):
-    status: Literal["ok", "error", "timeout"]
+class CaptureResult(Payload):
+    """capture's wire shape. A Payload like every other tool response, so the
+    omission rule applies here too: a clean capture used to ship "error": null
+    because this one model of the eight bypassed the base and dumped itself."""
+
+    status: RunStatus
     path: str
-    dtype: Literal["cf32"] = "cf32"
+    dtype: CaptureDtype = CaptureDtype.CF32
     sample_rate: float
     center_hz: float
     num_samples: int
@@ -214,12 +220,20 @@ def _probe_device(
         dev.close()
 
 
-_CAPTURE_STATUS: dict[str, Literal["ok", "error", "timeout"]] = {
-    "ok": "ok",
-    "timeout": "timeout",
-    "error": "error",
-    "empty": "error",
+# A recording has no "decoded nothing" outcome: a graph that wrote no samples
+# raises below, so EMPTY folds into ERROR. Keyed by the enum and checked for
+# completeness at import, so a new RunStatus member cannot reach this bridge as
+# a bare KeyError inside a tool call.
+_CAPTURE_STATUS: dict[RunStatus, RunStatus] = {
+    RunStatus.OK: RunStatus.OK,
+    RunStatus.TIMEOUT: RunStatus.TIMEOUT,
+    RunStatus.ERROR: RunStatus.ERROR,
+    RunStatus.EMPTY: RunStatus.ERROR,
 }
+
+_unbridged = sorted(s.value for s in RunStatus if s not in _CAPTURE_STATUS)
+if _unbridged:
+    raise RuntimeError(f"RunStatus members with no capture outcome: {_unbridged}")
 
 
 def capture_iq(
@@ -257,10 +271,9 @@ def capture_iq(
         raise CaptureError(
             f"capture produced no samples: {result.error or result.status}"
         )
-    status = _CAPTURE_STATUS.get(result.status, "error")
     levels = _levels(out_path)
-    return CaptureResult(
-        status=status,
+    return CaptureResult.build(
+        status=_CAPTURE_STATUS[result.status],
         path=str(out_path),
         sample_rate=rate,
         center_hz=freq,

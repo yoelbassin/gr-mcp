@@ -17,6 +17,31 @@ class QamOrder(IntEnum):
     QAM64 = 64
 
 
+class CaptureDtype(StrEnum):
+    """How an on-disk IQ capture is laid out. CF32 is the engine's native wire
+    and what a recording writes; the rest are interleaved integer formats a
+    caller's SDR tooling produced, converted on the way in."""
+
+    CF32 = "cf32"
+    CI16 = "ci16"
+    CI8 = "ci8"
+    CU8 = "cu8"
+
+
+class RunStatus(StrEnum):
+    """How a run ended, for the backend, the engine and a hardware capture
+    alike. One vocabulary rather than a Literal re-typed per model: the three
+    used to be hand-written four/four/three-member Literals bridged by an
+    unguarded lookup table, so a new member reached the wire from one producer
+    and KeyError'd in another."""
+
+    OK = "ok"
+    ERROR = "error"
+    TIMEOUT = "timeout"
+    # the graph ran clean but wrote nothing — a decoded-nothing run is never OK
+    EMPTY = "empty"
+
+
 class AgcMode(StrEnum):
     FEEDFORWARD = "feedforward"
     FEEDBACK = "feedback"
@@ -57,11 +82,14 @@ class ItemType(StrEnum):
     def item_bytes(self) -> int:
         return self.np_dtype.itemsize
 
-    def require_symbol(self) -> Literal["s", "f"]:
+    def require_symbol(self) -> "Literal[ItemType.S, ItemType.F]":
+        """Narrowed to the two item types that carry one value per symbol, so a
+        reader keyed on the distinction (io.bitfile.read_symbols' int16-vs-
+        float32 return) stays precise instead of widening to the whole enum."""
         if self is ItemType.S:
-            return "s"
+            return ItemType.S
         if self is ItemType.F:
-            return "f"
+            return ItemType.F
         raise ValueError(f"expected a symbol item type, got {self.value!r}")
 
 

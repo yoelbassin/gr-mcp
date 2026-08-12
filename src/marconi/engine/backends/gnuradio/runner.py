@@ -17,6 +17,8 @@ from marconi.engine.backends.gnuradio.worker import (
     sink_paths,
 )
 from marconi.engine.compile.ir import GrPipeline
+from marconi.engine.types.enums import RunStatus
+from marconi.wire import replace
 
 _GRACE_SECONDS = 5.0
 _TAIL_CHARS = 4000
@@ -75,11 +77,11 @@ def _resolve_result(
     suffix = f"\n{tail}" if tail else ""
     if timed_out:
         return RunResult(
-            status="timeout",
+            status=RunStatus.TIMEOUT,
             error=f"run exceeded timeout; worker killed{suffix}",
         )
     return RunResult(
-        status="error",
+        status=RunStatus.ERROR,
         error=f"backend worker exited abnormally (exitcode={exitcode}){suffix}",
     )
 
@@ -149,7 +151,7 @@ class GnuRadioBackend(Backend):
 
     def run_pipeline(self, pipeline: GrPipeline, timeout: float = 30.0) -> RunResult:
         result = _run_in_subprocess(pipeline.model_dump_json(), timeout)
-        if result.status != "ok" and not result.artifacts:
+        if result.status is not RunStatus.OK and not result.artifacts:
             partial = [p for p in sink_paths(pipeline) if Path(p).exists()]
-            result = result.model_copy(update={"artifacts": partial})
+            result = replace(result, artifacts=partial)
         return result
