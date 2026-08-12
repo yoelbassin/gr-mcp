@@ -28,7 +28,7 @@ def test_four_level_clusters_recovered(tmp_path: Path) -> None:
     assert isinstance(centers, list) and len(centers) == 4
     assert centers == sorted(centers)
     assert centers[0] < -2.0 and centers[-1] > 2.0
-    assert out["levels"] == centers
+    assert "levels" not in out, "centers must not ship twice"
     cluster_counts = out["cluster_counts"]
     assert isinstance(cluster_counts, list)
     assert sum(cluster_counts) == out["sampled_items"]
@@ -86,12 +86,12 @@ def test_tiny_stream_clamps_clusters_without_crash(tmp_path: Path) -> None:
     cluster_counts = out["cluster_counts"]
     assert isinstance(cluster_counts, list) and len(cluster_counts) == len(centers)
     assert sum(cluster_counts) == out["sampled_items"]
-    assert out["levels"] == centers
+    assert "levels" not in out, "centers must not ship twice"
 
 
 def test_over_requested_clusters_drops_phantoms(tmp_path: Path) -> None:
     # two well-separated clusters queried at clusters=3 must return two real
-    # levels, not three with phantom zero-count centers in the empty gap.
+    # centers, not three with phantom zero-count centers in the empty gap.
     rng = np.random.default_rng(4)
     cluster1 = rng.normal(-3.0, 0.2, 3000)
     cluster2 = rng.normal(3.0, 0.2, 3000)
@@ -102,8 +102,8 @@ def test_over_requested_clusters_drops_phantoms(tmp_path: Path) -> None:
         clusters=3,
         bins=41,
     )
-    levels = out["levels"]
-    assert isinstance(levels, list) and len(levels) == 2
+    centers = out["centers"]
+    assert isinstance(centers, list) and len(centers) == 2
     counts = out["cluster_counts"]
     assert isinstance(counts, list)
     assert all(c > 0 for c in counts)

@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 
 
-class Level(str, Enum):
+class Level(StrEnum):
     IQ = "iq"
     SYMBOLS = "symbols"
     BITS = "bits"

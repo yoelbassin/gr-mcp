@@ -19,15 +19,18 @@ def register_error(exc_type: type[Exception], code: str) -> None:
 
 
 def classify_error(exc: Exception) -> tuple[str, str]:
-    candidates: list[type[Exception]] = [t for t in _REGISTRY if isinstance(exc, t)]
-    if candidates:
-        best = candidates[0]
-        for t in candidates[1:]:
-            if issubclass(t, best):
-                best = t
-        return _REGISTRY[best], str(exc)
-
-    for exc_type, code in _FALLBACK_CODES:
-        if isinstance(exc, exc_type):
+    """The most DERIVED registered type wins, resolved by the raised class's own
+    MRO. Reducing over the registry with "subclass of the current best" only
+    finds the answer when every match is one chain — with a second, unrelated
+    match registered first it keeps that one, so the code an exception mapped to
+    depended on module import order. These codes are the agent's stable
+    contract; they cannot turn on which package imported first."""
+    for cls in type(exc).__mro__:
+        code = _REGISTRY.get(cls)
+        if code is not None:
             return code, str(exc)
+
+    for exc_type, fallback in _FALLBACK_CODES:
+        if isinstance(exc, exc_type):
+            return fallback, str(exc)
     return "internal_error", f"{type(exc).__name__}: {exc}"

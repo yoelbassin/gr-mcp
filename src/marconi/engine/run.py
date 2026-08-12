@@ -242,22 +242,21 @@ def _wrap_result(
     )
 
 
-_SCAN_DTYPES: dict[str, type] = {"c": np.complex64, "f": np.float32}
 _SCAN_CHUNK = 1 << 22
 
 
 def _first_nonfinite(
-    path: Path, item_type: str, offset: int = 0, length: int = 0
+    path: Path, item_type: ItemType, offset: int = 0, length: int = 0
 ) -> int | None:
     """Bounded-memory scan of a float-format input file; integer formats
     cannot hold non-finite values and are never scanned. offset/length (items,
     0 length = to EOF) bound the scan to the slice the run will read: a glitch
     outside the slice must not reject it, and a sliced run over a huge capture
     must not pay a whole-file scan."""
-    dtype = _SCAN_DTYPES.get(item_type)
-    if dtype is None or not path.is_file():
+    dtype = item_type.np_dtype
+    if not np.issubdtype(dtype, np.inexact) or not path.is_file():
         return None
-    itemsize = int(np.dtype(dtype).itemsize)
+    itemsize = int(dtype.itemsize)
     pos = offset
     end = offset + length if length > 0 else None
     with path.open("rb") as f:
@@ -279,7 +278,7 @@ def _first_nonfinite(
 
 
 def _nonfinite_input(
-    path: Path, item_type: str, offset: int = 0, length: int = 0
+    path: Path, item_type: ItemType, offset: int = 0, length: int = 0
 ) -> PipelineResult | None:
     bad = _first_nonfinite(path, item_type, offset, length)
     if bad is None:
@@ -364,8 +363,9 @@ def _hints(
     verdict: Verdict = "decoded",
 ) -> list[str]:
     hints: list[str] = list(composition_warnings(modem, registry))
+    stages = [registry.get(s.conv) for s in modem.path]
     if final.level in (Level.BITS, Level.SYMBOLS) and any(
-        getattr(registry.get(s.conv), "polarity_ambiguous", False) for s in modem.path
+        st is not None and st.polarity_ambiguous for st in stages
     ):
         hints.append(_POLARITY_HINT)
     if verdict != "decoded":
@@ -468,7 +468,7 @@ def _reject_nonfinite(
         and input_stream.item_type == ItemType.F.value
     )
     if soft_in and input_stream is not None:
-        return _nonfinite_input(input_stream.path, "f")
+        return _nonfinite_input(input_stream.path, ItemType.F)
     if cp.gr is not None and source is not None:
         return _nonfinite_input(
             source.path, start.item_type, source.offset, source.length

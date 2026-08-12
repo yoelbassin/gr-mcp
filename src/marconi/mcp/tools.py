@@ -33,21 +33,38 @@ from marconi.mcp.payload import (
     spec_trace_rows,
     survey_payload,
 )
-from marconi.mcp.streams import (
-    ITEM_DTYPES,
-    ensure_cf32,
-    parse_bits,
-    render_page,
-    require_file,
-)
+from marconi.mcp.streams import ensure_cf32, parse_bits, render_page, require_file
 from marconi.mcp.streams import stream_stats as _compute_stats
 from marconi.mcp.vocab import ENVELOPE, family_names, stage_details, stage_index
 from marconi.mcp.workspace import new_run_dir
 from marconi.survey import channelize_to_file, survey_iq
 
-_START_LEVELS = {"iq": Level.IQ, "symbols": Level.SYMBOLS, "bits": Level.BITS}
-_DEFAULT_LEVEL = {"c": "iq", "b": "bits", "s": "symbols", "f": "symbols"}
-_ITEM_BYTES: dict[str, int] = {k: v.itemsize for k, v in ITEM_DTYPES.items()}
+# A pipeline is only ever entered at a stream the caller holds; AUDIO is a
+# terminal rung nothing produces on disk, so it is excluded by name rather
+# than by a hand-copied list that a new Level would silently fall out of.
+_ENTRY_LEVELS: dict[str, Level] = {
+    lv.value: lv for lv in Level if lv is not Level.AUDIO
+}
+
+# The rung an entry item type sits on when the caller does not say. Keyed by
+# the enum so a new ItemType fails the completeness check below, not at
+# runtime inside a tool call.
+_DEFAULT_ENTRY_LEVEL: dict[ItemType, Level] = {
+    ItemType.C: Level.IQ,
+    ItemType.B: Level.BITS,
+    ItemType.S: Level.SYMBOLS,
+    ItemType.F: Level.SYMBOLS,
+}
+
+# Entry item types that name an existing stream file; "c" enters as a capture
+# and "l" is a paging-only sidecar type, neither of which is a decode input.
+_STREAM_ENTRY_TYPES: tuple[ItemType, ...] = (ItemType.B, ItemType.S, ItemType.F)
+
+_missing_default = sorted(t.value for t in ItemType if t not in _DEFAULT_ENTRY_LEVEL)
+if _missing_default:
+    raise RuntimeError(
+        f"ItemType members with no default entry level: " f"{_missing_default}"
+    )
 
 
 def _start_descriptor(item_type: str, level: str | None) -> Descriptor:
@@ -57,24 +74,26 @@ def _start_descriptor(item_type: str, level: str | None) -> Descriptor:
         raise ValueError(
             f"input_item_type must be one of {sorted(t.value for t in ItemType)}"
         ) from None
-    level_key = level if level is not None else _DEFAULT_LEVEL[item_type]
-    if level_key not in _START_LEVELS:
-        raise ValueError(f"input_level must be one of {sorted(_START_LEVELS)}")
+    if level is None:
+        start_level = _DEFAULT_ENTRY_LEVEL[item]
+    elif level in _ENTRY_LEVELS:
+        start_level = _ENTRY_LEVELS[level]
+    else:
+        raise ValueError(f"input_level must be one of {sorted(_ENTRY_LEVELS)}")
     carrier = Carrier.SOFT if item is ItemType.F else Carrier.HARD
-    return Descriptor(_START_LEVELS[level_key], item, carrier)
+    return Descriptor(start_level, item, carrier)
 
 
 def _input_stream(path: Path, item_type: str) -> Bitstream | Symbolstream:
-    if item_type not in ("b", "f", "s"):  # "l" is a paging-only sidecar type
-        raise ValueError(
-            "input_item_type must be one of ['b', 'f', 's'] with input_path"
-        )
+    accepted = [t.value for t in _STREAM_ENTRY_TYPES]
+    if item_type not in accepted:
+        raise ValueError(f"input_item_type must be one of {accepted} with input_path")
+    item = ItemType(item_type)
     require_file(path, "input stream")
-    items = path.stat().st_size // _ITEM_BYTES[item_type]
-    if item_type == "b":
+    items = path.stat().st_size // item.item_bytes
+    if item is ItemType.B:
         return Bitstream(path=path, num_bits=items)
-    sym_type: Literal["s", "f"] = "f" if item_type == "f" else "s"
-    return Symbolstream(path=path, num_symbols=items, item_type=sym_type)
+    return Symbolstream(path=path, num_symbols=items, item_type=item.require_symbol())
 
 
 def describe_stages(
@@ -402,11 +421,11 @@ def stream_stats(
     read as evenly-strided chunks spanning the file), min/max/mean/std, and
     a "histogram" {start, step, counts} over the 0.5..99.5 percentile range
     — bin i's center is start + i*step. clusters=K (1..16) also fits up to K
-    levels: sorted "centers", "cluster_counts", and a paste-ready "levels"
-    list for mfsk_soft_demap (ask for a power-of-two K to feed it). Levels
-    with no support are dropped — a short list means fewer real modes than
-    you asked for; read the histogram to judge modality. Bits (.u8) report
-    only ones_fraction.
+    levels: sorted "centers" with matching "cluster_counts". "centers" is the
+    paste-ready level list for mfsk_soft_demap (ask for a power-of-two K to
+    feed it). Levels with no support are dropped — a short list means fewer
+    real modes than you asked for; read the histogram to judge modality.
+    Bits (.u8) report only ones_fraction.
 
     item_type "c" (complex constellation symbols, e.g. a path ending at a
     bare demod stage) returns mean_magnitude, std_magnitude,

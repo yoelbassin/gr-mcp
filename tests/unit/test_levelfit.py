@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from marconi.levels import fit_levels, kmeans_1d
+from marconi.levelfit import fit_levels, kmeans_1d
 
 
 def _levels(centers: list[float], per: int, sigma: float, seed: int) -> np.ndarray:

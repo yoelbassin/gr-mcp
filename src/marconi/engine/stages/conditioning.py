@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 from typing import Any, Literal
 
 from pydantic import Field, StrictInt, model_validator
@@ -267,8 +268,10 @@ class AgcStep(Step):
             )
         if self.max_gain < 0.0:
             raise PydanticCustomError("value_error", "max_gain must be >= 0")
-        allowed = _MODE_FIELDS[self.mode]
-        unused = set().union(*_MODE_FIELDS.values()) - allowed
+        spec = _AGC_MODES[self.mode]
+        unused = (
+            frozenset().union(*(s.fields for s in _AGC_MODES.values())) - spec.fields
+        )
         fields = type(self).model_fields
         supplied_unused = {
             f for f in unused if getattr(self, f) != fields[f].get_default()
@@ -276,16 +279,9 @@ class AgcStep(Step):
         if supplied_unused:
             raise PydanticCustomError(
                 "value_error",
-                f"mode '{self.mode}' does not use {sorted(supplied_unused)}",
+                f"mode '{self.mode.value}' does not use {sorted(supplied_unused)}",
             )
         return self
-
-
-_MODE_FIELDS: dict[str, set[str]] = {
-    "feedforward": {"window_symbols", "reference"},
-    "feedback": {"attack_symbols", "decay_symbols", "max_gain", "reference"},
-    "power": {"window_symbols"},
-}
 
 
 def _agc_feedforward(b: CompileContext, p: AgcStep) -> None:
@@ -326,26 +322,43 @@ def _agc_power(b: CompileContext, p: AgcStep) -> None:
     b.set_tail(f2c)
 
 
-_AGC_MODES: dict[str, Callable[[CompileContext, AgcStep], None]] = {
-    "feedforward": _agc_feedforward,
-    "feedback": _agc_feedback,
-    "power": _agc_power,
+@dataclass(frozen=True)
+class AgcModeSpec:
+    """One AGC mode: the step fields it reads, how it emits, and which
+    amplitude statistic it drives to `reference`. A consumer declares the
+    statistic it needs, so a mode that normalizes the wrong one is a compile
+    error instead of a silent mis-decode. One row per mode, so a mode cannot
+    gain an emitter without an amplitude contract or a field list."""
+
+    fields: frozenset[str]
+    emit: Callable[[CompileContext, AgcStep], None]
+    amplitude: Amplitude
+
+
+_AGC_MODES: dict[AgcMode, AgcModeSpec] = {
+    AgcMode.FEEDFORWARD: AgcModeSpec(
+        frozenset({"window_symbols", "reference"}),
+        _agc_feedforward,
+        Amplitude.PEAK_UNITY,
+    ),
+    AgcMode.FEEDBACK: AgcModeSpec(
+        frozenset({"attack_symbols", "decay_symbols", "max_gain", "reference"}),
+        _agc_feedback,
+        Amplitude.MEAN_MAG_UNITY,
+    ),
+    AgcMode.POWER: AgcModeSpec(
+        frozenset({"window_symbols"}), _agc_power, Amplitude.RMS_UNITY
+    ),
 }
 
-# Which statistic each mode drives to `reference`. A consumer declares the
-# statistic it needs, so a mode that normalizes the wrong one is a compile
-# error instead of a silent mis-decode.
-_MODE_AMPLITUDE: dict[str, Amplitude] = {
-    "feedforward": Amplitude.PEAK_UNITY,
-    "feedback": Amplitude.MEAN_MAG_UNITY,
-    "power": Amplitude.RMS_UNITY,
-}
-
-_AMPLITUDE_MODE: dict[Amplitude, str] = {v: k for k, v in _MODE_AMPLITUDE.items()}
+_missing_modes = sorted(m.value for m in AgcMode if m not in _AGC_MODES)
+if _missing_modes:
+    raise RuntimeError(f"AgcMode members with no AgcModeSpec: {_missing_modes}")
 
 
 def agc_modes_for(amplitudes: Iterable[Amplitude]) -> list[str]:
-    return sorted({m for a in amplitudes if (m := _AMPLITUDE_MODE.get(a)) is not None})
+    wanted = frozenset(amplitudes)
+    return sorted(m.value for m, s in _AGC_MODES.items() if s.amplitude in wanted)
 
 
 class Agc(RxStage[CompileContext, AgcStep]):
@@ -360,14 +373,14 @@ class Agc(RxStage[CompileContext, AgcStep]):
     step_model = AgcStep
 
     def emit_rx(self, b: CompileContext, step: AgcStep) -> None:
-        _AGC_MODES[step.mode](b, step)
+        _AGC_MODES[step.mode].emit(b, step)
 
     def out_descriptor(self, in_desc: Descriptor, step: AgcStep) -> Descriptor:
         return Descriptor(
             Level.IQ,
             in_desc.item_type,
             in_desc.carrier,
-            _MODE_AMPLITUDE[step.mode],
+            _AGC_MODES[step.mode].amplitude,
         )
 
 

@@ -12,7 +12,7 @@ from scipy.signal import find_peaks, welch
 from scipy.stats import kurtosis
 
 from marconi.deadline import check_deadline
-from marconi.levels import fit_levels, percentile_span
+from marconi.levelfit import fit_levels, percentile_span
 from marconi.survey.iqfile import iter_iq, iter_probes, sample_iq
 
 _SURVEY_NPERSEG = 4096
@@ -174,7 +174,7 @@ def _carrier(
     centroid_hz: float,
 ) -> CarrierStats:
     xb = _bounded(x)
-    active = _slot_active_mask(xb, _SURVEY_ACTIVE_FRACTION, _SURVEY_BURST_WINDOW)
+    active = _burst_power_gate(xb, _SURVEY_ACTIVE_FRACTION, _SURVEY_BURST_WINDOW)
     dof = int(active.sum()) or xb.size
     xd = xb - _active_mean(xb, active)
     z = (xd / np.maximum(np.abs(xd), 1e-12)) * active
@@ -220,7 +220,7 @@ def _carrier(
 
 
 def _envelope(x: npt.NDArray[np.complex64]) -> EnvelopeStats:
-    active = _slot_active_mask(x, _SURVEY_ACTIVE_FRACTION, _SURVEY_BURST_WINDOW)
+    active = _burst_power_gate(x, _SURVEY_ACTIVE_FRACTION, _SURVEY_BURST_WINDOW)
     a = np.abs(_gate(x, active)).astype(np.float64)
     mean = float(a.mean())
     std = float(a.std())
@@ -310,7 +310,15 @@ def _peaks_in_band(
     return fb[top], mb[top]
 
 
-def _active_mask(
+# Survey has TWO "active" definitions and they are not interchangeable, so
+# each is named for what it measures rather than both being called active.
+# _magnitude_gate is per-sample against the median magnitude: it keeps the
+# sample-to-sample structure a clock line lives in, which is why the
+# symbol-rate search uses it. _burst_power_gate is windowed power against the
+# top-decile level: it cuts whole idle spans, which is what an amplitude or
+# tone statistic needs and what would destroy a clock line. Changing which
+# block uses which changes the measurement, not just the sample count.
+def _magnitude_gate(
     x: npt.NDArray[np.complex64], fraction: float
 ) -> npt.NDArray[np.bool_]:
     mag = np.abs(x)
@@ -320,14 +328,14 @@ def _active_mask(
     return mag > fraction * med
 
 
-def _active_pairs(
+def _magnitude_gate_pairs(
     x: npt.NDArray[np.complex64], fraction: float
 ) -> npt.NDArray[np.bool_]:
-    active = _active_mask(x, fraction)
+    active = _magnitude_gate(x, fraction)
     return active[1:] & active[:-1]
 
 
-def _slot_active_mask(
+def _burst_power_gate(
     x: npt.NDArray[np.complex64], fraction: float, window: int
 ) -> npt.NDArray[np.bool_]:
     power: npt.NDArray[np.float64] = uniform_filter1d(
@@ -344,10 +352,10 @@ def _slot_active_mask(
     return power > fraction * peak
 
 
-def _slot_active_pairs(
+def _burst_power_gate_pairs(
     x: npt.NDArray[np.complex64], fraction: float, window: int
 ) -> npt.NDArray[np.bool_]:
-    active = _slot_active_mask(x, fraction, window)
+    active = _burst_power_gate(x, fraction, window)
     return active[1:] & active[:-1]
 
 
@@ -449,7 +457,7 @@ def _symbol_rate(
     dphi = np.angle(x[1:] * np.conj(x[:-1]))
     yf_full = np.abs(np.diff(dphi))
 
-    active_pairs = _active_pairs(x, _SURVEY_ACTIVE_FRACTION)
+    active_pairs = _magnitude_gate_pairs(x, _SURVEY_ACTIVE_FRACTION)
     yf = _gate(yf_full, active_pairs[1:] & active_pairs[:-1])
 
     fa, ma = _clock_spectrum(ya, sample_rate, _SURVEY_CLOCK_CHUNKS)
@@ -524,7 +532,9 @@ def _inst_freq(x: npt.NDArray[np.complex64], sample_rate: float) -> InstFreqStat
     # frequency span at tens of kHz is finer than float32 resolves there, so
     # 65 bins across it collapse into a "Too many bins for data range" raise.
     f = np.angle(x[1:] * np.conj(x[:-1])).astype(np.float64) / (2 * np.pi) * sample_rate
-    f = _gate(f, _slot_active_pairs(x, _SURVEY_ACTIVE_FRACTION, _SURVEY_BURST_WINDOW))
+    f = _gate(
+        f, _burst_power_gate_pairs(x, _SURVEY_ACTIVE_FRACTION, _SURVEY_BURST_WINDOW)
+    )
     spread = float(f.std())
     lo, hi = percentile_span(f, bins=_SURVEY_IFREQ_BINS)
     counts, edges = np.histogram(f, bins=_SURVEY_IFREQ_BINS, range=(lo, hi))

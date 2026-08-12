@@ -18,7 +18,7 @@ from marconi.engine.backends.base import (
     DiagnosticRows,
 )
 from marconi.engine.stages.base import Stage
-from marconi.levels import fit_levels
+from marconi.levelfit import fit_levels
 
 Assessment = Literal["positive", "negative"]
 Verdict = Literal["decoded", "uncertain", "no_signal"]

@@ -33,9 +33,7 @@ def test_streaming_reads_honor_an_expired_deadline(capture: Path) -> None:
 
 def test_channelize_honors_an_expired_deadline(capture: Path, tmp_path: Path) -> None:
     with set_deadline(0.0), pytest.raises(RunTimeout):
-        channelize_to_file(
-            capture, tmp_path / "ch.cf32", 1.0e6, center_hz=0.0, decim=4
-        )
+        channelize_to_file(capture, tmp_path / "ch.cf32", 1.0e6, center_hz=0.0, decim=4)
 
 
 def test_survey_completes_with_a_generous_deadline(capture: Path) -> None:

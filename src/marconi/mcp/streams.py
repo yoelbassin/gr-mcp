@@ -5,6 +5,7 @@ import os
 import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
 from typing import Any, BinaryIO, Generic, TypeVar
 
@@ -14,7 +15,7 @@ import numpy.typing as npt
 from marconi.deadline import check_deadline
 from marconi.engine.io.source import SourceSlice
 from marconi.engine.types.enums import ItemType
-from marconi.levels import kmeans_1d, percentile_span
+from marconi.levelfit import kmeans_1d, percentile_span
 from marconi.mcp.workspace import (
     conversion_cache_dir,
     evict_conversion_cache,
@@ -27,15 +28,10 @@ _MAX_INLINE_BITS = 1_048_576
 # count therefore priced pages between 82 and 184 KB (21k-47k tokens) — one
 # read_stream call could take a quarter of an agent's context, and the worst
 # of them was the int64 sidecar run_rx explicitly tells the agent to page.
-# Every type now lands under _MAX_PAGE_BYTES; test_streams pins that budget
+# Every type lands under _MAX_PAGE_BYTES; test_streams pins that budget
 # directly, so a future retune is measured against the cost, not the number.
 _MAX_PAGE_BYTES = 48 * 1024
-_MAX_PAGE_ITEMS = {"b": 16384, "s": 8192, "f": 4096, "l": 2048, "c": 2048}
 _CHUNK_ITEMS = 1 << 20
-
-# default page sizes hold a default call near a few KB of JSON regardless of
-# how many chars one rendered item costs; an explicit count still pages more
-_DEFAULT_PAGE_ITEMS = {"b": 4096, "s": 2048, "f": 1024, "l": 1024, "c": 256}
 
 _STATS_SAMPLE_ITEMS = 65536
 _STATS_SAMPLE_CHUNKS = 16
@@ -43,12 +39,34 @@ _STATS_MAX_CLUSTERS = 16
 _STATS_MAX_BINS = 200
 _STATS_KMEANS_ITERS = 100
 
-# "l" (int64) is a paging-only type for run sidecars (windows/marks offsets),
-# never an engine wire type
-_SUFFIX_TYPES = {".i64": "l"} | {t.suffix: t.value for t in ItemType}
-ITEM_DTYPES: dict[str, np.dtype[Any]] = {"l": np.dtype(np.int64)} | {
-    t.value: t.np_dtype for t in ItemType
-}
+
+class PageType(StrEnum):
+    """Every item type read_stream/stream_stats can page: the engine's wire
+    types, plus L for the int64 sidecar lists a run writes (windows/marks
+    offsets), which is never an engine wire type. _PAGE_SPECS is checked
+    against both this enum and ItemType at import, so a new wire type cannot
+    reach the paging surface without its page budget and renderer."""
+
+    C = "c"
+    F = "f"
+    B = "b"
+    S = "s"
+    L = "l"
+
+
+@dataclass(frozen=True)
+class PageSpec:
+    """Everything paging needs to know about one item type. One row per type,
+    so the dtype, the suffix it infers from, its two page budgets and its
+    renderer cannot drift apart."""
+
+    dtype: np.dtype[Any]
+    suffix: str
+    # a default call stays near a few KB of JSON regardless of how many chars
+    # one rendered item costs; an explicit count still pages more
+    default_items: int
+    max_items: int
+    render: Callable[[npt.NDArray[Any]], dict[str, object]]
 
 
 @dataclass(frozen=True)
@@ -107,11 +125,72 @@ def _under_workspace(path: Path) -> bool:
         return False
 
 
-def _resolve_item_type(path: Path, item_type: str | None) -> str:
+def _render_bits(items: npt.NDArray[Any]) -> dict[str, object]:
+    ascii_bits = (items.astype(np.uint8) & np.uint8(1)) + np.uint8(ord("0"))
+    return {"bits": ascii_bits.tobytes().decode("ascii")}
+
+
+def _render_ints(key: str) -> Callable[[npt.NDArray[Any]], dict[str, object]]:
+    def render(items: npt.NDArray[Any]) -> dict[str, object]:
+        return {key: [int(v) for v in items]}
+
+    return render
+
+
+def _render_complex(items: npt.NDArray[Any]) -> dict[str, object]:
+    return {
+        "real": [round(float(v.real), 6) for v in items],
+        "imag": [round(float(v.imag), 6) for v in items],
+    }
+
+
+def _render_floats(items: npt.NDArray[Any]) -> dict[str, object]:
+    return {"values": [round(float(v), 4) for v in items]}
+
+
+_PAGE_SPECS: dict[PageType, PageSpec] = {
+    PageType.B: PageSpec(ItemType.B.np_dtype, ".u8", 4096, 16384, _render_bits),
+    PageType.S: PageSpec(
+        ItemType.S.np_dtype, ".i16", 2048, 8192, _render_ints("symbols")
+    ),
+    PageType.F: PageSpec(ItemType.F.np_dtype, ".f32", 1024, 4096, _render_floats),
+    PageType.C: PageSpec(ItemType.C.np_dtype, ".cf32", 256, 2048, _render_complex),
+    PageType.L: PageSpec(
+        np.dtype(np.int64), ".i64", 1024, 2048, _render_ints("values")
+    ),
+}
+
+
+def _check_page_specs() -> None:
+    missing = sorted(t.value for t in PageType if t not in _PAGE_SPECS)
+    if missing:
+        raise RuntimeError(f"PageType members with no PageSpec: {missing}")
+    unpageable = sorted(t.value for t in ItemType if t.value not in set(PageType))
+    if unpageable:
+        raise RuntimeError(
+            f"ItemType members the paging surface cannot render: {unpageable}; "
+            "add a PageType member and its PageSpec"
+        )
+    mismatched = sorted(
+        t.value for t in ItemType if _PAGE_SPECS[PageType(t.value)].suffix != t.suffix
+    )
+    if mismatched:
+        raise RuntimeError(f"PageSpec suffix disagrees with ItemType: {mismatched}")
+
+
+_check_page_specs()
+
+_SUFFIX_TYPES: dict[str, PageType] = {s.suffix: t for t, s in _PAGE_SPECS.items()}
+
+
+def resolve_page_type(path: Path, item_type: str | None) -> PageType:
     if item_type is not None:
-        if item_type not in ITEM_DTYPES:
-            raise ValueError(f"item_type must be one of {sorted(ITEM_DTYPES)}")
-        return item_type
+        try:
+            return PageType(item_type)
+        except ValueError:
+            raise ValueError(
+                f"item_type must be one of {sorted(t.value for t in PageType)}"
+            ) from None
     inferred = _SUFFIX_TYPES.get(path.suffix)
     if inferred is None:
         raise ValueError(
@@ -127,57 +206,24 @@ def render_page(
     if offset < 0:
         raise ValueError(f"offset must be >= 0, got {offset}")
     require_file(path)
-    kind = _resolve_item_type(path, item_type)
-    requested = _DEFAULT_PAGE_ITEMS[kind] if count is None else count
-    ceiling = _MAX_PAGE_ITEMS[kind]
-    dtype = ITEM_DTYPES[kind]
-    total = path.stat().st_size // dtype.itemsize
-    count = max(0, min(requested, ceiling, total - offset))
+    kind = resolve_page_type(path, item_type)
+    spec = _PAGE_SPECS[kind]
+    requested = spec.default_items if count is None else count
+    total = path.stat().st_size // spec.dtype.itemsize
+    count = max(0, min(requested, spec.max_items, total - offset))
     with path.open("rb") as f:
-        f.seek(offset * dtype.itemsize)
-        items = np.fromfile(f, dtype=dtype, count=count)
+        f.seek(offset * spec.dtype.itemsize)
+        items = np.fromfile(f, dtype=spec.dtype, count=count)
     page: dict[str, object] = {
-        "item_type": kind,
+        "item_type": kind.value,
         "offset": offset,
         "count": int(items.size),
         "total_items": int(total),
     }
-    if requested > ceiling:
-        page["capped_at"] = ceiling
-    page.update(_PAGE_FORMATTERS[kind](items))
+    if requested > spec.max_items:
+        page["capped_at"] = spec.max_items
+    page.update(spec.render(items))
     return page
-
-
-def _format_bits(items: npt.NDArray[Any]) -> dict[str, object]:
-    bits_array = items.astype(np.uint8)
-    return {"bits": "".join(chr(ord("0") + int(v & np.uint8(1))) for v in bits_array)}
-
-
-def _format_ints(key: str) -> Callable[[npt.NDArray[Any]], dict[str, object]]:
-    def _format(items: npt.NDArray[Any]) -> dict[str, object]:
-        return {key: [int(v) for v in items]}
-
-    return _format
-
-
-def _format_complex(items: npt.NDArray[Any]) -> dict[str, object]:
-    return {
-        "real": [round(float(v.real), 6) for v in items],
-        "imag": [round(float(v.imag), 6) for v in items],
-    }
-
-
-def _format_floats(items: npt.NDArray[Any]) -> dict[str, object]:
-    return {"values": [round(float(v), 4) for v in items]}
-
-
-_PAGE_FORMATTERS: dict[str, Callable[[npt.NDArray[Any]], dict[str, object]]] = {
-    "b": _format_bits,
-    "s": _format_ints("symbols"),
-    "l": _format_ints("values"),
-    "c": _format_complex,
-    "f": _format_floats,
-}
 
 
 def ensure_cf32(
@@ -333,25 +379,25 @@ def stream_stats(
     path: Path, *, item_type: str | None, clusters: int, bins: int = 41
 ) -> dict[str, object]:
     require_file(path)
-    kind = _resolve_item_type(path, item_type)
+    kind = resolve_page_type(path, item_type)
     if not 1 <= bins <= _STATS_MAX_BINS:
         raise ValueError(f"bins must be 1..{_STATS_MAX_BINS}, got {bins}")
     if not 0 <= clusters <= _STATS_MAX_CLUSTERS:
         raise ValueError(f"clusters must be 0..{_STATS_MAX_CLUSTERS}, got {clusters}")
-    dtype: np.dtype[Any] = ITEM_DTYPES[kind]
-    sampled = _sample_stream(path, dtype)
+    sampled = _sample_stream(path, _PAGE_SPECS[kind].dtype)
     sample, total = sampled.items, sampled.total_items
+    if sample.size == 0:
+        raise ValueError("stream has no finite items to summarize")
     out: dict[str, object] = {
-        "item_type": kind,
+        "item_type": kind.value,
         "total_items": int(total),
         "sampled_items": int(sample.size),
         "sampled": sampled.strided,
     }
-    if kind == "b":
-        ones = float((sample & np.uint8(1)).mean()) if sample.size else 0.0
-        out["ones_fraction"] = round(ones, 6)
+    if kind is PageType.B:
+        out["ones_fraction"] = round(float((sample & np.uint8(1)).mean()), 6)
         return out
-    if kind == "c":
+    if kind is PageType.C:
         out.update(_constellation_stats(sample, clusters, bins))
         return out
     x = sample.astype(np.float64)
@@ -373,12 +419,10 @@ def stream_stats(
             [int((labels == j).sum()) for j in range(centers.size)]
         )
         keep = cluster_counts > 0
-        centers = centers[keep]
-        cluster_counts = cluster_counts[keep]
-        rounded = [round(float(v), 6) for v in centers]
-        out["centers"] = rounded
-        out["cluster_counts"] = [int(n) for n in cluster_counts]
-        out["levels"] = list(rounded)
+        # "centers" was also shipped verbatim as "levels": two names, one array,
+        # twice the tokens. centers IS the paste-ready list.
+        out["centers"] = [round(float(v), 6) for v in centers[keep]]
+        out["cluster_counts"] = [int(n) for n in cluster_counts[keep]]
     return out
 
 

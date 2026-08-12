@@ -9,9 +9,9 @@ import pytest
 
 from marconi.engine.io.source import SourceSlice
 from marconi.mcp.streams import (
-    _DEFAULT_PAGE_ITEMS,
     _MAX_PAGE_BYTES,
-    _MAX_PAGE_ITEMS,
+    _PAGE_SPECS,
+    PageType,
     ensure_cf32,
     parse_bits,
     render_page,
@@ -67,7 +67,7 @@ def test_page_count_is_clamped(tmp_path: Path) -> None:
     p = tmp_path / "big.u8"
     np.zeros(70000, np.uint8).tofile(p)
     page = render_page(p, offset=0, count=1 << 20, item_type=None)
-    assert page["count"] == _MAX_PAGE_ITEMS["b"]
+    assert page["count"] == _PAGE_SPECS[PageType.B].max_items
 
 
 def test_ensure_cf32_converts_ci16(
@@ -153,12 +153,16 @@ def test_ensure_cf32_passthrough_and_unknown(tmp_path: Path) -> None:
 
 def test_page_reports_the_ceiling_that_clamped_it(tmp_path: Path) -> None:
     p = tmp_path / "sym.cf32"
-    np.zeros(_MAX_PAGE_ITEMS["c"] + 32, np.complex64).tofile(p)
-    over = render_page(p, offset=0, count=_MAX_PAGE_ITEMS["c"] + 32, item_type=None)
-    assert over["count"] == _MAX_PAGE_ITEMS["c"]
-    assert over["capped_at"] == _MAX_PAGE_ITEMS["c"]
+    np.zeros(_PAGE_SPECS[PageType.C].max_items + 32, np.complex64).tofile(p)
+    over = render_page(
+        p, offset=0, count=_PAGE_SPECS[PageType.C].max_items + 32, item_type=None
+    )
+    assert over["count"] == _PAGE_SPECS[PageType.C].max_items
+    assert over["capped_at"] == _PAGE_SPECS[PageType.C].max_items
     # a page short because the stream ended must NOT claim a cap
-    tail = render_page(p, offset=_MAX_PAGE_ITEMS["c"], count=None, item_type=None)
+    tail = render_page(
+        p, offset=_PAGE_SPECS[PageType.C].max_items, count=None, item_type=None
+    )
     assert tail["count"] == 32 and "capped_at" not in tail
 
 
@@ -176,12 +180,12 @@ def test_a_full_page_of_every_type_fits_the_context_budget(
     tmp_path: Path, suffix: str, dtype: Any
 ) -> None:
     # The requirement is a SIZE, so the test measures size. Asserting the
-    # clamp equals _MAX_PAGE_ITEMS (both sides imported from the source) let
+    # clamp equals the spec ceiling (both sides imported from the source) let
     # any retune through: raising the ceilings 256x would have stayed green
     # while a single call returned ~100 MB of JSON.
     p = tmp_path / f"page{suffix}"
     rng = np.random.default_rng(2)
-    n = max(_MAX_PAGE_ITEMS.values()) + 32
+    n = max(s.max_items for s in _PAGE_SPECS.values()) + 32
     if np.issubdtype(dtype, np.complexfloating):
         raw = (rng.standard_normal(n) + 1j * rng.standard_normal(n)).astype(dtype)
     elif np.issubdtype(dtype, np.floating):
@@ -193,11 +197,12 @@ def test_a_full_page_of_every_type_fits_the_context_budget(
     page = render_page(p, offset=0, count=n, item_type=None)
     size = len(json.dumps(page, separators=(",", ":")))
     assert size <= _MAX_PAGE_BYTES, f"{suffix}: {size} bytes > {_MAX_PAGE_BYTES}"
-    assert page["capped_at"] == _MAX_PAGE_ITEMS[str(page["item_type"])]
+    kind = PageType(str(page["item_type"]))
+    assert page["capped_at"] == _PAGE_SPECS[kind].max_items
 
 
 def test_read_stream_docstring_states_every_page_bound() -> None:
     doc = read_stream.__doc__ or ""
-    for table in (_DEFAULT_PAGE_ITEMS, _MAX_PAGE_ITEMS):
-        for kind, bound in table.items():
+    for kind, spec in _PAGE_SPECS.items():
+        for bound in (spec.default_items, spec.max_items):
             assert str(bound) in doc, f"{kind}={bound} missing from read_stream doc"

@@ -21,12 +21,19 @@ _RAMP_MIN_LEN = 64
 
 _SOFT_BIT1_SIGN = {"symbols": "positive", "bits": "negative"}
 
-_TRACE_STAT_KEYS: dict[str, tuple[str, ...]] = {
-    "c": ("mean_magnitude", "std_magnitude", "constant_modulus_ratio"),
-    "f": ("min", "max", "mean", "std"),
-    "s": ("min", "max", "mean", "std"),
-    "b": ("ones_fraction",),
+# The compact per-stage stats a trace row carries, by the item type the tap
+# wrote. Keyed by the enum so a new wire type fails the check below rather
+# than silently tracing with no stats at all.
+_TRACE_STAT_KEYS: dict[ItemType, tuple[str, ...]] = {
+    ItemType.C: ("mean_magnitude", "std_magnitude", "constant_modulus_ratio"),
+    ItemType.F: ("min", "max", "mean", "std"),
+    ItemType.S: ("min", "max", "mean", "std"),
+    ItemType.B: ("ones_fraction",),
 }
+
+_untraced = sorted(t.value for t in ItemType if t not in _TRACE_STAT_KEYS)
+if _untraced:
+    raise RuntimeError(f"ItemType members with no trace stat keys: {_untraced}")
 
 
 def as_ramp(seq: Sequence[int]) -> dict[str, int] | None:
@@ -210,7 +217,7 @@ def _trace_row(st: TraceStage) -> TraceRow:
         path=st.path,
         items=st.items,
     )
-    keys = _TRACE_STAT_KEYS.get(st.item_type)
+    keys = _TRACE_STAT_KEYS.get(ItemType(st.item_type))
     if not (st.items and keys):
         return row
     try:

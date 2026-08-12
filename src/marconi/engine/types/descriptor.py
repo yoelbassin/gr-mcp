@@ -1,18 +1,18 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 
 from marconi.engine.types.enums import ItemType
 from marconi.engine.types.levels import Level
 
 
-class Carrier(str, Enum):
+class Carrier(StrEnum):
     HARD = "hard"
     SOFT = "soft"
 
 
-class Amplitude(str, Enum):
+class Amplitude(StrEnum):
     """Which amplitude STATISTIC a stream has been normalized to. "Normalized"
     alone is not a contract: a demod with absolute decision boundaries needs a
     specific statistic, and the wrong one is silent garbage rather than a
