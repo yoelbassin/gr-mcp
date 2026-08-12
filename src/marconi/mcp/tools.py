@@ -36,6 +36,7 @@ from marconi.mcp.payload import (
 from marconi.mcp.streams import ensure_cf32, parse_bits, render_page, require_file
 from marconi.mcp.streams import stream_stats as _compute_stats
 from marconi.mcp.vocab import ENVELOPE, family_names, stage_details, stage_index
+from marconi.mcp.wire import Payload
 from marconi.mcp.workspace import new_run_dir
 from marconi.survey import channelize_to_file, survey_iq
 
@@ -59,6 +60,25 @@ _DEFAULT_ENTRY_LEVEL: dict[ItemType, Level] = {
 # Entry item types that name an existing stream file; "c" enters as a capture
 # and "l" is a paging-only sidecar type, neither of which is a decode input.
 _STREAM_ENTRY_TYPES: tuple[ItemType, ...] = (ItemType.B, ItemType.S, ItemType.F)
+
+
+class StageVocabulary(Payload):
+    """describe_stages' wire shape: the stage rows, plus the spec envelope and
+    level/item-type primer on the index call only."""
+
+    stages: dict[str, list[dict[str, Any]]] | list[dict[str, Any]]
+    envelope: dict[str, object] | None = None
+
+
+class ValidateModemPayload(Payload):
+    """validate_modem's wire shape. A failing spec is a normal result, so the
+    errors ride the payload instead of raising."""
+
+    valid: bool
+    trace: list[dict[str, object]] | None = None
+    warnings: list[str] | None = None
+    errors: list[dict[str, object]] | None = None
+
 
 _missing_default = sorted(t.value for t in ItemType if t not in _DEFAULT_ENTRY_LEVEL)
 if _missing_default:
@@ -117,10 +137,10 @@ def describe_stages(
     [{"conv": <stage name>, ...params}]}; check it with validate_modem
     before running."""
     if stage is not None:
-        return {"stages": stage_details([stage])}
+        return StageVocabulary(stages=stage_details([stage])).as_payload()
     if family is not None:
-        return {"stages": stage_details(family_names(family))}
-    return {"stages": stage_index(), "envelope": ENVELOPE}
+        return StageVocabulary(stages=stage_details(family_names(family))).as_payload()
+    return StageVocabulary(stages=stage_index(), envelope=ENVELOPE).as_payload()
 
 
 def validate_modem(
@@ -158,26 +178,20 @@ def validate_modem(
         )
     except SpecValidationError as exc:
         code, _ = classify_error(exc)
-        return {
-            "valid": False,
-            "errors": error_rows(
-                [
-                    ErrorRow(code=code, message=i.message, at=i.block_id)
-                    for i in exc.issues
-                ]
-            ),
-        }
+        rows = [
+            ErrorRow(code=code, message=i.message, at=i.block_id) for i in exc.issues
+        ]
+        return ValidateModemPayload(valid=False, errors=error_rows(rows)).as_payload()
     except (CompileError, ValidationError, ValueError) as exc:
         code, message = classify_error(exc)
-        return {
-            "valid": False,
-            "errors": error_rows([ErrorRow(code=code, message=message)]),
-        }
-    return {
-        "valid": True,
-        "trace": spec_trace_rows(modem, cp),
-        "warnings": composition_warnings(modem, stage_registry()),
-    }
+        return ValidateModemPayload(
+            valid=False, errors=error_rows([ErrorRow(code=code, message=message)])
+        ).as_payload()
+    return ValidateModemPayload(
+        valid=True,
+        trace=spec_trace_rows(modem, cp),
+        warnings=composition_warnings(modem, stage_registry()),
+    ).as_payload()
 
 
 def run_rx_tool(

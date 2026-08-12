@@ -7,6 +7,7 @@ from marconi.engine.stages.base import Stage
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.enums import ItemType
 from marconi.engine.types.levels import Level
+from marconi.mcp.wire import Payload
 
 __all__ = ["ENVELOPE", "family_names", "stage_index", "stage_details"]
 
@@ -54,21 +55,43 @@ ENVELOPE: dict[str, object] = {
 }
 
 
-def _index_entry(stage: Stage[Any, Any]) -> dict[str, Any]:
-    entry: dict[str, Any] = {
+class StageEntry(Payload):
+    """One stage as describe_stages publishes it: the index rows carry the
+    first three (plus a description where the name alone does not carry the
+    use), a per-stage detail call fills in the input contracts and the spec
+    schema. A contract this call cannot evaluate without a step is reported
+    null and named in step_conditional — see _overrides."""
+
+    name: str
+    levels: str
+    dir: str
+    description: str | None = None
+    family: str | None = None
+    step_conditional: list[str] | None = None
+    accepts_item_type: str | None = None
+    accepts_carrier: str | None = None
+    accepts_amplitude: list[str] | None = None
+    min_input_sps: float | None = None
+    seeds_windows: bool | None = None
+    params_schema: dict[str, Any] | None = None
+
+
+def _index_fields(stage: Stage[Any, Any]) -> dict[str, Any]:
+    fields: dict[str, Any] = {
         "name": stage.name,
         "levels": f"{stage.from_level.value}>{stage.to_level.value}",
         "dir": ",".join(sorted(stage.directions)),
     }
     if stage.description:
-        entry["description"] = stage.description
-    return entry
+        fields["description"] = stage.description
+    return fields
 
 
 def stage_index() -> dict[str, list[dict[str, Any]]]:
     grouped: dict[str, list[dict[str, Any]]] = {}
     for _, stage in sorted(stage_registry().items()):
-        grouped.setdefault(stage.family, []).append(_index_entry(stage))
+        row = StageEntry.model_validate(_index_fields(stage)).as_payload()
+        grouped.setdefault(stage.family, []).append(row)
     return dict(sorted(grouped.items()))
 
 
@@ -88,8 +111,8 @@ def stage_details(names: list[str]) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for n in names:
         s = registry[n]
-        entry = _index_entry(s)
-        entry["family"] = s.family
+        fields = _index_fields(s)
+        fields["family"] = s.family
         conditional_amp = _overrides(s, Stage.accepts_amplitude_for)
         conditional_sps = _overrides(s, Stage.min_input_sps_for)
         step_conditional = sorted(
@@ -101,26 +124,24 @@ def stage_details(names: list[str]) -> list[dict[str, Any]]:
             if cond
         )
         if step_conditional:
-            entry["step_conditional"] = step_conditional
-        entry.update(
-            {
-                "accepts_item_type": (
-                    None if s.accepts_item_type is None else s.accepts_item_type.value
-                ),
-                "accepts_carrier": (
-                    None if s.accepts_carrier is None else s.accepts_carrier.value
-                ),
-                "accepts_amplitude": (
-                    None
-                    if conditional_amp or s.accepts_amplitude is None
-                    else sorted(a.value for a in s.accepts_amplitude)
-                ),
-                "min_input_sps": None if conditional_sps else s.min_input_sps,
-                "seeds_windows": s.seeds_windows,
-                "params_schema": s.step_model.model_json_schema(),
-            }
+            fields["step_conditional"] = step_conditional
+        fields.update(
+            accepts_item_type=(
+                None if s.accepts_item_type is None else s.accepts_item_type.value
+            ),
+            accepts_carrier=(
+                None if s.accepts_carrier is None else s.accepts_carrier.value
+            ),
+            accepts_amplitude=(
+                None
+                if conditional_amp or s.accepts_amplitude is None
+                else sorted(a.value for a in s.accepts_amplitude)
+            ),
+            min_input_sps=None if conditional_sps else s.min_input_sps,
+            seeds_windows=s.seeds_windows,
+            params_schema=s.step_model.model_json_schema(),
         )
-        out.append(entry)
+        out.append(StageEntry.model_validate(fields).as_payload())
     return out
 
 

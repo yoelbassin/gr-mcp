@@ -16,6 +16,7 @@ from marconi.deadline import check_deadline
 from marconi.engine.io.source import SourceSlice
 from marconi.engine.types.enums import ItemType
 from marconi.levelfit import kmeans_1d, percentile_span
+from marconi.mcp.wire import Histogram, Payload
 from marconi.mcp.workspace import (
     conversion_cache_dir,
     evict_conversion_cache,
@@ -67,6 +68,59 @@ class PageSpec:
     default_items: int
     max_items: int
     render: Callable[[npt.NDArray[Any]], dict[str, object]]
+
+
+class StreamPage(Payload):
+    """read_stream's wire shape. Exactly one of the rendered-item fields is
+    set, chosen by the page's item type."""
+
+    item_type: str
+    offset: int
+    count: int
+    total_items: int
+    capped_at: int | None = None
+    bits: str | None = None
+    symbols: list[int] | None = None
+    values: list[float] | list[int] | None = None
+    real: list[float] | None = None
+    imag: list[float] | None = None
+
+
+class ConstellationCluster(Payload):
+    real: float
+    imag: float
+    magnitude: float
+    phase_deg: float
+    count: int
+
+
+class StreamStats(Payload):
+    """stream_stats' wire shape across all item types: the common header, then
+    the branch a type populates. A field absent from the response is one this
+    item type has no such measure for."""
+
+    item_type: str
+    total_items: int
+    sampled_items: int
+    sampled: bool
+    # bits
+    ones_fraction: float | None = None
+    # real-valued streams
+    min: float | None = None
+    max: float | None = None
+    mean: float | None = None
+    std: float | None = None
+    histogram: Histogram | None = None
+    centers: list[float] | None = None
+    cluster_counts: list[int] | None = None
+    # complex constellation streams
+    mean_magnitude: float | None = None
+    std_magnitude: float | None = None
+    constant_modulus_ratio: float | None = None
+    magnitude_histogram: Histogram | None = None
+    phase_histogram: Histogram | None = None
+    evm: float | None = None
+    clusters: list[ConstellationCluster] | None = None
 
 
 @dataclass(frozen=True)
@@ -214,16 +268,16 @@ def render_page(
     with path.open("rb") as f:
         f.seek(offset * spec.dtype.itemsize)
         items = np.fromfile(f, dtype=spec.dtype, count=count)
-    page: dict[str, object] = {
+    fields: dict[str, object] = {
         "item_type": kind.value,
         "offset": offset,
         "count": int(items.size),
         "total_items": int(total),
     }
     if requested > spec.max_items:
-        page["capped_at"] = spec.max_items
-    page.update(spec.render(items))
-    return page
+        fields["capped_at"] = spec.max_items
+    fields.update(spec.render(items))
+    return StreamPage.model_validate(fields).as_payload()
 
 
 def ensure_cf32(
@@ -320,16 +374,15 @@ def _sample_stream(path: Path, dtype: np.dtype[_S]) -> StreamSample[_S]:
     return StreamSample(np.concatenate(parts), total, strided=True)
 
 
-def _hist(x: npt.NDArray[np.float64], bins: int) -> dict[str, object]:
+def _hist(x: npt.NDArray[np.float64], bins: int) -> Histogram:
     lo, hi = percentile_span(x)
     edges = np.linspace(lo, hi, bins + 1)
     counts, _ = np.histogram(np.clip(x, lo, hi), bins=edges)
-    # bin i's center is start + i*step: the axis is derivable, never shipped
-    return {
-        "start": round(float((edges[0] + edges[1]) / 2.0), 6),
-        "step": round(float(edges[1] - edges[0]), 6),
-        "counts": [int(n) for n in counts],
-    }
+    return Histogram(
+        start=round(float((edges[0] + edges[1]) / 2.0), 6),
+        step=round(float(edges[1] - edges[0]), 6),
+        counts=[int(n) for n in counts],
+    )
 
 
 _N = TypeVar("_N", np.float64, np.complex128)
@@ -378,6 +431,14 @@ def _kmeans_2d(
 def stream_stats(
     path: Path, *, item_type: str | None, clusters: int, bins: int = 41
 ) -> dict[str, object]:
+    return stream_stats_payload(
+        path, item_type=item_type, clusters=clusters, bins=bins
+    ).as_payload()
+
+
+def stream_stats_payload(
+    path: Path, *, item_type: str | None, clusters: int, bins: int = 41
+) -> StreamStats:
     require_file(path)
     kind = resolve_page_type(path, item_type)
     if not 1 <= bins <= _STATS_MAX_BINS:
@@ -388,30 +449,39 @@ def stream_stats(
     sample, total = sampled.items, sampled.total_items
     if sample.size == 0:
         raise ValueError("stream has no finite items to summarize")
-    out: dict[str, object] = {
+    # one construction buffer, validated in one step against the declared
+    # wire model: extra="forbid" rejects a typo'd key and the field types are
+    # checked, neither of which a hand-assembled response dict could do
+    fields: dict[str, object] = {
         "item_type": kind.value,
         "total_items": int(total),
         "sampled_items": int(sample.size),
         "sampled": sampled.strided,
     }
     if kind is PageType.B:
-        out["ones_fraction"] = round(float((sample & np.uint8(1)).mean()), 6)
-        return out
-    if kind is PageType.C:
-        out.update(_constellation_stats(sample, clusters, bins))
-        return out
+        fields["ones_fraction"] = round(float((sample & np.uint8(1)).mean()), 6)
+    elif kind is PageType.C:
+        fields.update(_constellation_fields(sample, clusters, bins))
+    else:
+        fields.update(_real_fields(sample, clusters, bins))
+    return StreamStats.model_validate(fields)
+
+
+def _real_fields(
+    sample: npt.NDArray[Any], clusters: int, bins: int
+) -> dict[str, object]:
     x = sample.astype(np.float64)
     x = x[np.isfinite(x)]
     if x.size == 0:
         raise ValueError("stream has no finite items to summarize")
-    out["sampled_items"] = int(x.size)
-    out.update(
-        min=round(float(x.min()), 6),
-        max=round(float(x.max()), 6),
-        mean=round(float(x.mean()), 6),
-        std=round(float(x.std()), 6),
-    )
-    out["histogram"] = _hist(x, bins)
+    fields: dict[str, object] = {
+        "sampled_items": int(x.size),
+        "min": round(float(x.min()), 6),
+        "max": round(float(x.max()), 6),
+        "mean": round(float(x.mean()), 6),
+        "std": round(float(x.std()), 6),
+        "histogram": _hist(x, bins),
+    }
     if clusters >= 1:
         centers = kmeans_1d(x, clusters)
         labels = _nearest_labels(x, centers)
@@ -421,30 +491,33 @@ def stream_stats(
         keep = cluster_counts > 0
         # "centers" was also shipped verbatim as "levels": two names, one array,
         # twice the tokens. centers IS the paste-ready list.
-        out["centers"] = [round(float(v), 6) for v in centers[keep]]
-        out["cluster_counts"] = [int(n) for n in cluster_counts[keep]]
-    return out
+        fields["centers"] = [round(float(v), 6) for v in centers[keep]]
+        fields["cluster_counts"] = [int(n) for n in cluster_counts[keep]]
+    return fields
 
 
-def _constellation_stats(
-    sample: npt.NDArray[np.complex64], clusters: int, bins: int
+def _constellation_fields(
+    sample: npt.NDArray[Any], clusters: int, bins: int
 ) -> dict[str, object]:
     z = sample.astype(np.complex128)
     z = z[np.isfinite(z)]
     if z.size == 0:
         raise ValueError("stream has no finite items to summarize")
-    out: dict[str, object] = {"sampled_items": int(z.size)}
     mag = np.abs(z)
     mean_mag = float(mag.mean())
-    out.update(
-        mean_magnitude=round(mean_mag, 6),
-        std_magnitude=round(float(mag.std()), 6),
-        constant_modulus_ratio=(
+    fields: dict[str, object] = {
+        "sampled_items": int(z.size),
+        "mean_magnitude": round(mean_mag, 6),
+        "std_magnitude": round(float(mag.std()), 6),
+        # explicitly null when undefined, never omitted: the tool docstring
+        # sends the agent to read this FIRST, and a missing key reads as
+        # "this stream has no such measure"
+        "constant_modulus_ratio": (
             round(float(mag.std() / mean_mag), 6) if mean_mag > 0 else None
         ),
-    )
-    out["magnitude_histogram"] = _hist(mag, bins)
-    out["phase_histogram"] = _hist(np.angle(z), bins)
+        "magnitude_histogram": _hist(mag, bins),
+        "phase_histogram": _hist(np.angle(z), bins),
+    }
     if clusters >= 1:
         centers = _kmeans_2d(z, clusters)
         labels = _nearest_labels(z, centers)
@@ -453,19 +526,19 @@ def _constellation_stats(
         assigned = centers[labels]
         ref = float(np.sqrt((np.abs(assigned) ** 2).mean()))
         err = float(np.sqrt((np.abs(z - assigned) ** 2).mean()))
-        out["evm"] = round(err / ref, 6) if ref > 0 else None
+        fields["evm"] = round(err / ref, 6) if ref > 0 else None
         keep = counts > 0
         centers, counts = centers[keep], counts[keep]
         order = np.argsort(np.angle(centers))
         centers, counts = centers[order], counts[order]
-        out["clusters"] = [
-            {
-                "real": round(float(c.real), 6),
-                "imag": round(float(c.imag), 6),
-                "magnitude": round(float(abs(c)), 6),
-                "phase_deg": round(float(np.degrees(np.angle(c))), 6),
-                "count": int(n),
-            }
+        fields["clusters"] = [
+            ConstellationCluster(
+                real=round(float(c.real), 6),
+                imag=round(float(c.imag), 6),
+                magnitude=round(float(abs(c)), 6),
+                phase_deg=round(float(np.degrees(np.angle(c))), 6),
+                count=int(n),
+            )
             for c, n in zip(centers, counts)
         ]
-    return out
+    return fields
