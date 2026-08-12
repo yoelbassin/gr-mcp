@@ -137,10 +137,12 @@ def describe_stages(
     [{"conv": <stage name>, ...params}]}; check it with validate_modem
     before running."""
     if stage is not None:
-        return StageVocabulary(stages=stage_details([stage])).as_payload()
+        return StageVocabulary.build(stages=stage_details([stage])).as_payload()
     if family is not None:
-        return StageVocabulary(stages=stage_details(family_names(family))).as_payload()
-    return StageVocabulary(stages=stage_index(), envelope=ENVELOPE).as_payload()
+        return StageVocabulary.build(
+            stages=stage_details(family_names(family))
+        ).as_payload()
+    return StageVocabulary.build(stages=stage_index(), envelope=ENVELOPE).as_payload()
 
 
 def validate_modem(
@@ -179,15 +181,18 @@ def validate_modem(
     except SpecValidationError as exc:
         code, _ = classify_error(exc)
         rows = [
-            ErrorRow(code=code, message=i.message, at=i.block_id) for i in exc.issues
+            ErrorRow.build(code=code, message=i.message, at=i.block_id)
+            for i in exc.issues
         ]
-        return ValidateModemPayload(valid=False, errors=error_rows(rows)).as_payload()
+        return ValidateModemPayload.build(
+            valid=False, errors=error_rows(rows)
+        ).as_payload()
     except (CompileError, ValidationError, ValueError) as exc:
         code, message = classify_error(exc)
         return ValidateModemPayload(
-            valid=False, errors=error_rows([ErrorRow(code=code, message=message)])
+            valid=False, errors=error_rows([ErrorRow.build(code=code, message=message)])
         ).as_payload()
-    return ValidateModemPayload(
+    return ValidateModemPayload.build(
         valid=True,
         trace=spec_trace_rows(modem, cp),
         warnings=composition_warnings(modem, stage_registry()),

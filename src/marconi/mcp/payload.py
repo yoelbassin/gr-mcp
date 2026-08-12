@@ -82,16 +82,16 @@ def capped_int_list(
     ramp = as_ramp(seq)
     if ramp is not None:
         # a uniform tiling is fully derivable: ship the formula, not the list
-        return CappedIntList(values=[], total=ramp.count, ramp=ramp).under(key)
+        return CappedIntList.build(values=[], total=ramp.count, ramp=ramp).under(key)
     if len(seq) <= _MAX_INLINE_LIST:
-        return CappedIntList(values=list(seq)).under(key)
+        return CappedIntList.build(values=list(seq)).under(key)
     path: str | None = None
     if sidecar is not None:
         # entries past the cap have no other home; the sidecar keeps the
         # full list reachable (a >512-frame carve needs every offset)
         np.asarray(seq, np.int64).tofile(sidecar)
         path = str(sidecar)
-    return CappedIntList(
+    return CappedIntList.build(
         values=list(seq[:_MAX_INLINE_LIST]), total=len(seq), path=path
     ).under(key)
 
@@ -174,7 +174,7 @@ class RunTxPayload(Payload):
 
 def run_tx_payload(r: RunResult, out: Path, sample_rate: float) -> dict[str, object]:
     n = out.stat().st_size // ItemType.C.item_bytes if out.is_file() else 0
-    return RunTxPayload(
+    return RunTxPayload.build(
         status=r.status,
         iq_path=str(out),
         num_samples=n,

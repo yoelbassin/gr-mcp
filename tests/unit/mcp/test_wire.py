@@ -4,6 +4,8 @@ the null-omission rule the tool docstrings promise is one rule in one place."""
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from pydantic import ValidationError
 
@@ -107,3 +109,57 @@ def test_a_page_carries_only_its_own_rendered_field() -> None:
     ).as_payload()
     assert page["bits"] == "10"
     assert not {"symbols", "values", "real", "imag"} & set(page)
+
+
+def _null_keys(obj: object, prefix: str = "") -> set[str]:
+    found: set[str] = set()
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            if v is None:
+                found.add(prefix + k)
+            else:
+                found |= _null_keys(v, f"{prefix}{k}.")
+    elif isinstance(obj, list):
+        for item in obj:
+            found |= _null_keys(item, f"{prefix}[].")
+    return found
+
+
+def test_only_deliberate_nulls_reach_the_wire(tmp_path: Path) -> None:
+    """`Payload` keeps a field the producer SET to null, which is right for a
+    measured-but-undefined value and wrong for a producer that simply had
+    nothing. Three payloads shipped a stray null that way. This pins the whole
+    set, so the next one fails here instead of in an agent's context."""
+    import numpy as np
+
+    from marconi.mcp.payload import survey_payload
+    from marconi.mcp.streams import stream_stats
+    from marconi.survey import survey_iq
+
+    f32 = tmp_path / "v.f32"
+    np.random.default_rng(0).normal(size=4000).astype(np.float32).tofile(f32)
+    assert _null_keys(stream_stats(f32, item_type=None, clusters=2)) == set()
+
+    cf = tmp_path / "c.cf32"
+    rng = np.random.default_rng(1)
+    (rng.choice([1 + 1j, -1 - 1j], size=4000)).astype(np.complex64).tofile(cf)
+    # a complex stream publishes these two even when undefined: the tool
+    # docstring sends the agent to read constant_modulus_ratio FIRST
+    assert _null_keys(stream_stats(cf, item_type=None, clusters=0)) <= {
+        "constant_modulus_ratio"
+    }
+
+    cap = tmp_path / "cap.cf32"
+    n = 1 << 15
+    (rng.normal(size=n) + 1j * rng.normal(size=n)).astype(np.complex64).tofile(cap)
+    payload = survey_payload(survey_iq(cap, 1.0e6), offset_samples=0, decim=1)
+    assert _null_keys(payload) <= {
+        "carrier.psk_order",
+        "bursts.dominant_period_samples",
+    }
+
+
+def test_build_drops_none_but_model_validate_keeps_it() -> None:
+    assert _Sample.build(required=1, optional=None).as_payload() == {"required": 1}
+    kept = _Sample.model_validate({"required": 1, "optional": None}).as_payload()
+    assert kept == {"required": 1, "optional": None}

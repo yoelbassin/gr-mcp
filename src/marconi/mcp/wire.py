@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import cast
 
 from pydantic import BaseModel, ConfigDict
+from typing_extensions import Self
 
 
 def _restore_set_nulls(
@@ -37,6 +38,18 @@ class Payload(BaseModel):
     pass None for it."""
 
     model_config = ConfigDict(extra="forbid")
+
+    @classmethod
+    def build(cls, **fields: object) -> "Self":
+        """Construct from keyword fields, DROPPING the None ones. This is the
+        default a producer wants: None means "no value here". Keeping a null on
+        the wire is the deliberate act — pass the key through model_validate.
+
+        Plain `cls(...)` marks every keyword as set, so a `None` handed to it
+        SHIPS as null. That is right for a producer choosing to publish an
+        undefined measurement and wrong for one that simply had nothing; three
+        payloads regressed that way before this existed."""
+        return cls.model_validate({k: v for k, v in fields.items() if v is not None})
 
     def as_payload(self) -> dict[str, object]:
         dumped: dict[str, object] = self.model_dump(mode="json", exclude_none=True)
