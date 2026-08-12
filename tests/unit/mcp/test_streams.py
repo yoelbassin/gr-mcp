@@ -87,15 +87,18 @@ def test_ensure_cf32_converts_ci16(
 def test_ensure_cf32_conversion_is_cached_per_capture(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # iterating specs against one capture must not write a fresh copy per run
+    # iterating specs against one capture must not write a fresh copy per run.
+    # A hit re-stamps mtime on purpose (that stamp is the LRU recency the cache
+    # evicts by), so "not rewritten" is measured on the inode, not the clock.
     monkeypatch.setenv("MARCONI_WORKSPACE", str(tmp_path))
     src = tmp_path / "cap.iq"
     np.arange(8, dtype=np.int16).tofile(src)
     first = ensure_cf32(src, "ci16").path
-    stamp = first.stat().st_mtime_ns
+    inode = first.stat().st_ino
     again = ensure_cf32(src, "ci16").path
     assert again == first
-    assert again.stat().st_mtime_ns == stamp
+    assert again.stat().st_ino == inode
+    assert len(list(first.parent.glob("*.cf32"))) == 1
 
 
 def test_ensure_cf32_converts_only_the_requested_slice(

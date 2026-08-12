@@ -11,11 +11,15 @@ from typing import Any, BinaryIO, Generic, TypeVar
 import numpy as np
 import numpy.typing as npt
 
-from marconi.engine.deadline import check_deadline
+from marconi.deadline import check_deadline
 from marconi.engine.io.source import SourceSlice
 from marconi.engine.types.enums import ItemType
 from marconi.levels import kmeans_1d, percentile_span
-from marconi.mcp.workspace import conversion_cache_dir
+from marconi.mcp.workspace import (
+    conversion_cache_dir,
+    evict_conversion_cache,
+    touch_cache_entry,
+)
 
 _MAX_INLINE_BITS = 1_048_576
 # Per-type ceilings chosen from what an item COSTS as JSON, not from a round
@@ -182,8 +186,9 @@ def ensure_cf32(
     """Resolve a capture to the cf32 SourceSlice a GR file source can stream.
     cf32 passes through untouched - the GR file source does the slicing while
     streaming. Raw integer formats convert only the requested slice, into a
-    content-keyed cache shared across runs: iterating specs against one
-    capture must not write a fresh multi-GB copy per run."""
+    content-keyed LRU cache shared across runs: iterating specs against one
+    capture must not write a fresh multi-GB copy per run, and the cache must
+    not grow without bound as the requested slices vary."""
     if dtype == "cf32":
         return SourceSlice(path=src, offset=offset, length=samples)
     if dtype not in _RAW_FORMATS:
@@ -198,13 +203,17 @@ def ensure_cf32(
         hashlib.sha1(key.encode()).hexdigest()[:24] + ".cf32"
     )
     if dest.is_file():
+        touch_cache_entry(dest)
         return SourceSlice(path=dest)
+    # make room BEFORE writing, so the budget bounds the peak and the entry
+    # about to be published is never itself a candidate
+    evict_conversion_cache()
     with src.open("rb") as fin:
         raw_size = np.dtype(_RAW_FORMATS[dtype].np_dtype).itemsize
         fin.seek(offset * 2 * raw_size)
         # mkstemp: concurrent converters of the same capture (FastMCP runs
         # tools on worker threads) must never share a tmp path - the loser
-        # would publish interleaved garbage into the immortal cache
+        # would publish interleaved garbage into the cache
         fd, tmp_name = tempfile.mkstemp(dir=dest.parent, suffix=".cf32.tmp")
         try:
             with os.fdopen(fd, "wb") as fout:

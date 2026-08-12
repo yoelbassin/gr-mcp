@@ -1,6 +1,6 @@
 import pytest
 
-from marconi.engine.deadline import RunTimeout, check_deadline, remaining, set_deadline
+from marconi.deadline import RunTimeout, check_deadline, remaining, set_deadline
 from marconi.errors import classify_error
 
 

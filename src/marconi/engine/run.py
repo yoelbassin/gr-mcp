@@ -9,6 +9,7 @@ import numpy as np
 import numpy.typing as npt
 from pydantic import BaseModel
 
+from marconi.deadline import check_deadline, remaining, set_deadline
 from marconi.engine.backends.base import (
     Backend,
     BlockCensus,
@@ -26,7 +27,6 @@ from marconi.engine.compile.compiler import (
     trace_sink_path,
 )
 from marconi.engine.compile.errors import CompileError
-from marconi.engine.deadline import check_deadline, remaining, set_deadline
 from marconi.engine.io.bitfile import (
     read_bits,
     read_symbols,

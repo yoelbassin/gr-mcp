@@ -8,13 +8,13 @@ from typing import Any, Literal
 from pydantic import ValidationError
 
 from marconi.capture import capture_iq
+from marconi.deadline import remaining, set_deadline
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend
 from marconi.engine.compile.compiler import (
     compile_modem,
     compile_pipeline,
 )
 from marconi.engine.compile.errors import CompileError
-from marconi.engine.deadline import set_deadline
 from marconi.engine.run import composition_warnings
 from marconi.engine.run import run_rx as engine_run_rx
 from marconi.engine.stages.base import SpecValidationError
@@ -180,9 +180,10 @@ def run_rx_tool(
     Pass exactly one of capture_path (raw IQ; capture_dtype one of
     cf32/ci16/ci8/cu8; a non-cf32 capture is converted into a shared cache
     keyed by capture_path AND the requested slice, so re-running one slice is
-    free but each new capture_offset/capture_samples pair writes another full
-    copy — the cache is never pruned, so prefer a few deliberate slices over
-    sweeping) or input_path (+ input_item_type b/s/f, optional input_level).
+    free while each new capture_offset/capture_samples pair converts once; the
+    cache is evicted least-recently-used against a disk budget, so sweeping
+    many slices costs conversion time again, never unbounded disk) or
+    input_path (+ input_item_type b/s/f, optional input_level).
     capture_offset/capture_samples (complex samples; 0 samples = to EOF)
     decode a bounded slice while streaming — the answer to a capture too
     large for one run.
@@ -283,10 +284,9 @@ def run_rx_tool(
                 trace=trace,
                 timeout=timeout,
             )
-    else:
+    elif input_path is not None:
         if input_item_type is None:
             raise ValueError("input_item_type is required with input_path")
-        assert input_path is not None
         result = engine_run_rx(
             modem,
             stage_registry(),
@@ -297,6 +297,8 @@ def run_rx_tool(
             trace=trace,
             timeout=timeout,
         )
+    else:
+        raise ValueError("pass exactly one of capture_path or input_path")
     return pipeline_payload(result, run_dir)
 
 
@@ -316,38 +318,41 @@ def run_tx_tool(
     stages do not (the engine executes no tx-side coding), so supply bits
     that already carry any framing/encoding you need. out_path names the IQ
     file to write (default: a fresh file under ./marconi-runs/); its
-    directory must already exist. timeout is the whole-call deadline in
-    seconds. Returns the IQ file path, sample count, and per-block census."""
+    directory must already exist. timeout is a hard wall-clock cap on the
+    entire call — spec compilation and rendering both count against it.
+    Returns the IQ file path, sample count, and per-block census."""
     if (bits is None) == (bits_path is None):
         raise ValueError("pass exactly one of bits or bits_path")
-    modem = Modem.from_spec(spec, step_models())
-    run_dir = new_run_dir("tx")
-    if bits is not None:
-        bits_file = run_dir / "tx_bits.u8"
-        parse_bits(bits).tofile(bits_file)
-    else:
-        assert bits_path is not None
-        bits_file = Path(bits_path)
-        # unguarded, a bad path surfaced as a GR construction error naming a
-        # block id, and a DIRECTORY did not fail at all — file_source spun on
-        # fread error until the whole timeout expired
-        require_file(bits_file, "bits input")
-    out = Path(out_path) if out_path is not None else run_dir / "out.cf32"
-    if not out.parent.is_dir():
-        raise FileNotFoundError(
-            f"out_path directory does not exist: {out.parent}; create it or "
-            f"omit out_path to write under ./marconi-runs/"
+    with set_deadline(timeout):
+        modem = Modem.from_spec(spec, step_models())
+        run_dir = new_run_dir("tx")
+        if bits is not None:
+            bits_file = run_dir / "tx_bits.u8"
+            parse_bits(bits).tofile(bits_file)
+        elif bits_path is not None:
+            bits_file = Path(bits_path)
+            # unguarded, a bad path surfaced as a GR construction error naming
+            # a block id, and a DIRECTORY did not fail at all — file_source
+            # spun on fread error until the whole timeout expired
+            require_file(bits_file, "bits input")
+        else:
+            raise ValueError("pass exactly one of bits or bits_path")
+        out = Path(out_path) if out_path is not None else run_dir / "out.cf32"
+        if not out.parent.is_dir():
+            raise FileNotFoundError(
+                f"out_path directory does not exist: {out.parent}; create it "
+                f"or omit out_path to write under ./marconi-runs/"
+            )
+        gr = compile_modem(
+            modem,
+            stage_registry(),
+            direction="tx",
+            sample_rate=sample_rate,
+            start=Descriptor(Level.IQ, ItemType.C),
+            source_io={"path": str(bits_file)},
+            sink_io={"path": str(out)},
         )
-    gr = compile_modem(
-        modem,
-        stage_registry(),
-        direction="tx",
-        sample_rate=sample_rate,
-        start=Descriptor(Level.IQ, ItemType.C),
-        source_io={"path": str(bits_file)},
-        sink_io={"path": str(out)},
-    )
-    r = GnuRadioBackend().run_pipeline(gr, timeout=timeout)
+        r = GnuRadioBackend().run_pipeline(gr, timeout=remaining())
     return run_tx_payload(r, out, sample_rate)
 
 
@@ -440,6 +445,7 @@ def survey(
     center_hz: float = 0.0,
     decim: int = 1,
     bandwidth_hz: float | None = None,
+    timeout: float = 180.0,
 ) -> dict[str, object]:
     """Characterize a raw-IQ capture — pure DSP measurements, no interpretation.
 
@@ -575,6 +581,12 @@ def survey(
     back to the original capture (capture_offset = offset_samples +
     start*decim, capture_samples = length*decim) to re-decode one burst.
 
+    timeout is a hard wall-clock cap on the entire call — dtype conversion,
+    sub-band channelization, and every measurement block count against it — so
+    an oversized capture raises [deadline_exceeded] instead of measuring
+    unbounded; window a large capture with capture_offset/capture_samples
+    rather than only raising timeout.
+
     Never labels the modulation, never assembles or runs a spec;
     characterizes the dominant signal in the slice — window in time for a
     multi-signal capture."""
@@ -583,43 +595,44 @@ def survey(
     if decim < 1:
         raise ValueError("decim must be >= 1")
     require_file(Path(capture_path), "capture")
-    src_slice = ensure_cf32(
-        Path(capture_path),
-        capture_dtype,
-        offset=capture_offset,
-        samples=capture_samples,
-    )
-    if center_hz != 0.0 or decim > 1:
-        run_dir = new_run_dir("survey")
-        try:
-            channel = run_dir / "channel.cf32"
-            _, out_rate = channelize_to_file(
+    with set_deadline(timeout):
+        src_slice = ensure_cf32(
+            Path(capture_path),
+            capture_dtype,
+            offset=capture_offset,
+            samples=capture_samples,
+        )
+        if center_hz != 0.0 or decim > 1:
+            run_dir = new_run_dir("survey")
+            try:
+                channel = run_dir / "channel.cf32"
+                _, out_rate = channelize_to_file(
+                    src_slice.path,
+                    channel,
+                    sample_rate,
+                    center_hz=center_hz,
+                    decim=decim,
+                    offset=src_slice.offset,
+                    length=src_slice.length,
+                    bandwidth_hz=bandwidth_hz,
+                )
+                result = survey_iq(
+                    channel,
+                    out_rate,
+                    min_symbol_rate=min_symbol_rate,
+                    max_symbol_rate=max_symbol_rate,
+                )
+            finally:
+                shutil.rmtree(run_dir, ignore_errors=True)
+        else:
+            result = survey_iq(
                 src_slice.path,
-                channel,
                 sample_rate,
-                center_hz=center_hz,
-                decim=decim,
                 offset=src_slice.offset,
                 length=src_slice.length,
-                bandwidth_hz=bandwidth_hz,
-            )
-            result = survey_iq(
-                channel,
-                out_rate,
                 min_symbol_rate=min_symbol_rate,
                 max_symbol_rate=max_symbol_rate,
             )
-        finally:
-            shutil.rmtree(run_dir, ignore_errors=True)
-    else:
-        result = survey_iq(
-            src_slice.path,
-            sample_rate,
-            offset=src_slice.offset,
-            length=src_slice.length,
-            min_symbol_rate=min_symbol_rate,
-            max_symbol_rate=max_symbol_rate,
-        )
     # NOT src_slice.offset: converted dtypes bake the slice into the cached
     # cf32 (offset 0) — the analyzed stream starts at capture_offset in the
     # original capture regardless of conversion

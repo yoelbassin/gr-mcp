@@ -5,9 +5,9 @@ from dataclasses import dataclass, replace
 
 import numpy as np
 
+from marconi.deadline import check_deadline
 from marconi.engine.backends.base import BlockCensus
 from marconi.engine.coding.carrier import CodingCarrier
-from marconi.engine.deadline import check_deadline
 
 
 @dataclass(frozen=True)

@@ -15,9 +15,9 @@ try:  # reedsolo's optional Cython build: identical API, 10-50x faster RS. NOT
 except ImportError:  # pure-Python fallback, always installed
     import reedsolo as _rs
 
+from marconi.deadline import check_deadline
 from marconi.engine.coding.carrier import CodingCarrier, StepStats, Window
 from marconi.engine.coding.primitives import effective_t, syndrome_table
-from marconi.engine.deadline import check_deadline
 from marconi.engine.types.enums import DecodeMode, EmitMode
 
 

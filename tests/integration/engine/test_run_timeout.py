@@ -3,7 +3,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from marconi.engine.deadline import RunTimeout
+from marconi.deadline import RunTimeout
 from marconi.engine.io.source import SourceSlice
 from marconi.engine.run import run_rx
 from marconi.engine.stages.registry import stage_registry, step_models

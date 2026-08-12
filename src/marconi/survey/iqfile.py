@@ -8,6 +8,7 @@ import numpy as np
 import numpy.typing as npt
 from scipy.signal import firwin, upfirdn
 
+from marconi.deadline import check_deadline
 from marconi.errors import register_error
 
 _SURVEY_SAMPLE_ITEMS = 1 << 20
@@ -59,6 +60,7 @@ def _most_active_start(path: Path, offset: int, span: int, budget: int) -> int:
     with path.open("rb") as f:
         f.seek(offset * _ITEMSIZE)
         for i in range(nblocks):
+            check_deadline()
             count = min(_SURVEY_SCAN_BLOCK, span - i * _SURVEY_SCAN_BLOCK)
             block = np.fromfile(f, dtype=np.complex64, count=count)
             if block.size:
@@ -125,6 +127,7 @@ def iter_probes(
     step = max(span // max(probes, 1), items)
     with path.open("rb") as f:
         for start in range(0, span, step):
+            check_deadline()
             f.seek((offset + start) * _ITEMSIZE)
             block = np.fromfile(f, dtype=np.complex64, count=min(items, span - start))
             if block.size:
@@ -205,6 +208,7 @@ def iter_iq(
     with path.open("rb") as f:
         f.seek(offset * _ITEMSIZE)
         while remaining > 0:
+            check_deadline()
             block = np.fromfile(f, dtype=np.complex64, count=min(chunk, remaining))
             if block.size == 0:
                 break

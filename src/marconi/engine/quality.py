@@ -10,6 +10,7 @@ import numpy.typing as npt
 from pydantic import BaseModel
 from scipy.ndimage import uniform_filter1d
 
+from marconi.deadline import check_deadline
 from marconi.engine.backends.base import (
     BlockCensus,
     Diagnostic,
@@ -364,6 +365,7 @@ def _sample_soft(path: Path) -> npt.NDArray[np.float32]:
         nblocks = -(-total // _SOFT_SAMPLE_ITEMS)
         powers = np.zeros(nblocks, dtype=np.float64)
         for i in range(nblocks):
+            check_deadline()
             block = np.fromfile(f, dtype=np.float32, count=_SOFT_SAMPLE_ITEMS)
             if block.size:
                 powers[i] = float(np.mean(block.astype(np.float64) ** 2))

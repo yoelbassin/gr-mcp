@@ -11,6 +11,7 @@ from scipy.ndimage import uniform_filter1d
 from scipy.signal import find_peaks, welch
 from scipy.stats import kurtosis
 
+from marconi.deadline import check_deadline
 from marconi.levels import fit_levels, percentile_span
 from marconi.survey.iqfile import iter_iq, iter_probes, sample_iq
 
@@ -554,6 +555,7 @@ def _eye_openness(
     sample_rate: float,
     rate: float,
 ) -> float:
+    check_deadline()
     if rate <= 0.0:
         return 0.0
     sps = sample_rate / rate
@@ -694,6 +696,7 @@ def survey_iq(
         lo = min(_default_rate_floor(x.size, sample_rate), hi / 2)
     if not 0 < lo < hi:
         raise ValueError("require 0 < min_symbol_rate < max_symbol_rate")
+    check_deadline()
     spectrum = _spectrum(x, sample_rate)
     return SurveyResult(
         sample_rate=sample_rate,
