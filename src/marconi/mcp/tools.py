@@ -27,7 +27,7 @@ from marconi.errors import classify_error
 from marconi.mcp.boundary import tool_error_boundary
 from marconi.mcp.payload import (
     ErrorRow,
-    error_rows,
+    SpecTraceRow,
     pipeline_payload,
     run_tx_payload,
     spec_trace_rows,
@@ -35,7 +35,14 @@ from marconi.mcp.payload import (
 )
 from marconi.mcp.streams import ensure_cf32, parse_bits, render_page, require_file
 from marconi.mcp.streams import stream_stats as _compute_stats
-from marconi.mcp.vocab import ENVELOPE, family_names, stage_details, stage_index
+from marconi.mcp.vocab import (
+    ENVELOPE,
+    Envelope,
+    StageEntry,
+    family_names,
+    stage_details,
+    stage_index,
+)
 from marconi.mcp.workspace import new_run_dir
 from marconi.survey import channelize_to_file, survey_iq
 from marconi.wire import Payload
@@ -64,10 +71,11 @@ _STREAM_ENTRY_TYPES: tuple[ItemType, ...] = (ItemType.B, ItemType.S, ItemType.F)
 
 class StageVocabulary(Payload):
     """describe_stages' wire shape: the stage rows, plus the spec envelope and
-    level/item-type primer on the index call only."""
+    level/item-type primer on the index call only. An index call groups the
+    rows by family, a detail call returns them flat."""
 
-    stages: dict[str, list[dict[str, Any]]] | list[dict[str, Any]]
-    envelope: dict[str, object] | None = None
+    stages: dict[str, list[StageEntry]] | list[StageEntry]
+    envelope: Envelope | None = None
 
 
 class ValidateModemPayload(Payload):
@@ -75,9 +83,9 @@ class ValidateModemPayload(Payload):
     errors ride the payload instead of raising."""
 
     valid: bool
-    trace: list[dict[str, object]] | None = None
+    trace: list[SpecTraceRow] | None = None
     warnings: list[str] | None = None
-    errors: list[dict[str, object]] | None = None
+    errors: list[ErrorRow] | None = None
 
 
 _missing_default = sorted(t.value for t in ItemType if t not in _DEFAULT_ENTRY_LEVEL)
@@ -184,13 +192,11 @@ def validate_modem(
             ErrorRow.build(code=code, message=i.message, at=i.block_id)
             for i in exc.issues
         ]
-        return ValidateModemPayload.build(
-            valid=False, errors=error_rows(rows)
-        ).as_payload()
+        return ValidateModemPayload.build(valid=False, errors=rows).as_payload()
     except (CompileError, ValidationError, ValueError) as exc:
         code, message = classify_error(exc)
-        return ValidateModemPayload(
-            valid=False, errors=error_rows([ErrorRow.build(code=code, message=message)])
+        return ValidateModemPayload.build(
+            valid=False, errors=[ErrorRow.build(code=code, message=message)]
         ).as_payload()
     return ValidateModemPayload.build(
         valid=True,

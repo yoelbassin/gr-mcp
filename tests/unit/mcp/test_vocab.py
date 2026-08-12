@@ -6,33 +6,37 @@ from marconi.mcp.vocab import ENVELOPE, stage_details, stage_index
 
 def test_index_covers_every_registry_stage() -> None:
     index = stage_index()
-    names = {e["name"] for rows in index.values() for e in rows}
+    names = {e.name for rows in index.values() for e in rows}
     assert names == set(stage_registry())
     assert set(index) == {s.family for s in stage_registry().values()}
-    entry = next(e for e in index["fsk"] if e["name"] == "fsk")
-    assert entry["levels"] == "iq>symbols"
-    assert set(entry) >= {"name", "levels", "dir"}
+    entry = next(e for e in index["fsk"] if e.name == "fsk")
+    assert entry.levels == "iq>symbols"
+    assert set(entry.as_payload()) >= {"name", "levels", "dir"}
 
 
 def test_details_carry_schema_and_contracts() -> None:
     (d,) = stage_details(["fsk"])
-    assert d["params_schema"]["properties"]["deviation"]
-    assert "min_input_sps" in d
-    assert d["dir"] == "rx,tx"
-    assert d["family"] == "fsk"
+    assert d.params_schema is not None
+    assert d.params_schema["properties"]["deviation"]
+    # the KEY must reach the wire even when the contract is null
+    assert "min_input_sps" in d.as_payload()
+    assert d.dir == "rx,tx"
+    assert d.family == "fsk"
 
 
 def test_fsk_loop_bw_documents_open_loop_mode() -> None:
     # the schema is the agent's only view of the stage, so the open-loop knob
     # for short bursts must be discoverable there
     (d,) = stage_details(["fsk"])
-    loop_bw = d["params_schema"]["properties"]["loop_bw"]
+    assert d.params_schema is not None
+    loop_bw = d.params_schema["properties"]["loop_bw"]
     assert "open-loop" in loop_bw.get("description", "").lower()
 
 
 def test_descramble_sequence_documents_hex_format() -> None:
     (d,) = stage_details(["descramble"])
-    sequence = d["params_schema"]["properties"]["sequence"]
+    assert d.params_schema is not None
+    sequence = d.params_schema["properties"]["sequence"]
     assert "hex" in sequence.get("description", "").lower()
 
 
@@ -40,7 +44,7 @@ def test_every_stage_detail_builds() -> None:
     details = stage_details(sorted(stage_registry()))
     assert len(details) == len(stage_registry())
     for d in details:
-        assert isinstance(d["params_schema"], dict)
+        assert isinstance(d.params_schema, dict)
 
 
 def test_envelope_documents_the_spec_shape() -> None:
@@ -60,7 +64,7 @@ def test_a_step_conditional_contract_is_never_published_as_a_number() -> None:
 
     for name, stage in stage_registry().items():
         detail = stage_details([name])[0]
-        conditional = detail.get("step_conditional") or []
+        conditional = detail.step_conditional or []
         for hook, key in (
             ("min_input_sps_for", "min_input_sps"),
             ("accepts_amplitude_for", "accepts_amplitude"),
@@ -70,4 +74,6 @@ def test_a_step_conditional_contract_is_never_published_as_a_number() -> None:
             )
             if overrides:
                 assert key in conditional, f"{name}: {key} published unconditionally"
-                assert detail[key] is None, f"{name}: {key} still carries a value"
+                assert (
+                    getattr(detail, key) is None
+                ), f"{name}: {key} still carries a value"

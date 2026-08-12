@@ -17,11 +17,32 @@ def replace(model: _M, **changes: object) -> _M:
     replacement in the tree goes through here instead, so a typo is a raise and
     a wrong type is a ValidationError. Nested models are passed through by
     identity (pydantic revalidates instances only when asked), so this stays
-    cheap on a result carrying thousands of census rows."""
+    cheap on a result carrying thousands of census rows.
+
+    Only the fields the original SET are carried over, so a replacement cannot
+    quietly promote an omitted field to an explicit null — rebuilding from
+    __dict__ marks every field as set, which put `"description": null` on every
+    describe_stages detail row."""
     unknown = sorted(set(changes) - set(type(model).model_fields))
     if unknown:
         raise ValueError(f"{type(model).__name__} has no field(s) {unknown}")
-    return type(model).model_validate({**model.__dict__, **changes})
+    kept = {name: getattr(model, name) for name in model.model_fields_set}
+    return type(model).model_validate({**kept, **changes})
+
+
+def _restore_nested(value: object, dumped: object) -> None:
+    """Walk a field's value alongside its dump, restoring deliberate nulls at
+    every depth a payload nests: a model, a list of them, or a dict of either
+    (describe_stages groups its rows by family, and a dict-shaped field used to
+    drop the nulls the rows below deliberately published)."""
+    if isinstance(value, BaseModel) and isinstance(dumped, dict):
+        _restore_set_nulls(value, cast("dict[str, object]", dumped))
+    elif isinstance(value, list) and isinstance(dumped, list):
+        for item, entry in zip(value, dumped):
+            _restore_nested(item, entry)
+    elif isinstance(value, dict) and isinstance(dumped, dict):
+        for key, item in value.items():
+            _restore_nested(item, dumped.get(key))
 
 
 def _restore_set_nulls(
@@ -32,13 +53,7 @@ def _restore_set_nulls(
         if value is None:
             dumped[name] = None
             continue
-        nested = dumped.get(name)
-        if isinstance(value, BaseModel) and isinstance(nested, dict):
-            _restore_set_nulls(value, cast("dict[str, object]", nested))
-        elif isinstance(value, list) and isinstance(nested, list):
-            for item, entry in zip(value, nested):
-                if isinstance(item, BaseModel) and isinstance(entry, dict):
-                    _restore_set_nulls(item, cast("dict[str, object]", entry))
+        _restore_nested(value, dumped.get(name))
     return dumped
 
 

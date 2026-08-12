@@ -21,7 +21,7 @@ from marconi.mcp.workspace import (
     evict_conversion_cache,
     touch_cache_entry,
 )
-from marconi.wire import Histogram, Payload
+from marconi.wire import Histogram, Payload, replace
 
 _MAX_INLINE_BITS = 1_048_576
 # Per-type ceilings chosen from what an item COSTS as JSON, not from a round
@@ -55,11 +55,48 @@ class PageType(StrEnum):
     L = "l"
 
 
+class PageHeader(Payload):
+    """What every page reports regardless of type. The rendered items live on
+    the per-type subclass below, not as a bag of optional fields: "exactly one
+    of bits/symbols/values/real+imag is set" was a sentence in a docstring that
+    nothing enforced, and a renderer wired to the wrong type would have
+    produced a page whose declared shape still validated."""
+
+    item_type: PageType
+    offset: int
+    count: int
+    total_items: int
+    capped_at: int | None = None
+
+
+class BitsPage(PageHeader):
+    bits: str
+
+
+class SymbolsPage(PageHeader):
+    symbols: list[int]
+
+
+class ValuesPage(PageHeader):
+    """Soft floats and the int64 sidecar lists share a key: both are a plain
+    sequence of numbers with no per-item structure."""
+
+    values: list[float] | list[int]
+
+
+class ComplexPage(PageHeader):
+    real: list[float]
+    imag: list[float]
+
+
+StreamPage = BitsPage | SymbolsPage | ValuesPage | ComplexPage
+
+
 @dataclass(frozen=True)
 class PageSpec:
     """Everything paging needs to know about one item type. One row per type,
-    so the dtype, the suffix it infers from, its two page budgets and its
-    renderer cannot drift apart."""
+    so the dtype, the suffix it infers from, its two page budgets, its renderer
+    and the page shape that renderer feeds cannot drift apart."""
 
     dtype: np.dtype[Any]
     suffix: str
@@ -68,22 +105,7 @@ class PageSpec:
     default_items: int
     max_items: int
     render: Callable[[npt.NDArray[Any]], dict[str, object]]
-
-
-class StreamPage(Payload):
-    """read_stream's wire shape. Exactly one of the rendered-item fields is
-    set, chosen by the page's item type."""
-
-    item_type: str
-    offset: int
-    count: int
-    total_items: int
-    capped_at: int | None = None
-    bits: str | None = None
-    symbols: list[int] | None = None
-    values: list[float] | list[int] | None = None
-    real: list[float] | None = None
-    imag: list[float] | None = None
+    page: type[StreamPage]
 
 
 class ConstellationCluster(Payload):
@@ -94,33 +116,48 @@ class ConstellationCluster(Payload):
     count: int
 
 
-class StreamStats(Payload):
-    """stream_stats' wire shape across all item types: the common header, then
-    the branch a type populates. A field absent from the response is one this
-    item type has no such measure for."""
+class StatsHeader(Payload):
+    """What every stream_stats response reports, whatever the item type."""
 
-    item_type: str
+    item_type: PageType
     total_items: int
     sampled_items: int
     sampled: bool
-    # bits
-    ones_fraction: float | None = None
-    # real-valued streams
-    min: float | None = None
-    max: float | None = None
-    mean: float | None = None
-    std: float | None = None
-    histogram: Histogram | None = None
+
+
+class BitsStats(StatsHeader):
+    ones_fraction: float
+
+
+class RealStats(StatsHeader):
+    """Bits are the one type with no distribution to describe; every other
+    real-valued stream lands here, clusters included on request."""
+
+    min: float
+    max: float
+    mean: float
+    std: float
+    histogram: Histogram
     centers: list[float] | None = None
     cluster_counts: list[int] | None = None
-    # complex constellation streams
-    mean_magnitude: float | None = None
-    std_magnitude: float | None = None
-    constant_modulus_ratio: float | None = None
-    magnitude_histogram: Histogram | None = None
-    phase_histogram: Histogram | None = None
+
+
+class ConstellationStats(StatsHeader):
+    # the tool docstring sends the agent to read constant_modulus_ratio FIRST,
+    # so it publishes even when undefined: a missing key would read as "this
+    # stream has no such measure"
+    always_present = frozenset({"constant_modulus_ratio"})
+
+    mean_magnitude: float
+    std_magnitude: float
+    constant_modulus_ratio: float | None
+    magnitude_histogram: Histogram
+    phase_histogram: Histogram
     evm: float | None = None
     clusters: list[ConstellationCluster] | None = None
+
+
+StreamStats = BitsStats | RealStats | ConstellationStats
 
 
 @dataclass(frozen=True)
@@ -222,14 +259,20 @@ def _render_floats(items: npt.NDArray[Any]) -> dict[str, object]:
 
 
 _PAGE_SPECS: dict[PageType, PageSpec] = {
-    PageType.B: PageSpec(ItemType.B.np_dtype, ".u8", 4096, 16384, _render_bits),
-    PageType.S: PageSpec(
-        ItemType.S.np_dtype, ".i16", 2048, 8192, _render_ints("symbols")
+    PageType.B: PageSpec(
+        ItemType.B.np_dtype, ".u8", 4096, 16384, _render_bits, BitsPage
     ),
-    PageType.F: PageSpec(ItemType.F.np_dtype, ".f32", 1024, 4096, _render_floats),
-    PageType.C: PageSpec(ItemType.C.np_dtype, ".cf32", 256, 2048, _render_complex),
+    PageType.S: PageSpec(
+        ItemType.S.np_dtype, ".i16", 2048, 8192, _render_ints("symbols"), SymbolsPage
+    ),
+    PageType.F: PageSpec(
+        ItemType.F.np_dtype, ".f32", 1024, 4096, _render_floats, ValuesPage
+    ),
+    PageType.C: PageSpec(
+        ItemType.C.np_dtype, ".cf32", 256, 2048, _render_complex, ComplexPage
+    ),
     PageType.L: PageSpec(
-        np.dtype(np.int64), ".i64", 1024, 2048, _render_ints("values")
+        np.dtype(np.int64), ".i64", 1024, 2048, _render_ints("values"), ValuesPage
     ),
 }
 
@@ -287,16 +330,17 @@ def render_page(
     with path.open("rb") as f:
         f.seek(offset * spec.dtype.itemsize)
         items = np.fromfile(f, dtype=spec.dtype, count=count)
-    fields: dict[str, object] = {
-        "item_type": kind.value,
-        "offset": offset,
-        "count": int(items.size),
-        "total_items": int(total),
-    }
-    if requested > spec.max_items:
-        fields["capped_at"] = spec.max_items
-    fields.update(spec.render(items))
-    return StreamPage.model_validate(fields).as_payload()
+    # extra="forbid" on the per-type page: a renderer wired to the wrong
+    # PageSpec row fails HERE rather than shipping a page whose declared shape
+    # still validated because every item field was optional
+    return spec.page.build(
+        item_type=kind,
+        offset=offset,
+        count=int(items.size),
+        total_items=int(total),
+        capped_at=spec.max_items if requested > spec.max_items else None,
+        **spec.render(items),
+    ).as_payload()
 
 
 def ensure_cf32(
@@ -467,89 +511,104 @@ def stream_stats_payload(
     sample, total = sampled.items, sampled.total_items
     if sample.size == 0:
         raise ValueError("stream has no finite items to summarize")
-    # one construction buffer, validated in one step against the declared
-    # wire model: extra="forbid" rejects a typo'd key and the field types are
-    # checked, neither of which a hand-assembled response dict could do
-    fields: dict[str, object] = {
-        "item_type": kind.value,
+    # sampled_items is per-branch: the real and complex branches drop
+    # non-finite items first and report what they actually summarized
+    header: dict[str, object] = {
+        "item_type": kind,
         "total_items": int(total),
-        "sampled_items": int(sample.size),
         "sampled": sampled.strided,
     }
     if kind is PageType.B:
-        fields["ones_fraction"] = round(float((sample & np.uint8(1)).mean()), 6)
-    elif kind is PageType.C:
-        fields.update(_constellation_fields(sample, clusters, bins))
-    else:
-        fields.update(_real_fields(sample, clusters, bins))
-    return StreamStats.model_validate(fields)
+        return BitsStats.model_validate(
+            {
+                **header,
+                "sampled_items": int(sample.size),
+                "ones_fraction": round(float((sample & np.uint8(1)).mean()), 6),
+            }
+        )
+    if kind is PageType.C:
+        return _constellation_stats(header, sample, clusters, bins)
+    return _real_stats(header, sample, clusters, bins)
 
 
-def _real_fields(
-    sample: npt.NDArray[Any], clusters: int, bins: int
-) -> dict[str, object]:
-    x = sample.astype(np.float64)
+def _finite(sample: npt.NDArray[Any], dtype: type[Any]) -> npt.NDArray[Any]:
+    x = sample.astype(dtype)
     x = x[np.isfinite(x)]
     if x.size == 0:
         raise ValueError("stream has no finite items to summarize")
-    fields: dict[str, object] = {
-        "sampled_items": int(x.size),
-        "min": round(float(x.min()), 6),
-        "max": round(float(x.max()), 6),
-        "mean": round(float(x.mean()), 6),
-        "std": round(float(x.std()), 6),
-        "histogram": _hist(x, bins),
-    }
-    if clusters >= 1:
-        centers = kmeans_1d(x, clusters)
-        labels = _nearest_labels(x, centers)
-        cluster_counts = np.array(
-            [int((labels == j).sum()) for j in range(centers.size)]
-        )
-        keep = cluster_counts > 0
-        # "centers" was also shipped verbatim as "levels": two names, one array,
-        # twice the tokens. centers IS the paste-ready list.
-        fields["centers"] = [round(float(v), 6) for v in centers[keep]]
-        fields["cluster_counts"] = [int(n) for n in cluster_counts[keep]]
-    return fields
+    return x
 
 
-def _constellation_fields(
-    sample: npt.NDArray[Any], clusters: int, bins: int
-) -> dict[str, object]:
-    z = sample.astype(np.complex128)
-    z = z[np.isfinite(z)]
-    if z.size == 0:
-        raise ValueError("stream has no finite items to summarize")
+def _real_stats(
+    header: dict[str, object], sample: npt.NDArray[Any], clusters: int, bins: int
+) -> RealStats:
+    x = _finite(sample, np.float64)
+    stats = RealStats.model_validate(
+        {
+            **header,
+            "sampled_items": int(x.size),
+            "min": round(float(x.min()), 6),
+            "max": round(float(x.max()), 6),
+            "mean": round(float(x.mean()), 6),
+            "std": round(float(x.std()), 6),
+            "histogram": _hist(x, bins),
+        }
+    )
+    if clusters < 1:
+        return stats
+    centers = kmeans_1d(x, clusters)
+    labels = _nearest_labels(x, centers)
+    counts = np.array([int((labels == j).sum()) for j in range(centers.size)])
+    keep = counts > 0
+    # "centers" was also shipped verbatim as "levels": two names, one array,
+    # twice the tokens. centers IS the paste-ready list.
+    return replace(
+        stats,
+        centers=[round(float(v), 6) for v in centers[keep]],
+        cluster_counts=[int(n) for n in counts[keep]],
+    )
+
+
+def _constellation_stats(
+    header: dict[str, object], sample: npt.NDArray[Any], clusters: int, bins: int
+) -> ConstellationStats:
+    z = _finite(sample, np.complex128)
     mag = np.abs(z)
     mean_mag = float(mag.mean())
-    fields: dict[str, object] = {
-        "sampled_items": int(z.size),
-        "mean_magnitude": round(mean_mag, 6),
-        "std_magnitude": round(float(mag.std()), 6),
-        # explicitly null when undefined, never omitted: the tool docstring
-        # sends the agent to read this FIRST, and a missing key reads as
-        # "this stream has no such measure"
-        "constant_modulus_ratio": (
+    stats = ConstellationStats.build(
+        **header,
+        sampled_items=int(z.size),
+        mean_magnitude=round(mean_mag, 6),
+        std_magnitude=round(float(mag.std()), 6),
+        constant_modulus_ratio=(
             round(float(mag.std() / mean_mag), 6) if mean_mag > 0 else None
         ),
-        "magnitude_histogram": _hist(mag, bins),
-        "phase_histogram": _hist(np.angle(z), bins),
-    }
-    if clusters >= 1:
-        centers = _kmeans_2d(z, clusters)
-        labels = _nearest_labels(z, centers)
-        counts = np.array([int((labels == j).sum()) for j in range(clusters)])
-        # `labels` indexes `centers` only in its current, pre-reindex form
-        assigned = centers[labels]
-        ref = float(np.sqrt((np.abs(assigned) ** 2).mean()))
-        err = float(np.sqrt((np.abs(z - assigned) ** 2).mean()))
-        fields["evm"] = round(err / ref, 6) if ref > 0 else None
-        keep = counts > 0
-        centers, counts = centers[keep], counts[keep]
-        order = np.argsort(np.angle(centers))
-        centers, counts = centers[order], counts[order]
-        fields["clusters"] = [
+        magnitude_histogram=_hist(mag, bins),
+        phase_histogram=_hist(np.angle(z), bins),
+    )
+    if clusters < 1:
+        return stats
+    # evm and clusters are set together and set EXPLICITLY: asking for a fit
+    # and getting no evm key back would read as "this stream has no error
+    # measure" rather than "the fit was degenerate"
+    return replace(stats, **_cluster_fit(z, clusters))
+
+
+def _cluster_fit(z: npt.NDArray[Any], clusters: int) -> dict[str, object]:
+    centers = _kmeans_2d(z, clusters)
+    labels = _nearest_labels(z, centers)
+    counts = np.array([int((labels == j).sum()) for j in range(clusters)])
+    # `labels` indexes `centers` only in its current, pre-reindex form
+    assigned = centers[labels]
+    ref = float(np.sqrt((np.abs(assigned) ** 2).mean()))
+    err = float(np.sqrt((np.abs(z - assigned) ** 2).mean()))
+    keep = counts > 0
+    centers, counts = centers[keep], counts[keep]
+    order = np.argsort(np.angle(centers))
+    centers, counts = centers[order], counts[order]
+    return {
+        "evm": round(err / ref, 6) if ref > 0 else None,
+        "clusters": [
             ConstellationCluster(
                 real=round(float(c.real), 6),
                 imag=round(float(c.imag), 6),
@@ -558,5 +617,5 @@ def _constellation_fields(
                 count=int(n),
             )
             for c, n in zip(centers, counts)
-        ]
-    return fields
+        ],
+    }

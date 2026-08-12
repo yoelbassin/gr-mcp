@@ -7,9 +7,16 @@ from marconi.engine.stages.base import Stage
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.enums import ItemType
 from marconi.engine.types.levels import Level
-from marconi.wire import Payload
+from marconi.wire import Payload, replace
 
-__all__ = ["ENVELOPE", "family_names", "stage_index", "stage_details"]
+__all__ = [
+    "ENVELOPE",
+    "Envelope",
+    "StageEntry",
+    "family_names",
+    "stage_index",
+    "stage_details",
+]
 
 # The agent-facing gloss for each rung and wire type. Keyed by the enums and
 # checked for completeness at import: this primer is the only description of
@@ -40,19 +47,36 @@ _ungloss = sorted(
 if _ungloss:
     raise RuntimeError(f"vocabulary members with no agent-facing gloss: {_ungloss}")
 
-ENVELOPE: dict[str, object] = {
-    "spec_envelope": {
-        "name": "optional str",
-        "symbol_rate": ("float > 0 (symbols/second at the demod boundary)"),
-        "path": "list of steps, each {'conv': <stage name>, ...stage params}",
-    },
-    "levels": {lv.value: gloss for lv, gloss in _LEVEL_GLOSS.items()},
-    "item_types": {t.value: gloss for t, gloss in _ITEM_GLOSS.items()},
-    "direction": (
+
+class SpecEnvelope(Payload):
+    name: str
+    symbol_rate: str
+    path: str
+
+
+class Envelope(Payload):
+    """The primer describe_stages ships on the index call: how a spec is shaped
+    and what each rung and wire type means."""
+
+    spec_envelope: SpecEnvelope
+    levels: dict[str, str]
+    item_types: dict[str, str]
+    direction: str
+
+
+ENVELOPE = Envelope(
+    spec_envelope=SpecEnvelope(
+        name="optional str",
+        symbol_rate="float > 0 (symbols/second at the demod boundary)",
+        path="list of steps, each {'conv': <stage name>, ...stage params}",
+    ),
+    levels={lv.value: gloss for lv, gloss in _LEVEL_GLOSS.items()},
+    item_types={t.value: gloss for t, gloss in _ITEM_GLOSS.items()},
+    direction=(
         "the same path compiles rx (decode) and tx (generate); "
         "stages declare which directions they support"
     ),
-}
+)
 
 
 class StageEntry(Payload):
@@ -76,22 +100,19 @@ class StageEntry(Payload):
     params_schema: dict[str, Any] | None = None
 
 
-def _index_fields(stage: Stage[Any, Any]) -> dict[str, Any]:
-    fields: dict[str, Any] = {
-        "name": stage.name,
-        "levels": f"{stage.from_level.value}>{stage.to_level.value}",
-        "dir": ",".join(sorted(stage.directions)),
-    }
-    if stage.description:
-        fields["description"] = stage.description
-    return fields
+def _index_entry(stage: Stage[Any, Any]) -> StageEntry:
+    return StageEntry.build(
+        name=stage.name,
+        levels=f"{stage.from_level.value}>{stage.to_level.value}",
+        dir=",".join(sorted(stage.directions)),
+        description=stage.description or None,
+    )
 
 
-def stage_index() -> dict[str, list[dict[str, Any]]]:
-    grouped: dict[str, list[dict[str, Any]]] = {}
+def stage_index() -> dict[str, list[StageEntry]]:
+    grouped: dict[str, list[StageEntry]] = {}
     for _, stage in sorted(stage_registry().items()):
-        row = StageEntry.model_validate(_index_fields(stage)).as_payload()
-        grouped.setdefault(stage.family, []).append(row)
+        grouped.setdefault(stage.family, []).append(_index_entry(stage))
     return dict(sorted(grouped.items()))
 
 
@@ -103,46 +124,51 @@ def family_names(family: str) -> list[str]:
     return names
 
 
-def stage_details(names: list[str]) -> list[dict[str, Any]]:
+def _detail_entry(stage: Stage[Any, Any]) -> StageEntry:
+    conditional_amp = _overrides(stage, Stage.accepts_amplitude_for)
+    conditional_sps = _overrides(stage, Stage.min_input_sps_for)
+    step_conditional = sorted(
+        name
+        for name, cond in (
+            ("accepts_amplitude", conditional_amp),
+            ("min_input_sps", conditional_sps),
+        )
+        if cond
+    )
+    # the contract fields are set EXPLICITLY, null included: a withheld
+    # step-conditional contract must read as "this call cannot say", which an
+    # omitted key does not — so this is a construction, not a build()
+    entry = replace(
+        _index_entry(stage),
+        family=stage.family,
+        accepts_item_type=(
+            None if stage.accepts_item_type is None else stage.accepts_item_type.value
+        ),
+        accepts_carrier=(
+            None if stage.accepts_carrier is None else stage.accepts_carrier.value
+        ),
+        accepts_amplitude=(
+            None
+            if conditional_amp or stage.accepts_amplitude is None
+            else sorted(a.value for a in stage.accepts_amplitude)
+        ),
+        min_input_sps=None if conditional_sps else stage.min_input_sps,
+        seeds_windows=stage.seeds_windows,
+        params_schema=stage.step_model.model_json_schema(),
+    )
+    # omitted, not null, when nothing is step-conditional: the key's presence
+    # IS the signal that a contract above was withheld
+    return (
+        replace(entry, step_conditional=step_conditional) if step_conditional else entry
+    )
+
+
+def stage_details(names: list[str]) -> list[StageEntry]:
     registry = stage_registry()
     unknown = [n for n in names if n not in registry]
     if unknown:
         raise ValueError(f"unknown stage(s) {unknown}; known: {sorted(registry)}")
-    out: list[dict[str, Any]] = []
-    for n in names:
-        s = registry[n]
-        fields = _index_fields(s)
-        fields["family"] = s.family
-        conditional_amp = _overrides(s, Stage.accepts_amplitude_for)
-        conditional_sps = _overrides(s, Stage.min_input_sps_for)
-        step_conditional = sorted(
-            name
-            for name, cond in (
-                ("accepts_amplitude", conditional_amp),
-                ("min_input_sps", conditional_sps),
-            )
-            if cond
-        )
-        if step_conditional:
-            fields["step_conditional"] = step_conditional
-        fields.update(
-            accepts_item_type=(
-                None if s.accepts_item_type is None else s.accepts_item_type.value
-            ),
-            accepts_carrier=(
-                None if s.accepts_carrier is None else s.accepts_carrier.value
-            ),
-            accepts_amplitude=(
-                None
-                if conditional_amp or s.accepts_amplitude is None
-                else sorted(a.value for a in s.accepts_amplitude)
-            ),
-            min_input_sps=None if conditional_sps else s.min_input_sps,
-            seeds_windows=s.seeds_windows,
-            params_schema=s.step_model.model_json_schema(),
-        )
-        out.append(StageEntry.model_validate(fields).as_payload())
-    return out
+    return [_detail_entry(registry[n]) for n in names]
 
 
 def _overrides(stage: Stage[Any, Any], base_hook: Callable[..., Any]) -> bool:

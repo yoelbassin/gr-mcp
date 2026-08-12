@@ -95,15 +95,24 @@ def _diagnostic_row(block: str, key: str, v: int | float | list[int]) -> Diagnos
     )
 
 
+_UNHARVESTABLE = "diagnostics_unharvestable"
+
+
 def _harvest_diagnostics(tb: Any) -> list[Diagnostic]:
     """Same rule as _harvest_census: never let a diagnostic fail a run that
     otherwise worked. _diagnostic_row raises on a value it cannot represent,
     and this runs on the ok path AND both error paths — unguarded, one stray
     value type turned a flowgraph that ran to completion into "worker exited
     abnormally" with no stream, census or quality, and masked the real error
-    when there was one. A row that cannot be built is dropped; the run and
-    every other diagnostic survive."""
+    when there was one.
+
+    A row that cannot be built is dropped but COUNTED, per block, under
+    _UNHARVESTABLE. Dropping it silently was the other half of the rename trap
+    the vocabulary tests cover: a producer whose value type went wrong looked
+    exactly like a producer that had nothing to say, and the weakened verdict
+    had no visible cause anywhere in the response."""
     rows: list[Diagnostic] = []
+    dropped: dict[str, int] = {}
     for bid, blk in getattr(tb, "_py_instances", {}).items():
         diag = getattr(blk, "diagnostics", None)
         if not isinstance(diag, dict):
@@ -112,7 +121,11 @@ def _harvest_diagnostics(tb: Any) -> list[Diagnostic]:
             try:
                 rows.append(_diagnostic_row(str(bid), str(k), v))
             except (TypeError, ValueError):
-                continue
+                dropped[str(bid)] = dropped.get(str(bid), 0) + 1
+    rows.extend(
+        Diagnostic(block=bid, key=_UNHARVESTABLE, count=n)
+        for bid, n in sorted(dropped.items())
+    )
     return rows
 
 

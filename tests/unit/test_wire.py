@@ -16,7 +16,7 @@ from marconi.mcp.payload import (
     PipelinePayload,
     capped_int_list,
 )
-from marconi.mcp.streams import StreamPage, StreamStats
+from marconi.mcp.streams import BitsPage, RealStats
 from marconi.wire import Payload, Ramp
 
 
@@ -52,7 +52,7 @@ def test_an_unknown_key_cannot_reach_the_agent() -> None:
 
 def test_a_wrong_typed_value_cannot_reach_the_agent() -> None:
     with pytest.raises(ValidationError):
-        StreamStats.model_validate(
+        RealStats.model_validate(
             {
                 "item_type": "f",
                 "total_items": 4,
@@ -104,11 +104,28 @@ def test_census_kind_is_dropped_not_nulled_when_redundant() -> None:
 
 
 def test_a_page_carries_only_its_own_rendered_field() -> None:
-    page = StreamPage.model_validate(
+    page = BitsPage.model_validate(
         {"item_type": "b", "offset": 0, "count": 2, "total_items": 2, "bits": "10"}
     ).as_payload()
     assert page["bits"] == "10"
     assert not {"symbols", "values", "real", "imag"} & set(page)
+
+
+def test_a_page_type_cannot_carry_another_type_s_rendered_field() -> None:
+    # the tagged shapes are what makes "exactly one of bits/symbols/values/
+    # real+imag" true: a renderer wired to the wrong PageSpec row used to
+    # produce a page that still validated
+    with pytest.raises(ValidationError):
+        BitsPage.model_validate(
+            {
+                "item_type": "b",
+                "offset": 0,
+                "count": 1,
+                "total_items": 1,
+                "bits": "1",
+                "symbols": [3],
+            }
+        )
 
 
 def _null_keys(obj: object, prefix: str = "") -> set[str]:

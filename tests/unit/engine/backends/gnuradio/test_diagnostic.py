@@ -73,4 +73,41 @@ def test_an_unharvestable_diagnostic_does_not_fail_a_run_that_worked() -> None:
 
     blk = SimpleNamespace(diagnostics={"good": 4, "bad": {"not": "harvestable"}})
     rows = _harvest_diagnostics(SimpleNamespace(_py_instances={"b0": blk}))
-    assert [r.key for r in rows] == ["good"]
+    assert [r.key for r in rows if r.key == "good"] == ["good"]
+    assert not [r for r in rows if r.key == "bad"]
+
+
+def test_a_dropped_diagnostic_is_counted_not_silently_swallowed() -> None:
+    # dropping it silently was the other half of the rename trap: a producer
+    # whose value type went wrong looked exactly like a producer with nothing
+    # to say, and the weakened verdict had no visible cause in the response
+    from marconi.engine.backends.gnuradio.worker import (
+        _UNHARVESTABLE,
+        _harvest_diagnostics,
+    )
+
+    tb = SimpleNamespace(
+        _py_instances={
+            "b0": SimpleNamespace(diagnostics={"ok": 1, "bad": object()}),
+            "b1": SimpleNamespace(diagnostics={"ok": 2}),
+        }
+    )
+    rows = _harvest_diagnostics(tb)
+    dropped = [r for r in rows if r.key == _UNHARVESTABLE]
+    assert [(r.block, r.count) for r in dropped] == [("b0", 1)]
+
+
+def test_a_clean_harvest_reports_no_drops() -> None:
+    from marconi.engine.backends.gnuradio.worker import (
+        _UNHARVESTABLE,
+        _harvest_diagnostics,
+    )
+
+    tb = SimpleNamespace(
+        _py_instances={
+            "b0": SimpleNamespace(diagnostics={"locks": 1, "r": 2.0, "m": [1, 2]})
+        }
+    )
+    rows = _harvest_diagnostics(tb)
+    assert not [r for r in rows if r.key == _UNHARVESTABLE]
+    assert len(rows) == 3

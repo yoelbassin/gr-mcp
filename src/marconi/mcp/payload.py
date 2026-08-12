@@ -134,10 +134,6 @@ def census_rows(rows: Sequence[BlockCensus]) -> list[CensusRow]:
     ]
 
 
-def slim_census(rows: Sequence[BlockCensus]) -> list[dict[str, object]]:
-    return [r.as_payload() for r in census_rows(rows)]
-
-
 class DiagnosticRow(Payload):
     block: str
     key: str
@@ -168,12 +164,6 @@ def diagnostic_rows(
             )
         )
     return out
-
-
-def slim_diagnostics(
-    rows: Sequence[Diagnostic], run_dir: Path | None = None
-) -> list[dict[str, object]]:
-    return [r.as_payload() for r in diagnostic_rows(rows, run_dir)]
 
 
 class RunTxPayload(Payload):
@@ -229,16 +219,12 @@ def _spec_trace_row(label: str, desc: Descriptor, rate: float) -> SpecTraceRow:
     )
 
 
-def spec_trace_rows(modem: Modem, cp: CompiledPipeline) -> list[dict[str, object]]:
+def spec_trace_rows(modem: Modem, cp: CompiledPipeline) -> list[SpecTraceRow]:
     labels = ["<start>"] + [stage_label(i, s.conv) for i, s in enumerate(modem.path)]
     return [
-        _spec_trace_row(label, desc, rate).as_payload()
+        _spec_trace_row(label, desc, rate)
         for label, desc, rate in zip(labels, cp.boundaries, cp.rates)
     ]
-
-
-def error_rows(rows: Sequence[ErrorRow]) -> list[dict[str, object]]:
-    return [r.as_payload() for r in rows]
 
 
 class StreamSummary(Payload):
@@ -331,10 +317,6 @@ def _trace_row(st: TraceStage) -> TraceRow:
         stats=stats,
         stats_error=stats_error,
     )
-
-
-def trace_payload(result: PipelineResult) -> list[dict[str, object]]:
-    return [_trace_row(st).as_payload() for st in result.trace]
 
 
 class PipelinePayload(Payload):
