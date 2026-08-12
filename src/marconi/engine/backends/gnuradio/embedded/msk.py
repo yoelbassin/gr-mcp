@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import cmath
 import math
+from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
@@ -94,6 +95,155 @@ def _decide(z: complex, bit: int) -> tuple[float, float]:
     return (-rail if (bit & 2) else rail), err
 
 
+@dataclass(frozen=True)
+class MskGeometry:
+    """The matched-filter bank and loop constants, derived once from sps."""
+
+    sps: float
+    flen: int
+    mf_oversample: int
+    taps_rows: list[tuple[float, ...]]
+    taps_arr: npt.NDArray[np.float64]
+    gain: float
+    pole: float
+    vectorized: bool
+    j_ramp: npt.NDArray[np.float64]
+
+    @classmethod
+    def build(
+        cls, *, sps: float, loop_bw: float, loop_pole: float, mf_oversample: int
+    ) -> "MskGeometry":
+        flen = int(2.0 * sps) + 1
+        taps = _polyphase_taps(sps, flen, mf_oversample)
+        return cls(
+            sps=sps,
+            flen=flen,
+            mf_oversample=mf_oversample,
+            taps_rows=[tuple(float(t) for t in row) for row in taps],
+            taps_arr=np.asarray(taps),
+            gain=float(loop_bw),
+            pole=float(loop_pole),
+            # below the crossover, per-bit numpy ufunc dispatch on the
+            # ~sps-sample segments measures slower than a scalar rotor
+            vectorized=sps >= _VECTOR_SPS_MIN,
+            j_ramp=np.arange(1.0, math.ceil(sps) + 2.0),
+        )
+
+
+class MskDemodCore:
+    """The demodulator: rail de-rotation, matched integration and the
+    decision-directed carrier loop. The decision feedback (each bit's error
+    retunes the next bit's derotation) makes the loop irreducibly sequential,
+    so it exists in two mediums that must stay equivalent — which is exactly
+    why it is worth driving without a flowgraph."""
+
+    def __init__(self, geom: MskGeometry) -> None:
+        self.geom = geom
+        self.out = OutQueue(np.float32)
+        self._buf = np.empty(0, np.complex64)
+        # derotated matched-filter window, stored in the chosen medium
+        self._win: list[complex] = [] if geom.vectorized else [0j] * geom.flen
+        self._win_arr = np.zeros(geom.flen if geom.vectorized else 0, np.complex128)
+        self._carrier_phase = 0.0
+        self._freq_corr = 0.0  # PLL frequency correction (rad/sample)
+        self._bit = 0  # running bit index: rail parity + pi/2 derotation
+        self._consumed = 0  # input samples already resolved into bits
+
+    def feed(self, samples: npt.NDArray[np.complex64]) -> None:
+        self._buf = np.concatenate([self._buf, samples])
+        if self.geom.vectorized:
+            self._process_vectorized()
+        else:
+            self._process_scalar()
+
+    def _process_scalar(self) -> None:
+        g = self.geom
+        softs: list[float] = []
+        samples: list[complex] = self._buf.tolist()
+        pos, n = 0, len(samples)
+        win = self._win
+        phase = self._carrier_phase
+        fc = self._freq_corr  # baseband: nominal VCO is 0
+        bit = self._bit
+        consumed = self._consumed
+        two_pi = 2.0 * math.pi
+        while True:
+            step = _dump_index(bit, g.sps) + 1 - consumed
+            if n - pos < step:
+                break
+            r = cmath.exp(-1j * fc)
+            rot = cmath.exp(-1j * phase)
+            new = []
+            for s in samples[pos : pos + step]:
+                rot *= r
+                new.append(s * rot)
+            pos += step
+            consumed += step
+            phase = (phase + fc * step) % two_pi
+
+            win = win[step:] + new
+            v = 0j
+            for t, w in zip(g.taps_rows[_branch(bit, g.sps, g.mf_oversample)], win):
+                v += t * w
+            z = v / (abs(v) + _NORM_EPS)
+
+            soft, err = _decide(z, bit)
+            softs.append(soft)
+            fc = g.pole * fc + (1.0 - g.pole) * g.gain * err
+            bit += 1
+        self._buf = self._buf[pos:]
+        self._win = win
+        self._carrier_phase = phase
+        self._freq_corr = fc
+        self._bit = bit
+        self._consumed = consumed
+        if softs:
+            self.out.push(np.asarray(softs, np.float32))
+
+    def _process_vectorized(self) -> None:
+        # Same loop, wideband medium: the derotation frequency is constant
+        # within a bit, so each bit is a handful of vectorized ops on the
+        # sps-sample segment instead of a per-sample Python rotor; only
+        # the decision feedback stays sequential.
+        g = self.geom
+        softs: list[float] = []
+        buf = self._buf.astype(np.complex128)
+        pos, n = 0, buf.size
+        win = self._win_arr
+        phase = self._carrier_phase
+        fc = self._freq_corr  # baseband: nominal VCO is 0
+        bit = self._bit
+        consumed = self._consumed
+        two_pi = 2.0 * math.pi
+        while True:
+            step = _dump_index(bit, g.sps) + 1 - consumed
+            if n - pos < step:
+                break
+            rotors = np.exp((-1j * fc) * g.j_ramp[:step] - 1j * phase)
+            new = buf[pos : pos + step] * rotors
+            pos += step
+            consumed += step
+            phase = (phase + fc * step) % two_pi
+
+            keep = g.flen - step
+            win[:keep] = win[step:]
+            win[keep:] = new
+            v = complex(np.dot(g.taps_arr[_branch(bit, g.sps, g.mf_oversample)], win))
+            z = v / (abs(v) + _NORM_EPS)
+
+            soft, err = _decide(z, bit)
+            softs.append(soft)
+            fc = g.pole * fc + (1.0 - g.pole) * g.gain * err
+            bit += 1
+        self._buf = self._buf[pos:]
+        self._carrier_phase = phase
+        self._freq_corr = fc
+        self._bit = bit
+        self._consumed = consumed
+        if softs:
+            self.out.push(np.asarray(softs, np.float32))
+
+
 def make_msk_demod(
     gr: Any,
     *,
@@ -112,31 +262,17 @@ def make_msk_demod(
     tests/integration/engine/modulation/test_msk_snr_margin.py). One soft float
     per symbol, sign = bit."""
 
-    flen = int(2.0 * sps) + 1
-    taps_rows = [
-        tuple(float(t) for t in row)
-        for row in _polyphase_taps(sps, flen, mf_oversample)
-    ]
-    taps_arr = np.asarray(_polyphase_taps(sps, flen, mf_oversample))
-    gain = float(loop_bw)
-    pole = float(loop_pole)
-    vectorized = sps >= _VECTOR_SPS_MIN
-    j_ramp = np.arange(1.0, math.ceil(sps) + 2.0)
+    geom = MskGeometry.build(
+        sps=sps, loop_bw=loop_bw, loop_pole=loop_pole, mf_oversample=mf_oversample
+    )
 
     class _MskDemod(gr.basic_block):
         def __init__(self) -> None:
             gr.basic_block.__init__(
                 self, name="msk_demod", in_sig=[np.complex64], out_sig=[np.float32]
             )
-            self._out = OutQueue(np.float32)
-            self._buf = np.empty(0, np.complex64)
-            # derotated matched-filter window, stored in the chosen medium
-            self._win: list[complex] = [] if vectorized else [0j] * flen
-            self._win_arr = np.zeros(flen if vectorized else 0, np.complex128)
-            self._carrier_phase = 0.0
-            self._freq_corr = 0.0  # PLL frequency correction (rad/sample)
-            self._bit = 0  # running bit index: rail parity + π/2 derotation
-            self._consumed = 0  # input samples already resolved into bits
+            self._core = MskDemodCore(geom)
+            self._out = self._core.out
 
         def forecast(self, noutput_items: int, ninputs: int) -> list[int]:
             return forecast_drain(self._out.pending, ninputs)
@@ -144,102 +280,8 @@ def make_msk_demod(
         def general_work(self, input_items: Any, output_items: Any) -> int:
             inp = input_items[0]
             if len(inp):
-                self._buf = np.concatenate([self._buf, inp])
+                self._core.feed(inp)
                 self.consume(0, len(inp))
-                if vectorized:
-                    self._process_vectorized()
-                else:
-                    self._process_scalar()
             return self._out.drain(output_items[0])
-
-        def _process_scalar(self) -> None:
-            # The decision-directed feedback (each bit's err retunes the next
-            # bit's derotation) makes this loop irreducibly sequential. Below
-            # the _VECTOR_SPS_MIN crossover it runs on Python scalars: per-bit
-            # numpy ufunc dispatch on the ~sps-sample segments measures slower
-            # than the scalar rotor there.
-            softs: list[float] = []
-            samples: list[complex] = self._buf.tolist()
-            pos, n = 0, len(samples)
-            win = self._win
-            phase = self._carrier_phase
-            fc = self._freq_corr  # baseband: nominal VCO is 0
-            bit = self._bit
-            consumed = self._consumed
-            two_pi = 2.0 * math.pi
-            while True:
-                step = _dump_index(bit, sps) + 1 - consumed
-                if n - pos < step:
-                    break
-                r = cmath.exp(-1j * fc)
-                rot = cmath.exp(-1j * phase)
-                new = []
-                for s in samples[pos : pos + step]:
-                    rot *= r
-                    new.append(s * rot)
-                pos += step
-                consumed += step
-                phase = (phase + fc * step) % two_pi
-
-                win = win[step:] + new
-                v = 0j
-                for t, w in zip(taps_rows[_branch(bit, sps, mf_oversample)], win):
-                    v += t * w
-                z = v / (abs(v) + _NORM_EPS)
-
-                soft, err = _decide(z, bit)
-                softs.append(soft)
-                fc = pole * fc + (1.0 - pole) * gain * err
-                bit += 1
-            self._buf = self._buf[pos:]
-            self._win = win
-            self._carrier_phase = phase
-            self._freq_corr = fc
-            self._bit = bit
-            self._consumed = consumed
-            if softs:
-                self._out.push(np.asarray(softs, np.float32))
-
-        def _process_vectorized(self) -> None:
-            # Same loop, wideband medium: the derotation frequency is constant
-            # within a bit, so each bit is a handful of vectorized ops on the
-            # sps-sample segment instead of a per-sample Python rotor; only
-            # the decision feedback stays sequential.
-            softs: list[float] = []
-            buf = self._buf.astype(np.complex128)
-            pos, n = 0, buf.size
-            win = self._win_arr
-            phase = self._carrier_phase
-            fc = self._freq_corr  # baseband: nominal VCO is 0
-            bit = self._bit
-            consumed = self._consumed
-            two_pi = 2.0 * math.pi
-            while True:
-                step = _dump_index(bit, sps) + 1 - consumed
-                if n - pos < step:
-                    break
-                rotors = np.exp((-1j * fc) * j_ramp[:step] - 1j * phase)
-                new = buf[pos : pos + step] * rotors
-                pos += step
-                consumed += step
-                phase = (phase + fc * step) % two_pi
-
-                keep = flen - step
-                win[:keep] = win[step:]
-                win[keep:] = new
-                v = complex(np.dot(taps_arr[_branch(bit, sps, mf_oversample)], win))
-                z = v / (abs(v) + _NORM_EPS)
-
-                soft, err = _decide(z, bit)
-                softs.append(soft)
-                fc = pole * fc + (1.0 - pole) * gain * err
-                bit += 1
-            self._buf = self._buf[pos:]
-            self._carrier_phase = phase
-            self._freq_corr = fc
-            self._bit = bit
-            self._consumed = consumed
-            if softs:
-                self._out.push(np.asarray(softs, np.float32))
 
     return _MskDemod()

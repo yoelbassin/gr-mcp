@@ -116,7 +116,7 @@ def test_memory_bounded_under_slow_consumer() -> None:
         consumed = blk.nitems_read(0) - before
         pos += consumed
         stalls = stalls + 1 if (consumed == 0 and k == 0) else 0
-        peak = max(peak, blk._buf.size + blk._out.size)
+        peak = max(peak, blk._core._buf.size + blk._out.size)
     k = 1
     while k:  # EOF flush: drain the pending queue across zero-input wakeups
         out = np.zeros(256, np.complex64)

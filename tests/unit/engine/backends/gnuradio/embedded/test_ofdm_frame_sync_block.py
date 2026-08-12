@@ -87,7 +87,7 @@ def test_null_less_stream_holds_a_bounded_buffer() -> None:
     cap = NULL + (DS + 1) * SYM + 4 * FRAME
     blk = mk()
     _drive(blk, flat, chunk=FRAME)
-    assert blk._buf.size <= cap, f"buffer held {blk._buf.size}"
+    assert blk._core._buf.size <= cap, f"buffer held {blk._core._buf.size}"
 
     # the first null is 3*NULL: a mid-stream null flanked by signal on both
     # sides needs headroom over find_null's smoother width (real captures

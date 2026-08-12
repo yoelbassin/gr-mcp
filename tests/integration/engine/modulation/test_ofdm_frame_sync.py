@@ -163,4 +163,4 @@ def test_frame_sync_buffer_stays_bounded() -> None:
     )
     assert out.size == expected.size
     assert np.allclose(out, expected, atol=1e-4)
-    assert blk._buf.size <= 2 * frame + 8192, f"buffer held {blk._buf.size}"
+    assert blk._core._buf.size <= 2 * frame + 8192, f"buffer held {blk._core._buf.size}"

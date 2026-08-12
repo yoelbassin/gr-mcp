@@ -550,72 +550,129 @@ def run_rx(
         flagged = _reject_nonfinite(cp, start, source, input_stream)
         if flagged is not None:
             return flagged
-        census: list[BlockCensus] = []
-        diagnostics: list[Diagnostic] = []
-        trace_rows: list[TraceStage] = []
-        marks: list[int] = []
+        seg = _run_gr_segment(modem, cp, registry, backend, trace_dir)
+        if seg.failed is not None:
+            return seg.failed
+        marks = seg.marks
         entry_path = seam
-        gr_empty: PipelineResult | None = None
-        if cp.gr is not None:
-            if backend is None:
-                from marconi.engine.backends.gnuradio.runner import GnuRadioBackend
-
-                backend = GnuRadioBackend()
-            check_deadline()
-            r = backend.run_pipeline(cp.gr, timeout=remaining())
-            census, diagnostics = list(r.census), list(r.diagnostics)
-            if trace_dir is not None:
-                trace_rows = _harvest_trace(modem, cp, trace_dir, registry)
-            if r.status in (RunStatus.ERROR, RunStatus.TIMEOUT):
-                return PipelineResult(
-                    status=r.status,
-                    error=r.error,
-                    stalled_at=r.stalled_at,
-                    census=census,
-                    diagnostics=diagnostics,
-                    trace=trace_rows,
-                )
-            if r.status is RunStatus.EMPTY:
-                gr_empty = PipelineResult(
-                    status=RunStatus.EMPTY, error=r.error, stalled_at=r.stalled_at
-                )
-            marks = _harvest_marks(diagnostics)
         if input_stream is not None:
             entry_path = input_stream.path
             if isinstance(input_stream, Symbolstream):
                 marks = list(input_stream.marks)
         check_deadline()
-        if cp.coding is None:
-            result = _wrap_gr_only(cp, seam, marks, census, diagnostics)
-        else:
-            carrier = _entry_carrier(cp.boundary, entry_path, marks)
-            out = run_coding(cp.coding, carrier, census)
-            result = _flag_empty_coding(
-                _wrap_result(cp.final, out, workdir, marks, census, diagnostics)
-            )
-        if gr_empty is not None and result.status in (RunStatus.OK, RunStatus.EMPTY):
-            # the worker's stall is the upstream truth; the coding tail's
-            # recomputation over the same census would only echo it less
-            # precisely.
-            result = result.as_empty(
-                error=gr_empty.error, stalled_at=gr_empty.stalled_at
-            )
+        result = _run_coding_tail(cp, seg, seam, entry_path, workdir, marks)
         check_deadline()
-        # 'empty' keeps the full report: the zero-decode run is exactly where
-        # the agent needs the quality verdict, the census gradient, and the
-        # open-loop retry hints
-        soft = _soft_tap(cp, result, seam, input_stream)
-        quality = assess_quality(
-            registry=registry,
-            census=result.census,
-            diagnostics=result.diagnostics,
-            marks=result.marks,
-            soft_stream=soft.path if soft is not None else None,
-            soft_decode_grade=soft.level is Level.BITS if soft is not None else True,
-        )
-        return result.with_report(
-            softstream=soft,
-            quality=quality,
-            hints=_hints(modem, registry, cp.final, quality.verdict),
+        return _attach_report(modem, cp, registry, result, seg, seam, input_stream)
+
+
+@dataclass(frozen=True)
+class GrSegment:
+    """What the GR half of a run produced. `failed` short-circuits the whole
+    run; `empty` is a stall the coding tail must not overwrite with a rosier
+    status of its own."""
+
+    census: list[BlockCensus]
+    diagnostics: list[Diagnostic]
+    trace: list[TraceStage]
+    marks: list[int]
+    empty: PipelineResult | None = None
+    failed: PipelineResult | None = None
+
+
+def _run_gr_segment(
+    modem: Modem,
+    cp: CompiledPipeline,
+    registry: Mapping[str, Stage[Any, Any]],
+    backend: Backend | None,
+    trace_dir: Path | None,
+) -> GrSegment:
+    if cp.gr is None:
+        return GrSegment(census=[], diagnostics=[], trace=[], marks=[])
+    if backend is None:
+        from marconi.engine.backends.gnuradio.runner import GnuRadioBackend
+
+        backend = GnuRadioBackend()
+    check_deadline()
+    r = backend.run_pipeline(cp.gr, timeout=remaining())
+    census, diagnostics = list(r.census), list(r.diagnostics)
+    trace_rows = (
+        _harvest_trace(modem, cp, trace_dir, registry) if trace_dir is not None else []
+    )
+    if r.status in (RunStatus.ERROR, RunStatus.TIMEOUT):
+        return GrSegment(
+            census=census,
+            diagnostics=diagnostics,
             trace=trace_rows,
+            marks=[],
+            failed=PipelineResult(
+                status=r.status,
+                error=r.error,
+                stalled_at=r.stalled_at,
+                census=census,
+                diagnostics=diagnostics,
+                trace=trace_rows,
+            ),
         )
+    empty = (
+        PipelineResult(status=RunStatus.EMPTY, error=r.error, stalled_at=r.stalled_at)
+        if r.status is RunStatus.EMPTY
+        else None
+    )
+    return GrSegment(
+        census=census,
+        diagnostics=diagnostics,
+        trace=trace_rows,
+        marks=_harvest_marks(diagnostics),
+        empty=empty,
+    )
+
+
+def _run_coding_tail(
+    cp: CompiledPipeline,
+    seg: GrSegment,
+    seam: Path,
+    entry_path: Path,
+    workdir: Path,
+    marks: list[int],
+) -> PipelineResult:
+    if cp.coding is None:
+        result = _wrap_gr_only(cp, seam, marks, seg.census, seg.diagnostics)
+    else:
+        carrier = _entry_carrier(cp.boundary, entry_path, marks)
+        out = run_coding(cp.coding, carrier, seg.census)
+        result = _flag_empty_coding(
+            _wrap_result(cp.final, out, workdir, marks, seg.census, seg.diagnostics)
+        )
+    if seg.empty is not None and result.status in (RunStatus.OK, RunStatus.EMPTY):
+        # the worker's stall is the upstream truth; the coding tail's
+        # recomputation over the same census would only echo it less precisely.
+        result = result.as_empty(error=seg.empty.error, stalled_at=seg.empty.stalled_at)
+    return result
+
+
+def _attach_report(
+    modem: Modem,
+    cp: CompiledPipeline,
+    registry: Mapping[str, Stage[Any, Any]],
+    result: PipelineResult,
+    seg: GrSegment,
+    seam: Path,
+    input_stream: Bitstream | Symbolstream | None,
+) -> PipelineResult:
+    """'empty' keeps the full report: the zero-decode run is exactly where the
+    agent needs the quality verdict, the census gradient, and the retry hints."""
+    soft = _soft_tap(cp, result, seam, input_stream)
+    quality = assess_quality(
+        registry=registry,
+        census=result.census,
+        diagnostics=result.diagnostics,
+        marks=result.marks,
+        soft_stream=soft.path if soft is not None else None,
+        soft_decode_grade=soft.level is Level.BITS if soft is not None else True,
+    )
+    return result.with_report(
+        softstream=soft,
+        quality=quality,
+        hints=_hints(modem, registry, cp.final, quality.verdict),
+        trace=seg.trace,
+    )
