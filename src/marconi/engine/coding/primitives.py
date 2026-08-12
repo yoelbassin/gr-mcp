@@ -8,6 +8,8 @@ from __future__ import annotations
 from functools import lru_cache as _lru_cache
 from itertools import combinations as _combinations
 
+import numpy as _np
+
 
 def gray_encode(x: int) -> int:
     return x ^ (x >> 1)
@@ -50,10 +52,36 @@ def _column_signatures(
     return sigs + weights
 
 
+# The table enumerates every error pattern of weight 1..t, so its size is
+# sum(C(code_bits, w)) — superlinear in the code length and paid inside a
+# pydantic validator. Capped so an oversized code is refused with a message
+# naming the cost, instead of wedging the caller mid-validation.
+MAX_SYNDROME_PATTERNS = 1 << 20
+
+
+def _pattern_count(code_bits: int, t: int) -> int:
+    total = 0
+    for w in range(1, t + 1):
+        term = 1
+        for i in range(w):
+            term = term * (code_bits - i) // (i + 1)
+        total += term
+        if total > MAX_SYNDROME_PATTERNS:
+            break
+    return total
+
+
 @_lru_cache(maxsize=64)
 def _syndrome_table_cached(
     parity_masks: tuple[int, ...], code_bits: int, data_bits: int, t: int
 ) -> dict[int, int]:
+    patterns = _pattern_count(code_bits, t)
+    if patterns > MAX_SYNDROME_PATTERNS:
+        raise ValueError(
+            f"correcting {t} errors in a {code_bits}-bit code needs a syndrome "
+            f"table of over {patterns:,} entries (cap {MAX_SYNDROME_PATTERNS:,}); "
+            "lower 'correct' or use a shorter code"
+        )
     sigs = _column_signatures(list(parity_masks), code_bits, data_bits)
     table: dict[int, int] = {}
     for w in range(1, t + 1):
@@ -67,6 +95,45 @@ def _syndrome_table_cached(
                     f"correct {t} errors"
                 )
             table[syn] = sum(1 << pos for pos in combo)
+    return table
+
+
+def syndrome_key(value: int, n_parity: int) -> bytes:
+    """A syndrome's canonical fixed-width key: equation p occupies bit
+    ``n_parity-1-p`` of the integer form (see _column_signatures) and byte
+    position p here. Both sides of a lookup pack through this one function, so
+    a syndrome is compared as a bit VECTOR — the packed-integer form silently
+    dropped every equation past bit 63 of the register holding it."""
+    bits = _np.fromiter(
+        ((value >> (n_parity - 1 - p)) & 1 for p in range(n_parity)),
+        dtype=_np.uint8,
+        count=n_parity,
+    )
+    return bytes(_np.packbits(bits))
+
+
+def flip_table(
+    parity_masks: list[int], code_bits: int, data_bits: int, t: int
+) -> dict[bytes, int]:
+    """syndrome key -> codeword-position flip mask, for t=1 (each column's own
+    signature) and t>=2 (every pattern up to weight t). One table for both, so
+    a correction path cannot exist for one t and not the other. A duplicate
+    single-error signature resolves to the LOWEST column index."""
+    n_parity = code_bits - data_bits
+    if t >= 2:
+        return {
+            syndrome_key(syn, n_parity): flip
+            for syn, flip in syndrome_table(
+                parity_masks, code_bits, data_bits, t
+            ).items()
+        }
+    table: dict[bytes, int] = {}
+    if t == 1:
+        for column, sig in enumerate(
+            _column_signatures(parity_masks, code_bits, data_bits)
+        ):
+            if sig:
+                table.setdefault(syndrome_key(sig, n_parity), 1 << column)
     return table
 
 

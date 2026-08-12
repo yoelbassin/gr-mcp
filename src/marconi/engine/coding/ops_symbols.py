@@ -4,6 +4,7 @@ from dataclasses import replace
 
 import numpy as np
 
+from marconi.deadline import check_deadline
 from marconi.engine.coding.carrier import CodingCarrier
 from marconi.engine.types.enums import DcMode
 
@@ -23,6 +24,7 @@ def sync_symbols_rx(
     size = signs.size - pat.size + 1
     agree = np.zeros(size, np.min_scalar_type(int(pat.size)))
     for j in np.flatnonzero(want):
+        check_deadline()
         agree += signs[j : j + size] == pat[j]
     hits = np.flatnonzero(agree >= n_care - max_errors)
     marks = tuple(int(h) - pre_symbols for h in hits if int(h) - pre_symbols >= 0)
@@ -55,6 +57,7 @@ def normalize_rx(
         return c
     out = np.asarray(sym, np.float32).copy()
     for m in c.marks:
+        check_deadline()
         lo, hi = int(m), min(int(m) + span_symbols, out.size)
         if hi - lo < 1:
             continue

@@ -22,7 +22,7 @@ from marconi.engine.coding.carrier import (
     StepStats,
     Window,
 )
-from marconi.engine.coding.primitives import effective_t, syndrome_table
+from marconi.engine.coding.primitives import effective_t, flip_table
 from marconi.engine.types.enums import DecodeMode, EmitMode
 
 
@@ -62,6 +62,7 @@ def bits_to_bytes(bits: npt.ArrayLike, bit_order: str = "msb") -> bytes:
 
 
 def segment_rx(c: CodingCarrier, *, frame_body_len: int) -> CodingCarrier:
+    check_deadline()
     windows: list[Window] = []
     i = 0
     while i + frame_body_len <= len(c.bits):
@@ -91,6 +92,7 @@ def sync_word_rx(
     chance = float(size) * _chance_valid_rate(m, m, max_errors, 2)
     counts = np.zeros(size, np.min_scalar_type(m))
     for j in range(m):
+        check_deadline()
         counts += stream[j : j + size] != pat[j]
     hits = np.flatnonzero(counts <= max_errors)
     reach = 0
@@ -162,6 +164,7 @@ def _nearest_values(
     out = np.empty(grouped.shape[0], np.int64)
     chunk = 1 << 16
     for lo in range(0, grouped.shape[0], chunk):
+        check_deadline()
         seg = grouped[lo : lo + chunk]
         dist = (seg[:, None, :] != tbl[None, :, :]).sum(axis=2)
         out[lo : lo + seg.shape[0]] = dist.argmin(axis=1)
@@ -245,25 +248,56 @@ def codebook_rx(
     return _decode_scoped(c, lambda bits: (_decode(bits), None))
 
 
-def _syndromes(
-    words: npt.NDArray[np.uint8],
-    parity_masks: list[int],
-    code_bits: int,
-    data_bits: int,
-) -> npt.NDArray[np.signedinteger[Any]]:
-    # syndrome stays uint8 (mod-2 XOR of selected data cols + parity col),
-    # then packs to a small per-word int - no (n_words, k) int matrix
-    n_parity = code_bits - data_bits
-    dtype = _sym_dtype(n_parity)
-    rows = [[(m >> b) & 1 for b in range(data_bits)] for m in parity_masks]
-    s_int: npt.NDArray[np.signedinteger[Any]] = np.zeros(words.shape[0], dtype)
-    for p, row in enumerate(rows):
+def _syndrome_bits(
+    words: npt.NDArray[np.uint8], parity_masks: list[int], data_bits: int
+) -> npt.NDArray[np.uint8]:
+    """One row per word, ONE COLUMN PER PARITY EQUATION. The equations used to
+    be shifted into a single fixed-width integer, which dropped every equation
+    past bit 63 of it: measured on a (300,100) code, a wholly corrupt stream
+    reported words_valid = 400/400 and the quality layer read "decoded".
+    A syndrome is as wide as the code says it is, so it is never a register."""
+    syn = np.empty((words.shape[0], len(parity_masks)), np.uint8)
+    for p, mask in enumerate(parity_masks):
         col = words[:, data_bits + p].astype(np.uint8)
-        for c, bit in enumerate(row):
-            if bit:
+        for c in range(data_bits):
+            if (mask >> c) & 1:
                 col = col ^ words[:, c]
-        s_int = (s_int << 1) | (col & 1)
-    return s_int
+        syn[:, p] = col & 1
+    return syn
+
+
+def _correct_words(
+    words: npt.NDArray[np.uint8], syn: npt.NDArray[np.uint8], lut: dict[bytes, int]
+) -> npt.NDArray[np.bool_]:
+    """Flip the error pattern each failing syndrome names; returns which words
+    were repaired.
+
+    Iterates the correctable PATTERNS, not the words and not the syndromes the
+    data happens to contain: the pattern count is fixed by the spec (one per
+    column at t=1), so the numpy call count does not move with input size —
+    a per-word python loop is what this shape exists to avoid. Each pattern
+    costs one vectorized row compare over the words that failed parity."""
+    fixed = np.zeros(words.shape[0], bool)
+    bad = np.flatnonzero(syn.any(axis=1))
+    if not lut or bad.size == 0:
+        return fixed
+    keys = np.packbits(syn[bad], axis=1)
+    unresolved = np.ones(bad.size, bool)
+    for key, flip in lut.items():
+        check_deadline()
+        want = np.frombuffer(key, np.uint8)
+        match = unresolved & (keys == want).all(axis=1)
+        rows = bad[match]
+        if rows.size == 0:
+            continue
+        positions = [p for p in range(words.shape[1]) if (flip >> p) & 1]
+        if positions:
+            words[np.ix_(rows, positions)] ^= 1
+        fixed[rows] = True
+        unresolved &= ~match
+        if not unresolved.any():
+            break
+    return fixed
 
 
 def _block_decode(
@@ -278,46 +312,17 @@ def _block_decode(
     # so parity_masks and the emitted data bits are LSB-first too. A caller
     # assembling codewords MSB-first must reconcile the basis (supply masks
     # LSB-first, or reverse each stride).
-    n_parity = code_bits - data_bits
     n_words = bits.size // code_bits
     words = bits[: n_words * code_bits].reshape(n_words, code_bits).copy()
     ok = np.zeros(n_words, bool)
     if n_words and parity_masks:
-        s_int = _syndromes(words, parity_masks, code_bits, data_bits)
-        ok = s_int == 0
-        if t == 1:
-            dtype = _sym_dtype(n_parity)
-            rows = [[(m >> b) & 1 for b in range(data_bits)] for m in parity_masks]
-            # a column's syndrome signature, data columns then the parity
-            # identity; ties resolve to the lowest column index
-            weights = np.left_shift(1, np.arange(n_parity - 1, -1, -1, dtype=dtype))
-            col_sig = np.concatenate([np.asarray(rows, dtype).T @ weights, weights])
-            bad = np.flatnonzero(s_int)
-            if bad.size:
-                match = s_int[bad, None] == col_sig[None, :]
-                col_idx = match.argmax(axis=1)
-                fixable = match.any(axis=1)
-                words[bad[fixable], col_idx[fixable]] ^= 1
-                ok[bad[fixable]] = True
-        if t >= 2:
-            lut = syndrome_table(parity_masks, code_bits, data_bits, t)
-            keys = np.fromiter(lut.keys(), np.int64, len(lut))
-            flips = np.fromiter(lut.values(), np.int64, len(lut))
-            order_ = np.argsort(keys)
-            keys, flips = keys[order_], flips[order_]
-            s64 = s_int.astype(np.int64)
-            bad = np.flatnonzero(s64)
-            if bad.size:
-                pos = np.searchsorted(keys, s64[bad])
-                pos = np.clip(pos, 0, keys.size - 1)
-                hit = keys[pos] == s64[bad]
-                flip = flips[pos[hit]]
-                fixed = bad[hit]
-                flip_bits = ((flip[:, None] >> np.arange(code_bits)) & 1).astype(
-                    np.uint8
-                )
-                words[fixed] ^= flip_bits
-                ok[fixed] = True
+        check_deadline()
+        syn = _syndrome_bits(words, parity_masks, data_bits)
+        ok = ~syn.any(axis=1)
+        if t >= 1:
+            ok |= _correct_words(
+                words, syn, flip_table(parity_masks, code_bits, data_bits, t)
+            )
     out = words if emit is EmitMode.CODEWORD else words[:, :data_bits]
     return out.reshape(-1), (int(ok.sum()), n_words)
 
@@ -373,6 +378,7 @@ def _decode_scoped(
     windows: list[Window] = []
     pos = 0
     for lo, hi in c.window_spans():
+        check_deadline()
         dec, tally = decode(bits[lo:hi])
         if tally is not None:
             tallies.append(tally)
@@ -526,6 +532,8 @@ def _lfsr_seq(mask: int, seed: int, length: int, n: int) -> npt.NDArray[np.uint8
     # row i = which bits of the L-wide window XOR into block output i
     rows: list[int] = []
     for i in range(chunk):
+        if not i % 4096:
+            check_deadline()
         acc = 0
         for j in taps:
             m = i - length + j
@@ -535,6 +543,7 @@ def _lfsr_seq(mask: int, seed: int, length: int, n: int) -> npt.NDArray[np.uint8
     t = length
     window = seed & ((1 << length) - 1)
     while t < n:
+        check_deadline()
         c = min(chunk, n - t)
         vals = np.bitwise_and(rows_arr[:c], np.uint64(window))
         out[t : t + c] = (np.bitwise_count(vals) & 1).astype(np.uint8)

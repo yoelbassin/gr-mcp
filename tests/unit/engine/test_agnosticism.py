@@ -113,9 +113,12 @@ def test_coding_primitives_surface_is_minimal() -> None:
         "annotations",
         "can_correct",
         "effective_t",
+        "flip_table",
         "gray_decode",
         "gray_encode",
+        "syndrome_key",
         "syndrome_table",
+        "MAX_SYNDROME_PATTERNS",
     }
 
 

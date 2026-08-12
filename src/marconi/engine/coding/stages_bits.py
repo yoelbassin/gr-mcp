@@ -306,9 +306,17 @@ class Codebook(CodingStage[CodebookStep]):
         b.add(ops_bits.codebook_rx, **_codebook_kw(step))
 
 
+# A block code's decode cost is per codeword, but its syndrome-table cost is
+# superlinear in the length (see primitives.MAX_SYNDROME_PATTERNS) and the
+# correction table holds one entry per column. Every real block code is orders
+# of magnitude under this; the bound exists so a typo'd length is refused at
+# the spec boundary rather than absorbed as work.
+MAX_CODE_BITS = 4096
+
+
 class BlockCodeStep(Step):
     conv: Literal["block_code"] = "block_code"
-    code_bits: StrictInt = Field(ge=2)
+    code_bits: StrictInt = Field(ge=2, le=MAX_CODE_BITS)
     data_bits: StrictInt = Field(ge=1)
     parity_masks: list[int]
     correct_single: bool | None = None
