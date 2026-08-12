@@ -182,9 +182,11 @@ class DescrambleStep(Step):
             raise PydanticCustomError(
                 "value_error", "exactly one of sequence or lfsr_* must be set"
             )
-        if has_lfsr:
-            assert self.lfsr_mask is not None and self.lfsr_seed is not None
-            assert self.lfsr_len is not None
+        if (
+            self.lfsr_mask is not None
+            and self.lfsr_seed is not None
+            and self.lfsr_len is not None
+        ):
             top = 1 << self.lfsr_len
             if not 0 < self.lfsr_mask < top or not 0 < self.lfsr_seed < top:
                 raise PydanticCustomError(

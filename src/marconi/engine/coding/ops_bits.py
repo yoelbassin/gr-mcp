@@ -16,7 +16,12 @@ except ImportError:  # pure-Python fallback, always installed
     import reedsolo as _rs
 
 from marconi.deadline import check_deadline
-from marconi.engine.coding.carrier import CodingCarrier, StepStats, Window
+from marconi.engine.coding.carrier import (
+    CarrierInvariantError,
+    CodingCarrier,
+    StepStats,
+    Window,
+)
 from marconi.engine.coding.primitives import effective_t, syndrome_table
 from marconi.engine.types.enums import DecodeMode, EmitMode
 
@@ -551,9 +556,17 @@ def descramble_rx(
     bits = np.asarray(c.bits, dtype=np.uint8)
     if bits.size == 0:
         return c
-    if lfsr_mask is not None:
-        assert lfsr_seed is not None and lfsr_len is not None
+    lfsr = (lfsr_mask, lfsr_seed, lfsr_len)
+    if lfsr_mask is not None and lfsr_seed is not None and lfsr_len is not None:
         return _descramble_lfsr(c, bits, lfsr_mask, lfsr_seed, lfsr_len)
+    if any(v is not None for v in lfsr):
+        # DescrambleStep's validator already refuses a partial triple; falling
+        # through to the sequence path here would descramble with an EMPTY
+        # sequence and return the input unchanged, which reads as a clean run
+        raise CarrierInvariantError(
+            "descramble needs lfsr_mask, lfsr_seed and lfsr_len together; "
+            f"got {lfsr}"
+        )
     return _descramble_sequence(c, bits, sequence)
 
 

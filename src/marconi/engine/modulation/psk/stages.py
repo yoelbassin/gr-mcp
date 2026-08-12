@@ -181,8 +181,7 @@ class DifferentialDemod(RxStage[CompileContext, DifferentialDemodStep]):
     accepts_carrier = Carrier.SOFT
 
     def emit_rx(self, b: CompileContext, step: DifferentialDemodStep) -> None:
-        src = b.tail
-        assert src is not None
+        src = b.require_tail()
         dly = b.chain("delay_cc", samples=step.delay)
         mc = b.add("multiply_conjugate_cc")
         b.connect(src, mc, dst_port=0)

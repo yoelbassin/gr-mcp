@@ -82,6 +82,19 @@ class CompileContext:
     def tail(self) -> str | None:
         return self._tail
 
+    def require_tail(self) -> str:
+        """The block a fan-out stage branches from. Every RX stage runs after
+        the source has been chained, so this is a structural invariant — but it
+        is enforced rather than asserted: an assert is stripped under -O, and
+        the None would then reach connect() and surface as an unresolvable
+        block id instead of naming the real problem."""
+        if self._tail is None:
+            raise CompileError(
+                "stage needs an upstream block to branch from but the graph is "
+                "empty; a fan-out stage cannot be the first block in a path"
+            )
+        return self._tail
+
     def set_tail(self, block_id: str) -> None:
         self._tail = block_id
 

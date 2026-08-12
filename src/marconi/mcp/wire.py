@@ -5,7 +5,9 @@ from typing import cast
 from pydantic import BaseModel, ConfigDict
 
 
-def _restore_set_nulls(model: BaseModel, dumped: dict[str, object]) -> dict[str, object]:
+def _restore_set_nulls(
+    model: BaseModel, dumped: dict[str, object]
+) -> dict[str, object]:
     for name in model.model_fields_set:
         value = getattr(model, name, None)
         if value is None:

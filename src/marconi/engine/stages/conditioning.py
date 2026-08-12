@@ -303,8 +303,7 @@ def _agc_feedback(b: CompileContext, p: AgcStep) -> None:
 
 
 def _agc_power(b: CompileContext, p: AgcStep) -> None:
-    src = b.tail
-    assert src is not None
+    src = b.require_tail()
     alpha = 1.0 / (p.window_symbols * b.sps)
     c2f = b.add("complex_to_float")
     rms = b.add("rms_cf", alpha=alpha)

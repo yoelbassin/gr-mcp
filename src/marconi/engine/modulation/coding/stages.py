@@ -80,8 +80,7 @@ class Depuncture(RxStage[CompileContext, DepunctureStep]):
     accepts_carrier = Carrier.SOFT
 
     def emit_rx(self, b: CompileContext, step: DepunctureStep) -> None:
-        src = b.tail
-        assert src is not None
+        src = b.require_tail()
         il = b.add(
             "patterned_interleaver_f",
             pattern=[0 if m else 1 for m in step.keep_mask],

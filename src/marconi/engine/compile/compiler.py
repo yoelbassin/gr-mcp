@@ -489,5 +489,9 @@ def compile_modem(
             "path contains coding stages; compile_modem is the pure-GR entry — "
             "use compile_pipeline/run_rx"
         )
-    assert cp.gr is not None
+    if cp.gr is None:
+        raise CompileError(
+            "compile_modem produced no GR segment for a coding-free path; "
+            "this is an engine bug, not a spec problem"
+        )
     return cp.gr
