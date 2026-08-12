@@ -255,6 +255,8 @@ def test_chirp_sync_noise_bounded_no_lock() -> None:
     tb.connect(src, blk, snk)
     tb.run()
     bound = 2 * (pl + 6) * sn + 8192
-    assert blk._buf.size <= bound, f"pre-lock buffer {blk._buf.size} > {bound}"
-    assert not blk._armed
+    assert (
+        blk._core._buf.size <= bound
+    ), f"pre-lock buffer {blk._core._buf.size} > {bound}"
+    assert not blk._core.armed
     assert len(snk.data()) == 0

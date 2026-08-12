@@ -9,6 +9,8 @@ from helpers._fakegr import FAKE_GR, drive
 
 from marconi.engine.backends.gnuradio.embedded.oerder_meyr import (
     _MAX_REGION_SYMS,
+    OerderMeyrCore,
+    OerderMeyrGeometry,
     _cubic,
     estimate_tau,
     make_oerder_meyr,
@@ -119,9 +121,10 @@ def test_output_is_chunk_independent_across_gaps() -> None:
 def test_scan_fall_matches_the_reference_loop() -> None:
     # the vectorized fall scan (run-length trick + quiet carry) must be
     # sample-exact against the per-sample loop it replaced, including the
-    # carry of a quiet run straddling a block boundary
-    blk = make_oerder_meyr(FAKE_GR, sps=8)
-    fall_run = 2 * 8
+    # carry of a quiet run straddling a block boundary. Driven on the core
+    # directly: the estimator is a plain class, so this needs no fake GR.
+    core = OerderMeyrCore(OerderMeyrGeometry.build(sps=8, span=11, alpha=0.35))
+    fall_run = core.geom.fall_run
     rng = np.random.default_rng(9)
     for trial in range(200):
         active = rng.random(int(rng.integers(1, 200))) < 0.7
@@ -133,9 +136,20 @@ def test_scan_fall_matches_the_reference_loop() -> None:
             j += 1
             if q >= fall_run:
                 break
-        blk._quiet = q0
-        jv = blk._scan_fall(active, i)
-        assert jv == j and blk._quiet == q, (trial, i, q0, jv, j, blk._quiet, q)
+        core._quiet = q0
+        jv = core._scan_fall(active, i)
+        assert jv == j and core._quiet == q, (trial, i, q0, jv, j, core._quiet, q)
+
+
+def test_geometry_rejects_a_rate_the_clock_line_cannot_survive() -> None:
+    # the validation moved off the factory onto the geometry, so it is
+    # reachable (and assertable) without constructing a GR block at all
+    with pytest.raises(ValueError, match="integer sps"):
+        OerderMeyrGeometry.build(sps=8.5, span=11, alpha=0.35)
+    with pytest.raises(ValueError, match="sps >= 4"):
+        OerderMeyrGeometry.build(sps=3, span=11, alpha=0.35)
+    with pytest.raises(ValueError, match="alpha"):
+        OerderMeyrGeometry.build(sps=8, span=11, alpha=0.0)
 
 
 def test_withholds_the_uncapped_tail_without_a_finality_probe() -> None:

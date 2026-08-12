@@ -337,6 +337,247 @@ def make_css_demap(gr: Any, sf: int) -> Any:
     return _CssDemap()
 
 
+_NTAPS = 33
+_HALF = (_NTAPS - 1) // 2
+# FIR group delay + fractional-timing rounding slack; stays under one symbol
+# window (sn >= 32) so pad zeros can only complete the final real window, never
+# form a bogus trailing one
+_EOF_PAD = _HALF + 8
+_OUT_CAP = 1 << 16  # pending-out saturation: stop consuming, let GR backpressure
+
+
+@dataclass(frozen=True)
+class ChirpSyncGeometry:
+    """The burst anatomy the detector and the estimators are measured in."""
+
+    grid: _Grid
+    sn: int
+    bandwidth: float
+    oversample: int
+    zero_pad: int
+    preamble_len: int
+    sfd_symbols: float
+    sync_symbols: int
+    detect_run: int
+    hunt_span: int
+
+    @classmethod
+    def build(
+        cls,
+        *,
+        sf: int,
+        oversample: int,
+        zero_pad: int,
+        preamble_len: int,
+        bandwidth: float,
+        sfd_symbols: float,
+        sync_symbols: int,
+    ) -> "ChirpSyncGeometry":
+        grid = _Grid(sf, oversample, zero_pad)
+        sn = grid.sample_num
+        return cls(
+            grid=grid,
+            sn=sn,
+            bandwidth=bandwidth,
+            oversample=oversample,
+            zero_pad=zero_pad,
+            preamble_len=preamble_len,
+            sfd_symbols=sfd_symbols,
+            sync_symbols=sync_symbols,
+            detect_run=preamble_len - sync_symbols,
+            # the whole declared anatomy plus detector slack
+            hunt_span=(preamble_len + sync_symbols + int(np.ceil(sfd_symbols)) + 2)
+            * sn,
+        )
+
+
+class ChirpSyncCore:
+    """Detection, per-burst CFO/STO estimation, and the fractional-timing FIR.
+    A plain class rather than a body nested in the factory closure: the EOF
+    rules and the tag bookkeeping are the parts that have been wrong before,
+    and they are worth driving without a flowgraph. The two EOF facts it cannot
+    know — whether the source is exhausted, and whether every sample is already
+    in hand — arrive as arguments from the shell that can answer them."""
+
+    def __init__(self, geom: ChirpSyncGeometry) -> None:
+        self.geom = geom
+        self.out = OutQueue(np.complex64)
+        self.diagnostics: Diagnostics = {"locks": 0, "eof_flushed": 0}
+        self.tagq: list[int] = []  # out indices (absolute) of burst starts
+        self._buf = np.empty(0, dtype=np.complex64)
+        self._armed = False
+        self._f_cfo = 0.0
+        self._n_out = 0  # per-burst payload samples, for CFO phase continuity
+        self._taps = np.zeros(_NTAPS, dtype=np.complex64)
+        self._hist = np.zeros(_NTAPS - 1, dtype=np.complex64)
+        self._drop = 0  # FIR group-delay outputs still to discard
+        self._seg = 0  # samples appended to out for the current segment
+        self._scan = _DetectScan(geom.grid, geom.detect_run)
+        self._det_x: int | None = None
+        self._eof_padded = False  # FIR tail zeros injected (once, at flush)
+
+    @property
+    def armed(self) -> bool:
+        return self._armed
+
+    @property
+    def saturated(self) -> bool:
+        return self.out.size >= _OUT_CAP
+
+    def feed(self, x: npt.NDArray[np.complex64]) -> None:
+        self._buf = np.concatenate([self._buf, x])
+
+    def has_work(self, exhausted: bool) -> bool:
+        return bool(
+            self.out.pending
+            or (self._armed and self.cleared() > 0)
+            or self.eof_flushable(exhausted) > 0
+        )
+
+    def eof_flushable(self, exhausted: bool) -> int:
+        """Whole symbol windows of buffered payload releasable once the
+        source is exhausted: emitting them early is exactly what normal
+        streaming would do, so a straggler still in flight through an
+        upstream buffer appends seamlessly (window alignment holds)."""
+        if not self._armed or not exhausted:
+            return 0
+        sn = self.geom.sn
+        return max(0, (self._seg + len(self._buf)) // sn * sn - self._seg)
+
+    def cleared(self) -> int:
+        """Samples of _buf beyond any claim by an in-progress detection
+        (with one symbol of slack for the joint estimator's look-back)."""
+        sn = self.geom.sn
+        c = self._scan.x - (len(self._scan.run) + 1) * sn
+        if self._det_x is not None:
+            c = min(c, self._det_x)
+        return max(0, min(c - sn, len(self._buf)))
+
+    def hunt(self) -> tuple[int, float, float] | None:
+        g = self.geom
+        if self._det_x is None:
+            self._det_x = self._scan.step(self._buf)
+        if self._det_x is None:
+            return None
+        cap = self._det_x + g.hunt_span
+        try:
+            if g.sfd_symbols:
+                payload_start = _sfd_sync(
+                    self._buf, self._det_x, g.grid, cap, g.sfd_symbols
+                )
+            else:
+                end = _preamble_end(self._buf, self._det_x, g.grid, cap)
+                payload_start = None if end is None else end + g.sync_symbols * g.sn
+        except ValueError:
+            self._det_x = None
+            self._scan.run = []
+            return None
+        if payload_start is None or payload_start + g.sn > len(self._buf):
+            return None
+        if g.sfd_symbols:
+            cfo_bins, sto_bins = _joint_sync(
+                self._buf,
+                payload_start,
+                g.grid,
+                g.preamble_len,
+                g.sfd_symbols,
+                g.sync_symbols,
+            )
+        else:
+            cfo_bins, sto_bins = _preamble_sync(
+                self._buf,
+                payload_start - g.sync_symbols * g.sn,
+                g.grid,
+                g.preamble_len,
+            )
+        return payload_start, cfo_bins, sto_bins
+
+    def _fir_to_out(self, upto: int) -> None:
+        if upto <= 0:
+            return
+        g = self.geom
+        ext = np.concatenate([self._hist, self._buf[:upto]])
+        y = np.convolve(ext, self._taps, "valid")
+        self._hist = ext[-(_NTAPS - 1) :]
+        self._trim(upto)
+        if self._drop:
+            d = min(self._drop, len(y))
+            y = y[d:]
+            self._drop -= d
+        k = self._n_out + np.arange(len(y))
+        rotated = (
+            y * np.exp(-1j * 2 * np.pi * self._f_cfo * k / (g.oversample * g.bandwidth))
+        ).astype(np.complex64)
+        self._n_out += len(y)
+        self.out.push(rotated)
+        self._seg += len(rotated)
+
+    def _trim(self, cut: int) -> None:
+        if cut <= 0:
+            return
+        self._buf = self._buf[cut:]
+        self._scan.x = max(0, self._scan.x - cut)
+        if self._det_x is not None:
+            self._det_x = max(0, self._det_x - cut)
+
+    def relock(self, payload_start: int, cfo_bins: float, sto_bins: float) -> None:
+        g = self.geom
+        if self._armed:
+            # flush the old segment up to an emitted-count symbol boundary
+            # (so a downstream demod's windows stay aligned across bursts)
+            boundary = self._det_x if self._det_x is not None else payload_start
+            flush = max(0, ((self._seg + boundary) // g.sn) * g.sn - self._seg)
+            self._fir_to_out(flush)
+            payload_start -= flush  # _fir_to_out trimmed _buf by `flush`
+        self._f_cfo = cfo_bins * g.bandwidth / g.grid.bins
+        sto = sto_bins * g.oversample / g.zero_pad  # fractional sample timing
+        n_int = int(round(sto))
+        mu = sto - n_int
+        k = np.arange(_NTAPS) - _HALF
+        h = np.sinc(k - mu) * np.blackman(_NTAPS)
+        self._taps = (h / h.sum()).astype(np.complex64)
+        start = max(_NTAPS - 1, payload_start - n_int)
+        self._hist = self._buf[start - (_NTAPS - 1) : start].copy()
+        self._trim(start)
+        self._drop = _HALF
+        self._n_out = 0
+        self._seg = 0
+        self._scan = _DetectScan(g.grid, g.detect_run)
+        self._det_x = None
+        self.tagq.append(self.out.pushed_total)
+        self._armed = True
+        bump(self.diagnostics, "locks")
+
+    def pump(self, *, exhausted: bool, final: bool) -> None:
+        """One detect-and-emit pass. `final` licenses the irreversible FIR-tail
+        pad: exhausted() alone is NOT finality — for a small capture the source
+        finishes almost immediately while the stream is still in flight, and a
+        mid-stream pad would splice zeros into real payload."""
+        while True:
+            lock = self.hunt()
+            if lock is None:
+                break
+            self.relock(*lock)
+        if not self._armed:
+            self._trim(self.cleared())
+            return
+        if self.saturated:
+            return
+        upto = self.cleared()
+        if final and not self._eof_padded:
+            # the FIR's last outputs need future samples (group delay plus the
+            # fractional-timing shift); none can ever come, so zeros expel the
+            # real tail — they only feed the interpolation edge past the last
+            # sample
+            self._buf = np.concatenate([self._buf, np.zeros(_EOF_PAD, np.complex64)])
+            self._eof_padded = True
+        flush = self.eof_flushable(exhausted)
+        if flush > upto:
+            bump(self.diagnostics, "eof_flushed", flush - upto)
+            upto = flush
+        self._fir_to_out(upto)
+
+
 def make_chirp_sync(
     gr: Any,
     sf: int,
@@ -354,207 +595,57 @@ def make_chirp_sync(
     sample carries a "burst" stream tag, and each burst segment is emitted as a
     whole number of symbol windows so a downstream demod stays aligned.
     Emission trails the detector by a bounded margin (samples an in-progress
-    detection could still claim are withheld, including at EOF)."""
+    detection could still claim are withheld, including at EOF).
+
+    The shell below owns only what needs GNU Radio — the EOF probe, stream tags
+    and backpressure; the synchronizer is ChirpSyncCore."""
     pmt = gr.pmt
-    grid = _Grid(sf, oversample, zero_pad)
-    sn = grid.sample_num
-    detect_run = preamble_len - sync_symbols
-    _NTAPS = 33
-    _HALF = (_NTAPS - 1) // 2
-    _HUNT_SPAN = (
-        preamble_len + sync_symbols + int(np.ceil(sfd_symbols)) + 2
-    ) * sn  # the whole declared anatomy plus detector slack
-    # FIR group delay + fractional-timing rounding slack; stays under one
-    # symbol window (sn >= 32) so pad zeros can only complete the final real
-    # window, never form a bogus trailing one
-    _EOF_PAD = _HALF + 8
-    _OUT_CAP = 1 << 16  # pending-out saturation: stop consuming, let GR backpressure
+    geom = ChirpSyncGeometry.build(
+        sf=sf,
+        oversample=oversample,
+        zero_pad=zero_pad,
+        preamble_len=preamble_len,
+        bandwidth=bandwidth,
+        sfd_symbols=sfd_symbols,
+        sync_symbols=sync_symbols,
+    )
 
     class _ChirpSync(gr.basic_block):
         def __init__(self) -> None:
             gr.basic_block.__init__(
                 self, name="chirp_sync", in_sig=[np.complex64], out_sig=[np.complex64]
             )
-            self._buf = np.empty(0, dtype=np.complex64)
-            self._armed = False
-            self._f_cfo = 0.0
-            self._n_out = 0  # per-burst payload samples, for CFO phase continuity
-            self._taps = np.zeros(_NTAPS, dtype=np.complex64)
-            self._hist = np.zeros(_NTAPS - 1, dtype=np.complex64)
-            self._drop = 0  # FIR group-delay outputs still to discard
-            self._seg = 0  # samples appended to _out for the current segment
-            self._scan = _DetectScan(grid, detect_run)
-            self._det_x: int | None = None
-            self._out = OutQueue(np.complex64)
-            self._tagq: list[int] = []  # _out indices (absolute) of burst starts
+            self._core = ChirpSyncCore(geom)
+            self._out = self._core.out
+            self.diagnostics = self._core.diagnostics
             self.eof_probe: EofProbe | None = None
-            self._eof_padded = False  # FIR tail zeros injected (once, at flush)
-            self.diagnostics: Diagnostics = {"locks": 0, "eof_flushed": 0}
 
-        def forecast(self, noutput_items: int, ninputs: int) -> list[int]:
-            work = (
-                self._out.pending
-                or (self._armed and self._cleared() > 0)
-                or self._eof_flushable() > 0
-            )
-            return forecast_drain(bool(work), ninputs)
+        def _exhausted(self) -> bool:
+            return self.eof_probe is not None and self.eof_probe.exhausted()
 
-        def _eof_flushable(self) -> int:
-            """Whole symbol windows of buffered payload releasable once the
-            source is exhausted: emitting them early is exactly what normal
-            streaming would do, so a straggler still in flight through an
-            upstream buffer appends seamlessly (window alignment holds)."""
-            if (
-                not self._armed
-                or self.eof_probe is None
-                or not self.eof_probe.exhausted()
-            ):
-                return 0
-            return max(0, (self._seg + len(self._buf)) // sn * sn - self._seg)
-
-        def _eof_final(self) -> bool:
-            """True only when every source sample is provably in _buf already
-            (direct source feed + read counter at total) — the license for
-            the irreversible FIR-tail pad. exhausted() alone is NOT finality:
-            for a small capture the source finishes almost immediately while
-            the stream is still in flight, and a mid-stream pad would splice
-            zeros into real payload."""
+        def _final(self) -> bool:
+            """Every source sample is provably buffered already (direct source
+            feed + read counter at total)."""
             p = self.eof_probe
             return (
-                self._armed
+                self._core.armed
                 and p is not None
                 and p.expected_items is not None
                 and self.nitems_read(0) >= p.expected_items
             )
 
-        def _cleared(self) -> int:
-            """Samples of _buf beyond any claim by an in-progress detection
-            (with one symbol of slack for the joint estimator's look-back)."""
-            c = self._scan.x - (len(self._scan.run) + 1) * sn
-            if self._det_x is not None:
-                c = min(c, self._det_x)
-            return max(0, min(c - sn, len(self._buf)))
-
-        def _hunt(self) -> tuple[int, float, float] | None:
-            if self._det_x is None:
-                self._det_x = self._scan.step(self._buf)
-            if self._det_x is None:
-                return None
-            cap = self._det_x + _HUNT_SPAN
-            try:
-                if sfd_symbols:
-                    payload_start = _sfd_sync(
-                        self._buf, self._det_x, grid, cap, sfd_symbols
-                    )
-                else:
-                    end = _preamble_end(self._buf, self._det_x, grid, cap)
-                    payload_start = None if end is None else end + sync_symbols * sn
-            except ValueError:
-                self._det_x = None
-                self._scan.run = []
-                return None
-            if payload_start is None or payload_start + sn > len(self._buf):
-                return None
-            if sfd_symbols:
-                cfo_bins, sto_bins = _joint_sync(
-                    self._buf,
-                    payload_start,
-                    grid,
-                    preamble_len,
-                    sfd_symbols,
-                    sync_symbols,
-                )
-            else:
-                cfo_bins, sto_bins = _preamble_sync(
-                    self._buf, payload_start - sync_symbols * sn, grid, preamble_len
-                )
-            return payload_start, cfo_bins, sto_bins
-
-        def _fir_to_out(self, upto: int) -> None:
-            if upto <= 0:
-                return
-            ext = np.concatenate([self._hist, self._buf[:upto]])
-            y = np.convolve(ext, self._taps, "valid")
-            self._hist = ext[-(_NTAPS - 1) :]
-            self._trim(upto)
-            if self._drop:
-                d = min(self._drop, len(y))
-                y = y[d:]
-                self._drop -= d
-            k = self._n_out + np.arange(len(y))
-            rotated = (
-                y * np.exp(-1j * 2 * np.pi * self._f_cfo * k / (oversample * bandwidth))
-            ).astype(np.complex64)
-            self._n_out += len(y)
-            self._out.push(rotated)
-            self._seg += len(rotated)
-
-        def _trim(self, cut: int) -> None:
-            if cut <= 0:
-                return
-            self._buf = self._buf[cut:]
-            self._scan.x = max(0, self._scan.x - cut)
-            if self._det_x is not None:
-                self._det_x = max(0, self._det_x - cut)
-
-        def _relock(self, payload_start: int, cfo_bins: float, sto_bins: float) -> None:
-            if self._armed:
-                # flush the old segment up to an emitted-count symbol boundary
-                # (so a downstream demod's windows stay aligned across bursts)
-                boundary = self._det_x if self._det_x is not None else payload_start
-                flush = max(0, ((self._seg + boundary) // sn) * sn - self._seg)
-                self._fir_to_out(flush)
-                payload_start -= flush  # _fir_to_out trimmed _buf by `flush`
-            self._f_cfo = cfo_bins * bandwidth / grid.bins
-            sto = sto_bins * oversample / zero_pad  # fractional sample timing
-            n_int = int(round(sto))
-            mu = sto - n_int
-            k = np.arange(_NTAPS) - _HALF
-            h = np.sinc(k - mu) * np.blackman(_NTAPS)
-            self._taps = (h / h.sum()).astype(np.complex64)
-            start = max(_NTAPS - 1, payload_start - n_int)
-            self._hist = self._buf[start - (_NTAPS - 1) : start].copy()
-            self._trim(start)
-            self._drop = _HALF
-            self._n_out = 0
-            self._seg = 0
-            self._scan = _DetectScan(grid, detect_run)
-            self._det_x = None
-            self._tagq.append(self._out.pushed_total)
-            self._armed = True
-            bump(self.diagnostics, "locks")
+        def forecast(self, noutput_items: int, ninputs: int) -> list[int]:
+            return forecast_drain(self._core.has_work(self._exhausted()), ninputs)
 
         def general_work(self, input_items: Any, output_items: Any) -> int:
             x = input_items[0]
             # Saturated pending-out: leave the input unconsumed so GR's own
             # backpressure reaches upstream instead of _out growing unboundedly
             # under a slow consumer.
-            if len(x) and self._out.size < _OUT_CAP:
-                self._buf = np.concatenate([self._buf, x])
+            if len(x) and not self._core.saturated:
+                self._core.feed(x)
                 self.consume(0, len(x))
-            while True:
-                lock = self._hunt()
-                if lock is None:
-                    break
-                self._relock(*lock)
-            if self._armed and self._out.size < _OUT_CAP:
-                upto = self._cleared()
-                if self._eof_final() and not self._eof_padded:
-                    # the FIR's last outputs need future samples (group delay
-                    # plus the fractional-timing shift); none can ever come,
-                    # so zeros expel the real tail — they only feed the
-                    # interpolation edge past the last sample
-                    self._buf = np.concatenate(
-                        [self._buf, np.zeros(_EOF_PAD, np.complex64)]
-                    )
-                    self._eof_padded = True
-                flush = self._eof_flushable()
-                if flush > upto:
-                    bump(self.diagnostics, "eof_flushed", flush - upto)
-                    upto = flush
-                self._fir_to_out(upto)
-            elif not self._armed:
-                self._trim(self._cleared())
+            self._core.pump(exhausted=self._exhausted(), final=self._final())
             before = self._out.drained_total
             k = self._out.drain(output_items[0])
             if k:
@@ -562,7 +653,7 @@ def make_chirp_sync(
             return k
 
         def _emit_tags(self, before: int, k: int) -> None:
-            for tag in self._tagq:
+            for tag in self._core.tagq:
                 if before <= tag < before + k:
                     self.add_item_tag(
                         0,
@@ -570,6 +661,6 @@ def make_chirp_sync(
                         pmt.intern("burst"),
                         pmt.PMT_NIL,
                     )
-            self._tagq = [t for t in self._tagq if t >= before + k]
+            self._core.tagq = [t for t in self._core.tagq if t >= before + k]
 
     return _ChirpSync()

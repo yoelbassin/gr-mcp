@@ -109,14 +109,14 @@ def test_relock_during_undrained_backlog_stays_sane() -> None:
         consumed = blk.nitems_read(0) - before
         pos += consumed
         stalls = stalls + 1 if (consumed == 0 and k == 0) else 0
-        assert blk._first <= blk._m
+        assert blk._core._first <= blk._core._m
     k = 1
     while k:
         out = np.zeros(1 << 15, np.complex64)
         k = int(blk.general_work([spec[0:0]], [out]))
         blk._nwritten += k
         got.append(out[:k].copy())
-        assert blk._first <= blk._m
+        assert blk._core._first <= blk._core._m
     total = np.concatenate(got)
     assert blk.diagnostics["locks"] == 2
     assert blk.diagnostics["relocks"] == 1
@@ -136,8 +136,8 @@ def test_memory_bounded_under_slow_consumer() -> None:
         consumed = blk.nitems_read(0) - before
         pos += consumed
         stalls = stalls + 1 if (consumed == 0 and k == 0) else 0
-        nodes = sum(len(ms) for ms in blk._node_ms)
-        peak = max(peak, len(blk._vecs) + nodes + blk._out.size // 64)
+        nodes = sum(len(ms) for ms in blk._core._node_ms)
+        peak = max(peak, len(blk._core._vecs) + nodes + blk._out.size // 64)
     cap = 8 * _lattice.NS * (len(_lattice.EMIT) + _lattice.FFT_LEN)
     assert peak <= cap, f"state peaked at {peak} > {cap}"
     assert drained > 100 * len(_lattice.EMIT)
