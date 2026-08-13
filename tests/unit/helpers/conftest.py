@@ -13,13 +13,16 @@ def _parse_range(header: str, size: int) -> tuple[int, int] | None:
     if not header.startswith("bytes=") or "," in header:
         return None
     start_s, _, end_s = header[len("bytes=") :].partition("-")
-    if start_s:
-        start = int(start_s)
-        end = int(end_s) if end_s else size - 1
-    elif end_s:
-        start = max(size - int(end_s), 0)
-        end = size - 1
-    else:
+    try:
+        if start_s:
+            start = int(start_s)
+            end = int(end_s) if end_s else size - 1
+        elif end_s:
+            start = max(size - int(end_s), 0)
+            end = size - 1
+        else:
+            return None
+    except ValueError:
         return None
     end = min(end, size - 1)
     if start < 0 or start > end:
@@ -31,6 +34,7 @@ class _Handler(http.server.SimpleHTTPRequestHandler):
     require_browser_ua = False
     last_status: int | None = None
     last_range: tuple[int, int] | None = None
+    served_bytes: int = 0
 
     def log_message(self, fmt: str, *args: object) -> None:
         return
@@ -50,6 +54,9 @@ class _Handler(http.server.SimpleHTTPRequestHandler):
         if range_header is None:
             _Handler.last_status = 200
             _Handler.last_range = None
+            path = self.translate_path(self.path)
+            if os.path.isfile(path):
+                _Handler.served_bytes += os.path.getsize(path)
             super().do_GET()
             return
         self._serve_range(range_header)
@@ -83,6 +90,7 @@ class _Handler(http.server.SimpleHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+        _Handler.served_bytes += len(body)
         _Handler.last_status = 206
         _Handler.last_range = (start, end)
 
@@ -93,6 +101,7 @@ def local_server(tmp_path: Path) -> Iterator[tuple[str, Path]]:
     root.mkdir()
     _Handler.last_status = None
     _Handler.last_range = None
+    _Handler.served_bytes = 0
 
     def factory(*args: object, **kw: object) -> _Handler:
         return _Handler(*args, directory=str(root), **kw)  # type: ignore[arg-type]
