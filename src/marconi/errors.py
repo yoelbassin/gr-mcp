@@ -11,11 +11,19 @@ _REGISTRY: dict[type[Exception], str] = {}
 # hand-ordered first-match scan is the very import-order dependence
 # classify_error exists to remove, one table further down (registering OSError
 # above FileNotFoundError would have made "not_found" unreachable).
+#
+# The environment entries matter as much as the argument ones: "internal_error"
+# tells the agent to stop and report a bug, so a full disk, a denied path or an
+# oversized allocation must not wear it — those are retryable with a smaller
+# slice or a fixed environment, and they were all landing there.
 _FALLBACK_CODES: dict[type[Exception], str] = {
     ValueError: "invalid_argument",
     TypeError: "invalid_argument",
     FileNotFoundError: "not_found",
     RuntimeError: "runtime_error",
+    MemoryError: "resource_exhausted",
+    PermissionError: "failed_precondition",
+    OSError: "io_error",
 }
 
 

@@ -10,6 +10,8 @@ from itertools import combinations as _combinations
 
 import numpy as _np
 
+from marconi.deadline import check_deadline as _check_deadline
+
 
 def gray_encode(x: int) -> int:
     return x ^ (x >> 1)
@@ -85,7 +87,11 @@ def _syndrome_table_cached(
     sigs = _column_signatures(list(parity_masks), code_bits, data_bits)
     table: dict[int, int] = {}
     for w in range(1, t + 1):
-        for combo in _combinations(range(code_bits), w):
+        for i, combo in enumerate(_combinations(range(code_bits), w)):
+            # this runs inside a pydantic validator, and the cap above still
+            # admits ~1M patterns: the caller's timeout has to reach in here
+            if not i % 4096:
+                _check_deadline()
             syn = 0
             for pos in combo:
                 syn ^= sigs[pos]

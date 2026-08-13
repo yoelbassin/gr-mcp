@@ -53,14 +53,29 @@ def test_eviction_drops_least_recently_used_first() -> None:
     assert new.exists()
 
 
-def test_a_fresh_entry_is_never_evicted_out_from_under_a_starting_run() -> None:
-    _entry("aged.cf32", 1000, age_s=10_000)
+def test_a_fresh_entry_is_spared_while_aged_ones_can_pay_the_budget() -> None:
+    aged = _entry("aged.cf32", 1000, age_s=10_000)
+    fresh = conversion_cache_dir() / "fresh.cf32"
+    fresh.write_bytes(b"\0" * 1000)
+
+    evict_conversion_cache(budget=1000)
+
+    assert not aged.exists()
+    assert fresh.exists(), "an entry inside the grace window is evicted last"
+
+
+def test_a_fresh_entry_yields_when_the_budget_cannot_be_met_without_it() -> None:
+    # young entries counted toward the total but could never be evicted, so a
+    # burst of large slices inside one grace window left the budget
+    # unenforceable — the one case it exists for. A re-conversion is cheaper
+    # than an unbounded cache.
     fresh = conversion_cache_dir() / "fresh.cf32"
     fresh.write_bytes(b"\0" * 10_000)
 
-    evict_conversion_cache(budget=0)
+    freed = evict_conversion_cache(budget=1000)
 
-    assert fresh.exists(), "an entry inside the grace window must survive"
+    assert freed == 10_000
+    assert not fresh.exists()
 
 
 def test_a_cache_hit_restamps_recency() -> None:

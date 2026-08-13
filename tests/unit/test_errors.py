@@ -70,3 +70,18 @@ def test_no_fastmcp_import_in_core_errors() -> None:
     from marconi import errors
 
     assert "fastmcp" not in inspect.getsource(errors)
+
+
+def test_environment_failures_are_not_internal_errors() -> None:
+    # "internal_error" tells the agent to stop and report a bug. A full disk, a
+    # denied path, or an allocation the machine cannot serve are none of those:
+    # they are retryable with a smaller slice or a fixed environment.
+    cases: list[tuple[Exception, str]] = [
+        (MemoryError("Unable to allocate 6.44 GiB"), "resource_exhausted"),
+        (PermissionError(13, "denied"), "failed_precondition"),
+        (OSError(28, "No space left on device"), "io_error"),
+        (FileNotFoundError(2, "missing"), "not_found"),
+    ]
+    for exc, want in cases:
+        code, _ = classify_error(exc)
+        assert code == want, f"{type(exc).__name__} -> {code}, want {want}"

@@ -12,7 +12,7 @@ from typing import Any, BinaryIO, Generic, TypeVar
 import numpy as np
 import numpy.typing as npt
 
-from marconi.deadline import check_deadline
+from marconi.deadline import bounded, check_deadline
 from marconi.engine.io.source import SourceSlice
 from marconi.engine.types.enums import CaptureDtype, ItemType
 from marconi.levelfit import kmeans_1d, percentile_span
@@ -430,7 +430,7 @@ def _sample_stream(path: Path, dtype: np.dtype[_S]) -> StreamSample[_S]:
         per = _STATS_SAMPLE_ITEMS // _STATS_SAMPLE_CHUNKS
         starts = np.linspace(0, total - per, _STATS_SAMPLE_CHUNKS).astype(np.int64)
         parts = []
-        for s in starts:
+        for s in bounded(starts):
             f.seek(int(s) * dtype.itemsize)
             parts.append(np.fromfile(f, dtype=dtype, count=per))
     return StreamSample(np.concatenate(parts), total, strided=True)

@@ -43,7 +43,7 @@ from marconi.mcp.vocab import (
     stage_details,
     stage_index,
 )
-from marconi.mcp.workspace import new_run_dir
+from marconi.mcp.workspace import discarded_if_unused, new_run_dir
 from marconi.survey import channelize_to_file, survey_iq
 from marconi.wire import Payload
 
@@ -159,6 +159,7 @@ def validate_modem(
     direction: Literal["rx", "tx"] = "rx",
     input_item_type: str = "c",
     input_level: str | None = None,
+    timeout: float = 60.0,
 ) -> dict[str, object]:
     """Compile a modem spec without running it — the fast iteration loop.
 
@@ -173,19 +174,21 @@ def validate_modem(
 
     A "warnings" list flags compositions that compile but silently misbehave
     (e.g. a window-seeding stage discarding an earlier seeder's windows) -
-    fix or knowingly ignore."""
+    fix or knowingly ignore. timeout caps the compile: a step model can do
+    real work in its validator (a syndrome table, a codebook sweep)."""
     start = _start_descriptor(input_item_type, input_level)
     try:
-        modem = Modem.from_spec(spec, step_models())
-        cp = compile_pipeline(
-            modem,
-            stage_registry(),
-            direction=direction,
-            sample_rate=sample_rate,
-            start=start,
-            source_io={"path": "unused"},
-            sink_io={"path": "unused"},
-        )
+        with set_deadline(timeout):
+            modem = Modem.from_spec(spec, step_models())
+            cp = compile_pipeline(
+                modem,
+                stage_registry(),
+                direction=direction,
+                sample_rate=sample_rate,
+                start=start,
+                source_io={"path": "unused"},
+                sink_io={"path": "unused"},
+            )
     except SpecValidationError as exc:
         code, _ = classify_error(exc)
         rows = [
@@ -304,14 +307,12 @@ def run_rx_tool(
         raise ValueError("capture_offset and capture_samples must be >= 0")
     if capture_path is None and (capture_offset or capture_samples):
         raise ValueError("capture_offset/capture_samples apply to capture_path only")
-    modem = Modem.from_spec(spec, step_models())
-    run_dir = new_run_dir("rx")
-    if capture_path is not None:
-        require_file(Path(capture_path), "capture")
-        # a first-time ci16/ci8/cu8 conversion is real work with no bound of
-        # its own; set_deadline here too so it counts against timeout - the
-        # min-nesting means engine_run_rx's own inner deadline can't extend it
-        with set_deadline(timeout):
+    # the whole call, spec parse included: a step model can do real work in its
+    # validator, and "hard cap on the entire call" has to mean the entire call
+    with set_deadline(timeout), discarded_if_unused(new_run_dir("rx")) as run_dir:
+        modem = Modem.from_spec(spec, step_models())
+        if capture_path is not None:
+            require_file(Path(capture_path), "capture")
             src_slice = ensure_cf32(
                 Path(capture_path),
                 capture_dtype,
@@ -328,22 +329,22 @@ def run_rx_tool(
                 trace=trace,
                 timeout=timeout,
             )
-    elif input_path is not None:
-        if input_item_type is None:
-            raise ValueError("input_item_type is required with input_path")
-        result = engine_run_rx(
-            modem,
-            stage_registry(),
-            sample_rate=sample_rate,
-            start=_start_descriptor(input_item_type, input_level),
-            workdir=run_dir,
-            input_stream=_input_stream(Path(input_path), input_item_type),
-            trace=trace,
-            timeout=timeout,
-        )
-    else:
-        raise ValueError("pass exactly one of capture_path or input_path")
-    return pipeline_payload(result, run_dir)
+        elif input_path is not None:
+            if input_item_type is None:
+                raise ValueError("input_item_type is required with input_path")
+            result = engine_run_rx(
+                modem,
+                stage_registry(),
+                sample_rate=sample_rate,
+                start=_start_descriptor(input_item_type, input_level),
+                workdir=run_dir,
+                input_stream=_input_stream(Path(input_path), input_item_type),
+                trace=trace,
+                timeout=timeout,
+            )
+        else:
+            raise ValueError("pass exactly one of capture_path or input_path")
+        return pipeline_payload(result, run_dir)
 
 
 def run_tx_tool(
@@ -720,8 +721,7 @@ def capture_tool(
     are real and usable. Iterate on ONE capture while forming hypotheses
     (same bits every run); re-capture only when you want fresh RF. Captures
     persist under ./marconi-runs/ until you remove them."""
-    run_dir = new_run_dir("capture")
-    try:
+    with discarded_if_unused(new_run_dir("capture")) as run_dir:
         result = capture_iq(
             run_dir / "iq.cf32",
             center_hz=center_hz,
@@ -731,13 +731,7 @@ def capture_tool(
             ppm=ppm,
             device=device,
         )
-    except Exception:
-        try:
-            run_dir.rmdir()
-        except OSError:
-            pass
-        raise
-    return result.as_payload()
+        return result.as_payload()
 
 
 TOOLS: dict[str, Callable[..., object]] = {
