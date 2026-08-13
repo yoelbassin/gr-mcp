@@ -1,21 +1,13 @@
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import pytest
 from _pytest.fixtures import FixtureFunctionDefinition
 from helpers.assets.manifest import Asset
-from helpers.assets.resolve import ASSET_ROOT
-
-SKIPPED: set[str] = set()
+from helpers.assets.root import asset_root
 
 _FETCH_HINT = "PYTHONPATH=tests uv run python -m helpers.assets fetch"
-
-
-def asset_root() -> Path:
-    override = os.environ.get("MARCONI_ASSET_ROOT")
-    return Path(override) if override else ASSET_ROOT
 
 
 def asset_path(name: str) -> Path:
@@ -26,7 +18,6 @@ def require_asset(name: str) -> Path:
     path = asset_path(name)
     if path.exists():
         return path
-    SKIPPED.add(name)
     pytest.skip(f"asset {name!r} absent; fetch with: {_FETCH_HINT}")
 
 
@@ -38,5 +29,21 @@ def asset_fixture(name: str) -> FixtureFunctionDefinition:
     return _resolved
 
 
-def strict_failures(index: dict[str, Asset], skipped: set[str]) -> list[str]:
-    return sorted(n for n in skipped if n in index and index[n].ci_required)
+# The strict verdict reads the filesystem, never the skips a run happened to
+# collect: a deselected gate, an xdist worker's private state or a typo'd
+# asset name must not be able to turn a missing capture into a green run.
+def missing_required(index: dict[str, Asset], root: Path) -> list[str]:
+    return sorted(
+        name
+        for name, asset in index.items()
+        if asset.ci_required and not (root / name).exists()
+    )
+
+
+__all__ = [
+    "asset_fixture",
+    "asset_path",
+    "asset_root",
+    "missing_required",
+    "require_asset",
+]
