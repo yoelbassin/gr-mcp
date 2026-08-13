@@ -26,7 +26,10 @@ def require_asset(name: str) -> Path:
     if path.exists():
         return path
     SKIPPED.add(name)
-    pytest.skip(f"asset {name!r} absent; fetch with: {_FETCH_HINT}")
+    pytest.skip(
+        f"asset {name!r} absent; fetch with: {_FETCH_HINT}",
+        allow_module_level=True,
+    )
 
 
 def strict_failures(index: dict[str, Asset], skipped: set[str]) -> list[str]:
