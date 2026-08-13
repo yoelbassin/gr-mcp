@@ -84,15 +84,18 @@ class _Handler(http.server.SimpleHTTPRequestHandler):
         with open(path, "rb") as f:
             f.seek(start)
             body = f.read(end - start + 1)
+        # Recorded before the body is written, as the 200 path above does: a
+        # client that reads its bytes and asserts wins the race against this
+        # thread otherwise, and reads back the reset None.
+        _Handler.served_bytes += len(body)
+        _Handler.last_status = 206
+        _Handler.last_range = (start, end)
         self.send_response(206)
         self.send_header("Content-Type", self.guess_type(path))
         self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
-        _Handler.served_bytes += len(body)
-        _Handler.last_status = 206
-        _Handler.last_range = (start, end)
 
 
 @pytest.fixture
