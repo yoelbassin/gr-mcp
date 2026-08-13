@@ -3,11 +3,12 @@ from __future__ import annotations
 import math
 from typing import Any, Literal
 
-from pydantic import Field, model_validator
+from pydantic import Field, StrictInt, model_validator
 from pydantic_core import PydanticCustomError
 
 from marconi.engine.compile.compile_context import CompileContext
 from marconi.engine.stages.base import DuplexStage, RxStage, Stage
+from marconi.engine.types.bounds import MAX_OVERSAMPLE
 from marconi.engine.types.descriptor import Carrier, Descriptor
 from marconi.engine.types.enums import ItemType
 from marconi.engine.types.levels import Level
@@ -80,9 +81,10 @@ MSK_LOOP_BW_DEFAULT = 0.0038
 
 class MskStep(Step):
     conv: Literal["msk"] = "msk"
-    loop_bw: float = MSK_LOOP_BW_DEFAULT
+    loop_bw: float = Field(default=MSK_LOOP_BW_DEFAULT, ge=0.0)
     loop_pole: float = Field(default=0.52, ge=0.0, le=1.0)
-    mf_oversample: int = Field(default=12, ge=1)
+    # the matched-filter bank is (2*sps+1) x mf_oversample wide
+    mf_oversample: StrictInt = Field(default=12, ge=1, le=MAX_OVERSAMPLE)
 
 
 class Msk(RxStage[CompileContext, MskStep]):

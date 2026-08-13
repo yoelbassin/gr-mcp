@@ -10,6 +10,13 @@ from pydantic_core import PydanticCustomError
 
 from marconi.engine.compile.compile_context import CompileContext
 from marconi.engine.stages.base import RxStage, Stage
+from marconi.engine.types.bounds import (
+    MAX_DECIM,
+    MAX_FILTER_TAPS,
+    MAX_FRAME_ITEMS,
+    MAX_RESAMPLE_FACTOR,
+    MAX_WINDOW_SYMBOLS,
+)
 from marconi.engine.types.descriptor import Amplitude, Descriptor
 from marconi.engine.types.enums import AgcMode, ItemType
 from marconi.engine.types.levels import Level
@@ -19,7 +26,9 @@ from marconi.engine.types.step import Step
 class ChannelizeStep(Step):
     conv: Literal["channelize"] = "channelize"
     decim: StrictInt = Field(
-        description="Integer decimation factor; output rate = input rate / decim."
+        ge=1,
+        le=MAX_DECIM,
+        description="Integer decimation factor; output rate = input rate / decim.",
     )
     bandwidth_hz: float = Field(
         description=(
@@ -37,8 +46,6 @@ class ChannelizeStep(Step):
 
     @model_validator(mode="after")
     def _ok(self) -> "ChannelizeStep":
-        if self.decim < 1:
-            raise PydanticCustomError("value_error", "decim must be >= 1")
         if self.bandwidth_hz <= 0:
             raise PydanticCustomError("value_error", "bandwidth_hz must be > 0")
         return self
@@ -161,16 +168,10 @@ class Invert(RxStage[CompileContext, InvertStep]):
 
 class ResampleStep(Step):
     conv: Literal["resample"] = "resample"
-    interpolation: StrictInt
-    decimation: StrictInt
-
-    @model_validator(mode="after")
-    def _ok(self) -> "ResampleStep":
-        if self.interpolation < 1:
-            raise PydanticCustomError("value_error", "interpolation must be >= 1")
-        if self.decimation < 1:
-            raise PydanticCustomError("value_error", "decimation must be >= 1")
-        return self
+    # the anti-imaging filter is sized by the interpolation factor, so an
+    # unbounded ratio designs an unbounded filter inside the worker
+    interpolation: StrictInt = Field(ge=1, le=MAX_RESAMPLE_FACTOR)
+    decimation: StrictInt = Field(ge=1, le=MAX_RESAMPLE_FACTOR)
 
 
 class Resample(RxStage[CompileContext, ResampleStep]):
@@ -239,6 +240,7 @@ class AgcStep(Step):
     reference: float = 1.0
     window_symbols: float = Field(
         default=16.0,
+        le=MAX_WINDOW_SYMBOLS,
         description=(
             "Feedforward/power normalization window, in symbols. For bursty "
             "signals it must exceed the burst-repetition scale (e.g. 1024): "
@@ -394,6 +396,7 @@ class SquelchStep(Step):
     )
     alpha_symbols: float = Field(
         default=1.0,
+        le=MAX_WINDOW_SYMBOLS,
         description=(
             "Averaging time constant of the power estimate, in symbols. Too "
             "fast gates OOK/PPM frame bodies off mid-burst; marginal-SNR PPM "
@@ -404,6 +407,7 @@ class SquelchStep(Step):
     )
     ramp_symbols: float = Field(
         default=0.0,
+        le=MAX_WINDOW_SYMBOLS,
         description=(
             "cosine edge length in symbols applied at each gate opening and "
             "closing; suppresses the switching transient"
@@ -458,6 +462,8 @@ class EqualizerStep(Step):
     conv: Literal["equalizer"] = "equalizer"
     num_taps: StrictInt = Field(
         default=15,
+        ge=1,
+        le=MAX_FILTER_TAPS,
         description="FIR length in taps; must span the channel's delay spread",
     )
     step_size: float = Field(
@@ -471,8 +477,6 @@ class EqualizerStep(Step):
 
     @model_validator(mode="after")
     def _ok(self) -> "EqualizerStep":
-        if self.num_taps < 1:
-            raise PydanticCustomError("value_error", "num_taps must be >= 1")
         if self.step_size <= 0.0:
             raise PydanticCustomError("value_error", "step_size must be > 0")
         if self.modulus <= 0.0:
@@ -510,13 +514,7 @@ class Equalizer(RxStage[CompileContext, EqualizerStep]):
 
 class AmStep(Step):
     conv: Literal["am"] = "am"
-    dc_block_len: StrictInt = 1024
-
-    @model_validator(mode="after")
-    def _ok(self) -> "AmStep":
-        if self.dc_block_len < 2:
-            raise PydanticCustomError("value_error", "dc_block_len must be >= 2")
-        return self
+    dc_block_len: StrictInt = Field(default=1024, ge=2, le=MAX_FRAME_ITEMS)
 
 
 class Am(RxStage[CompileContext, AmStep]):
@@ -537,13 +535,7 @@ class Am(RxStage[CompileContext, AmStep]):
 class FmDemodStep(Step):
     conv: Literal["fm_demod"] = "fm_demod"
     deviation: float = Field(gt=0)
-    dc_block_len: StrictInt = 1024
-
-    @model_validator(mode="after")
-    def _ok(self) -> "FmDemodStep":
-        if self.dc_block_len < 2:
-            raise PydanticCustomError("value_error", "dc_block_len must be >= 2")
-        return self
+    dc_block_len: StrictInt = Field(default=1024, ge=2, le=MAX_FRAME_ITEMS)
 
 
 class FmDemod(RxStage[CompileContext, FmDemodStep]):
@@ -563,7 +555,7 @@ class FmDemod(RxStage[CompileContext, FmDemodStep]):
 
 class AnalyticStep(Step):
     conv: Literal["analytic"] = "analytic"
-    ntaps: StrictInt = 65
+    ntaps: StrictInt = Field(default=65, le=MAX_FILTER_TAPS)
 
     @model_validator(mode="after")
     def _ok(self) -> "AnalyticStep":

@@ -9,6 +9,7 @@ from pydantic_core import PydanticCustomError
 
 from marconi.engine.compile.compile_context import CompileContext
 from marconi.engine.stages.base import DuplexStage, RxStage, Stage
+from marconi.engine.types.bounds import MAX_FILTER_TAPS, MAX_FRAME_ITEMS
 from marconi.engine.types.descriptor import Carrier, Descriptor
 from marconi.engine.types.enums import ItemType
 from marconi.engine.types.levels import Level
@@ -22,7 +23,7 @@ class PreambleSyncStep(Step):
     conv: Literal["preamble_sync"] = "preamble_sync"
     preamble_i: list[float]
     preamble_q: list[float]
-    pad_symbols: StrictInt = 192
+    pad_symbols: StrictInt = Field(default=192, ge=0, le=MAX_FRAME_ITEMS)
     threshold: float = 0.9
     # True: the preamble is drawn from the payload constellation, so the
     # modulus/phase-grid typo check applies. False: a freeform training
@@ -38,8 +39,6 @@ class PreambleSyncStep(Step):
             )
         if not self.preamble_i:
             raise PydanticCustomError("value_error", "preamble must be non-empty")
-        if self.pad_symbols < 0:
-            raise PydanticCustomError("value_error", "pad_symbols must be >= 0")
         if self.threshold <= 0:
             raise PydanticCustomError("value_error", "threshold must be > 0")
         return self
@@ -121,17 +120,13 @@ class FllStep(Step):
             "rolloff mistunes them."
         ),
     )
-    filter_size: StrictInt = 44
-    loop_bw: float = 0.03
+    filter_size: StrictInt = Field(default=44, ge=1, le=MAX_FILTER_TAPS)
+    loop_bw: float = Field(default=0.03, gt=0.0)
 
     @model_validator(mode="after")
     def _ok(self) -> "FllStep":
         if not (0.0 < self.rolloff <= 1.0):
             raise PydanticCustomError("value_error", "rolloff must be in (0, 1]")
-        if self.filter_size < 1:
-            raise PydanticCustomError("value_error", "filter_size must be >= 1")
-        if self.loop_bw <= 0.0:
-            raise PydanticCustomError("value_error", "loop_bw must be > 0")
         return self
 
 

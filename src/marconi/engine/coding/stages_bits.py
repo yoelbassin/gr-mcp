@@ -9,6 +9,7 @@ from marconi.engine.coding import ops_bits
 from marconi.engine.coding.builder import CodingBuilder
 from marconi.engine.coding.primitives import effective_t, syndrome_table
 from marconi.engine.stages.base import CodingStage, Stage
+from marconi.engine.types.bounds import MAX_FRAME_ITEMS, check_match_tolerance
 from marconi.engine.types.descriptor import Carrier
 from marconi.engine.types.enums import DecodeMode, EmitMode, ItemType
 from marconi.engine.types.levels import Level
@@ -69,6 +70,8 @@ class SyncWordStep(Step):
             raise PydanticCustomError(
                 "value_error", "bits must contain only '0' and '1'"
             )
+        pattern_bits = 4 * len(self.sync) if self.sync else len(self.bits)
+        check_match_tolerance(self.max_errors, pattern_bits, field="max_errors")
         return self
 
 
@@ -280,7 +283,7 @@ class MarkFrame(CodingStage[MarkFrameStep]):
 
 class SegmentStep(Step):
     conv: Literal["segment"] = "segment"
-    frame_body_len: StrictInt = Field(ge=1)
+    frame_body_len: StrictInt = Field(ge=1, le=MAX_FRAME_ITEMS)
 
 
 class Segment(CodingStage[SegmentStep]):
@@ -523,6 +526,21 @@ class RsCodeStep(Step):
         if self.prim_poly.bit_length() != self.symbol_bits + 1:
             raise PydanticCustomError(
                 "value_error", "prim_poly must have degree symbol_bits"
+            )
+        # fcr and generator are ELEMENTS of GF(2**symbol_bits); outside the
+        # field they are not a bad choice, they are not a choice at all
+        field = 1 << self.symbol_bits
+        if not 0 <= self.fcr < field:
+            raise PydanticCustomError(
+                "value_error",
+                "fcr {fcr} is outside GF(2**{symbol_bits})",
+                {"fcr": self.fcr, "symbol_bits": self.symbol_bits},
+            )
+        if not 0 < self.generator < field:
+            raise PydanticCustomError(
+                "value_error",
+                "generator {generator} is outside GF(2**{symbol_bits})",
+                {"generator": self.generator, "symbol_bits": self.symbol_bits},
             )
         return self
 

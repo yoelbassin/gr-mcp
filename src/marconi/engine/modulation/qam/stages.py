@@ -7,6 +7,7 @@ from pydantic import Field, StrictInt
 
 from marconi.engine.compile.compile_context import CompileContext
 from marconi.engine.stages.base import DuplexStage, Stage
+from marconi.engine.types.bounds import MAX_FILTER_TAPS
 from marconi.engine.types.descriptor import Amplitude, Carrier, Descriptor
 from marconi.engine.types.enums import ItemType, QamOrder
 from marconi.engine.types.levels import Level
@@ -16,11 +17,12 @@ from marconi.engine.types.step import Step
 class QamDemodStep(Step):
     conv: Literal["qam_demod"] = "qam_demod"
     order: QamOrder
-    alpha: float = 0.35
+    alpha: float = Field(default=0.35, gt=0.0, le=1.0)
     loop_bw: float = Field(
-        default=0.045, description="symbol_sync timing-loop bandwidth"
+        default=0.045, gt=0.0, description="symbol_sync timing-loop bandwidth"
     )
-    span: StrictInt = 11
+    # the RRC is round(sps*span)+1 taps long
+    span: StrictInt = Field(default=11, ge=1, le=MAX_FILTER_TAPS)
 
 
 class QamDemod(DuplexStage[CompileContext, QamDemodStep]):

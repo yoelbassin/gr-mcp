@@ -7,6 +7,10 @@ from pydantic_core import PydanticCustomError
 
 from marconi.engine.compile.compile_context import CompileContext
 from marconi.engine.stages.base import DuplexStage, Stage
+from marconi.engine.types.bounds import (
+    MAX_CHIRP_PREFIX_SAMPLES,
+    MAX_DECHIRP_FFT,
+)
 from marconi.engine.types.descriptor import Carrier, Descriptor
 from marconi.engine.types.enums import ItemType
 from marconi.engine.types.levels import Level
@@ -25,7 +29,7 @@ def _check_sf(sf: int) -> None:
         )
 
 
-def _check_osr_pad(oversample: int, zero_pad: int) -> None:
+def _check_osr_pad(sf: int, oversample: int, zero_pad: int) -> None:
     if not (1 <= oversample <= _OSR_MAX):
         raise PydanticCustomError(
             "value_error",
@@ -34,6 +38,25 @@ def _check_osr_pad(oversample: int, zero_pad: int) -> None:
         )
     if zero_pad < 1:
         raise PydanticCustomError("value_error", "zero_pad must be >= 1")
+    # The dechirp FFT is oversample * 2**sf * zero_pad long and one is taken
+    # per symbol window, so the PRODUCT is what has to be bounded — sf and
+    # oversample are capped above, but zero_pad alone was not, and no single
+    # field's ceiling expresses the FFT this triple asks for.
+    fft_len = oversample * (1 << sf) * zero_pad
+    if fft_len > MAX_DECHIRP_FFT:
+        raise PydanticCustomError(
+            "value_error",
+            "oversample {oversample} x 2**sf {n} x zero_pad {zero_pad} is a "
+            "{fft_len}-point FFT per symbol window; {max} is the ceiling",
+            {
+                "oversample": oversample,
+                "n": 1 << sf,
+                "zero_pad": zero_pad,
+                "fft_len": fft_len,
+                "max": MAX_DECHIRP_FFT,
+                "field": "zero_pad",
+            },
+        )
 
 
 class CssDemapStep(Step):
@@ -55,7 +78,7 @@ class DechirpStep(Step):
     @model_validator(mode="after")
     def _ok(self) -> "DechirpStep":
         _check_sf(self.sf)
-        _check_osr_pad(self.oversample, self.zero_pad)
+        _check_osr_pad(self.sf, self.oversample, self.zero_pad)
         return self
 
 
@@ -71,9 +94,27 @@ class ChirpSyncStep(Step):
     @model_validator(mode="after")
     def _ok(self) -> "ChirpSyncStep":
         _check_sf(self.sf)
-        _check_osr_pad(self.oversample, self.zero_pad)
+        _check_osr_pad(self.sf, self.oversample, self.zero_pad)
         if self.preamble_len < 5:
             raise PydanticCustomError("value_error", "preamble_len must be >= 5")
+        # the TX prefix materializes this many complex samples as one Python
+        # list on its way into vector_insert_c
+        prefix = round(
+            (self.preamble_len + self.sfd_symbols) * self.oversample * (1 << self.sf)
+        )
+        if prefix > MAX_CHIRP_PREFIX_SAMPLES:
+            raise PydanticCustomError(
+                "value_error",
+                "(preamble_len {preamble_len} + sfd_symbols {sfd}) x oversample "
+                "x 2**sf is a {prefix}-sample prefix; {max} is the ceiling",
+                {
+                    "preamble_len": self.preamble_len,
+                    "sfd": self.sfd_symbols,
+                    "prefix": prefix,
+                    "max": MAX_CHIRP_PREFIX_SAMPLES,
+                    "field": "preamble_len",
+                },
+            )
         if self.sfd_symbols != 0.0 and self.sfd_symbols < 1.0:
             raise PydanticCustomError(
                 "value_error", "sfd_symbols must be 0 (no SFD) or >= 1"

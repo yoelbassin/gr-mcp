@@ -9,6 +9,11 @@ from pydantic_core import PydanticCustomError
 
 from marconi.engine.compile.compile_context import CompileContext
 from marconi.engine.stages.base import DuplexStage, RxStage, Stage
+from marconi.engine.types.bounds import (
+    MAX_DELAY_ITEMS,
+    MAX_FILTER_TAPS,
+    MAX_OVERSAMPLE,
+)
 from marconi.engine.types.descriptor import Amplitude, Carrier, Descriptor
 from marconi.engine.types.enums import ItemType, PskOrder
 from marconi.engine.types.levels import Level
@@ -20,7 +25,9 @@ class SymbolSyncStep(Step):
     # explicit rather than derived: the compiler needs rate_factor (1/sps)
     # from the params alone, before any stream exists
     sps: StrictInt = Field(
-        description="input samples per symbol the timing loop decimates by"
+        ge=2,
+        le=MAX_OVERSAMPLE * MAX_OVERSAMPLE,
+        description="input samples per symbol the timing loop decimates by",
     )
     alpha: float = 0.35
     loop_bw: float = Field(
@@ -41,14 +48,11 @@ class SymbolSyncStep(Step):
             "this path. >0 = continuous Gardner loop for sustained signals."
         ),
     )
-    span: StrictInt = 11
+    # the RRC is round(sps*span)+1 taps long
+    span: StrictInt = Field(default=11, ge=1, le=MAX_FILTER_TAPS)
 
     @model_validator(mode="after")
     def _ok(self) -> "SymbolSyncStep":
-        if self.sps < 2:
-            raise PydanticCustomError(
-                "value_error", "sps must be >= 2 to recover symbol timing"
-            )
         if not 0.0 < self.alpha <= 1.0:
             raise PydanticCustomError("value_error", "alpha must be in (0, 1]")
         if self.loop_bw == 0.0 and self.alpha < 0.1:
@@ -57,8 +61,6 @@ class SymbolSyncStep(Step):
                 "open-loop timing (loop_bw=0) rides the |x|^2 clock line, "
                 "which vanishes without excess bandwidth: alpha must be >= 0.1",
             )
-        if self.span < 1:
-            raise PydanticCustomError("value_error", "span must be >= 1")
         return self
 
 
@@ -163,7 +165,8 @@ class SampleSymbols(RxStage[CompileContext, SampleSymbolsStep]):
 
 class DifferentialDemodStep(Step):
     conv: Literal["differential_demod"] = "differential_demod"
-    delay: StrictInt = Field(default=1, ge=1)
+    # delay_cc allocates the whole line up front
+    delay: StrictInt = Field(default=1, ge=1, le=MAX_DELAY_ITEMS)
     rotate: float = 0.0
     out_order: PskOrder | None = Field(
         default=None,
@@ -236,7 +239,7 @@ class PskDemodStep(Step):
             "demap, not psk_demod."
         ),
     )
-    span: StrictInt = Field(default=11, ge=1)
+    span: StrictInt = Field(default=11, ge=1, le=MAX_FILTER_TAPS)
 
     @model_validator(mode="after")
     def _loops_run(self) -> "PskDemodStep":

@@ -10,6 +10,11 @@ from marconi.engine.coding import ops_bits, ops_symbols
 from marconi.engine.coding.builder import CodingBuilder
 from marconi.engine.coding.stages_bits import _codebook_kw, check_codebook_sizing
 from marconi.engine.stages.base import CodingStage, Stage
+from marconi.engine.types.bounds import (
+    MAX_FRAME_ITEMS,
+    MAX_WINDOW_SYMBOLS,
+    check_match_tolerance,
+)
 from marconi.engine.types.descriptor import Amplitude, Carrier, Descriptor
 from marconi.engine.types.enums import DcMode, DecodeMode, ItemType
 from marconi.engine.types.levels import Level
@@ -26,8 +31,8 @@ class SyncSymbolsStep(Step):
             "every 0 becomes a wildcard and the correlator over-matches."
         )
     )
-    max_errors: StrictInt = 0
-    pre_symbols: StrictInt = 0
+    max_errors: StrictInt = Field(default=0, ge=0)
+    pre_symbols: StrictInt = Field(default=0, ge=0, le=MAX_FRAME_ITEMS)
 
     @model_validator(mode="after")
     def _sign_alphabet(self) -> "SyncSymbolsStep":
@@ -42,6 +47,7 @@ class SyncSymbolsStep(Step):
                 "value_error",
                 "pattern needs at least one non-wildcard (+-1) entry",
             )
+        check_match_tolerance(self.max_errors, len(self.pattern), field="max_errors")
         return self
 
 
@@ -64,7 +70,7 @@ class SyncSymbols(CodingStage[SyncSymbolsStep]):
 
 class NormalizeStep(Step):
     conv: Literal["normalize"] = "normalize"
-    span_symbols: StrictInt = Field(ge=1)
+    span_symbols: StrictInt = Field(ge=1, le=MAX_WINDOW_SYMBOLS)
     dc: DcMode = DcMode.MEDIAN
     gain_percentile: float | None = Field(default=None, ge=0.0, le=100.0)
 

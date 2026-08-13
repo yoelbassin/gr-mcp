@@ -10,6 +10,12 @@ from pydantic_core import PydanticCustomError
 
 from marconi.engine.compile.compile_context import CompileContext
 from marconi.engine.stages.base import RxStage, Stage
+from marconi.engine.types.bounds import (
+    MAX_DECODER_ITERATIONS,
+    MAX_FRAME_ITEMS,
+    MAX_LIST_SIZE,
+    MAX_OVERSAMPLE,
+)
 from marconi.engine.types.descriptor import Carrier, Descriptor
 from marconi.engine.types.enums import ItemType
 from marconi.engine.types.levels import Level
@@ -144,7 +150,7 @@ class Harden(RxStage[CompileContext, HardenStep]):
 class SyncAlignStep(Step):
     conv: Literal["sync_align"] = "sync_align"
     access_code: str
-    frame_len: StrictInt = Field(ge=1)
+    frame_len: StrictInt = Field(ge=1, le=MAX_FRAME_ITEMS)
     threshold: StrictInt = Field(default=0, ge=0)
 
     @model_validator(mode="after")
@@ -208,9 +214,9 @@ class FecStep(Step):
     scheme: str
     rate_inv: StrictInt = Field(ge=1)
     polys: list[int] = Field(min_length=1)
-    frame_bits: StrictInt = Field(ge=1)
-    tail: StrictInt = Field(default=0, ge=0)
-    k: StrictInt = Field(default=1, ge=1)
+    frame_bits: StrictInt = Field(ge=1, le=MAX_FRAME_ITEMS)
+    tail: StrictInt = Field(default=0, ge=0, le=MAX_FRAME_ITEMS)
+    k: StrictInt = Field(default=1, ge=1, le=MAX_OVERSAMPLE)
 
     @model_validator(mode="after")
     def _ok(self) -> "FecStep":
@@ -285,11 +291,12 @@ class Fec(RxStage[CompileContext, FecStep]):
 
 class PolarStep(Step):
     conv: Literal["polar"] = "polar"
-    block_size: StrictInt = Field(ge=2)
+    block_size: StrictInt = Field(ge=2, le=MAX_FRAME_ITEMS)
     info_bits: StrictInt = Field(ge=1)
     frozen_positions: list[int]
     frozen_values: list[int]
-    list_size: StrictInt = Field(default=1, ge=1)
+    # the decoder holds list_size full candidate paths at once
+    list_size: StrictInt = Field(default=1, ge=1, le=MAX_LIST_SIZE)
 
     @model_validator(mode="after")
     def _ok(self) -> "PolarStep":
@@ -374,9 +381,9 @@ class Polar(RxStage[CompileContext, PolarStep]):
 
 class LdpcStep(Step):
     conv: Literal["ldpc"] = "ldpc"
-    block_size: StrictInt = Field(ge=2)
+    block_size: StrictInt = Field(ge=2, le=MAX_FRAME_ITEMS)
     check_nodes: list[list[int]]
-    max_iterations: StrictInt = Field(default=50, ge=1)
+    max_iterations: StrictInt = Field(default=50, ge=1, le=MAX_DECODER_ITERATIONS)
 
     @model_validator(mode="after")
     def _ok(self) -> "LdpcStep":

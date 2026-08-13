@@ -10,8 +10,9 @@ from pydantic_core import PydanticCustomError
 from marconi.engine.compile.compile_context import CompileContext
 from marconi.engine.modulation.ofdm.primitives import LOCK_MIN_RATIO_DEFAULT
 from marconi.engine.stages.base import RxStage, Stage
+from marconi.engine.types.bounds import MAX_DELAY_ITEMS, MAX_FRAME_ITEMS
 from marconi.engine.types.descriptor import Carrier, Descriptor
-from marconi.engine.types.enums import ItemType
+from marconi.engine.types.enums import ItemType, PskOrder
 from marconi.engine.types.levels import Level
 from marconi.engine.types.perm import check_block_permutation
 from marconi.engine.types.step import Step
@@ -52,7 +53,7 @@ class OfdmFrameSyncProbeStep(Step):
     cp_len: StrictInt
     sym_len: StrictInt
     null_len: StrictInt
-    frame_len: StrictInt
+    frame_len: StrictInt = Field(le=MAX_FRAME_ITEMS)
     data_syms: StrictInt
 
     @model_validator(mode="after")
@@ -103,7 +104,7 @@ class OfdmDemodStep(Step):
     cp_len: StrictInt
     sym_len: StrictInt
     null_len: StrictInt
-    frame_len: StrictInt
+    frame_len: StrictInt = Field(le=MAX_FRAME_ITEMS)
     data_syms: StrictInt
     n_carriers: StrictInt
     bin_perm: list[int]
@@ -170,6 +171,26 @@ class OfdmDemod(RxStage[CompileContext, OfdmDemodStep]):
         return in_rate * cells / step.frame_len
 
 
+_NAMED_SCHEME_ORDERS: dict[str, frozenset[int]] = {
+    "psk": frozenset(int(o) for o in PskOrder),
+    "qam": frozenset({16}),
+}
+
+
+def _check_named_order(scheme: str, order: int) -> None:
+    """A named scheme resolves to a stock GR constellation, and only a few
+    orders have one. Unchecked, the order reached _const_psk in the worker and
+    came back as a BackendError naming a block id, from a spec validate_modem
+    had called valid."""
+    supported = _NAMED_SCHEME_ORDERS[scheme]
+    if order not in supported:
+        raise PydanticCustomError(
+            "value_error",
+            "scheme {scheme!r} supports order {supported}, got {order}",
+            {"scheme": scheme, "supported": sorted(supported), "order": order},
+        )
+
+
 def _check_explicit_points(
     points_i: list[float] | None, points_q: list[float] | None
 ) -> None:
@@ -192,8 +213,9 @@ def _check_explicit_points(
 
 class DqpskSoftDemapStep(Step):
     conv: Literal["dqpsk_soft_demap"] = "dqpsk_soft_demap"
-    data_syms: StrictInt
-    n_carriers: StrictInt
+    data_syms: StrictInt = Field(ge=1, le=MAX_FRAME_ITEMS)
+    # n_carriers sizes a delay_cc line, which is allocated up front
+    n_carriers: StrictInt = Field(ge=1, le=MAX_DELAY_ITEMS)
     scheme: Literal["psk", "explicit"] = "psk"
     order: StrictInt = 4
     points_i: list[float] | None = None
@@ -206,6 +228,7 @@ class DqpskSoftDemapStep(Step):
                 raise PydanticCustomError(
                     "value_error", "named schemes take order, not points"
                 )
+            _check_named_order(self.scheme, self.order)
         elif self.scheme == "explicit":
             _check_explicit_points(self.points_i, self.points_q)
         else:
@@ -283,7 +306,7 @@ class OfdmCoherentSyncStep(Step):
     n_carriers: StrictInt
     kmin: StrictInt
     dc_search: StrictInt
-    warmup_syms: StrictInt
+    warmup_syms: StrictInt = Field(le=MAX_FRAME_ITEMS)
     pilot_lens: list[int]
     pilot_carriers: list[int]
     pilot_i: list[float]
@@ -410,6 +433,7 @@ class SoftDemapStep(Step):
                     "constellations emit collapsed soft decisions (measured: 64 "
                     "clean points decode to 16 distinct values)",
                 )
+            _check_named_order(self.scheme, self.order)
         elif self.scheme == "explicit":
             if self.order is not None:
                 raise PydanticCustomError(
