@@ -407,6 +407,21 @@ _SOFT_NEGATIVE = 1.45
 _SOFT_MIN_POLARITY_FRACTION = 0.02
 _SOFT_MAX_SIGN_CORR = 0.15
 
+# A soft stream carrying non-finite items is not the stream it claims to be, so
+# it scores nothing at all rather than scoring the survivors. run_rx rejects a
+# non-finite INPUT capture outright, so a NaN/Inf reaching here was manufactured
+# by the path itself — measured: agc mode='power' divides by the rms of an
+# exactly-zero span. Dropping them silently and judging what was left certified
+# "decoded" over 1311 real items of a 65536-item stream that was 98% NaN, with
+# nothing on the wire saying so. No tolerance band: a healthy path emits none,
+# which the whole suite passing at this bar is the measurement for.
+_NON_FINITE_CAVEAT = (
+    "soft stream unscorable: {bad} of {total} sampled items are non-finite "
+    "({pct:.1f}%). run_rx refuses a non-finite capture, so these were produced "
+    "by the path — check for an agc over a zero-power span, or a stage dividing "
+    "by a level it never established"
+)
+
 _SOFT_ACTIVE_WINDOW = 64
 _SOFT_ACTIVE_HI_PCTILE = 90.0
 # Windowed power blurs about half a window of idle into each burst edge, so a
@@ -490,24 +505,41 @@ def _emit_soft(
 def soft_evidence(
     path: Path | None, *, decode_grade: bool = True
 ) -> list[QualityEvidence]:
+    return _soft_reading(path, decode_grade=decode_grade)[0]
+
+
+def _soft_reading(
+    path: Path | None, *, decode_grade: bool = True
+) -> tuple[list[QualityEvidence], str | None]:
+    """The soft evidence, and a caveat naming what had to be discarded to get
+    it. Sampled once: the caveat cannot be a second pass over the file."""
     if path is None or not path.is_file():
-        return []
+        return [], None
     x = _sample_soft(path)
-    x = x[np.isfinite(x)]
+    finite = np.isfinite(x)
+    n_bad = int(x.size - int(finite.sum()))
+    if n_bad:
+        return [], _NON_FINITE_CAVEAT.format(
+            bad=n_bad, total=int(x.size), pct=100.0 * n_bad / max(x.size, 1)
+        )
+    x = x[finite]
     if x.size < _SOFT_MIN_ITEMS:
-        return []
+        return [], None
     active = _active_mask(x)
     if not active.any():
-        return _emit_soft(0.0, Assessment.NEGATIVE, decode_grade)
+        return _emit_soft(0.0, Assessment.NEGATIVE, decode_grade), None
     xa = x[active]
     if xa.size < _SOFT_MIN_ITEMS:
-        return []
+        return [], None
     fit = fit_levels(xa)
     if fit.order > 2 and fit.separation >= _SOFT_MULTILEVEL_SEPARATION:
-        return _emit_soft(
-            float(min(fit.separation, _SOFT_VALUE_CAP)),
-            Assessment.POSITIVE,
-            decode_grade,
+        return (
+            _emit_soft(
+                float(min(fit.separation, _SOFT_VALUE_CAP)),
+                Assessment.POSITIVE,
+                decode_grade,
+            ),
+            None,
         )
     mag = np.abs(xa)
     spread = float(mag.std())
@@ -532,8 +564,11 @@ def soft_evidence(
     elif ratio <= _SOFT_NEGATIVE:
         assessment = Assessment.NEGATIVE
     else:
-        return []
-    return _emit_soft(float(min(ratio, _SOFT_VALUE_CAP)), assessment, decode_grade)
+        return [], None
+    return (
+        _emit_soft(float(min(ratio, _SOFT_VALUE_CAP)), assessment, decode_grade),
+        None,
+    )
 
 
 def assess_quality(
@@ -545,6 +580,7 @@ def assess_quality(
     soft_stream: Path | None,
     soft_decode_grade: bool = True,
 ) -> QualityReport:
+    soft, caveat = _soft_reading(soft_stream, decode_grade=soft_decode_grade)
     evidence = (
         sync_evidence(census, registry)
         + tag_sync_evidence(diagnostics)
@@ -552,7 +588,16 @@ def assess_quality(
         + marks_evidence(marks)
         + lock_evidence(diagnostics)
         + dominance_evidence(diagnostics)
-        + soft_evidence(soft_stream, decode_grade=soft_decode_grade)
+        + soft
     )
     verdict, rationale = verdict_from(evidence)
+    if caveat is not None:
+        # rides the rationale the tool docstring already sends the agent to,
+        # rather than a new wire field every clean run would pay tokens for.
+        # Carried whatever the verdict: independent evidence may still support a
+        # decode, and the operator needs to know their stream was poisoned
+        # either way. When it is the whole story it REPLACES the no-evidence
+        # text, which says "no soft stream" — there is one, and saying both
+        # sends the reader looking for a stream the next sentence describes.
+        rationale = f"{rationale}. {caveat}" if evidence else caveat
     return QualityReport(verdict=verdict, evidence=evidence, rationale=rationale)

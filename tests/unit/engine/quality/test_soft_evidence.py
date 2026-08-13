@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 
 from marconi.engine import quality
+from marconi.engine.backends.base import BlockCensus
 from marconi.engine.io.bitfile import write_llrs
 from marconi.engine.quality import (
     _SOFT_POSITIVE,
@@ -13,6 +14,7 @@ from marconi.engine.quality import (
     _sample_soft,
     soft_evidence,
 )
+from marconi.engine.stages.registry import stage_registry
 
 
 def _llr_file(tmp_path: Path, values: np.ndarray) -> Path:
@@ -224,3 +226,84 @@ def test_active_gate_keeps_bursty_llrs_above_the_positive_bar(tmp_path: Path) ->
     assert shipped >= _SOFT_POSITIVE * 2.0, shipped  # measured 5.5, bar 2.0
     # every step down the gate admits more idle and costs ratio
     assert shipped > ratio_at(0.25) > ratio_at(0.10) > ratio_at(0.02)
+
+
+def _poisoned(tmp_path: Path, nan_fraction: float, name: str) -> Path:
+    """A clean +-2.0 decision stream with a leading NaN span — a poisoned
+    PREFIX, not the all-NaN degenerate case. Written straight to the file on
+    purpose: this scores whatever hands quality a non-finite stream, so it must
+    not depend on any one producer still being able to make one."""
+    rng = np.random.default_rng(0)
+    n_bad = int(_SOFT_SAMPLE_ITEMS * nan_fraction)
+    clean = np.sign(rng.standard_normal(_SOFT_SAMPLE_ITEMS - n_bad)) * 2.0
+    values = np.concatenate([np.full(n_bad, np.nan), clean])
+    p = tmp_path / f"{name}.f32"
+    write_llrs(p, values.astype(np.float32))
+    return p
+
+
+@pytest.mark.parametrize("nan_fraction", [0.02, 0.5, 0.9, 0.98])
+def test_a_partly_non_finite_stream_scores_nothing(
+    tmp_path: Path, nan_fraction: float
+) -> None:
+    """np.isfinite() DROPPED the poisoned items and scored the survivors as if
+    they were the stream: at 98% NaN, 1311 real items of 65536 still certified
+    "decoded". Partial poisoning is the case that matters — the all-NaN one was
+    benign, falling under _SOFT_MIN_ITEMS and reading uncertain anyway.
+
+    Found via agc mode='power' dividing by the rms of a zero span, which is now
+    floored at its source; a soft stream a caller hands us via input_path is
+    never re-scanned by _reject_nonfinite's capture path, and a diverging
+    equalizer can still produce one, so the reading is guarded here regardless
+    of who poisons it."""
+    assert soft_evidence(_poisoned(tmp_path, nan_fraction, "p")) == []
+
+
+def test_the_same_stream_without_the_poison_does_certify(tmp_path: Path) -> None:
+    # the control: the surviving span is genuinely clean, so the refusal above
+    # is the non-finites and nothing else
+    clean = _poisoned(tmp_path, 0.0, "clean")
+    assert [e.assessment for e in soft_evidence(clean)] == ["positive"]
+
+
+def test_a_poisoned_stream_says_so_in_the_rationale(tmp_path: Path) -> None:
+    """Returning [] alone would read as "no soft stream" — the operator needs
+    the reason, since the fix is in their spec, not their capture."""
+    report = quality.assess_quality(
+        registry=stage_registry(),
+        census=[],
+        diagnostics=[],
+        marks=[],
+        soft_stream=_poisoned(tmp_path, 0.5, "half"),
+    )
+    assert report.verdict is quality.Verdict.UNCERTAIN
+    assert report.evidence == []
+    assert "non-finite" in report.rationale
+    assert "50.0%" in report.rationale
+    # and it must not also claim there was no soft stream to score
+    assert "no soft stream" not in report.rationale
+
+
+def test_a_poisoned_stream_does_not_erase_independent_evidence(
+    tmp_path: Path,
+) -> None:
+    """A sync searcher that cleared its own chance model is untouched by a
+    poisoned soft tap — but the caveat still has to travel."""
+    report = quality.assess_quality(
+        registry=stage_registry(),
+        census=[
+            BlockCensus(
+                block="sync_word[0]",
+                kind="sync_word",
+                items_in=60_000,
+                windows_out=1000,
+                chance_windows=234.4,
+            )
+        ],
+        diagnostics=[],
+        marks=[],
+        soft_stream=_poisoned(tmp_path, 0.5, "half2"),
+    )
+    assert report.verdict is quality.Verdict.DECODED
+    assert [e.metric for e in report.evidence] == ["sync_matches"]
+    assert "non-finite" in report.rationale
