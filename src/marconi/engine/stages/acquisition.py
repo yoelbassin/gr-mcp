@@ -8,7 +8,7 @@ from pydantic import Field, StrictInt, model_validator
 from pydantic_core import PydanticCustomError
 
 from marconi.engine.compile.compile_context import CompileContext
-from marconi.engine.stages.base import DuplexStage, RxStage, Stage
+from marconi.engine.stages.base import Stage
 from marconi.engine.types.bounds import MAX_FILTER_TAPS, MAX_FRAME_ITEMS
 from marconi.engine.types.descriptor import Carrier, Descriptor
 from marconi.engine.types.enums import ItemType
@@ -44,11 +44,11 @@ class PreambleSyncStep(Step):
         return self
 
 
-class PreambleSync(DuplexStage[CompileContext, PreambleSyncStep]):
-    """Coherent acquisition, SYMBOLS<->SYMBOLS. TX prepends a settle ramp + a
-    known sync preamble (a phy training sequence, never seen at BITS). RX
-    correlates recovered soft symbols against the preamble to recover timing +
-    the M-fold carrier-phase rotation, derotates, and strips to payload-only.
+class PreambleSync(Stage[CompileContext, PreambleSyncStep]):
+    """Coherent acquisition, SYMBOLS->SYMBOLS. Correlates recovered soft
+    symbols against a known preamble (a phy training sequence, never seen at
+    BITS) to recover timing + the M-fold carrier-phase rotation, derotates, and
+    strips to payload-only.
     out_descriptor/rate_factor inherit defaults: level/type/carrier unchanged,
     rate 1.0 (stripping changes symbol count, not rate)."""
 
@@ -72,14 +72,6 @@ class PreambleSync(DuplexStage[CompileContext, PreambleSyncStep]):
             threshold=step.threshold,
         )
         b.chain("sym_strip", n_pre=len(step.preamble_i))
-
-    def emit_tx(self, b: CompileContext, step: PreambleSyncStep) -> None:
-        b.chain(
-            "sym_prepend",
-            preamble_i=step.preamble_i,
-            preamble_q=step.preamble_q,
-            pad_symbols=step.pad_symbols,
-        )
 
     def validate_input(self, in_desc: Descriptor, step: PreambleSyncStep) -> str | None:
         if in_desc.order is None or not step.constellation_preamble:
@@ -130,7 +122,7 @@ class FllStep(Step):
         return self
 
 
-class Fll(RxStage[CompileContext, FllStep]):
+class Fll(Stage[CompileContext, FllStep]):
     """Coarse carrier-frequency acquisition, IQ->IQ (stock fll_band_edge_cc).
 
     A costas/decision-directed loop only pulls in a fraction of its own loop

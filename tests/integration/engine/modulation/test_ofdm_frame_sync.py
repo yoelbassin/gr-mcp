@@ -45,7 +45,6 @@ def test_frame_sync_strips_cp(tmp_path: Path) -> None:
     pipe = compile_modem(
         modem,
         stage_registry(),
-        direction="rx",
         sample_rate=2_048_000.0,
         start=Descriptor(Level.IQ, ItemType.C),
         source_io={"path": str(src)},
@@ -100,7 +99,6 @@ def test_frame_sync_resyncs_under_drift(tmp_path: Path) -> None:
     pipe = compile_modem(
         modem,
         stage_registry(),
-        direction="rx",
         sample_rate=2_048_000.0,
         start=Descriptor(Level.IQ, ItemType.C),
         source_io={"path": str(src)},

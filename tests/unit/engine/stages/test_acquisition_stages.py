@@ -50,17 +50,10 @@ def test_emit_rx_chains_corr_est_then_strip() -> None:
     assert strip.params["n_pre"] == 64
 
 
-def test_emit_tx_chains_sym_prepend() -> None:
-    b = CompileContext(SYM_C, rate=4.0, symbol_rate=1.0)
-    PreambleSync().emit_tx(b, _P)
-    assert [x.kind for x in b.build("t", 4.0).blocks] == ["sym_prepend"]
-
-
 def _compile_rx(*steps: Step) -> GrPipeline:
     return compile_modem(
         Modem(symbol_rate=1.0, path=list(steps)),
         stage_registry(),
-        direction="rx",
         sample_rate=8.0,
         start=Descriptor(Level.IQ, ItemType.C, amplitude=Amplitude.PEAK_UNITY),
         source_io={"path": "in.iq"},

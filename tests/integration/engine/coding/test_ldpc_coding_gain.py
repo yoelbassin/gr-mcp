@@ -68,7 +68,6 @@ def _run(
     pipe = compile_modem(
         Modem(symbol_rate=1.0, path=path),
         stage_registry(),
-        direction="rx",
         sample_rate=1.0,
         start=SYM_C,
         source_io={"path": str(src)},

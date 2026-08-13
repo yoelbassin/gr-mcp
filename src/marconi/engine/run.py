@@ -372,13 +372,27 @@ def composition_warnings(
     return warnings
 
 
+_UNSCALED_MARKS_HINT = (
+    "burst marks from {probes} are recorded in that stage's own item units, "
+    "and a later stage changed the item rate or level, so they do NOT index "
+    "the output stream and are withheld from 'marks'. They are still reported "
+    "verbatim in diagnostics under that block — read them there, or move the "
+    "probe to the end of the path to have them indexed against the output."
+)
+
+
 def _hints(
     modem: Modem,
     registry: Mapping[str, Stage[Any, Any]],
     final: Descriptor,
     verdict: Verdict = Verdict.DECODED,
+    unscaled_probe_marks: tuple[str, ...] = (),
 ) -> list[str]:
     hints: list[str] = list(composition_warnings(modem, registry))
+    if unscaled_probe_marks:
+        hints.append(
+            _UNSCALED_MARKS_HINT.format(probes=", ".join(unscaled_probe_marks))
+        )
     stages = [registry.get(s.conv) for s in modem.path]
     if final.level in (Level.BITS, Level.SYMBOLS) and any(
         st is not None and st.polarity_ambiguous for st in stages
@@ -514,7 +528,6 @@ def run_rx(
         cp = compile_pipeline(
             modem,
             registry,
-            direction="rx",
             sample_rate=sample_rate,
             start=start,
             source_io=source.to_params() if source is not None else {},
@@ -616,7 +629,10 @@ def _run_coding_tail(
         path = seam.with_suffix(cp.final.item_type.suffix)
         if path != seam:
             seam.replace(path)
-        result = _ok(_gr_only_stream(cp, path, marks), seg, marks)
+        # marks recorded upstream of a stage that changed the item units do not
+        # index this stream; they stay in the per-block diagnostics instead
+        out_marks = [] if cp.unscaled_probe_marks else marks
+        result = _ok(_gr_only_stream(cp, path, out_marks), seg, out_marks)
     else:
         carrier = _entry_carrier(cp.boundary, entry_path, marks)
         out = run_coding(cp.coding, carrier, seg.census)
@@ -657,6 +673,8 @@ def _attach_report(
     return result.with_report(
         softstream=soft,
         quality=quality,
-        hints=_hints(modem, registry, cp.final, quality.verdict),
+        hints=_hints(
+            modem, registry, cp.final, quality.verdict, cp.unscaled_probe_marks
+        ),
         trace=seg.trace,
     )

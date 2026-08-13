@@ -26,7 +26,6 @@ def test_harden_matches_bitfile_convention(tmp_path: Path) -> None:
     pipe = compile_modem(
         modem,
         stage_registry(),
-        direction="rx",
         sample_rate=1.0,
         start=Descriptor(Level.BITS, ItemType.F, Carrier.SOFT),
         source_io={"path": str(src)},
@@ -48,7 +47,6 @@ def test_harden_rejects_hard_input() -> None:
         compile_modem(
             modem,
             stage_registry(),
-            direction="rx",
             sample_rate=1.0,
             start=Descriptor(Level.BITS, ItemType.F, Carrier.SOFT),
             source_io={"path": "x"},

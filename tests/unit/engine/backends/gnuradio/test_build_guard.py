@@ -11,24 +11,25 @@ SF = 7
 
 
 def _css_demap_pipeline(tmp_path: Path) -> GrPipeline:
-    bits_in = tmp_path / "in.bits"
+    """css_demap is the one embedded block that OUTPUTS uint8 — the shape the
+    main-thread guard exists for. It is fed through a real dechirp chain from
+    IQ, since no symbol-file source exists to drive it directly."""
+    from marconi.engine.compile.compile_context import CompileContext
+    from marconi.engine.modulation.css.stages import Dechirp, DechirpStep
+    from marconi.engine.types.descriptor import Descriptor
+    from marconi.engine.types.enums import ItemType
+    from marconi.engine.types.levels import Level
+
+    iq_in = tmp_path / "in.iq"
     bits_out = tmp_path / "out.bits"
-    np.zeros(SF, dtype=np.uint8).tofile(bits_in)
-    return GrPipeline(
-        name="css_demap_guard",
-        sample_rate=250_000.0,
-        blocks=[
-            GrBlock(id="src", kind="bits_file_source", params={"path": str(bits_in)}),
-            GrBlock(id="map", kind="css_map", params={"sf": SF}),
-            GrBlock(id="demap", kind="css_demap", params={"sf": SF}),
-            GrBlock(id="snk", kind="bits_file_sink", params={"path": str(bits_out)}),
-        ],
-        connections=[
-            GrConnection(src_block="src", dst_block="map"),
-            GrConnection(src_block="map", dst_block="demap"),
-            GrConnection(src_block="demap", dst_block="snk"),
-        ],
-    )
+    np.zeros(4 * (1 << SF), dtype=np.complex64).tofile(iq_in)
+    rate = float(2 * (1 << SF))
+    ctx = CompileContext(Descriptor(Level.IQ, ItemType.C), rate, 1.0)
+    ctx.chain("iq_file_source", path=str(iq_in))
+    Dechirp().emit_rx(ctx, DechirpStep(sf=SF, oversample=2, zero_pad=1))
+    ctx.chain("css_demap", sf=SF)
+    terminal = ctx.chain("bits_file_sink", path=str(bits_out))
+    return ctx.build("css_demap_guard", rate, terminal_sink=terminal)
 
 
 def _complex_only_pipeline(tmp_path: Path) -> tuple[GrPipeline, Path]:

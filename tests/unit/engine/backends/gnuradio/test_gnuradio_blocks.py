@@ -36,7 +36,7 @@ def test_rrc_filter_accepts_fractional_sps() -> None:
 def test_const_rejects_unknown_order() -> None:
     ctx = _modules()
     with pytest.raises(BackendError):
-        GR_BLOCKS["chunks_to_symbols_bc"](
+        GR_BLOCKS["constellation_decoder_cb"](
             ctx, BlockParams({"scheme": "psk", "order": 5})
         )
 
@@ -44,7 +44,7 @@ def test_const_rejects_unknown_order() -> None:
 def test_qam_const_rejects_unknown_order() -> None:
     ctx = _modules()
     with pytest.raises(BackendError):
-        GR_BLOCKS["chunks_to_symbols_bc"](
+        GR_BLOCKS["constellation_decoder_cb"](
             ctx, BlockParams({"scheme": "qam", "order": 32})
         )
 

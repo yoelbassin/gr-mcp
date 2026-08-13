@@ -32,7 +32,6 @@ def test_depuncture_scatters_per_mask(tmp_path: Path) -> None:
     pipe = compile_modem(
         modem,
         stage_registry(),
-        direction="rx",
         sample_rate=1.0,
         start=Descriptor(Level.BITS, ItemType.F, Carrier.SOFT),
         source_io={"path": str(src)},

@@ -7,12 +7,9 @@ from typing import Any, cast
 from marconi.engine.backends.base import BackendError, BackendUnavailable
 from marconi.engine.backends.gnuradio.embedded.burst import make_burst_sampler
 from marconi.engine.backends.gnuradio.embedded.chirp import (
-    chirp_prefix,
     dechirp_ref,
-    make_chirp_mod,
     make_chirp_sync,
     make_css_demap,
-    make_css_map,
 )
 from marconi.engine.backends.gnuradio.embedded.cp_sync import make_cp_symbol_sync
 from marconi.engine.backends.gnuradio.embedded.decision import make_peak_decision
@@ -26,10 +23,7 @@ from marconi.engine.backends.gnuradio.embedded.pilot_lattice import (
     make_pilot_lattice_equalizer,
 )
 from marconi.engine.backends.gnuradio.embedded.polar import make_polar_decoder
-from marconi.engine.backends.gnuradio.embedded.preamble import (
-    make_sym_strip,
-    sym_prefix,
-)
+from marconi.engine.backends.gnuradio.embedded.preamble import make_sym_strip
 from marconi.engine.backends.gnuradio.embedded.probe import make_burst_probe
 from marconi.engine.backends.gnuradio.embedded.trellis_fec import make_trellis_viterbi
 from marconi.engine.modulation.fsk.stages import MSK_LOOP_BW_DEFAULT
@@ -37,9 +31,6 @@ from marconi.engine.types.params import ParamValue
 
 Params = dict[str, ParamValue]
 Factory = Callable[["BlockParams"], Any]
-
-# vector_insert_c re-inserts each period; graphs stay far below 2^30 items
-_INSERT_ONCE = 1 << 30
 
 _MISSING = object()
 
@@ -378,13 +369,6 @@ GR_BLOCKS: dict[str, Callable[[_GrModules, BlockParams], Any]] = {
         _SYNC_TAPS,
     ),
     "binary_slicer": lambda c, p: c.digital.binary_slicer_fb(),
-    "chunks_to_symbols": lambda c, p: c.digital.chunks_to_symbols_bf(
-        p.floats("symbols")
-    ),
-    "repeat_f": lambda c, p: c.blocks.repeat(c.gr.sizeof_float, p.i("interp")),
-    "frequency_modulator": lambda c, p: c.analog.frequency_modulator_fc(
-        p.f("sensitivity")
-    ),
     "rrc_filter_ccf": lambda c, p: c.gr_filter.interp_fir_filter_ccf(
         p.i("interpolation"),
         c.firdes.root_raised_cosine(
@@ -459,13 +443,9 @@ GR_BLOCKS: dict[str, Callable[[_GrModules, BlockParams], Any]] = {
         p.f("fmin", -0.5),
         p.f("fmax", 0.5),
     ),
-    "chunks_to_symbols_bc": lambda c, p: c.digital.chunks_to_symbols_bc(
-        _const(c, p).points()
-    ),
     "constellation_decoder_cb": lambda c, p: c.digital.constellation_decoder_cb(
         _const(c, p).base()
     ),
-    "pack_k_bits_bb": lambda c, p: c.blocks.pack_k_bits_bb(p.i("k")),
     "unpack_k_bits_bb": lambda c, p: c.blocks.unpack_k_bits_bb(p.i("k")),
     "complex_to_mag": lambda c, p: c.blocks.complex_to_mag(p.i("vlen", 1)),
     "dc_blocker_ff": lambda c, p: c.gr_filter.dc_blocker_ff(p.i("d"), True),
@@ -478,15 +458,6 @@ GR_BLOCKS: dict[str, Callable[[_GrModules, BlockParams], Any]] = {
     "complex_to_float": lambda c, p: c.blocks.complex_to_float(1),
     "rms_cf": lambda c, p: c.blocks.rms_cf(p.f("alpha")),
     "divide_ff": lambda c, p: c.blocks.divide_ff(1),
-    "sym_prepend": lambda c, p: c.blocks.vector_insert_c(
-        sym_prefix(
-            p.floats("preamble_i"),
-            p.floats("preamble_q"),
-            p.i("pad_symbols"),
-        ).tolist(),
-        _INSERT_ONCE,
-        0,
-    ),
     "corr_est_cc": lambda c, p: c.digital.corr_est_cc(
         _complex_syms(p.floats("preamble_i"), p.floats("preamble_q")),
         p.i("sps"),
@@ -503,16 +474,6 @@ GR_BLOCKS: dict[str, Callable[[_GrModules, BlockParams], Any]] = {
         tag_name=p.s("tag_name"),
         chance_per_item=p.f("chance_per_item"),
     ),
-    "chirp_prepend": lambda c, p: c.blocks.vector_insert_c(
-        chirp_prefix(
-            p.i("sf"),
-            p.i("oversample"),
-            p.i("preamble_len"),
-            p.f("sfd_symbols"),
-        ).tolist(),
-        _INSERT_ONCE,
-        0,
-    ),
     "chirp_sync": lambda c, p: make_chirp_sync(
         c.gr,
         p.i("sf"),
@@ -523,7 +484,6 @@ GR_BLOCKS: dict[str, Callable[[_GrModules, BlockParams], Any]] = {
         p.f("sfd_symbols"),
         p.i("sync_symbols"),
     ),
-    "chirp_mod": lambda c, p: make_chirp_mod(c.gr, p.i("sf"), p.i("oversample")),
     "chirp_ref_source": lambda c, p: c.blocks.vector_source_c(
         dechirp_ref(p.i("sf"), p.i("oversample")).tolist(), True
     ),
@@ -546,7 +506,6 @@ GR_BLOCKS: dict[str, Callable[[_GrModules, BlockParams], Any]] = {
         divisor=p.i("divisor"),
         modulo=p.i("modulo"),
     ),
-    "css_map": lambda c, p: make_css_map(c.gr, p.i("sf")),
     "css_demap": lambda c, p: make_css_demap(c.gr, p.i("sf")),
     "ofdm_frame_sync": lambda c, p: make_ofdm_frame_sync(
         c.gr,

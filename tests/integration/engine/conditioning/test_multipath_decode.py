@@ -21,7 +21,8 @@ from pathlib import Path
 from typing import Literal
 
 import numpy as np
-from helpers._dsp import channel, read_complex, resolved_ser, tx_sym_indices, write_bits
+from helpers import _synth as synth
+from helpers._dsp import channel, read_complex, resolved_ser, tx_sym_indices
 
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
 from marconi.engine.compile.compiler import compile_modem
@@ -64,7 +65,6 @@ def _compile(
     return compile_modem(
         modem,
         stage_registry(),
-        direction=direction,
         sample_rate=_SR,
         start=start,
         source_io={"path": str(src)},
@@ -74,8 +74,6 @@ def _compile(
 
 def _tx_multipath_iq(bits: np.ndarray, tmp_path: Path, seed: int) -> Path:
     """bits -> pulse-shaped IQ -> multipath+AWGN channel -> RMS-normalized file."""
-    be = GnuRadioBackend()
-    bp = write_bits(tmp_path / "in.bits", bits)
     clean, imp = tmp_path / "tx.iq", tmp_path / "imp.iq"
     tx = Modem(
         symbol_rate=_SYM,
@@ -84,7 +82,9 @@ def _tx_multipath_iq(bits: np.ndarray, tmp_path: Path, seed: int) -> Path:
             PskDemapStep(order=PskOrder(_ORDER)),
         ],
     )
-    assert be.run_pipeline(_compile(tx, "tx", IQ, bp, clean)).status == "ok"
+    synth.write(
+        clean, synth.from_steps(tx.path, bits, sample_rate=_SR, symbol_rate=_SYM)
+    )
     channel(
         clean,
         imp,

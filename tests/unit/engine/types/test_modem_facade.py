@@ -258,3 +258,30 @@ def test_bad_param_fails_at_parse() -> None:
 def test_missing_symbol_rate_fails_cleanly() -> None:
     with pytest.raises(ValueError, match="symbol_rate"):
         Modem.from_spec({"path": []}, step_models())
+
+
+def test_a_misspelled_top_level_key_is_rejected() -> None:
+    """Step forbids extras and Modem forbids extras, and from_spec defeated
+    both by picking three keys out of the mapping by hand: a misspelled 'path'
+    produced an EMPTY path that compiled and reported valid — the one typo the
+    fast iteration loop exists to catch."""
+    with pytest.raises(ValueError, match="unknown key"):
+        Modem.from_spec(
+            {"symbol_rate": 1000.0, "paht": [{"conv": "agc"}]}, step_models()
+        )
+
+
+def test_a_stray_key_alongside_a_good_path_is_rejected() -> None:
+    with pytest.raises(ValueError, match="sample_rate"):
+        Modem.from_spec(
+            {"symbol_rate": 1000.0, "sample_rate": 48000.0, "path": [{"conv": "agc"}]},
+            step_models(),
+        )
+
+
+def test_a_missing_path_is_rejected_but_an_explicit_empty_one_is_not() -> None:
+    with pytest.raises(ValueError, match="path"):
+        Modem.from_spec({"symbol_rate": 1000.0}, step_models())
+    assert (
+        Modem.from_spec({"symbol_rate": 1000.0, "path": []}, step_models()).path == []
+    )

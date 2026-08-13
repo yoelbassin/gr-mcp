@@ -3,7 +3,8 @@ from typing import Literal
 
 import numpy as np
 import pytest
-from helpers._dsp import aligned_ber, channel, read_bits, write_bits
+from helpers import _synth as synth
+from helpers._dsp import aligned_ber, channel, read_bits
 
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
 from marconi.engine.compile.compiler import compile_modem
@@ -47,7 +48,6 @@ def _compile(
     return compile_modem(
         Modem(symbol_rate=_SYM, path=path),
         stage_registry(),
-        direction=direction,
         sample_rate=rate,
         start=IQ,
         source_io={"path": str(src)},
@@ -66,13 +66,12 @@ def test_clock_correct_removes_sfo(ppm: float, tmp_path: Path) -> None:
     bits = (
         np.random.default_rng(int(abs(ppm))).integers(0, 2, _SF * 150).astype(np.uint8)
     )
-    bp = write_bits(tmp_path / "in.bits", bits)
     clean, imp, op_no, op_cc = (
         tmp_path / n for n in ("c.iq", "i.iq", "o0.bits", "o1.bits")
     )
 
     tx = _css_steps()
-    assert be.run_pipeline(_compile(tx, "tx", rate, bp, clean)).status == "ok"
+    synth.write(clean, synth.from_steps(tx, bits, sample_rate=rate, symbol_rate=_SYM))
     channel(
         clean,
         imp,

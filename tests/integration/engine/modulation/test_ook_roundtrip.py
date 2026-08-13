@@ -2,7 +2,8 @@ from pathlib import Path
 from typing import Literal
 
 import numpy as np
-from helpers._dsp import aligned_ber, channel, read_bits, write_bits
+from helpers import _synth as synth
+from helpers._dsp import aligned_ber, channel, read_bits
 
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
 from marconi.engine.compile.compiler import compile_modem
@@ -31,7 +32,6 @@ def _compile(direction: Literal["rx", "tx"], src: Path, snk: Path) -> GrPipeline
     return compile_modem(
         _modem(direction),
         stage_registry(),
-        direction=direction,
         sample_rate=_SR,
         start=IQ,
         source_io={"path": str(src)},
@@ -43,12 +43,10 @@ def test_ook_roundtrip_clean_ber0(tmp_path: Path) -> None:
     ensure_worker_warm()
     be = GnuRadioBackend()
     bits = np.random.default_rng(0).integers(0, 2, 2048).astype(np.uint8)
-    bp, ip, op = (
-        write_bits(tmp_path / "in.bits", bits),
-        tmp_path / "s.iq",
-        tmp_path / "o.bits",
+    ip, op = tmp_path / "s.iq", tmp_path / "o.bits"
+    synth.write(
+        ip, synth.from_steps(_modem("rx").path, bits, sample_rate=_SR, symbol_rate=_SYM)
     )
-    assert be.run_pipeline(_compile("tx", bp, ip)).status == "ok"
     assert be.run_pipeline(_compile("rx", ip, op)).status == "ok"
     assert aligned_ber(read_bits(op), bits) == 0.0
 
@@ -58,9 +56,11 @@ def test_ook_roundtrip_survives_impairments(tmp_path: Path) -> None:
     ensure_worker_warm()
     be = GnuRadioBackend()
     bits = np.random.default_rng(5).integers(0, 2, 2048).astype(np.uint8)
-    bp = write_bits(tmp_path / "in.bits", bits)
     clean, imp, op = tmp_path / "c.iq", tmp_path / "i.iq", tmp_path / "o.bits"
-    assert be.run_pipeline(_compile("tx", bp, clean)).status == "ok"
+    synth.write(
+        clean,
+        synth.from_steps(_modem("rx").path, bits, sample_rate=_SR, symbol_rate=_SYM),
+    )
     channel(
         clean,
         imp,

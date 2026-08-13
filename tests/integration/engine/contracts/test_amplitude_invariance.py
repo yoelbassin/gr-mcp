@@ -7,16 +7,15 @@ import numpy as np
 import numpy.typing as npt
 import pytest
 from helpers import _lattice
+from helpers import _synth as synth
 from helpers._dsp import (
     AlignmentNotFound,
     aligned_ber,
     aligned_ber_best,
     channel,
     read_bits,
-    read_complex,
     resolved_ser_hard,
     tx_sym_indices,
-    write_bits,
 )
 
 from marconi.engine.backends.gnuradio.runner import (
@@ -274,12 +273,22 @@ def _compile_pipeline(
     return compile_modem(
         Modem(symbol_rate=symbol_rate, path=path),
         stage_registry(),
-        direction=direction,
         sample_rate=sample_rate,
         start=start,
         source_io={"path": str(src)},
         sink_io={"path": str(snk)},
     )
+
+
+def _synth_tx(tx_path: list[Step], bits: np.ndarray, rate: float, out: Path) -> Path:
+    """The capture this matrix conditions and decodes. Synthesized from the
+    path's own step params (helpers/_synth.py) rather than run through a
+    modulator, so gain-invariance is measured against a signal the RX chain
+    had no hand in producing."""
+    synth.write(
+        out, synth.from_steps(tx_path, bits, sample_rate=rate, symbol_rate=_SYM)
+    )
+    return out
 
 
 def _paths(
@@ -304,15 +313,11 @@ def _roundtrip_ber(
     rx_path, tx_path = _paths(name, with_agc, agc_override)
     rate = _sample_rate(name)
     bits = np.random.default_rng(0).integers(0, 2, _n_bits(name)).astype(np.uint8)
-    bp = write_bits(tmp_path / f"{name}_in.bits", bits)
-    iq = tmp_path / f"{name}.iq"
+    iq = tmp_path / f"{name}_clean.iq"
     scaled = tmp_path / f"{name}_{gain}_{with_agc}_{condition}.iq"
     out = tmp_path / f"{name}_{gain}_{with_agc}_{condition}.bits"
 
-    assert (
-        be.run_pipeline(_compile_pipeline("tx", tx_path, rate, _SYM, IQ, bp, iq)).status
-        == "ok"
-    )
+    assert _synth_tx(tx_path, bits, rate, iq).is_file()
     z = np.fromfile(iq, dtype=np.complex64)
     z = _apply(z, gain, condition)
     z.astype(np.complex64).tofile(scaled)
@@ -359,14 +364,12 @@ def _qam_ser(
     be = GnuRadioBackend()
     rate = _sample_rate("qam_demod")
     bits = np.random.default_rng(0).integers(0, 2, _QAM_N_BITS).astype(np.uint8)
-    bp = write_bits(tmp_path / "qam_in.bits", bits)
     clean = tmp_path / "qam_clean.iq"
     tx_path: list[Step] = [
         QamDemodStep(order=QamOrder(order)),
         QamDemapStep(order=QamOrder(order)),
     ]
-    tx_pipe = _compile_pipeline("tx", tx_path, rate, _SYM, IQ, bp, clean)
-    assert be.run_pipeline(tx_pipe).status == "ok"
+    _synth_tx(tx_path, bits, rate, clean)
 
     # constellation_receiver_cb's decision-directed loop needs SOME channel
     # dither to lock (see report): a bit-exact identity channel never
@@ -408,10 +411,8 @@ def _msk_ber(
     be = GnuRadioBackend()
     rate = _sample_rate("msk")
     bits = np.random.default_rng(0).integers(0, 2, _n_bits("msk")).astype(np.uint8)
-    bp = write_bits(tmp_path / "msk_in.bits", bits)
     clean = tmp_path / "msk_clean.iq"
-    tx_pipe = _compile_pipeline("tx", _tx_path("msk"), rate, _SYM, IQ, bp, clean)
-    assert be.run_pipeline(tx_pipe).status == "ok"
+    _synth_tx(_tx_path("msk"), bits, rate, clean)
     z = np.fromfile(clean, dtype=np.complex64)
     z = _apply(z, gain, condition)
     scaled = tmp_path / f"msk_scaled_{gain}_{with_agc}_{condition}.iq"
@@ -427,20 +428,9 @@ def _msk_ber(
 
 
 def _ofdm_demod_points(tmp_path: Path, bits: np.ndarray) -> np.ndarray:
-    be = GnuRadioBackend()
-    bp = write_bits(tmp_path / "ofdm_demod_bits.bits", bits)
-    sym = tmp_path / "ofdm_demod_points.cf32"
-    pipe = _compile_pipeline(
-        "tx",
-        [PskDemapStep(order=PskOrder(4))],
-        1.0,
-        1.0,
-        SYM_C,
-        bp,
-        sym,
-    )
-    assert be.run_pipeline(pipe).status == "ok"
-    return read_complex(sym)
+    """The QPSK cell values the OFDM frame carries — a bit-pair to
+    constellation-point lookup, no pulse shaping (cells ARE the symbols)."""
+    return np.asarray(synth.map_bits(bits, scheme="psk", order=4))
 
 
 def _ofdm_demod_iq(points: np.ndarray) -> np.ndarray:
@@ -729,25 +719,25 @@ def _ber_at_gain(tmp_path: Path, name: str, gain: float) -> GainResult:
     be = GnuRadioBackend()
     spec = Modem(symbol_rate=_SYM, path=_CHAINS[name])
     bits = np.random.default_rng(0).integers(0, 2, 4096).astype(np.uint8)
-    bp = write_bits(tmp_path / f"{name}_in.bits", bits)
     iq = tmp_path / f"{name}.iq"
     scaled = tmp_path / f"{name}_{gain}.iq"
     out = tmp_path / f"{name}_{gain}.bits"
 
-    def _compile(direction: Literal["rx", "tx"], src: Path, snk: Path) -> GrPipeline:
+    def _compile(src: Path, snk: Path) -> GrPipeline:
         return compile_modem(
             spec,
             stage_registry(),
-            direction=direction,
             sample_rate=_SR,
             start=IQ,
             source_io={"path": str(src)},
             sink_io={"path": str(snk)},
         )
 
-    assert be.run_pipeline(_compile("tx", bp, iq)).status == "ok"
+    synth.write(
+        iq, synth.from_steps(_CHAINS[name], bits, sample_rate=_SR, symbol_rate=_SYM)
+    )
     (np.fromfile(iq, dtype=np.complex64) * np.complex64(gain)).tofile(scaled)
-    rx = be.run_pipeline(_compile("rx", scaled, out))
+    rx = be.run_pipeline(_compile(scaled, out))
     # A non-ok RX run (e.g. a hung loop) never decodes anything: worst-case BER,
     # but the status itself is kept so a crash is never mistaken for a decode.
     if rx.status is not RunStatus.OK:

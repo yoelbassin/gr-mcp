@@ -21,7 +21,6 @@ def _kinds(loop_bw: float, sps: int, rate: float) -> list[str]:
     gr = compile_modem(
         m,
         stage_registry(),
-        direction="rx",
         sample_rate=rate,
         start=IQ,
         source_io={"path": "in"},

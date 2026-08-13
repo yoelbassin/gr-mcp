@@ -32,17 +32,8 @@ class SpecValidationError(CompileError):
         super().__init__(f"{kind} validation failed:\n" + "\n".join(lines))
 
 
-class StageDirectionError(Exception):
-    def __init__(self, stage: str, direction: str, supported: frozenset[str]) -> None:
-        super().__init__(
-            f"stage '{stage}' does not support direction '{direction}'; "
-            f"supported: {sorted(supported)}"
-        )
-
-
-# A bad spec/direction is the user's to fix, not a bug to report.
+# A bad spec is the user's to fix, not a bug to report.
 register_error(SpecValidationError, "invalid_argument")
-register_error(StageDirectionError, "invalid_argument")
 
 
 class Stage(ABC, Generic[B, S]):
@@ -50,7 +41,6 @@ class Stage(ABC, Generic[B, S]):
     from_level: Level
     to_level: Level
     family: str
-    directions: frozenset[str] = frozenset({"rx", "tx"})
     step_model: type[S]
 
     # One agent-facing line naming what the stage is FOR, surfaced by
@@ -102,9 +92,6 @@ class Stage(ABC, Generic[B, S]):
 
     @abstractmethod
     def emit_rx(self, b: B, step: S) -> None: ...
-
-    @abstractmethod
-    def emit_tx(self, b: B, step: S) -> None: ...
 
     def out_descriptor(self, in_desc: Descriptor, step: S) -> Descriptor:
         amplitude = (
@@ -179,30 +166,19 @@ class Stage(ABC, Generic[B, S]):
     ) -> float | None:
         """True items-per-second of this stage's OUTPUT stream where it
         departs from the compiled rate model: an RX demod that decimates by
-        sps internally (rate_factor stays 1.0 for TX symmetry) emits at the
+        sps internally (rate_factor stays 1.0 there) emits at the
         symbol rate; a demap that unpacks k bits per symbol multiplies by k.
         None means the rate model is already the truth. Observability only —
         trace metadata, never compile checks."""
         return None
 
 
-class RxStage(Stage[B, S]):
-    directions: frozenset[str] = frozenset({"rx"})
-
-    def emit_tx(self, b: B, step: S) -> None:
-        raise StageDirectionError(self.name, "tx", self.directions)
-
-
-class DuplexStage(Stage[B, S]):
-    directions: frozenset[str] = frozenset({"rx", "tx"})
-
-
-class CodingStage(RxStage[CodingBuilder, S]):
+class CodingStage(Stage[CodingBuilder, S]):
     """Coding-lane stage: emits into the numpy CodingProgram via a
     CodingBuilder, never the GR graph. The compiler partitions the path on
     CodingStage membership (isinstance), so a stage's execution flavor and the
     context its emit body is written against are one fact — it cannot claim one
-    flavor and emit for the other. Coding stages are RX-only."""
+    flavor and emit for the other."""
 
 
 def validate_path(
@@ -211,7 +187,6 @@ def validate_path(
     start_level: Level,
     entity_name: str,
     issues: list[ValidationIssue],
-    direction: str | None = None,
 ) -> None:
     prev_level = start_level
     for idx, step in enumerate(steps):
@@ -226,14 +201,6 @@ def validate_path(
                 )
             )
             continue
-        if direction is not None and direction not in conv.directions:
-            issues.append(
-                ValidationIssue(
-                    block_id=sid,
-                    message=f"{conv.name} does not support direction "
-                    f"'{direction}'; supports {sorted(conv.directions)}",
-                )
-            )
         if idx == 0 and conv.from_level != start_level:
             issues.append(
                 ValidationIssue(

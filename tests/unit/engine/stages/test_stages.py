@@ -4,10 +4,7 @@ import pytest
 from pydantic import StrictInt, ValidationError
 
 from marconi.engine.stages.base import (
-    DuplexStage,
-    RxStage,
     Stage,
-    StageDirectionError,
     validate_path,
 )
 from marconi.engine.types.descriptor import Carrier, Descriptor
@@ -27,7 +24,7 @@ class _DemodStep(Step):
     sps: StrictInt
 
 
-class Demod(DuplexStage["_FakeBuilder", _DemodStep]):
+class Demod(Stage["_FakeBuilder", _DemodStep]):
     name = "demod"
     from_level = Level.IQ
     to_level = Level.SYMBOLS
@@ -36,9 +33,6 @@ class Demod(DuplexStage["_FakeBuilder", _DemodStep]):
 
     def emit_rx(self, b: "_FakeBuilder", step: _DemodStep) -> None:
         b.ops.append("rx")
-
-    def emit_tx(self, b: "_FakeBuilder", step: _DemodStep) -> None:
-        b.ops.append("tx")
 
     def out_descriptor(self, d: Descriptor, step: _DemodStep) -> Descriptor:
         return Descriptor(self.to_level, ItemType.F, carrier=Carrier.SOFT)
@@ -50,7 +44,7 @@ class _ResampleStep(Step):
     decimation: StrictInt
 
 
-class Resample(DuplexStage["_FakeBuilder", _ResampleStep]):
+class Resample(Stage["_FakeBuilder", _ResampleStep]):
     name = "resample"
     from_level = Level.IQ
     to_level = Level.IQ
@@ -58,7 +52,6 @@ class Resample(DuplexStage["_FakeBuilder", _ResampleStep]):
     step_model = _ResampleStep
 
     def emit_rx(self, b: "_FakeBuilder", step: _ResampleStep) -> None: ...
-    def emit_tx(self, b: "_FakeBuilder", step: _ResampleStep) -> None: ...
 
     def rate_factor(self, step: _ResampleStep) -> float:
         return step.interpolation / step.decimation
@@ -69,7 +62,7 @@ class _SinkStep(Step):
     sf: StrictInt
 
 
-class Sink(RxStage["_FakeBuilder", _SinkStep]):
+class Sink(Stage["_FakeBuilder", _SinkStep]):
     name = "css_demap"
     from_level = Level.SYMBOLS
     to_level = Level.BITS
@@ -83,7 +76,7 @@ class _FecStep(Step):
     conv: Literal["fec"] = "fec"
 
 
-class Fec(DuplexStage["_FakeBuilder", _FecStep]):
+class Fec(Stage["_FakeBuilder", _FecStep]):
     name = "fec"
     from_level = Level.BITS
     to_level = Level.BITS
@@ -91,7 +84,6 @@ class Fec(DuplexStage["_FakeBuilder", _FecStep]):
     step_model = _FecStep
 
     def emit_rx(self, b: "_FakeBuilder", step: _FecStep) -> None: ...
-    def emit_tx(self, b: "_FakeBuilder", step: _FecStep) -> None: ...
 
 
 class _UnknownStep(Step):
@@ -107,11 +99,6 @@ def test_stage_declares_descriptor_and_rate_transforms() -> None:
     assert out == Descriptor(Level.SYMBOLS, ItemType.F, carrier=Carrier.SOFT)
     assert Resample().rate_factor(_ResampleStep(interpolation=3, decimation=2)) == 1.5
     assert Demod().rate_factor(_DemodStep(sps=4)) == 1.0  # default identity
-
-
-def test_rx_only_stage_rejects_tx() -> None:
-    with pytest.raises(StageDirectionError):
-        Sink().emit_tx(_FakeBuilder(), _SinkStep(sf=7))
 
 
 def test_valid_path_passes() -> None:

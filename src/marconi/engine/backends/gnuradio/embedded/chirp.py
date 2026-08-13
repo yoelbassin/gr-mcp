@@ -13,7 +13,7 @@ from marconi.engine.backends.gnuradio.embedded.lifecycle import (
     bump,
     forecast_drain,
 )
-from marconi.engine.coding.primitives import gray_decode, gray_encode
+from marconi.engine.coding.primitives import gray_decode
 
 
 def _base_upchirp(sf: int, oversample: int) -> npt.NDArray[np.complex64]:
@@ -218,96 +218,12 @@ def _preamble_sync(
     return cfo, b - cfo
 
 
-def _modulate_symbol(s: int, sf: int, oversample: int) -> npt.NDArray[np.complex64]:
-    n = 1 << sf
-    t = np.arange(oversample * n) / oversample
-    return (np.exp(1j * 2 * np.pi * s * t / n) * _base_upchirp(sf, oversample)).astype(
-        np.complex64
-    )
-
-
 # Each GR class is defined INSIDE its builder so that `gr` is never a module-
 # level name (satisfies the engine ⊥ gnuradio invariant in test_invariants).
 
 
-def chirp_prefix(
-    sf: int, oversample: int, preamble_len: int, sfd_symbols: float
-) -> npt.NDArray[np.complex64]:
-    sn = oversample * (1 << sf)
-    up = _base_upchirp(sf, oversample)
-    down = np.conj(up)
-    full = int(sfd_symbols)
-    frac = int(round((sfd_symbols - full) * sn))
-    sfd = np.concatenate([np.tile(down, full), down[:frac]])
-    return np.concatenate([np.tile(up, preamble_len), sfd]).astype(np.complex64)
-
-
 def dechirp_ref(sf: int, oversample: int) -> npt.NDArray[np.complex64]:
     return np.conj(_base_upchirp(sf, oversample))
-
-
-def make_chirp_mod(gr: Any, sf: int, oversample: int) -> Any:
-    sn = oversample * (1 << sf)
-
-    class _ChirpMod(gr.basic_block):
-        def __init__(self) -> None:
-            gr.basic_block.__init__(
-                self,
-                name="chirp_mod",
-                in_sig=[np.int16],
-                out_sig=[np.complex64],
-            )
-            self._out = OutQueue(np.complex64)
-
-        def forecast(self, noutput_items: int, ninputs: int) -> list[int]:
-            return forecast_drain(self._out.pending, ninputs)
-
-        def general_work(self, input_items: Any, output_items: Any) -> int:
-            x = input_items[0]
-            out = output_items[0]
-            if not self._out.pending and len(x):
-                # One symbol can exceed the granted output window (sn > len(out)
-                # for large sf); synthesize just enough and drain across calls.
-                nsym = min(len(x), -(-len(out) // sn))
-                self._out.push(
-                    np.concatenate(
-                        [
-                            _modulate_symbol(int(s) % (1 << sf), sf, oversample)
-                            for s in x[:nsym]
-                        ]
-                    )
-                )
-                self.consume(0, nsym)
-            return self._out.drain(out)
-
-    return _ChirpMod()
-
-
-def make_css_map(gr: Any, sf: int) -> Any:
-    class _CssMap(gr.basic_block):
-        def __init__(self) -> None:
-            gr.basic_block.__init__(
-                self,
-                name="css_map",
-                in_sig=[np.uint8],
-                out_sig=[np.int16],
-            )
-
-        def forecast(self, noutput_items: int, ninputs: int) -> list[int]:
-            return [noutput_items * sf] * ninputs
-
-        def general_work(self, input_items: Any, output_items: Any) -> int:
-            x = input_items[0]
-            out = output_items[0]
-            nsym = min(len(out), len(x) // sf)
-            for i in range(nsym):
-                bits = x[i * sf : (i + 1) * sf]
-                s = int(np.asarray(bits, dtype=int).dot(1 << np.arange(sf)[::-1]))
-                out[i] = gray_encode(s)
-            self.consume(0, nsym * sf)
-            return nsym
-
-    return _CssMap()
 
 
 def make_css_demap(gr: Any, sf: int) -> Any:

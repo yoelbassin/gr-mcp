@@ -43,7 +43,8 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
-from helpers._dsp import aligned_ber_best, channel, read_bits, write_bits
+from helpers import _synth as synth
+from helpers._dsp import aligned_ber_best, channel, read_bits
 
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
 from marconi.engine.compile.compiler import compile_modem
@@ -80,26 +81,19 @@ def _score(rx_conv: str, out: np.ndarray, bits: np.ndarray) -> float:
 
 def _ber(rx_conv: str, seed: int, tmp_path: Path) -> float:
     bits = np.random.default_rng(100 + seed).integers(0, 2, 2048).astype(np.uint8)
-    bp = tmp_path / f"in{rx_conv}{seed}.bits"
     clean = tmp_path / f"c{rx_conv}{seed}.iq"
     imp = tmp_path / f"i{rx_conv}{seed}.iq"
     op = tmp_path / f"o{rx_conv}{seed}.bits"
-    write_bits(bp, bits)
-    tx = compile_modem(
-        _modem("fsk"),
-        stage_registry(),
-        direction="tx",
-        sample_rate=_SR,
-        start=IQ,
-        source_io={"path": str(bp)},
-        sink_io={"path": str(clean)},
+    # both paths are fed the SAME h=0.5 CPFSK waveform; only the RX differs,
+    # which is the whole point of the margin measurement
+    synth.write(
+        clean,
+        synth.cpfsk(bits, sps=int(_SR / _SYM), deviation=_SYM / 4.0, sample_rate=_SR),
     )
-    assert GnuRadioBackend().run_pipeline(tx, timeout=60.0).status == "ok"
     channel(clean, imp, snr_db=_SNR_DB, sample_rate=_SR, seed=seed)
     rx = compile_modem(
         _modem(rx_conv),
         stage_registry(),
-        direction="rx",
         sample_rate=_SR,
         start=IQ,
         source_io={"path": str(imp)},

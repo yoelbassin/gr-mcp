@@ -37,17 +37,3 @@ def test_rx_is_mag_centre_then_timing() -> None:
         "add_const_ff",
         "symbol_sync_ff",
     ]
-
-
-def test_tx_inverts_centre_upsamples_to_complex() -> None:
-    b = CompileContext(Descriptor(Level.IQ, ItemType.C), rate=4.0, symbol_rate=1.0)
-    OokEnvelope().emit_tx(b, OokEnvelopeStep())
-    kinds = [x.kind for x in b.build("t", 4.0).blocks]
-    assert kinds == [
-        "add_const_ff",
-        "multiply_const_ff",
-        "repeat_f",
-        "float_to_complex",
-    ]
-    rpt = next(x for x in b.build("t", 4.0).blocks if x.kind == "repeat_f")
-    assert rpt.params["interp"] == 4

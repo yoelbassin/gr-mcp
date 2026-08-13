@@ -65,7 +65,6 @@ def _roundtrip(
     pipe = compile_modem(
         modem,
         stage_registry(),
-        direction="rx",
         sample_rate=1.0,
         start=Descriptor(Level.BITS, ItemType.F, Carrier.SOFT),
         source_io={"path": str(src)},
@@ -163,7 +162,6 @@ def test_fec_conv_unterminated_frame_tail_bits_correct(tmp_path: Path) -> None:
     pipe = compile_modem(
         modem,
         stage_registry(),
-        direction="rx",
         sample_rate=1.0,
         start=Descriptor(Level.BITS, ItemType.F, Carrier.SOFT),
         source_io={"path": str(src)},
@@ -224,7 +222,6 @@ def test_fec_conv_rate_two_thirds_k2(tmp_path: Path) -> None:
     pipe = compile_modem(
         modem,
         stage_registry(),
-        direction="rx",
         sample_rate=1.0,
         start=Descriptor(Level.BITS, ItemType.F, Carrier.SOFT),
         source_io={"path": str(src)},

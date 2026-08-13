@@ -98,7 +98,18 @@ class Modem(BaseModel):
     def from_spec(
         cls, data: Mapping[str, object], step_models: Mapping[str, type[Step]]
     ) -> "Modem":
-        raw = data.get("path", [])
+        # extra="forbid" above only guards the constructor; this reader picked
+        # three keys out of the mapping by hand and dropped the rest, so a
+        # misspelled 'path' produced an EMPTY path that compiled and reported
+        # valid — the one typo the fast iteration loop exists to catch.
+        unknown = sorted(set(data) - set(cls.model_fields))
+        if unknown:
+            raise ValueError(
+                f"modem spec has unknown key(s) {unknown}; a spec carries only "
+                f"{sorted(cls.model_fields)}. Note sample_rate is an argument "
+                "to validate_modem/run_rx, not part of the spec"
+            )
+        raw = data.get("path")
         if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes)):
             raise ValueError("modem spec 'path' must be a list of steps")
         rate = data.get("symbol_rate")

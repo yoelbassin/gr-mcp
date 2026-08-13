@@ -9,7 +9,7 @@ from pydantic_core import PydanticCustomError
 
 from marconi.engine.compile.compile_context import CompileContext
 from marconi.engine.modulation.ofdm.primitives import LOCK_MIN_RATIO_DEFAULT
-from marconi.engine.stages.base import RxStage, Stage
+from marconi.engine.stages.base import Stage
 from marconi.engine.types.bounds import MAX_DELAY_ITEMS, MAX_FRAME_ITEMS
 from marconi.engine.types.descriptor import Carrier, Descriptor
 from marconi.engine.types.enums import ItemType, PskOrder
@@ -71,7 +71,7 @@ class OfdmFrameSyncProbeStep(Step):
         return self
 
 
-class OfdmFrameSyncProbe(RxStage[CompileContext, OfdmFrameSyncProbeStep]):
+class OfdmFrameSyncProbe(Stage[CompileContext, OfdmFrameSyncProbeStep]):
     """IQ->IQ: null-sync + CP-strip only (test/diagnostic isolation of the block)."""
 
     name = "ofdm_frame_sync_probe"
@@ -129,7 +129,7 @@ class OfdmDemodStep(Step):
         return self
 
 
-class OfdmDemod(RxStage[CompileContext, OfdmDemodStep]):
+class OfdmDemod(Stage[CompileContext, OfdmDemodStep]):
     """OFDM demod, IQ->SYMBOLS (RX-only). Custom null-sync + CP-strip, stock FFTW
     fft_vcc, stock carrier permute + select -> symbol-major active carriers. Generic
     over OFDM frames; the carrier permutation is a parameter."""
@@ -239,7 +239,7 @@ class DqpskSoftDemapStep(Step):
         return len(self.points_i) if self.points_i is not None else int(self.order)
 
 
-class DqpskSoftDemap(RxStage[CompileContext, DqpskSoftDemapStep]):
+class DqpskSoftDemap(Stage[CompileContext, DqpskSoftDemapStep]):
     """Differential-QPSK soft demap, SYMBOLS->BITS soft, from STOCK GR blocks. The
     per-carrier differential is delay + multiply_conjugate; the leading reference
     dropped by keep_m_in_n; the soft decision is constellation_soft_decoder over
@@ -353,7 +353,7 @@ class OfdmCoherentSyncStep(Step):
         return self
 
 
-class OfdmCoherentSync(RxStage[CompileContext, OfdmCoherentSyncStep]):
+class OfdmCoherentSync(Stage[CompileContext, OfdmCoherentSyncStep]):
     """Coherent scattered-pilot OFDM demod, IQ->SYMBOLS (RX-only). Streaming
     CP-correlation symbol tracker, stock vectorize + FFT, and a scattered-pilot
     lattice equalizer: fine-CFO derotation off the frequency pilots, 2-D
@@ -449,7 +449,7 @@ class SoftDemapStep(Step):
         return int(self.order) if self.order is not None else len(self.points_i or [])
 
 
-class SoftDemap(RxStage[CompileContext, SoftDemapStep]):
+class SoftDemap(Stage[CompileContext, SoftDemapStep]):
     """Constellation soft demap, SYMBOLS->BITS soft, for any constellation:
     named psk/qam schemes or explicit caller points (a point's bit pattern is
     its index, MSB-first; points are power-normalized so input must be unit
@@ -510,7 +510,7 @@ class CellSelectStep(Step):
         return self
 
 
-class CellSelect(RxStage[CompileContext, CellSelectStep]):
+class CellSelect(Stage[CompileContext, CellSelectStep]):
     """SYMBOLS(c)->SYMBOLS(c) cell gather: reorder each fixed-size symbol
     block by a whole-block permutation (stock blockinterleaver_cc) with the
     wanted cells at the front, then keep that front (keep_m_in_n). Which

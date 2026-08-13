@@ -125,7 +125,6 @@ def test_dab_phy_decodes_crc_valid_fibs(tmp_path: Path) -> None:
     pipe = compile_modem(
         modem,
         stage_registry(),
-        direction="rx",
         sample_rate=2_048_000.0,
         start=Descriptor(Level.IQ, ItemType.C),
         source_io={"path": str(_SLICE)},

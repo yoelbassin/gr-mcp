@@ -100,10 +100,20 @@ def verdict_from(evidence: Sequence[QualityEvidence]) -> tuple[Verdict, str]:
             "chance, no soft stream, no validating decoder); bits out does "
             "not mean signal in"
         )
-    if positives and negatives:
+    # Only evidence of the same grade can rebut a negative. A DETECTION
+    # positive says a signal is PRESENT, which is not a claim about the decode
+    # and cannot answer a decode-grade refutation — and marks_evidence emits an
+    # unconditional positive for a single burst mark, the one producer here
+    # with no null hypothesis. Treating that as a conflict let it veto every
+    # producer that has one: word_validity NEGATIVE alone read no_signal, and
+    # one burst mark turned the same run uncertain.
+    decode_positives = [e for e in positives if e.tier is Tier.DECODE]
+    if negatives and decode_positives:
         return Verdict.UNCERTAIN, f"conflicting evidence; negative: {_names(negatives)}"
     if negatives:
-        return Verdict.NO_SIGNAL, f"negative evidence: {_names(negatives)}"
+        detected = _names([e for e in positives if e.tier is Tier.DETECTION])
+        aside = f" (detection-only, does not rebut: {detected})" if detected else ""
+        return Verdict.NO_SIGNAL, f"negative evidence: {_names(negatives)}{aside}"
     if not any(e.tier is Tier.DECODE for e in positives):
         return Verdict.UNCERTAIN, (
             f"detection only ({_names(positives)}): a signal is present but "
@@ -124,6 +134,16 @@ def _names(evidence: Sequence[QualityEvidence]) -> str:
 # stream it is about to judge rather than assuming one.
 _SYNC_CHANCE_SIGMA = 5.0
 _SYNC_CHANCE_RATIO = 3.0
+# Finding ZERO matches only means "absent" if the search had somewhere to find
+# one. It is not a claim the chance model can make — a long pattern drives the
+# expectation toward 0, so 0 hits is what the NULL predicts too — so it is
+# bounded by search extent instead: below this many scanned items the reading
+# is untestable, not negative. Sized as roughly one frame's worth of bit
+# positions, the scale at which a periodic sync would have had to appear.
+# Lower and a 2-position search over a stream barely longer than the pattern
+# certifies "no_signal" (measured: expected=1e-9, found=0, verdict no_signal);
+# higher and a genuinely short capture reads untestable — the safe direction.
+_SYNC_NEGATIVE_MIN_ITEMS = 1000
 
 _WORD_VALIDITY_POSITIVE = 0.5
 _WORD_VALIDITY_NEGATIVE = 0.1
@@ -153,11 +173,16 @@ def _word_excess_significant(valid: int, total: int, chance: float) -> bool:
     return log_odds >= _WORD_EXCESS_MIN_LOG_ODDS
 
 
-def _sync_assessment(found: int, expected: float) -> Assessment | None:
-    """None = indistinguishable from chance: found something, but no more
-    than random bits would match, so it proves nothing either way."""
+def _sync_assessment(found: int, expected: float, scanned: int) -> Assessment | None:
+    """None = untestable: either the hit count is indistinguishable from chance
+    (found something, but no more than random bits would match), or the search
+    covered too little of the stream for zero hits to mean anything."""
     if found == 0:
-        return Assessment.NEGATIVE
+        return (
+            Assessment.NEGATIVE
+            if scanned >= _SYNC_NEGATIVE_MIN_ITEMS
+            else None  # searched too little to call it absent
+        )
     if found <= expected + _SYNC_CHANCE_SIGMA * math.sqrt(expected):
         return None
     if found < _SYNC_CHANCE_RATIO * expected:
@@ -177,7 +202,12 @@ def sync_evidence(
             # the search never ran (stream shorter than the pattern):
             # untestable is not the same as absent
             continue
-        assessment = _sync_assessment(row.windows_out, row.chance_windows)
+        # a row that does not report what it scanned cannot support "absent"
+        # either, so it reaches _sync_assessment as zero extent; a POSITIVE
+        # needs no extent — the hits themselves are the evidence
+        assessment = _sync_assessment(
+            row.windows_out, row.chance_windows, row.items_in or 0
+        )
         if assessment is None:
             continue
         out.append(
@@ -202,7 +232,8 @@ def tag_sync_evidence(diagnostics: Sequence[Diagnostic]) -> list[QualityEvidence
     out: list[QualityEvidence] = []
     for block, tags in rows.counts(DiagnosticKey.SYNC_TAGS).items():
         chance = expected.get(block)
-        if not scanned.get(block) or chance is None:
+        items = scanned.get(block)
+        if not items or chance is None:
             # the correlator never consumed anything, or reported tags without
             # the chance expectation they must be judged against: untestable,
             # not absent.
@@ -212,9 +243,9 @@ def tag_sync_evidence(diagnostics: Sequence[Diagnostic]) -> list[QualityEvidence
             # expectation at all: it clears both the sigma and the ratio bar,
             # so a single chance-level hit would certify. tag_gate refuses to
             # be built without a real chance, so reaching here is a malformed
-            # harvest. Zero tags stay negative — that reading needs no model.
+            # harvest. Zero tags are judged below, on search extent.
             continue
-        assessment = _sync_assessment(tags, chance)
+        assessment = _sync_assessment(tags, chance, items)
         if assessment is None:
             continue
         out.append(

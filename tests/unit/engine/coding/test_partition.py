@@ -9,6 +9,7 @@ from marconi.engine.compile.compiler import (
     compile_pipeline,
 )
 from marconi.engine.compile.errors import CompileError
+from marconi.engine.modulation.coding.stages import HardenStep
 from marconi.engine.modulation.fsk.stages import FskStep
 from marconi.engine.stages.conditioning import AgcStep, ChannelizeStep
 from marconi.engine.stages.general import SliceStep
@@ -32,6 +33,9 @@ _BUILDERS: dict[str, Callable[[], Step]] = {
     "fsk": lambda: FskStep(deviation=4500.0),
     "slice": SliceStep,
     "sync_word": lambda: SyncWordStep(sync="7e"),
+    # a BITS->BITS GR stage, so a coding->GR re-entry can be exercised without
+    # also tripping the path-level rung check that now reports first
+    "harden": HardenStep,
 }
 
 
@@ -43,7 +47,6 @@ def test_mixed_path_partitions_at_first_coding_stage() -> None:
     cp = compile_pipeline(
         _spec("channelize", "agc", "fsk", "slice", "sync_word"),
         stage_registry(),
-        direction="rx",
         sample_rate=128000.0,
         start=IQ,
         source_io={"path": "in.cf32"},
@@ -59,7 +62,6 @@ def test_pure_coding_path_has_no_gr_segment() -> None:
     cp = compile_pipeline(
         _spec("sync_word"),
         stage_registry(),
-        direction="rx",
         sample_rate=1.0,
         start=SOFT_BITS,
         source_io={},
@@ -71,9 +73,8 @@ def test_pure_coding_path_has_no_gr_segment() -> None:
 def test_gr_after_coding_is_a_compile_error() -> None:
     with pytest.raises(CompileError, match="re-enter"):
         compile_pipeline(
-            _spec("channelize", "agc", "fsk", "slice", "sync_word", "agc"),
+            _spec("channelize", "agc", "fsk", "slice", "sync_word", "harden"),
             stage_registry(),
-            direction="rx",
             sample_rate=128000.0,
             start=IQ,
             source_io={},
@@ -81,17 +82,21 @@ def test_gr_after_coding_is_a_compile_error() -> None:
         )
 
 
-def test_tx_with_coding_stage_is_a_compile_error() -> None:
-    with pytest.raises(CompileError, match="coded tx"):
+def test_path_validation_reports_before_partitioning() -> None:
+    """_validate is the AGGREGATING reporter — it names the offending stage and
+    can list several issues; _split_index raises one bare string. Partitioning
+    ran first, so a spec that was wrong in both ways only ever surfaced the
+    coarser message."""
+    with pytest.raises(CompileError) as exc:
         compile_pipeline(
-            _spec("sync_word"),
+            _spec("channelize", "agc", "fsk", "slice", "sync_word", "agc"),
             stage_registry(),
-            direction="tx",
-            sample_rate=1.0,
-            start=SOFT_BITS,
+            sample_rate=128000.0,
+            start=IQ,
             source_io={},
             sink_io={},
         )
+    assert "agc[5]" in str(exc.value), str(exc.value)
 
 
 def test_unknown_stage_is_a_compile_error() -> None:
@@ -103,7 +108,6 @@ def test_unknown_stage_is_a_compile_error() -> None:
         compile_pipeline(
             spec,
             stage_registry(),
-            direction="rx",
             sample_rate=128000.0,
             start=IQ,
             source_io={},
@@ -128,7 +132,6 @@ def test_empty_rx_path_builds_passthrough_gr_pipeline() -> None:
     pipe = compile_modem(
         Modem(symbol_rate=1200.0, path=[]),
         stage_registry(),
-        direction="rx",
         sample_rate=128000.0,
         start=IQ,
         source_io={"path": "in.cf32"},
@@ -142,7 +145,6 @@ def test_compile_modem_rejects_coding_stages() -> None:
         compile_modem(
             _spec("channelize", "agc", "fsk", "slice", "sync_word"),
             stage_registry(),
-            direction="rx",
             sample_rate=128000.0,
             start=IQ,
             source_io={},

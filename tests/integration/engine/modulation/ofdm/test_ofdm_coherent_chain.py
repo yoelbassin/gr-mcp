@@ -32,7 +32,6 @@ def test_synthetic_lattice_full_chain_equalizes(tmp_path: Path) -> None:
     pipe = compile_modem(
         modem,
         stage_registry(),
-        direction="rx",
         sample_rate=_lattice.RATE,
         start=Descriptor(Level.IQ, ItemType.C),
         source_io={"path": str(src)},
@@ -79,7 +78,6 @@ def test_synthetic_dropout_relocks_through_real_chain(tmp_path: Path) -> None:
     pipe = compile_modem(
         modem,
         stage_registry(),
-        direction="rx",
         sample_rate=_lattice.RATE,
         start=Descriptor(Level.IQ, ItemType.C),
         source_io={"path": str(src)},

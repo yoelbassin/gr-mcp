@@ -49,12 +49,11 @@ def test_every_public_exception_classifies_not_internal() -> None:
     # spec/codec/wiring must never read as an internal bug.
     from marconi.engine.backends.base import BackendError
     from marconi.engine.compile.errors import CompileError
-    from marconi.engine.stages.base import SpecValidationError, StageDirectionError
+    from marconi.engine.stages.base import SpecValidationError
     from marconi.engine.types.models import ValidationIssue
 
     cases = [
         SpecValidationError([ValidationIssue(message="bad")], "modem"),
-        StageDirectionError("psk_demod", "tx", frozenset({"rx"})),
         CompileError("unknown stage"),
         BackendError("unknown block kind"),
     ]
@@ -85,3 +84,34 @@ def test_environment_failures_are_not_internal_errors() -> None:
     for exc, want in cases:
         code, _ = classify_error(exc)
         assert code == want, f"{type(exc).__name__} -> {code}, want {want}"
+
+
+def test_a_caller_number_too_large_is_not_an_engine_bug() -> None:
+    """internal_error tells the agent to stop and report a bug. sample_rate=inf
+    reached round() in the compiler and wore it, for a value the caller could
+    have retyped. Its siblings stay internal_error on purpose — a
+    ZeroDivisionError here really is ours."""
+    assert classify_error(OverflowError("cannot convert float infinity"))[0] == (
+        "invalid_argument"
+    )
+    assert classify_error(ZeroDivisionError("x"))[0] == "internal_error"
+    assert classify_error(KeyError("x"))[0] == "internal_error"
+
+
+def test_pydantic_docs_url_is_stripped_from_agent_facing_text() -> None:
+    """pydantic appends a docs URL to every ValidationError. The tools ship
+    these straight to the agent, where the line is pure token cost pointing at
+    a dependency's internals rather than at the spec that failed."""
+    from pydantic import BaseModel, Field, ValidationError
+
+    class _M(BaseModel):
+        n: int = Field(ge=0)
+
+    try:
+        _M(n=-1)
+    except ValidationError as exc:
+        code, message = classify_error(exc)
+    assert code == "invalid_argument"
+    assert "errors.pydantic.dev" not in message
+    # the part that names the failure survives
+    assert "greater than or equal to 0" in message

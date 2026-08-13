@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 from marconi.engine.coding.builder import CodingBuilder
 from marconi.engine.coding.program import CodingProgram
@@ -17,14 +17,13 @@ from marconi.engine.stages.base import (
     validate_path,
 )
 from marconi.engine.stages.conditioning import agc_modes_for
+from marconi.engine.types.bounds import sample_rate_problem
 from marconi.engine.types.descriptor import Amplitude, Descriptor
 from marconi.engine.types.enums import ItemType
 from marconi.engine.types.levels import Level
 from marconi.engine.types.models import Modem, ValidationIssue
 from marconi.engine.types.params import ParamValue
 from marconi.engine.types.step import Step, stage_label
-
-Direction = Literal["rx", "tx"]
 
 
 def _io_kinds(desc: Descriptor) -> tuple[str | None, str]:
@@ -106,7 +105,6 @@ class _CompilePlan:
     rates: Sequence[float]
     symbol_rate: float
     sample_rate: float
-    direction: Direction
 
 
 @dataclass(frozen=True)
@@ -119,7 +117,6 @@ class _StepInput:
     rate: float
     producer: str
     symbol_rate: float
-    direction: Direction
 
 
 def _check_item_type(s: _StepInput) -> str | None:
@@ -145,7 +142,7 @@ def _check_carrier(s: _StepInput) -> str | None:
 
 def _check_amplitude(s: _StepInput) -> str | None:
     required = s.stage.accepts_amplitude_for(s.step)
-    if s.direction != "rx" or required is None or s.desc.amplitude in required:
+    if required is None or s.desc.amplitude in required:
         return None
     wanted = ", ".join(sorted(a.value for a in required))
     mode_hint = " or ".join(f"mode='{m}'" for m in agc_modes_for(required))
@@ -187,7 +184,7 @@ def _check_required_rate(s: _StepInput) -> str | None:
 
 def _check_min_sps(s: _StepInput) -> str | None:
     min_sps = s.stage.min_input_sps_for(s.step)
-    if s.direction != "rx" or min_sps is None:
+    if min_sps is None:
         return None
     sps = s.rate / s.symbol_rate
     if sps >= min_sps * (1.0 - _RATE_TOL):
@@ -234,7 +231,6 @@ def _validate_descriptors(plan: _CompilePlan) -> None:
             rate=plan.rates[i],
             producer=plan.steps[i - 1].conv if i > 0 else "<source>",
             symbol_rate=plan.symbol_rate,
-            direction=plan.direction,
         )
         for check in _INPUT_CHECKS:
             problem = check(arriving)
@@ -242,38 +238,48 @@ def _validate_descriptors(plan: _CompilePlan) -> None:
                 raise CompileError(problem)
 
 
+def _misscaled_probes(plan: _CompilePlan, end: int) -> list[str]:
+    """Probe steps before `end` whose recorded marks are in different item
+    units from the boundary at `end`. A probe records burst marks in item units
+    at its own graph position; a later GR stage that changes the item rate or
+    level leaves them meaningless at that boundary."""
+    return [
+        stage_label(j, step.conv)
+        for j, step in enumerate(plan.steps[:end])
+        if _resolve(step, plan.registry).family == "probe"
+        and (
+            plan.boundaries[end].level is not plan.boundaries[j + 1].level
+            or plan.rates[end] != plan.rates[j + 1]
+        )
+    ]
+
+
 def _validate_probe_marks(plan: _CompilePlan, k: int) -> None:
-    """A probe records burst marks in item units at its own graph position; the
-    engine hands them to the coding entry at the seam. If a GR stage between
-    the two changes the item rate or level, the marks reach the seam in the
-    wrong units and silently seed wrong windows."""
-    steps, boundaries, rates = plan.steps, plan.boundaries, plan.rates
-    if plan.direction != "rx" or k >= len(steps):
+    """Misscaled marks reaching the CODING SEAM are fatal: the coding lane
+    consumes them to seed windows, so wrong units silently decode the wrong
+    spans. At the output boundary they are only REPORTED, so the composition
+    stays legal and run_rx withholds them instead (see unscaled_probe_marks) —
+    rejecting there would outlaw dechirp -> burst_probe -> css_demap, where the
+    marks are perfectly good symbol offsets and the bits are what you wanted."""
+    if k >= len(plan.steps):
         return
-    for j, step in enumerate(steps[:k]):
-        if _resolve(step, plan.registry).family != "probe":
-            continue
-        if boundaries[k].level is not boundaries[j + 1].level or (
-            rates[k] != rates[j + 1]
-        ):
-            raise CompileError(
-                f"'{step.conv}' records burst marks in item units at its own "
-                f"position, but a later GR stage changes the item rate or "
-                f"level before the coding seam, so the marks would be misread "
-                f"there; move the probe to the end of the GR segment"
-            )
+    offenders = _misscaled_probes(plan, k)
+    if offenders:
+        raise CompileError(
+            f"{offenders[0]} records burst marks in item units at its own "
+            f"position, but a later GR stage changes the item rate or level "
+            f"before the coding seam, so the marks would be misread there; "
+            f"move the probe to the end of the GR segment"
+        )
 
 
 def _validate(
     modem: Modem,
     registry: Mapping[str, Stage[Any, Any]],
     start: Descriptor,
-    direction: Direction,
 ) -> None:
     issues: list[ValidationIssue] = []
-    validate_path(
-        modem.path, registry, start.level, "modem", issues, direction=direction
-    )
+    validate_path(modem.path, registry, start.level, "modem", issues)
     if issues:
         raise SpecValidationError(issues, "modem")
 
@@ -293,49 +299,37 @@ def _emit_gr_segment(
     n = len(steps)
     ctx = CompileContext(boundaries[0], plan.sample_rate, plan.symbol_rate)
 
-    if plan.direction == "rx":
-        ctx.chain(_source_kind(boundaries[0]), **dict(source_io))
-        soft_tail: str | None = None
-        for i, step in enumerate(steps):
-            stage = _resolve(step, registry)
-            ctx.descriptor = boundaries[i]
-            ctx.rate = rates[i]
-            stage.emit_rx(ctx, step)
-            if boundaries[i + 1].item_type is ItemType.F:
-                soft_tail = ctx.tail
-            if trace_dir is not None and ctx.tail is not None:
-                out = boundaries[i + 1]
-                trace_it = trace_item_type(out)
-                tail = ctx.tail
-                if trace_it is not out.item_type:
-                    # exact uchar->i16 (char_to_short scales by 256)
-                    to_f = ctx.add("uchar_to_float")
-                    ctx.connect(tail, to_f)
-                    to_s = ctx.add("float_to_short", scale=1.0)
-                    ctx.connect(to_f, to_s)
-                    tail = to_s
-                tap = ctx.add(
-                    _IO_BLOCKS[trace_it][1],
-                    path=str(trace_sink_path(trace_dir, i, step.conv, trace_it)),
-                )
-                ctx.connect(tail, tap)
-        ctx.descriptor = boundaries[n]
-        ctx.rate = rates[n]
-        terminal = ctx.chain(_sink_kind(boundaries[n]), **dict(sink_io))
-        if soft_tap_path is not None and soft_tail is not None:
-            tap = ctx.add("soft_bits_file_sink", path=str(soft_tap_path))
-            ctx.connect(soft_tail, tap)
-    else:  # tx
-        ctx.chain(_source_kind(boundaries[n]), **dict(source_io))
-        for i in range(n - 1, -1, -1):
-            step = steps[i]
-            stage = _resolve(step, registry)
-            ctx.descriptor = boundaries[i + 1]
-            ctx.rate = rates[i + 1]
-            stage.emit_tx(ctx, step)
-        ctx.descriptor = boundaries[0]
-        ctx.rate = rates[0]
-        terminal = ctx.chain(_sink_kind(boundaries[0]), **dict(sink_io))
+    ctx.chain(_source_kind(boundaries[0]), **dict(source_io))
+    soft_tail: str | None = None
+    for i, step in enumerate(steps):
+        stage = _resolve(step, registry)
+        ctx.descriptor = boundaries[i]
+        ctx.rate = rates[i]
+        stage.emit_rx(ctx, step)
+        if boundaries[i + 1].item_type is ItemType.F:
+            soft_tail = ctx.tail
+        if trace_dir is not None and ctx.tail is not None:
+            out = boundaries[i + 1]
+            trace_it = trace_item_type(out)
+            tail = ctx.tail
+            if trace_it is not out.item_type:
+                # exact uchar->i16 (char_to_short scales by 256)
+                to_f = ctx.add("uchar_to_float")
+                ctx.connect(tail, to_f)
+                to_s = ctx.add("float_to_short", scale=1.0)
+                ctx.connect(to_f, to_s)
+                tail = to_s
+            tap = ctx.add(
+                _IO_BLOCKS[trace_it][1],
+                path=str(trace_sink_path(trace_dir, i, step.conv, trace_it)),
+            )
+            ctx.connect(tail, tap)
+    ctx.descriptor = boundaries[n]
+    ctx.rate = rates[n]
+    terminal = ctx.chain(_sink_kind(boundaries[n]), **dict(sink_io))
+    if soft_tap_path is not None and soft_tail is not None:
+        tap = ctx.add("soft_bits_file_sink", path=str(soft_tap_path))
+        ctx.connect(soft_tail, tap)
 
     return ctx.build(name, plan.sample_rate, terminal_sink=terminal)
 
@@ -358,18 +352,12 @@ def _known_engine(step: Step, registry: Mapping[str, Stage[Any, Any]]) -> str | 
     return "coding" if isinstance(stage, CodingStage) else "gr"
 
 
-def _split_index(
-    steps: Sequence[Step], registry: Mapping[str, Stage[Any, Any]], direction: Direction
-) -> int:
+def _split_index(steps: Sequence[Step], registry: Mapping[str, Stage[Any, Any]]) -> int:
     # Unknown names map to None so _validate stays the sole (aggregating)
     # reporter of unknown-stage issues; they neither start the coding segment
     # nor count as a GR re-entry.
     engines = [_known_engine(s, registry) for s in steps]
     k = next((i for i, e in enumerate(engines) if e == "coding"), len(steps))
-    if direction == "tx" and k < len(steps):
-        raise CompileError(
-            f"stage '{steps[k].conv}' is a coding stage; coded tx is not supported yet"
-        )
     for i in range(k, len(steps)):
         if engines[i] not in (None, "coding"):
             raise CompileError(
@@ -393,13 +381,19 @@ class CompiledPipeline:
     # count of GR-segment stages (the coding split index); the trace taps cover
     # exactly modem.path[:gr_steps], so the runner harvests them by this bound.
     gr_steps: int = 0
+    # probe steps whose burst marks are in different item units from the GR
+    # segment's OUTPUT boundary. Non-empty means the run must not attach them
+    # to the output stream: they stay in the per-block diagnostics, where they
+    # carry their own provenance, instead of being reported as offsets into a
+    # stream they do not index (measured: symbol marks on a bit stream 7x
+    # longer). Wrong units are worse than absent.
+    unscaled_probe_marks: tuple[str, ...] = ()
 
 
 def compile_pipeline(
     modem: Modem,
     registry: Mapping[str, Stage[Any, Any]],
     *,
-    direction: Direction,
     sample_rate: float,
     start: Descriptor,
     source_io: Mapping[str, ParamValue],
@@ -408,11 +402,15 @@ def compile_pipeline(
     quality_tap: bool = False,
     trace_dir: Path | None = None,
 ) -> CompiledPipeline:
-    if direction not in ("rx", "tx"):
-        raise CompileError(f"direction must be 'rx' or 'tx', got {direction!r}")
+    problem = sample_rate_problem(sample_rate)
+    if problem is not None:
+        raise CompileError(problem)
     steps = modem.path
-    k = _split_index(steps, registry, direction)
-    _validate(modem, registry, start, direction)
+    # _validate FIRST: it is the aggregating reporter, and _split_index raises a
+    # single CompileError on a coded-tx path, which suppressed the addressable
+    # issue list the MCP surface returns.
+    _validate(modem, registry, start)
+    k = _split_index(steps, registry)
     boundaries, rates = _forward_pass(steps, registry, start, sample_rate)
     plan = _CompilePlan(
         steps=steps,
@@ -421,7 +419,6 @@ def compile_pipeline(
         rates=rates,
         symbol_rate=modem.symbol_rate,
         sample_rate=sample_rate,
-        direction=direction,
     )
     _validate_descriptors(plan)
     _validate_probe_marks(plan, k)
@@ -431,14 +428,13 @@ def compile_pipeline(
     soft_seam: Path | None = None
     if (
         quality_tap
-        and direction == "rx"
         and k == len(steps)
         and boundaries[-1].item_type is ItemType.B
         and any(b.item_type is ItemType.F for b in boundaries[1:])
     ):
         soft_seam = Path(str(sink_io["path"])).with_name("soft_tap.f32")
     gr: GrPipeline | None = None
-    if k or direction == "tx" or not steps:
+    if k or not steps:
         gr = _emit_gr_segment(
             plan,
             k,
@@ -460,6 +456,9 @@ def compile_pipeline(
         rates=rates,
         soft_seam=soft_seam,
         gr_steps=k,
+        unscaled_probe_marks=(
+            tuple(_misscaled_probes(plan, k)) if k == len(steps) else ()
+        ),
     )
 
 
@@ -467,7 +466,6 @@ def compile_modem(
     modem: Modem,
     registry: Mapping[str, Stage[Any, Any]],
     *,
-    direction: Direction,
     sample_rate: float,
     start: Descriptor,
     source_io: Mapping[str, ParamValue],
@@ -477,7 +475,6 @@ def compile_modem(
     cp = compile_pipeline(
         modem,
         registry,
-        direction=direction,
         sample_rate=sample_rate,
         start=start,
         source_io=source_io,

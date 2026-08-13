@@ -9,7 +9,7 @@ from pydantic import Field, StrictInt, model_validator
 from pydantic_core import PydanticCustomError
 
 from marconi.engine.compile.compile_context import CompileContext
-from marconi.engine.stages.base import RxStage, Stage
+from marconi.engine.stages.base import Stage
 from marconi.engine.types.bounds import (
     MAX_DECIM,
     MAX_FILTER_TAPS,
@@ -83,7 +83,7 @@ def _nyquist_problem(center_hz: float, rate: float) -> str | None:
     return None
 
 
-class Channelize(RxStage[CompileContext, ChannelizeStep]):
+class Channelize(Stage[CompileContext, ChannelizeStep]):
     name = "channelize"
     description = (
         "Extract a sub-band: frequency-shift center_hz to baseband, low-pass "
@@ -118,7 +118,7 @@ class Channelize(RxStage[CompileContext, ChannelizeStep]):
         )
 
 
-class Translate(RxStage[CompileContext, TranslateStep]):
+class Translate(Stage[CompileContext, TranslateStep]):
     """Frequency-translate a sub-band to baseband: multiply by a complex rotator so
     center_hz lands at DC (stock rotator_cc). PURE shift — no filtering and no
     decimation, so |z| (amplitude) is preserved. For channel isolation (shift +
@@ -139,7 +139,7 @@ class Translate(RxStage[CompileContext, TranslateStep]):
         return _nyquist_problem(step.center_hz, rate)
 
 
-class Invert(RxStage[CompileContext, InvertStep]):
+class Invert(Stage[CompileContext, InvertStep]):
     name = "invert"
     from_level = Level.IQ
     to_level = Level.IQ
@@ -158,7 +158,7 @@ class ResampleStep(Step):
     decimation: StrictInt = Field(ge=1, le=MAX_RESAMPLE_FACTOR)
 
 
-class Resample(RxStage[CompileContext, ResampleStep]):
+class Resample(Stage[CompileContext, ResampleStep]):
     """Rational resample by interpolation/decimation via rational_resampler_ccf
     (integer ratio, auto-designed anti-imaging taps). The first non-unity
     rate_factor that is not 1/decim: lands an arbitrary capture rate exactly on a
@@ -198,7 +198,7 @@ class ClockCorrectStep(Step):
         return self
 
 
-class ClockCorrect(RxStage[CompileContext, ClockCorrectStep]):
+class ClockCorrect(Stage[CompileContext, ClockCorrectStep]):
     """Cancel sampling-frequency offset (transmitter clock drift) by resampling
     by 1/(1 + ppm*1e-6) via the polyphase arbitrary resampler. RX-only. SFO is a
     silent no-op below ~1 chip of cumulative drift (ppm * n_samples), so it only
@@ -346,7 +346,7 @@ def agc_modes_for(amplitudes: Iterable[Amplitude]) -> list[str]:
     return sorted(m.value for m, s in _AGC_MODES.items() if s.amplitude in wanted)
 
 
-class Agc(RxStage[CompileContext, AgcStep]):
+class Agc(Stage[CompileContext, AgcStep]):
     """Normalize IQ amplitude. `mode` selects WHICH statistic is driven to
     `reference`, and that choice is part of the output contract:
     feedforward -> peak_unity, feedback -> mean_mag_unity, power -> rms_unity."""
@@ -407,7 +407,7 @@ class SquelchStep(Step):
         return self
 
 
-class Squelch(RxStage[CompileContext, SquelchStep]):
+class Squelch(Stage[CompileContext, SquelchStep]):
     """Mute the stream below a power threshold, IQ->IQ (stock pwr_squelch_cc).
 
     A clock-recovery loop that free-runs through the gaps between bursts
@@ -468,7 +468,7 @@ class EqualizerStep(Step):
         return self
 
 
-class Equalizer(RxStage[CompileContext, EqualizerStep]):
+class Equalizer(Stage[CompileContext, EqualizerStep]):
     """Blind adaptive channel equalizer: a symbol-spaced FIR whose taps adapt by
     the Constant Modulus Algorithm (stock linear_equalizer at sps=1 +
     adaptive_algorithm_cma). It inverts the inter-symbol interference a
@@ -501,7 +501,7 @@ class AmStep(Step):
     dc_block_len: StrictInt = Field(default=1024, ge=2, le=MAX_FRAME_ITEMS)
 
 
-class Am(RxStage[CompileContext, AmStep]):
+class Am(Stage[CompileContext, AmStep]):
     name = "am"
     from_level = Level.IQ
     to_level = Level.AUDIO
@@ -522,7 +522,7 @@ class FmDemodStep(Step):
     dc_block_len: StrictInt = Field(default=1024, ge=2, le=MAX_FRAME_ITEMS)
 
 
-class FmDemod(RxStage[CompileContext, FmDemodStep]):
+class FmDemod(Stage[CompileContext, FmDemodStep]):
     name = "fm_demod"
     from_level = Level.IQ
     to_level = Level.AUDIO
@@ -548,7 +548,7 @@ class AnalyticStep(Step):
         return self
 
 
-class Analytic(RxStage[CompileContext, AnalyticStep]):
+class Analytic(Stage[CompileContext, AnalyticStep]):
     name = "analytic"
     from_level = Level.AUDIO
     to_level = Level.IQ

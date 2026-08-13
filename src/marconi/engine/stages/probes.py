@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any, Literal
 
 from marconi.engine.compile.compile_context import CompileContext
-from marconi.engine.stages.base import RxStage, Stage
+from marconi.engine.stages.base import Stage
 from marconi.engine.types.enums import ItemType
 from marconi.engine.types.levels import Level
 from marconi.engine.types.step import Step
@@ -13,7 +13,7 @@ class BurstProbeStep(Step):
     conv: Literal["burst_probe"] = "burst_probe"
 
 
-class BurstProbe(RxStage[CompileContext, BurstProbeStep]):
+class BurstProbe(Stage[CompileContext, BurstProbeStep]):
     """Passthrough probe recording each upstream "burst" tag's symbol offset
     into run diagnostics ({"bursts": [...]}) — burst starts for an offline
     consumer, since stream tags don't survive a file sink."""

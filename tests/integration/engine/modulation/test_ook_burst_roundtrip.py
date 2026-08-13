@@ -65,10 +65,10 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from helpers._dsp import channel, read_bits, write_bits
+from helpers import _synth as synth
+from helpers._dsp import channel, read_bits
 
-from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
-from marconi.engine.compile.compiler import compile_modem
+from marconi.engine.backends.gnuradio.runner import ensure_worker_warm
 from marconi.engine.io.source import SourceSlice
 from marconi.engine.modulation.ook.stages import OokEnvelopeStep
 from marconi.engine.run import run_rx
@@ -110,36 +110,19 @@ def _chip_string(payload: str) -> str:
     return "".join("10" if bit == "1" else "01" for bit in payload)
 
 
-def _tx_modem() -> Modem:
-    return Modem(symbol_rate=_SYMBOL_RATE, path=[OokEnvelopeStep(), SliceStep()])
-
-
 def _rx_modem() -> Modem:
     path: list[Step] = [OokEnvelopeStep(loop_bw=0.0), SliceStep()]
     return Modem(symbol_rate=_SYMBOL_RATE, path=path)
 
 
-def _unit_burst(tmp_path: Path) -> np.ndarray:
+def _unit_burst() -> np.ndarray:
     # a single pulse-position chip-pair burst (payload bit 1 -> chip pair
-    # (1, 0), bit 0 -> (0, 1)) generated through the real tx chain:
-    # chunks_to_symbols maps each chip bit to +/-1, then ook_envelope's
-    # emit_tx un-centres and upsamples it to sps=8 IQ - the chip-pair
-    # encoding is this test's construction (ook_envelope itself emits one
-    # chip per input bit), the same scheme the sps=1/sps=2 siblings use.
+    # (1, 0), bit 0 -> (0, 1)): each chip held for sps=8 samples on the real
+    # axis, which is what OOK IS. The chip-pair encoding is this test's
+    # construction (an envelope demod carries one chip per input bit), the
+    # same scheme the sps=1/sps=2 siblings use.
     chips = np.array([int(c) for c in _chip_string(_PAYLOAD)], dtype=np.uint8)
-    bp = write_bits(tmp_path / "burst.bits", chips)
-    ip = tmp_path / "burst.cf32"
-    pipe = compile_modem(
-        _tx_modem(),
-        stage_registry(),
-        direction="tx",
-        sample_rate=_SAMPLE_RATE,
-        start=IQ,
-        source_io={"path": str(bp)},
-        sink_io={"path": str(ip)},
-    )
-    assert GnuRadioBackend().run_pipeline(pipe).status == "ok"
-    return np.fromfile(ip, dtype=np.complex64)
+    return np.asarray(synth.ook(chips, sps=_SPS), dtype=np.complex64)
 
 
 def _noise_sigma(reference_power: float, snr_db: float) -> float:
@@ -150,7 +133,7 @@ def _noise_sigma(reference_power: float, snr_db: float) -> float:
 
 
 def _capture(tmp_path: Path, scale_a: float, scale_b: float) -> Path:
-    burst = _unit_burst(tmp_path)
+    burst = _unit_burst()
     p_ref = float(np.mean(np.abs(burst) ** 2))
     sigma = _noise_sigma(p_ref, _SNR_DB)
     a = (burst * np.complex64(scale_a)).astype(np.complex64)

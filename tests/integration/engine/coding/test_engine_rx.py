@@ -2,13 +2,13 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from helpers import _synth as synth
 
 from marconi.engine.backends.base import Backend, BlockCensus, RunResult
-from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
+from marconi.engine.backends.gnuradio.runner import ensure_worker_warm
 from marconi.engine.coding.stages_bits import SyncWordStep
 from marconi.engine.coding.stages_symbols import SymbolMapStep, SyncSymbolsStep
 from marconi.engine.compile.compiler import (
-    compile_modem,
     compile_pipeline,
 )
 from marconi.engine.compile.errors import CompileError
@@ -184,26 +184,26 @@ def test_gr_only_hard_symbols_final_get_i16_suffix(tmp_path: Path) -> None:
     ensure_worker_warm()
     sf, osr, zp = _CSS_SF, _CSS_OSR, _CSS_ZP
     rate = osr * (1 << sf) * _CSS_SYM
-    bits = np.random.default_rng(5).integers(0, 2, sf * 20).astype(np.uint8)
-    bits_path = tmp_path / "in.u8"
-    write_bits(bits_path, bits)
-    iq_path = tmp_path / "css.iq"
-    tx = compile_modem(
-        _css_tx_modem(sf, osr, zp),
-        stage_registry(),
-        direction="tx",
-        sample_rate=rate,
-        start=IQ,
-        source_io={"path": str(bits_path)},
-        sink_io={"path": str(iq_path)},
+    n_symbols = 20
+    symbols = np.random.default_rng(5).integers(0, 1 << sf, n_symbols)
+    # the rx path opens with chirp_sync, so the capture must carry the preamble
+    # it searches for — same geometry as the ChirpSyncStep above it
+    iq_path = synth.write(
+        tmp_path / "css.iq",
+        np.concatenate(
+            [
+                synth.chirp_preamble(
+                    sf=sf, oversample=osr, preamble_len=8, sfd_symbols=2.25
+                ),
+                synth.chirp_symbols(symbols, sf=sf, oversample=osr),
+            ]
+        ),
     )
-    assert GnuRadioBackend().run_pipeline(tx).status == "ok"
 
     rx_modem = _css_symbols_rx_modem(sf, osr, zp)
     cp = compile_pipeline(
         rx_modem,
         stage_registry(),
-        direction="rx",
         sample_rate=rate,
         start=IQ,
         source_io={"path": str(iq_path)},
@@ -225,7 +225,7 @@ def test_gr_only_hard_symbols_final_get_i16_suffix(tmp_path: Path) -> None:
     assert res.symbolstream.item_type == "s"
     assert res.symbolstream.path.suffix == ".i16"
     assert res.symbolstream.path.is_file()
-    assert res.symbolstream.num_symbols >= bits.size // sf
+    assert res.symbolstream.num_symbols >= n_symbols
 
     on_disk = np.fromfile(res.symbolstream.path, dtype=np.int16)
     assert on_disk.size == res.symbolstream.num_symbols

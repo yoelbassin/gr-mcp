@@ -15,7 +15,8 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from helpers._dsp import channel, read_complex, resolved_ser, tx_sym_indices, write_bits
+from helpers import _synth as synth
+from helpers._dsp import channel, read_complex, resolved_ser, tx_sym_indices
 from pydantic import ValidationError
 
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
@@ -23,14 +24,12 @@ from marconi.engine.compile.compile_context import CompileContext
 from marconi.engine.compile.compiler import compile_modem
 from marconi.engine.compile.errors import CompileError
 from marconi.engine.modulation.psk.stages import (
-    PskDemapStep,
-    PskDemodStep,
     SymbolSyncStep,
 )
 from marconi.engine.stages.conditioning import AgcStep
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Amplitude, Carrier, Descriptor
-from marconi.engine.types.enums import AgcMode, ItemType, PskOrder
+from marconi.engine.types.enums import AgcMode, ItemType
 from marconi.engine.types.levels import Level
 from marconi.engine.types.models import Modem
 
@@ -46,26 +45,14 @@ def _const_points(order: int) -> tuple[np.ndarray, int]:
 
 
 def _tx_iq(order: int, bits: np.ndarray, tmp_path: Path) -> Path:
-    bp = write_bits(tmp_path / "in.bits", bits)
-    clean = tmp_path / "tx.iq"
-    modem = Modem(
-        symbol_rate=_SYM,
-        path=[
-            PskDemodStep(order=PskOrder(order)),
-            PskDemapStep(order=PskOrder(order)),
-        ],
+    """The shaped constellation this timing test recovers, synthesized rather
+    than modulated (helpers/_synth.py)."""
+    return synth.write(
+        tmp_path / "tx.iq",
+        synth.shaped_constellation(
+            bits, scheme="psk", order=order, sps=int(_SR / _SYM)
+        ),
     )
-    pipe = compile_modem(
-        modem,
-        stage_registry(),
-        direction="tx",
-        sample_rate=_SR,
-        start=IQ,
-        source_io={"path": str(bp)},
-        sink_io={"path": str(clean)},
-    )
-    assert GnuRadioBackend().run_pipeline(pipe).status == "ok"
-    return clean
 
 
 def _recover(src: Path, snk: Path) -> np.ndarray:
@@ -80,7 +67,6 @@ def _recover(src: Path, snk: Path) -> np.ndarray:
     pipe = compile_modem(
         modem,
         stage_registry(),
-        direction="rx",
         sample_rate=_SR,
         start=IQ,
         source_io={"path": str(src)},
@@ -135,7 +121,6 @@ def test_symbol_sync_rejects_a_rate_that_does_not_deliver_sps(tmp_path: Path) ->
         compile_modem(
             modem,
             stage_registry(),
-            direction="rx",
             sample_rate=_SR,
             start=Descriptor(Level.IQ, ItemType.C, amplitude=Amplitude.RMS_UNITY),
             source_io={"path": "in.iq"},
@@ -155,7 +140,6 @@ def test_symbol_sync_requires_a_known_scale() -> None:
                 path=[SymbolSyncStep(sps=_SPS)],
             ),
             stage_registry(),
-            direction="rx",
             sample_rate=_SR,
             start=IQ,  # UNKNOWN amplitude
             source_io={"path": "in.iq"},

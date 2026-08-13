@@ -65,15 +65,6 @@ def test_sub_nyquist_rate_is_structured_error() -> None:
     )
 
 
-def test_off_grid_tx_rate_is_structured_error() -> None:
-    spec = {"symbol_rate": 1000.0, "path": [{"conv": "fsk", "deviation": 500.0}]}
-    out = validate_modem(spec, sample_rate=2500.0, direction="tx")
-    assert out["valid"] is False
-    errors = cast(list[dict[str, object]], out["errors"])
-    assert errors[0]["code"] == "invalid_argument"
-    assert "samples-per-symbol" in cast(str, errors[0]["message"])
-
-
 def test_validate_modem_reports_seeder_shadow_warning() -> None:
     spec = {
         "symbol_rate": 1000.0,

@@ -28,7 +28,6 @@ def _compile(
     return compile_modem(
         Modem(symbol_rate=1.0, path=path),
         stage_registry(),
-        direction=direction,
         sample_rate=sample_rate,
         start=IQ,
         source_io={"path": "/dev/null"},
@@ -91,11 +90,3 @@ def test_fractional_sps_above_two_compiles() -> None:
 
 def test_ppm_scale_slack_below_two_compiles() -> None:
     _compile(_PSK, sample_rate=1.999)
-
-
-def test_tx_is_not_gated_on_rx_timing_floor() -> None:
-    _compile(
-        [PskDemodStep(order=PskOrder.QPSK), PskDemapStep(order=PskOrder.QPSK)],
-        sample_rate=1.0,
-        direction="tx",
-    )

@@ -29,11 +29,22 @@ def test_sync_hits_above_chance_are_positive() -> None:
     assert ev[0].value == 5.0
 
 
-def test_sync_search_zero_is_negative() -> None:
+def test_sync_search_zero_over_a_long_stream_is_negative() -> None:
     ev = sync_evidence(
-        [_row("sync_word", windows_out=0, chance_windows=1e-5)], stage_registry()
+        [_row("sync_word", windows_out=0, chance_windows=1e-5, items_in=60_000)],
+        stage_registry(),
     )
     assert [e.assessment for e in ev] == ["negative"]
+
+
+def test_sync_search_zero_over_a_short_stream_is_not_evidence() -> None:
+    """Zero hits is only "absent" if the search had room to find one. Without
+    items_in the row cannot claim it scanned anything, and a genuinely short
+    scan cannot either — both must read untestable rather than no_signal."""
+    short = _row("sync_word", windows_out=0, chance_windows=1e-5, items_in=64)
+    unreported = _row("sync_word", windows_out=0, chance_windows=1e-5)
+    assert sync_evidence([short], stage_registry()) == []
+    assert sync_evidence([unreported], stage_registry()) == []
 
 
 def test_sync_hits_at_chance_level_are_not_evidence() -> None:

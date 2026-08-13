@@ -135,7 +135,6 @@ def test_closed_loop_chain_is_unchanged() -> None:
     pipe = compile_modem(
         _modem(0.045),
         stage_registry(),
-        direction="rx",
         sample_rate=_SAMPLE_RATE,
         start=IQ,
         source_io={"path": "in.iq"},
@@ -151,7 +150,6 @@ def test_open_loop_chain_routes_through_burst_sampler() -> None:
     pipe = compile_modem(
         _modem(0.0),
         stage_registry(),
-        direction="rx",
         sample_rate=_SAMPLE_RATE,
         start=IQ,
         source_io={"path": "in.iq"},

@@ -15,7 +15,30 @@ recipe. test_param_bounds holds every cost-sizing field to one of them.
 
 from __future__ import annotations
 
+import math
+
 from pydantic_core import PydanticCustomError
+
+
+def sample_rate_problem(rate: float, field: str = "sample_rate") -> str | None:
+    """What is wrong with a caller-supplied sample rate, or None.
+
+    Modem.symbol_rate is Field(gt=0); the quantity every rate check pairs it
+    with had nothing, at any tool entry but capture. Non-finite is the one that
+    bit: inf reached round() inside the compiler and surfaced as an
+    OverflowError, which classifies internal_error — "stop and report a bug" —
+    for a number the caller could have retyped."""
+    if not math.isfinite(rate):
+        return f"{field} must be a finite number, got {rate!r}"
+    if rate <= 0:
+        return f"{field} must be > 0, got {rate:g}"
+    return None
+
+
+def check_sample_rate(rate: float, field: str = "sample_rate") -> None:
+    problem = sample_rate_problem(rate, field)
+    if problem is not None:
+        raise ValueError(problem)
 
 
 def check_match_tolerance(max_errors: int, pattern_bits: int, *, field: str) -> None:
@@ -122,6 +145,7 @@ MAX_LIST_SIZE = 32
 # expresses it (sf 14 with oversample 8 and zero_pad 8 already lands here).
 MAX_DECHIRP_FFT = 1 << 20
 
-# A chirp TX prefix materializes (preamble_len + sfd) * oversample * 2**sf
-# complex samples as one Python list on the way into vector_insert_c.
+# The chirp preamble span, (preamble_len + sfd) * oversample * 2**sf complex
+# samples. chirp_sync scans and holds references across it, so the PRODUCT is
+# the cost — no single field's cap expresses it.
 MAX_CHIRP_PREFIX_SAMPLES = 1 << 22

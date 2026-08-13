@@ -3,13 +3,13 @@ from typing import Literal
 
 import numpy as np
 import pytest
+from helpers import _synth as synth
 from helpers._dsp import (
     aligned_ber,
     channel,
     make_preamble,
     read_bits,
     read_complex,
-    write_bits,
 )
 
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
@@ -67,7 +67,6 @@ def _compile(
     return compile_modem(
         modem,
         stage_registry(),
-        direction=direction,
         sample_rate=_SR,
         start=IQ,
         source_io={"path": str(src)},
@@ -85,10 +84,12 @@ def test_preamble_sync_ber0_no_oracle(order: int, tmp_path: Path) -> None:
     be = GnuRadioBackend()
     n_bits, cfo_frac = _CFG[order]
     bits = np.random.default_rng(order).integers(0, 2, n_bits).astype(np.uint8)
-    bp = write_bits(tmp_path / "in.bits", bits)
     clean, imp, op = tmp_path / "c.iq", tmp_path / "i.iq", tmp_path / "out.bits"
-    assert (
-        be.run_pipeline(_compile(_modem(order, "tx"), "tx", bp, clean)).status == "ok"
+    synth.write(
+        clean,
+        synth.from_steps(
+            _modem(order, "rx").path, bits, sample_rate=_SR, symbol_rate=_SYM
+        ),
     )
     channel(
         clean,
@@ -124,16 +125,22 @@ def test_two_burst_capture_decodes_both(tmp_path: Path) -> None:
     rng = np.random.default_rng(11)
     bits1 = rng.integers(0, 2, n_bits).astype(np.uint8)
     bits2 = rng.integers(0, 2, n_bits).astype(np.uint8)
-    tx_modem = _modem(order, "tx")
+    tx_modem = _modem(order, "rx")
     f1, f2 = tmp_path / "f1.iq", tmp_path / "f2.iq"
     # 16 pad bits absorb the RRC pulse tail truncated at each burst's end (in
     # single-burst tests those edge symbols hide inside corr_est's withheld
     # EOF tail); the payloads under test then round-trip exactly.
     pad = np.zeros(16, dtype=np.uint8)
-    b1 = write_bits(tmp_path / "b1.bits", np.concatenate([bits1, pad]))
-    b2 = write_bits(tmp_path / "b2.bits", np.concatenate([bits2, pad]))
-    assert be.run_pipeline(_compile(tx_modem, "tx", b1, f1)).status == "ok"
-    assert be.run_pipeline(_compile(tx_modem, "tx", b2, f2)).status == "ok"
+    for burst_path, payload in ((f1, bits1), (f2, bits2)):
+        synth.write(
+            burst_path,
+            synth.from_steps(
+                tx_modem.path,
+                np.concatenate([payload, pad]),
+                sample_rate=_SR,
+                symbol_rate=_SYM,
+            ),
+        )
     noise = 0.02 * (rng.standard_normal(2048) + 1j * rng.standard_normal(2048))
     gap, tail = noise[:1024], noise[1024:]
     cap = np.concatenate(

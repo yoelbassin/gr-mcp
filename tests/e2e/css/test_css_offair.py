@@ -155,7 +155,6 @@ def _compile(modem: Modem, rate: float, src: Path, snk: Path) -> GrPipeline:
     return compile_modem(
         modem,
         stage_registry(),
-        direction="rx",
         sample_rate=rate,
         start=IQ,
         source_io={"path": str(src)},

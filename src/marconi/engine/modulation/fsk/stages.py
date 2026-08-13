@@ -7,7 +7,7 @@ from pydantic import Field, StrictInt, model_validator
 from pydantic_core import PydanticCustomError
 
 from marconi.engine.compile.compile_context import CompileContext
-from marconi.engine.stages.base import DuplexStage, RxStage, Stage
+from marconi.engine.stages.base import Stage
 from marconi.engine.types.bounds import MAX_OVERSAMPLE
 from marconi.engine.types.descriptor import Carrier, Descriptor
 from marconi.engine.types.enums import ItemType
@@ -39,9 +39,9 @@ FSK_OPEN_LOOP_HINT = (
 )
 
 
-class Fsk(DuplexStage[CompileContext, FskStep]):
+class Fsk(Stage[CompileContext, FskStep]):
     """Binary FSK carrier stage. RX: FM discriminator + Gardner symbol timing ->
-    one soft float per symbol. TX: upsample + FM modulate. The symbol-rate
+    one soft float per symbol. The symbol-rate
     decimation is internal (driven by ctx.sps); rate_factor stays 1.0 so the
     modulator reads the IQ-domain sample rate (rate-model invariant)."""
 
@@ -56,13 +56,6 @@ class Fsk(DuplexStage[CompileContext, FskStep]):
         gain = b.rate / (2.0 * math.pi * step.deviation)
         b.chain("quadrature_demod", gain=gain)
         b.chain("symbol_sync_ff", sps=b.sps, loop_bw=step.loop_bw)
-
-    def emit_tx(self, b: CompileContext, step: FskStep) -> None:
-        b.chain("repeat_f", interp=b.sps_int())
-        b.chain(
-            "frequency_modulator",
-            sensitivity=2.0 * math.pi * step.deviation / b.rate,
-        )
 
     def out_descriptor(self, in_desc: Descriptor, step: FskStep) -> Descriptor:
         return Descriptor(Level.SYMBOLS, ItemType.F, Carrier.SOFT)
@@ -87,10 +80,10 @@ class MskStep(Step):
     mf_oversample: StrictInt = Field(default=12, ge=1, le=MAX_OVERSAMPLE)
 
 
-class Msk(RxStage[CompileContext, MskStep]):
+class Msk(Stage[CompileContext, MskStep]):
     """Coherent MSK (h=0.5 CPFSK) demod -> one soft float per symbol. RX-only:
     an MSK transmitter is the fsk stage at deviation = symbol_rate/4 (h=0.5),
-    so TX needs no new vocabulary. Coherent detection buys ~2-3 dB at operational
+    so no new vocabulary is needed. Coherent detection buys ~2-3 dB at operational
     BER over the best stock differential detector, which stock GR cannot beat (no
     coherent MSK receiver); guarded by
     tests/integration/engine/modulation/test_msk_snr_margin.py."""
@@ -145,7 +138,7 @@ class MfskSoftDemapStep(Step):
         return math.sqrt(sum(x * x for x in self.levels) / len(self.levels))
 
 
-class MfskSoftDemap(RxStage[CompileContext, MfskSoftDemapStep]):
+class MfskSoftDemap(Stage[CompileContext, MfskSoftDemapStep]):
     """M-ary soft demap, SYMBOLS->BITS soft. Turns the one-soft-float-per-symbol
     stream an fsk/msk discriminator emits into log2(M) LLRs per symbol, which is
     what the coding lane (deinterleave/depuncture/fec) consumes.

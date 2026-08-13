@@ -5,7 +5,7 @@ from typing import Any, Literal
 from pydantic import Field
 
 from marconi.engine.compile.compile_context import CompileContext
-from marconi.engine.stages.base import DuplexStage, Stage
+from marconi.engine.stages.base import Stage
 from marconi.engine.types.descriptor import Amplitude, Carrier, Descriptor
 from marconi.engine.types.enums import ItemType
 from marconi.engine.types.levels import Level
@@ -51,7 +51,7 @@ OOK_AGC_REMOVE_HINT = (
 )
 
 
-class OokEnvelope(DuplexStage[CompileContext, OokEnvelopeStep]):
+class OokEnvelope(Stage[CompileContext, OokEnvelopeStep]):
     name = "ook_envelope"
     description = (
         "Non-coherent OOK/PPM envelope demod, IQ<->SYMBOLS, whose amplitude "
@@ -93,12 +93,6 @@ class OokEnvelope(DuplexStage[CompileContext, OokEnvelopeStep]):
         b.chain("multiply_const_ff", value=2.0)
         b.chain("add_const_ff", value=-1.0)
         b.chain("symbol_sync_ff", sps=b.sps, loop_bw=step.loop_bw)
-
-    def emit_tx(self, b: CompileContext, step: OokEnvelopeStep) -> None:
-        b.chain("add_const_ff", value=1.0)
-        b.chain("multiply_const_ff", value=0.5)
-        b.chain("repeat_f", interp=b.sps_int())
-        b.chain("float_to_complex")
 
     def out_descriptor(self, in_desc: Descriptor, step: OokEnvelopeStep) -> Descriptor:
         return Descriptor(Level.SYMBOLS, ItemType.F, Carrier.SOFT)

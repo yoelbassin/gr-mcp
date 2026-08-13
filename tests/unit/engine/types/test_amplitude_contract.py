@@ -1,6 +1,6 @@
 from typing import Literal
 
-from marconi.engine.stages.base import RxStage
+from marconi.engine.stages.base import Stage
 from marconi.engine.types.descriptor import Amplitude, Carrier, Descriptor
 from marconi.engine.types.enums import ItemType
 from marconi.engine.types.levels import Level
@@ -11,7 +11,7 @@ class _PassThroughStep(Step):
     conv: Literal["passthrough"] = "passthrough"
 
 
-class _PassThrough(RxStage[object, _PassThroughStep]):
+class _PassThrough(Stage[object, _PassThroughStep]):
     name = "passthrough"
     from_level = Level.IQ
     to_level = Level.IQ

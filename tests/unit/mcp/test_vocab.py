@@ -11,7 +11,7 @@ def test_index_covers_every_registry_stage() -> None:
     assert set(index) == {s.family for s in stage_registry().values()}
     entry = next(e for e in index["fsk"] if e.name == "fsk")
     assert entry.levels == "iq>symbols"
-    assert set(entry.as_payload()) >= {"name", "levels", "dir"}
+    assert set(entry.as_payload()) >= {"name", "levels"}
 
 
 def test_details_carry_schema_and_contracts() -> None:
@@ -20,7 +20,6 @@ def test_details_carry_schema_and_contracts() -> None:
     assert d.params_schema["properties"]["deviation"]
     # the KEY must reach the wire even when the contract is null
     assert "min_input_sps" in d.as_payload()
-    assert d.dir == "rx,tx"
     assert d.family == "fsk"
 
 

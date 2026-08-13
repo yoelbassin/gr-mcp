@@ -55,26 +55,6 @@ def test_demod_rx_uses_iq_rate_and_sps() -> None:
     assert costas.params["order"] == 4
 
 
-def test_demod_tx_shaping_interp_is_sps() -> None:
-    b = CompileContext(Descriptor(Level.IQ, ItemType.C), rate=8.0, symbol_rate=2.0)
-    PskDemod().emit_tx(b, PskDemodStep(order=PskOrder(4)))
-    rrc = next(x for x in b.build("t", 8.0).blocks if x.kind == "rrc_filter_ccf")
-    assert rrc.params["interpolation"] == 4
-
-
-def test_demap_tx_packs_then_maps() -> None:
-    b = CompileContext(
-        Descriptor(Level.SYMBOLS, ItemType.C, carrier=Carrier.SOFT),
-        rate=4.0,
-        symbol_rate=1.0,
-    )
-    PskDemap().emit_tx(b, PskDemapStep(order=PskOrder(8)))
-    kinds = [x.kind for x in b.build("t", 4.0).blocks]
-    assert kinds == ["pack_k_bits_bb", "chunks_to_symbols_bc"]
-    pack = next(x for x in b.build("t", 4.0).blocks if x.kind == "pack_k_bits_bb")
-    assert pack.params["k"] == 3  # log2(8)
-
-
 def test_demod_rejects_loop_bw_zero_pointing_at_symbol_sync() -> None:
     # loop_bw=0 freezes Gardner AND Costas: a spinning constellation
     # hard-slices into confident garbage with constant modulus, so the

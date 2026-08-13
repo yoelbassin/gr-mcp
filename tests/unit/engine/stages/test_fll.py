@@ -23,13 +23,13 @@ from typing import Literal
 
 import numpy as np
 import pytest
+from helpers import _synth as synth
 from helpers._dsp import (
     AlignmentNotFound,
     channel,
     read_complex,
     resolved_ser,
     tx_sym_indices,
-    write_bits,
 )
 
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
@@ -63,7 +63,6 @@ def _compile(
     return compile_modem(
         Modem(symbol_rate=_SYM, path=path),
         stage_registry(),
-        direction=direction,
         sample_rate=_SR,
         start=IQ,
         source_io={"path": str(src)},
@@ -75,13 +74,12 @@ def _ser_at(tmp_path: Path, cfo_frac: float, with_fll: bool) -> float:
     be = GnuRadioBackend()
     pts, k = _points()
     bits = np.random.default_rng(4).integers(0, 2, _NBITS).astype(np.uint8)
-    bp = write_bits(tmp_path / "in.bits", bits)
     clean = tmp_path / "clean.iq"
     tx: list[Step] = [
         PskDemodStep(order=PskOrder(_ORDER)),
         PskDemapStep(order=PskOrder(_ORDER)),
     ]
-    assert be.run_pipeline(_compile(tx, "tx", bp, clean)).status == "ok"
+    synth.write(clean, synth.from_steps(tx, bits, sample_rate=_SR, symbol_rate=_SYM))
 
     imp = tmp_path / f"imp_{cfo_frac}.iq"
     channel(

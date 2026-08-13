@@ -66,8 +66,8 @@ def test_sync_chance_ratio_is_load_bearing() -> None:
     assert _SYNC_CHANCE_RATIO == 3.0
     # clears the 5-sigma bar (100 + 5*10 = 150) but not 3x chance
     assert 200 > 150 and 200 >= 2.0 * 100.0  # a 2x bar would have admitted it
-    assert _sync_assessment(200, 100.0) is None
-    assert _sync_assessment(301, 100.0) is Assessment.POSITIVE
+    assert _sync_assessment(200, 100.0, 100_000) is None
+    assert _sync_assessment(301, 100.0, 100_000) is Assessment.POSITIVE
 
 
 def test_word_validity_positive_is_load_bearing() -> None:

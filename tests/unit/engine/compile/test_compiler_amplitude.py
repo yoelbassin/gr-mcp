@@ -7,7 +7,7 @@ from marconi.engine.compile.compiler import compile_modem
 from marconi.engine.compile.errors import CompileError
 from marconi.engine.compile.ir import GrPipeline
 from marconi.engine.modulation.ook.stages import OokEnvelopeStep
-from marconi.engine.stages.base import DuplexStage, RxStage, Stage
+from marconi.engine.stages.base import Stage
 from marconi.engine.stages.conditioning import AgcStep, ChannelizeStep
 from marconi.engine.stages.general import SliceStep
 from marconi.engine.stages.registry import stage_registry
@@ -28,7 +28,7 @@ class _EstablishesStep(Step):
     conv: Literal["establishes"] = "establishes"
 
 
-class _NeedsNormalized(DuplexStage[CompileContext, _NeedsNormalizedStep]):
+class _NeedsNormalized(Stage[CompileContext, _NeedsNormalizedStep]):
     name = "needs_normalized"
     from_level = Level.IQ
     to_level = Level.SYMBOLS
@@ -39,11 +39,8 @@ class _NeedsNormalized(DuplexStage[CompileContext, _NeedsNormalizedStep]):
     def emit_rx(self, b: CompileContext, step: _NeedsNormalizedStep) -> None:
         b.chain("complex_to_mag")
 
-    def emit_tx(self, b: CompileContext, step: _NeedsNormalizedStep) -> None:
-        b.chain("float_to_complex")
 
-
-class _Establishes(RxStage[CompileContext, _EstablishesStep]):
+class _Establishes(Stage[CompileContext, _EstablishesStep]):
     name = "establishes"
     from_level = Level.IQ
     to_level = Level.IQ
@@ -66,7 +63,7 @@ class _NeedsPeakStep(Step):
     conv: Literal["needs_peak"] = "needs_peak"
 
 
-class _NeedsPeak(DuplexStage[CompileContext, _NeedsPeakStep]):
+class _NeedsPeak(Stage[CompileContext, _NeedsPeakStep]):
     name = "needs_peak"
     from_level = Level.IQ
     to_level = Level.SYMBOLS
@@ -76,9 +73,6 @@ class _NeedsPeak(DuplexStage[CompileContext, _NeedsPeakStep]):
 
     def emit_rx(self, b: CompileContext, step: _NeedsPeakStep) -> None:
         b.chain("complex_to_mag")
-
-    def emit_tx(self, b: CompileContext, step: _NeedsPeakStep) -> None:
-        b.chain("float_to_complex")
 
 
 def _registry() -> dict[str, Stage[Any, Any]]:
@@ -93,7 +87,6 @@ def _compile(path: list[Step], direction: Literal["rx", "tx"] = "rx") -> GrPipel
     return compile_modem(
         Modem(symbol_rate=1.0, path=path),
         _registry(),
-        direction=direction,
         sample_rate=4.0,
         start=IQ,
         source_io={"path": "/dev/null"},
@@ -114,10 +107,6 @@ def test_missing_amplitude_establishment_fails_at_compile() -> None:
 
 def test_established_amplitude_satisfies_the_requirement() -> None:
     _compile([_EstablishesStep(), _NeedsNormalizedStep()])
-
-
-def test_amplitude_check_does_not_apply_to_tx() -> None:
-    _compile([_NeedsNormalizedStep()], direction="tx")
 
 
 def test_wrong_statistic_names_the_corrective_mode() -> None:
@@ -163,7 +152,6 @@ def test_agc_after_channelize_satisfies_a_requiring_stage() -> None:
             ],
         ),
         stage_registry(),
-        direction="rx",
         sample_rate=4.0,
         start=IQ,
         source_io={"path": "/dev/null"},
@@ -184,7 +172,6 @@ def test_agc_before_channelize_is_rejected() -> None:
                 ],
             ),
             stage_registry(),
-            direction="rx",
             sample_rate=4.0,
             start=IQ,
             source_io={"path": "/dev/null"},

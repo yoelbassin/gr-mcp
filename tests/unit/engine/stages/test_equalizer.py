@@ -41,7 +41,6 @@ def _equalize(src: Path, snk: Path, *, num_taps: int, step_size: float) -> np.nd
             path=[EqualizerStep(num_taps=num_taps, step_size=step_size)],
         ),
         stage_registry(),
-        direction="rx",
         sample_rate=_SR,
         start=IQ,
         source_io={"path": str(src)},

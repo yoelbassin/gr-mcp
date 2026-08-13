@@ -5,6 +5,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 from fastmcp import Client
+from helpers import _synth as synth
 
 from marconi.mcp.server import build_server
 
@@ -13,10 +14,10 @@ async def test_all_tools_are_registered() -> None:
     async with Client(build_server()) as client:
         names = {t.name for t in await client.list_tools()}
     assert names == {
+        "explain",
         "describe_stages",
         "validate_modem",
         "run_rx",
-        "run_tx",
         "read_stream",
         "stream_stats",
         "survey",
@@ -32,22 +33,19 @@ async def test_roundtrip_through_client(
         "symbol_rate": 1.0,
         "path": [{"conv": "fsk", "deviation": 1.0}, {"conv": "slice"}],
     }
-    bits = "".join("01"[b] for b in np.random.default_rng(5).integers(0, 2, 512))
+    bits = np.random.default_rng(5).integers(0, 2, 512).astype(np.uint8)
+    capture = synth.write(
+        tmp_path / "fsk.cf32",
+        synth.cpfsk(bits, sps=4, deviation=1.0, sample_rate=4.0),
+    )
     async with Client(build_server()) as client:
-        tx = (
-            await client.call_tool(
-                "run_tx",
-                {"spec": spec, "sample_rate": 4.0, "bits": bits},
-            )
-        ).data
-        assert tx["status"] == "ok"
         rx = (
             await client.call_tool(
                 "run_rx",
                 {
                     "spec": spec,
                     "sample_rate": 4.0,
-                    "capture_path": tx["iq_path"],
+                    "capture_path": str(capture),
                 },
             )
         ).data

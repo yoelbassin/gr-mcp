@@ -47,7 +47,6 @@ def _run_rx(pre: np.ndarray, stream: np.ndarray, tmp_path: Path) -> np.ndarray:
     pipe = compile_modem(
         modem,
         stage_registry(),
-        direction="rx",
         sample_rate=1.0,
         start=SYM_C,
         source_io={"path": str(src)},

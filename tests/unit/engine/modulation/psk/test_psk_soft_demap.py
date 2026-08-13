@@ -41,7 +41,6 @@ def _run(path: list[Step], sym: np.ndarray, tmp: Path, tag: str, ext: str) -> Pa
     pipe = compile_modem(
         Modem(symbol_rate=1.0, path=path),
         stage_registry(),
-        direction="rx",
         sample_rate=1.0,
         start=SYM_C,
         source_io={"path": str(src)},
@@ -143,7 +142,6 @@ def test_hard_demap_cannot_reach_the_coding_lane() -> None:
             compile_modem(
                 spec,
                 stage_registry(),
-                direction="rx",
                 sample_rate=1.0,
                 start=SYM_C,
                 source_io={"path": "in.cf32"},
@@ -154,7 +152,6 @@ def test_hard_demap_cannot_reach_the_coding_lane() -> None:
                 compile_modem(
                     spec,
                     stage_registry(),
-                    direction="rx",
                     sample_rate=1.0,
                     start=SYM_C,
                     source_io={"path": "in.cf32"},

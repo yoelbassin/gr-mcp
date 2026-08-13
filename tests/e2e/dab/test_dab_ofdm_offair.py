@@ -62,7 +62,6 @@ def test_dab_carriers_lock(tmp_path: Path) -> None:
     pipe = compile_modem(
         modem,
         stage_registry(),
-        direction="rx",
         sample_rate=2_048_000.0,
         start=Descriptor(Level.IQ, ItemType.C),
         source_io={"path": str(_SLICE)},

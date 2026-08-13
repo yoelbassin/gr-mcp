@@ -3,10 +3,10 @@
 
 Marconi is an LLM-driven assistant for radio-frequency work — **"Claude Code for RF."**
 Operators speak in natural language and Marconi does the radio work on their behalf:
-surveying a band, identifying an unknown signal, decoding a transmission, or
-constructing one. Its value is expert RF judgment delivered through conversation,
-removing the slow specialist loop of hand-building flowgraphs, consulting references,
-and writing single-use scripts.
+surveying a band, identifying an unknown signal, and decoding a transmission. Its
+value is expert RF judgment delivered through conversation, removing the slow
+specialist loop of hand-building flowgraphs, consulting references, and writing
+single-use scripts.
 
 **Intended users** — practitioners who work with the signals already in their
 environment, not engineers designing radios of their own:
@@ -14,27 +14,27 @@ environment, not engineers designing radios of their own:
 - Makers and amateur-radio operators — receiving/decoding nearby transmissions and
   extending their own equipment.
 - Security and reverse-engineering researchers (authorized contexts) — characterizing
-  undocumented protocols and exercising devices under test.
-- Educators and students — generating signals with known ground truth, then decoding
-  and measuring them.
+  undocumented protocols and reading what a device under test emits.
+- Educators and students — measuring and decoding signals whose ground truth they
+  already know.
 
-**Two-sided workflow**, each side informing the other:
+**RECEIVE ONLY.** Marconi is a receiver: capture, characterize, decode. There is no
+transmit path and no signal generation — no `emit_tx`, no `run_tx`, no compile
+direction. A capture comes from hardware (`capture`) or from a file the operator
+already holds; a test signal comes from `tests/helpers/_synth.py`, which is test
+scaffolding and ships in no wheel.
 
-- **Understand** — measure a signal's parameters, classify its modulation, and turn IQ
-  into FEC-corrected bits; the agent composes those bits with its own framing, CRC, and
-  field-parsing to read messages and reverse-engineer an unknown protocol's structure.
-- **Create** — encode messages into a signal, generate test waveforms, and transmit —
-  sim-first, and on hardware only behind an explicit safety confirmation.
+**The workflow** — measure a signal's parameters, classify its modulation, and turn IQ
+into FEC-corrected bits; the agent composes those bits with its own framing, CRC, and
+field-parsing to read messages and reverse-engineer an unknown protocol's structure.
 
-Marconi itself is a radio: it transforms between IQ and FEC-corrected bits — sync,
+Marconi itself is a radio front end: it transforms IQ into FEC-corrected bits — sync,
 demod, symbol decisions, descrambling, deinterleaving, FEC. Framing, CRC checks, field
-parsing, and messages are protocol-datasheet work, not the product's. Reverse-engineering
-a protocol from Marconi's bits is exactly what enables recreating and transmitting it —
-closing the loop between the two sides.
+parsing, and messages are protocol-datasheet work, not the product's.
 
 **Success:** a user points Marconi at a band or a recording, asks "what is this, and
 what is it transmitting?" in plain language, and gets a substantive, trustworthy
-answer — and, when desired, builds and transmits a signal of their own.
+answer.
 
 ## Coding Standards and Guidelines
 
@@ -120,8 +120,13 @@ with `@tool_error_boundary`.
 
 ### Tests
 
-- **Test real behavior, not mocks** — round-trip BER-0 sweeps through the real engine,
-  AWGN introduction, real CRCs, malformed input. The test tree is kind-first: `tests/unit`
+- **Test real behavior, not mocks** — BER-0 sweeps through the real engine, AWGN
+  introduction, real CRCs, malformed input. There is no transmitter, so a test that
+  needs a signal synthesizes one with `tests/helpers/_synth.py`, whose generators are
+  written from each modulation's textbook definition and checked against that
+  definition in `tests/unit/helpers/test_synth.py`. Never generate a test signal by
+  inverting the stage under test: a demod bug and an encoder bug that agree produce
+  BER 0 and prove nothing. The test tree is kind-first: `tests/unit`
   (one component under test — a minimal compiled chain may be the vehicle; source tree
   mirrored inside), `tests/integration` (multi-stage behavior: round-trips and cross-stage
   contracts through the real engine on synthetic signals), `tests/e2e` (gates against

@@ -4,7 +4,6 @@ import pytest
 from pydantic import ValidationError
 
 from marconi.engine.compile.compile_context import CompileContext
-from marconi.engine.stages.base import StageDirectionError
 from marconi.engine.stages.conditioning import (
     Channelize,
     ChannelizeStep,
@@ -71,20 +70,11 @@ def test_compile_rejects_translate_beyond_nyquist() -> None:
         compile_pipeline(
             modem,
             stage_registry(),
-            direction="rx",
             sample_rate=250_000.0,
             start=Descriptor(Level.IQ, ItemType.C),
             source_io={"path": "in.cf32"},
             sink_io={"path": "out.cf32"},
         )
-
-
-def test_rx_only_rejects_tx() -> None:
-    b = CompileContext(Descriptor(Level.IQ, ItemType.C), rate=16.0, symbol_rate=1.0)
-    with pytest.raises(StageDirectionError):
-        Channelize().emit_tx(b, ChannelizeStep(decim=2, bandwidth_hz=4.0))
-    with pytest.raises(StageDirectionError):
-        Invert().emit_tx(b, InvertStep())
 
 
 def test_channelize_emit_uses_input_rate_and_decim() -> None:
@@ -138,7 +128,6 @@ def test_rate_threads_through_channelize_to_demod() -> None:
     pipe = compile_modem(
         modem,
         stage_registry(),
-        direction="rx",
         sample_rate=16.0,
         start=D(Level.IQ, ItemType.C),
         source_io={"path": "x"},

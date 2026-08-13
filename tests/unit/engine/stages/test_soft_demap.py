@@ -35,7 +35,6 @@ def _run_bits(
     pipe = compile_modem(
         modem,
         stage_registry(),
-        direction="rx",
         sample_rate=1.0,
         start=SYM_C,
         source_io={"path": str(src)},
@@ -77,7 +76,6 @@ def test_soft_demap_psk_matches_psk_soft_demap(tmp_path: Path) -> None:
     pipe = compile_modem(
         modem,
         stage_registry(),
-        direction="rx",
         sample_rate=1.0,
         start=SYM_C,
         source_io={"path": str(src)},

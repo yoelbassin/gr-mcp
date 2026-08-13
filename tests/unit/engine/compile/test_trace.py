@@ -25,7 +25,6 @@ def test_compiled_pipeline_carries_full_trace() -> None:
     cp = compile_pipeline(
         modem,
         stage_registry(),
-        direction="rx",
         sample_rate=4.0,
         start=IQ,
         source_io={"path": "unused.cf32"},
@@ -43,7 +42,6 @@ def _demod_demap(trace_dir: Path | None) -> CompiledPipeline:
     return compile_pipeline(
         modem,
         fixture_registry(),
-        direction="rx",
         sample_rate=8.0,
         start=IQ,
         source_io={"path": "in.iq"},

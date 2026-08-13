@@ -60,6 +60,22 @@ _PROTOCOL_TOKENS = [
     r"\brds\b",
     r"\bwm-?bus\b",
     r"\bm-?bus\b",
+    # Protocols with no capture in the suite yet. The list is hand-maintained,
+    # so its coverage is whatever someone remembered to type — these are the
+    # names a new vertical is most likely to arrive under, added ahead of the
+    # leak rather than after it.
+    r"\bp25\b",
+    r"\btetra\b",
+    r"\bgsm\b",
+    r"\blte\b",
+    r"\bmeshtastic\b",
+    r"\btpms\b",
+    r"\biridium\b",
+    r"\binmarsat\b",
+    r"\bapco\b",
+    r"\bsigfox\b",
+    r"\bz-?wave\b",
+    r"\b802\.?11\b",
 ]
 _PATTERN = re.compile("|".join(_PROTOCOL_TOKENS), re.IGNORECASE)
 

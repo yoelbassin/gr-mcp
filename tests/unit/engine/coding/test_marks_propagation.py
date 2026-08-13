@@ -123,7 +123,6 @@ def test_probe_marks_cannot_cross_a_rate_changing_gr_stage() -> None:
         compile_pipeline(
             modem,
             stage_registry(),
-            direction="rx",
             sample_rate=4096.0,
             start=IQ,
             source_io={},
@@ -147,7 +146,6 @@ def test_probe_at_the_end_of_the_gr_segment_compiles() -> None:
     cp = compile_pipeline(
         modem,
         stage_registry(),
-        direction="rx",
         sample_rate=4096.0,
         start=IQ,
         source_io={},

@@ -99,7 +99,6 @@ def _compile_agc(
     return compile_modem(
         Modem(symbol_rate=symbol_rate, path=[AgcStep(**params)]),
         stage_registry(),
-        direction="rx",
         sample_rate=rate,
         start=Descriptor(Level.IQ, ItemType.C),
         source_io={"path": "/dev/null"},
@@ -177,7 +176,6 @@ def test_agc_runs_and_normalizes_a_scaled_stream(mode: str, tmp_path: Path) -> N
     pipe = compile_modem(
         Modem(symbol_rate=1.0, path=[AgcStep(**params)]),
         stage_registry(),
-        direction="rx",
         sample_rate=8.0,
         start=Descriptor(Level.IQ, ItemType.C),
         source_io={"path": str(src)},

@@ -15,6 +15,7 @@ import numpy.typing as npt
 from marconi.deadline import bounded, check_deadline
 from marconi.engine.io.source import SourceSlice
 from marconi.engine.types.enums import CaptureDtype, ItemType
+from marconi.errors import register_error
 from marconi.levelfit import (
     Tail,
     binned_counts,
@@ -29,6 +30,16 @@ from marconi.mcp.workspace import (
     touch_cache_entry,
 )
 from marconi.wire import Histogram, Payload, replace
+
+
+class EmptyStreamError(Exception):
+    """A stream that exists and holds nothing to summarize. Its own type, and
+    NOT invalid_argument: the caller's arguments were fine — a run decoded
+    nothing, which is a fact about the run, and "[invalid_argument] stream has
+    no finite items" sent the agent back to re-check a call that was correct."""
+
+
+register_error(EmptyStreamError, "failed_precondition")
 
 _MAX_INLINE_BITS = 1_048_576
 # Per-type ceilings chosen from what an item COSTS as JSON, not from a round
@@ -327,6 +338,10 @@ def render_page(
 ) -> dict[str, object]:
     if offset < 0:
         raise ValueError(f"offset must be >= 0, got {offset}")
+    if count is not None and count < 0:
+        # offset<0 raised and count<0 silently returned an empty page: the same
+        # mistake, told two different ways
+        raise ValueError(f"count must be >= 0, got {count}")
     require_file(path)
     kind = resolve_page_type(path, item_type)
     spec = _PAGE_SPECS[kind]
@@ -371,11 +386,14 @@ def ensure_cf32(
     if dest.is_file():
         touch_cache_entry(dest)
         return SourceSlice(path=dest)
-    # make room BEFORE writing, so the budget bounds the peak and the entry
-    # about to be published is never itself a candidate
-    evict_conversion_cache()
+    raw_size = np.dtype(_RAW_FORMATS[kind].np_dtype).itemsize
+    # make room BEFORE writing, for the entry about to be written as well as
+    # what is already there — so the budget bounds the peak, and the new entry
+    # is never itself an eviction candidate
+    evict_conversion_cache(
+        incoming=_converted_bytes(st.st_size, offset, samples, raw_size)
+    )
     with src.open("rb") as fin:
-        raw_size = np.dtype(_RAW_FORMATS[kind].np_dtype).itemsize
         fin.seek(offset * 2 * raw_size)
         # mkstemp: concurrent converters of the same capture (FastMCP runs
         # tools on worker threads) must never share a tmp path - the loser
@@ -392,6 +410,13 @@ def ensure_cf32(
                 pass
             raise
     return SourceSlice(path=dest)
+
+
+def _converted_bytes(src_size: int, offset: int, samples: int, raw_size: int) -> int:
+    """cf32 bytes the conversion below will write, from sizes alone."""
+    available = max(0, src_size - offset * 2 * raw_size) // (2 * raw_size)
+    taken = min(samples, available) if samples > 0 else available
+    return taken * ItemType.C.item_bytes
 
 
 def _convert_slice(
@@ -473,7 +498,11 @@ def stream_stats_payload(
     sampled = _sample_stream(path, _PAGE_SPECS[kind].dtype)
     sample, total = sampled.items, sampled.total_items
     if sample.size == 0:
-        raise ValueError("stream has no finite items to summarize")
+        raise EmptyStreamError(
+            f"{path} holds 0 items — the run that wrote it decoded nothing; "
+            "read the run's quality verdict and per-block census for where "
+            "the signal was lost, not this stream"
+        )
     # sampled_items is per-branch: the real and complex branches drop
     # non-finite items first and report what they actually summarized
     header: dict[str, object] = {
@@ -498,7 +527,10 @@ def _finite(sample: npt.NDArray[Any], dtype: type[Any]) -> npt.NDArray[Any]:
     x = sample.astype(dtype)
     x = x[np.isfinite(x)]
     if x.size == 0:
-        raise ValueError("stream has no finite items to summarize")
+        raise EmptyStreamError(
+            "every sampled item is NaN or infinite — nothing to summarize; "
+            "the stream is corrupt rather than empty"
+        )
     return x
 
 

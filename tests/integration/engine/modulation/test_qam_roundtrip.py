@@ -5,12 +5,12 @@ from typing import Literal
 import numpy as np
 import numpy.typing as npt
 import pytest
+from helpers import _synth as synth
 from helpers._dsp import (
     channel,
     read_bits,
     resolved_ser_hard,
     tx_sym_indices,
-    write_bits,
 )
 
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
@@ -85,7 +85,6 @@ def _compile(
     return compile_modem(
         modem,
         stage_registry(),
-        direction=direction,
         sample_rate=_SR,
         start=start,
         source_io={"path": str(src)},
@@ -100,10 +99,12 @@ def test_qam_demod_ser0_under_impairments(order: int, tmp_path: Path) -> None:
     n_bits, cfo_frac, snr_db, settle = _CFG[order]
     points, k = _const_points(order)
     bits = np.random.default_rng(order).integers(0, 2, n_bits).astype(np.uint8)
-    bp = write_bits(tmp_path / "in.bits", bits)
     clean, imp, sym = tmp_path / "c.iq", tmp_path / "i.iq", tmp_path / "s.u8"
     # TX bits -> IQ via the full modem (pack -> chunks_to_symbols -> RRC)
-    assert be.run_pipeline(_compile(_full(order), "tx", IQ, bp, clean)).status == "ok"
+    synth.write(
+        clean,
+        synth.from_steps(_full(order).path, bits, sample_rate=_SR, symbol_rate=_SYM),
+    )
     channel(
         clean,
         imp,
@@ -128,14 +129,15 @@ def test_run_rx_wraps_symbol_index_final_as_symbolstream(tmp_path: Path) -> None
     from marconi.engine.stages.registry import stage_registry
 
     ensure_worker_warm()
-    be = GnuRadioBackend()
     order = 16
     n_bits, cfo_frac, snr_db, settle = _CFG[order]
     points, k = _const_points(order)
     bits = np.random.default_rng(order).integers(0, 2, n_bits).astype(np.uint8)
-    bp = write_bits(tmp_path / "in.bits", bits)
     clean, imp = tmp_path / "c.iq", tmp_path / "i.iq"
-    assert be.run_pipeline(_compile(_full(order), "tx", IQ, bp, clean)).status == "ok"
+    synth.write(
+        clean,
+        synth.from_steps(_full(order).path, bits, sample_rate=_SR, symbol_rate=_SYM),
+    )
     channel(
         clean,
         imp,
@@ -172,10 +174,9 @@ def test_qam_demap_clean_identity(order: int, tmp_path: Path) -> None:
     be = GnuRadioBackend()
     n_bits = _CFG[order][0]
     bits = np.random.default_rng(0).integers(0, 2, n_bits).astype(np.uint8)
-    bp = write_bits(tmp_path / "in.bits", bits)
     sym, op = tmp_path / "s.u8", tmp_path / "out.bits"
     modem = Modem(symbol_rate=_SYM, path=[QamDemapStep(order=QamOrder(order))])
-    assert be.run_pipeline(_compile(modem, "tx", SYM_B, bp, sym)).status == "ok"
+    synth.symbol_indices(bits, order=order).tofile(sym)
     assert be.run_pipeline(_compile(modem, "rx", SYM_B, sym, op)).status == "ok"
     out = read_bits(op)
     k = int(log2(order))

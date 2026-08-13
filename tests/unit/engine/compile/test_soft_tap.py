@@ -20,7 +20,6 @@ def _compile(*steps: Step, quality_tap: bool = True) -> CompiledPipeline:
     return compile_pipeline(
         Modem(symbol_rate=1.0, path=list(steps)),
         stage_registry(),
-        direction="rx",
         sample_rate=4.0,
         start=IQ,
         source_io={"path": "in.cf32"},

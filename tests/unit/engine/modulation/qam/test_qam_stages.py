@@ -57,26 +57,7 @@ def test_demod_rx_chain_is_rrc_sync_receiver() -> None:
     assert cr.params["scheme"] == "qam" and cr.params["order"] == 16
 
 
-def test_demod_tx_maps_then_shapes_with_interp_sps() -> None:
-    b = CompileContext(Descriptor(Level.IQ, ItemType.C), rate=8.0, symbol_rate=2.0)
-    QamDemod().emit_tx(b, QamDemodStep(order=QamOrder(64)))
-    p = b.build("t", 8.0)
-    assert [x.kind for x in p.blocks] == ["chunks_to_symbols_bc", "rrc_filter_ccf"]
-    c2s = next(x for x in p.blocks if x.kind == "chunks_to_symbols_bc")
-    assert c2s.params["scheme"] == "qam" and c2s.params["order"] == 64
-    rrc = next(x for x in p.blocks if x.kind == "rrc_filter_ccf")
-    assert rrc.params["interpolation"] == 4  # sps
-
-
-def test_demap_is_pure_pack_unpack_of_k() -> None:
-    tx = CompileContext(
-        Descriptor(Level.SYMBOLS, ItemType.B, carrier=Carrier.HARD),
-        rate=4.0,
-        symbol_rate=1.0,
-    )
-    QamDemap().emit_tx(tx, QamDemapStep(order=QamOrder(64)))
-    pack = next(x for x in tx.build("t", 4.0).blocks if x.kind == "pack_k_bits_bb")
-    assert pack.params["k"] == 6  # log2(64)
+def test_demap_is_pure_unpack_of_k() -> None:
     rx = CompileContext(
         Descriptor(Level.SYMBOLS, ItemType.B, carrier=Carrier.HARD),
         rate=4.0,

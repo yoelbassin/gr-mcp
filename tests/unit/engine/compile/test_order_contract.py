@@ -43,7 +43,6 @@ def _compile(
     return compile_modem(
         Modem(symbol_rate=1.0, path=path),
         stage_registry(),
-        direction=direction,
         sample_rate=sample_rate,
         start=start,
         source_io={"path": "/dev/null"},
@@ -122,7 +121,6 @@ def test_qam_order_mismatch_fails_tx() -> None:
     with pytest.raises(CompileError):
         _compile(
             [QamDemodStep(order=QamOrder.QAM16), QamDemapStep(order=QamOrder.QAM64)],
-            direction="tx",
         )
 
 
@@ -287,7 +285,6 @@ def test_m_slice_conflicting_upstream_pin_fails_at_compile() -> None:
         compile_pipeline(
             Modem(symbol_rate=1.0, path=[_m_slice()]),
             stage_registry(),
-            direction="rx",
             sample_rate=1.0,
             start=pinned,
             source_io={"path": "/dev/null"},

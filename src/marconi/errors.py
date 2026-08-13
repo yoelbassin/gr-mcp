@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 # Public exception types register their stable agent-facing [code] here at
 # import (see register_error call sites in each package). classify_error is
 # framework-free: the MCP boundary (marconi/mcp/boundary.py) builds on top of
@@ -24,7 +26,17 @@ _FALLBACK_CODES: dict[type[Exception], str] = {
     MemoryError: "resource_exhausted",
     PermissionError: "failed_precondition",
     OSError: "io_error",
+    # A caller number too large to convert is the caller's to retype, not a bug
+    # to report: sample_rate=inf reached round() in the compiler and wore
+    # "internal_error". Its siblings deliberately do NOT appear — a
+    # ZeroDivisionError or a KeyError here really is an engine bug.
+    OverflowError: "invalid_argument",
 }
+
+# pydantic appends a docs URL to every ValidationError message. The tools ship
+# these straight to the agent, where the line is pure token cost and points at
+# our dependency's internals rather than at the spec that failed.
+_DOC_URL = re.compile(r"\n\s*For further information visit https://\S+")
 
 
 def register_error(exc_type: type[Exception], code: str) -> None:
@@ -39,13 +51,14 @@ def classify_error(exc: Exception) -> tuple[str, str]:
     code an exception mapped to depended on module import order (registry) or on
     the order a table was typed (fallbacks). These codes are the agent's stable
     contract; they cannot turn on either."""
+    message = _DOC_URL.sub("", str(exc))
     for cls in type(exc).__mro__:
         code = _REGISTRY.get(cls)
         if code is not None:
-            return code, str(exc)
+            return code, message
 
     for cls in type(exc).__mro__:
         fallback = _FALLBACK_CODES.get(cls)
         if fallback is not None:
-            return fallback, str(exc)
-    return "internal_error", f"{type(exc).__name__}: {exc}"
+            return fallback, message
+    return "internal_error", f"{type(exc).__name__}: {message}"

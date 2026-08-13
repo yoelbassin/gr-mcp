@@ -14,17 +14,22 @@ off-main-thread production runner to avoid the embedded-uint8-output SIGSEGV.
 
 from __future__ import annotations
 
-import tracemalloc
 from pathlib import Path
 
 import numpy as np
 import pytest
-from helpers._dsp import aligned_ber, read_bits, write_bits
+from helpers import _synth as synth
+from helpers._dsp import aligned_ber, read_bits
 
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
 from marconi.engine.compile.compile_context import CompileContext
 from marconi.engine.compile.ir import GrBlock, GrConnection, GrPipeline
-from marconi.engine.modulation.css.stages import Dechirp, DechirpStep
+from marconi.engine.modulation.css.stages import (
+    ChirpSyncStep,
+    CssDemapStep,
+    Dechirp,
+    DechirpStep,
+)
 from marconi.engine.types.descriptor import Descriptor
 from marconi.engine.types.enums import ItemType
 from marconi.engine.types.levels import Level
@@ -40,15 +45,14 @@ _IQ = Descriptor(Level.IQ, ItemType.C)
 
 
 def _bits_to_bits_pipeline(
-    bits_in: Path, bits_out: Path, *, sf: int = SF, os: int = OS, zp: int = ZP
+    iq_in: Path, bits_out: Path, *, sf: int = SF, os: int = OS, zp: int = ZP
 ) -> GrPipeline:
-    """bits_src → css_map → chirp_mod → [stock dechirp chain] → css_demap →
-    bits_sink."""
+    """iq_src → [stock dechirp chain] → css_demap → bits_sink. The chirps are
+    synthesized (helpers/_synth.py) rather than modulated by a sibling block, so
+    the decode is measured against an independent waveform."""
     rate = float(os * (1 << sf))
     ctx = CompileContext(_IQ, rate, 1.0)
-    ctx.chain("bits_file_source", path=str(bits_in))
-    ctx.chain("css_map", sf=sf)
-    ctx.chain("chirp_mod", sf=sf, oversample=os)
+    ctx.chain("iq_file_source", path=str(iq_in))
     Dechirp().emit_rx(ctx, DechirpStep(sf=sf, oversample=os, zero_pad=zp))
     ctx.chain("css_demap", sf=sf)
     ctx.chain("bits_file_sink", path=str(bits_out))
@@ -106,7 +110,15 @@ def test_css_core_bits_roundtrip(
     """css_map → chirp_mod → [stock dechirp] → css_demap recovers bits exactly."""
     ensure_worker_warm()
     bits = np.random.default_rng(0).integers(0, 2, sf * n_syms).astype(np.uint8)
-    bp = write_bits(tmp_path / "in.bits", bits)
+    bp = synth.write(
+        tmp_path / "in.iq",
+        synth.from_steps(
+            [DechirpStep(sf=sf, oversample=os_, zero_pad=1), CssDemapStep(sf=sf)],
+            bits,
+            sample_rate=float(os_ << sf),
+            symbol_rate=1.0,
+        ),
+    )
     op = tmp_path / "out.bits"
 
     be = GnuRadioBackend()
@@ -132,7 +144,15 @@ def test_css_roundtrip_wide_fold_bins(
 ) -> None:
     ensure_worker_warm()
     bits = np.random.default_rng(1).integers(0, 2, sf * n_syms).astype(np.uint8)
-    bp = write_bits(tmp_path / "in.bits", bits)
+    bp = synth.write(
+        tmp_path / "in.iq",
+        synth.from_steps(
+            [DechirpStep(sf=sf, oversample=os_, zero_pad=zp), CssDemapStep(sf=sf)],
+            bits,
+            sample_rate=float(os_ << sf),
+            symbol_rate=1.0,
+        ),
+    )
     op = tmp_path / "out.bits"
     be = GnuRadioBackend()
     result = be.run_pipeline(_bits_to_bits_pipeline(bp, op, sf=sf, os=os_, zp=zp))
@@ -151,19 +171,10 @@ def _full_chain_pipeline(
     zp: int = ZP,
     preamble_len: int = PREAMBLE_LEN,
 ) -> GrPipeline:
-    """TX+RX in one flowgraph: … chirp_prepend → chirp_sync → [stock dechirp] …"""
+    """iq_src (synthesized preamble + payload) → chirp_sync → [stock dechirp] …"""
     rate = float(os * (1 << sf))
     ctx = CompileContext(_IQ, rate, 1.0)
-    ctx.chain("bits_file_source", path=str(bits_in))
-    ctx.chain("css_map", sf=sf)
-    ctx.chain("chirp_mod", sf=sf, oversample=os)
-    ctx.chain(
-        "chirp_prepend",
-        sf=sf,
-        oversample=os,
-        preamble_len=preamble_len,
-        sfd_symbols=2.25,
-    )
+    ctx.chain("iq_file_source", path=str(bits_in))
     ctx.chain(
         "chirp_sync",
         sf=sf,
@@ -189,51 +200,32 @@ def test_chirp_sync_clean_roundtrip(tmp_path: Path) -> None:
     rng = np.random.default_rng(3)
     bits = rng.integers(0, 2, SF * 40).astype(np.uint8)
     pad = rng.integers(0, 2, SF * (PREAMBLE_LEN + 4)).astype(np.uint8)
-    bp = write_bits(tmp_path / "in.bits", np.concatenate([bits, pad]))
+    bp = synth.write(
+        tmp_path / "in.iq",
+        synth.from_steps(
+            [
+                ChirpSyncStep(
+                    sf=SF,
+                    oversample=OS,
+                    zero_pad=ZP,
+                    preamble_len=PREAMBLE_LEN,
+                    sfd_symbols=2.25,
+                    sync_symbols=2,
+                ),
+                DechirpStep(sf=SF, oversample=OS, zero_pad=ZP),
+                CssDemapStep(sf=SF),
+            ],
+            np.concatenate([bits, pad]),
+            sample_rate=float(OS << SF),
+            symbol_rate=1.0,
+        ),
+    )
     op = tmp_path / "out.bits"
     be = GnuRadioBackend()
     assert be.run_pipeline(_full_chain_pipeline(bp, op)).status == "ok"
     out = read_bits(op)
     assert len(out) >= len(bits)  # payload fully emitted; pad absorbs the tail
     assert aligned_ber(out, bits) == 0.0
-
-
-def test_chirp_prepend_output_length(tmp_path: Path) -> None:
-    """chirp_prepend emits (preamble_len + 2.25)*sample_num prepend samples
-    followed by the input payload samples."""
-    ensure_worker_warm()
-    payload_samples = 4 * SAMPLE_NUM  # a few chirp symbols worth of IQ
-    payload = np.ones(payload_samples, dtype=np.complex64)
-    iq_in = tmp_path / "payload.iq"
-    payload.tofile(iq_in)
-    iq_out = tmp_path / "out.iq"
-
-    be = GnuRadioBackend()
-    result = be.run_pipeline(_prepend_pipeline(iq_in, iq_out))
-    assert result.status == "ok", f"pipeline failed: {result}"
-
-    out = np.fromfile(iq_out, dtype=np.complex64)
-    sfd_len = SAMPLE_NUM + SAMPLE_NUM + SAMPLE_NUM // 4  # 2.25 * sample_num
-    expected_prepend = PREAMBLE_LEN * SAMPLE_NUM + sfd_len
-    expected_total = expected_prepend + payload_samples
-    assert len(out) == expected_total, (
-        f"expected {expected_total} samples ({expected_prepend} prepend + "
-        f"{payload_samples} payload), got {len(out)}"
-    )
-
-
-def test_chirp_mod_build_allocation_bounded() -> None:
-    ensure_worker_warm()
-    from gnuradio import gr
-
-    from marconi.engine.backends.gnuradio.embedded.chirp import make_chirp_mod
-
-    for sf in (12, 14):
-        tracemalloc.start()
-        make_chirp_mod(gr, sf, 2)
-        _, peak = tracemalloc.get_traced_memory()
-        tracemalloc.stop()
-        assert peak < 10 * 2**20, f"sf={sf} build allocated {peak} bytes"
 
 
 def test_chirp_sync_noise_bounded_no_lock() -> None:

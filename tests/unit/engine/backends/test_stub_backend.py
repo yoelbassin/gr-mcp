@@ -26,7 +26,6 @@ def test_instantiate_resolves_a_compiled_pipeline() -> None:
     pipe = compile_modem(
         modem,
         fixture_registry(),
-        direction="rx",
         sample_rate=8.0,
         start=IQ,
         source_io={"path": "i"},

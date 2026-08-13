@@ -33,7 +33,6 @@ def test_ofdm_coherent_equalizes_to_clean_qpsk(tmp_path: Path) -> None:
     pipe = compile_modem(
         modem,
         stage_registry(),
-        direction="rx",
         sample_rate=_drm.RATE,
         start=Descriptor(Level.IQ, ItemType.C),
         source_io={"path": str(_SLICE)},

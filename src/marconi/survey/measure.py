@@ -10,6 +10,7 @@ from scipy.signal import find_peaks, welch
 from scipy.stats import kurtosis
 
 from marconi.deadline import check_deadline
+from marconi.engine.types.bounds import check_sample_rate
 from marconi.levelfit import (
     Tail,
     binned_counts,
@@ -759,6 +760,11 @@ def survey_iq(
     min_symbol_rate: float | None = None,
     max_symbol_rate: float | None = None,
 ) -> SurveyResult:
+    # named first, and by name: with sample_rate 0/negative/NaN the derived
+    # bounds below both collapse and the failure surfaced as "require 0 <
+    # min_symbol_rate < max_symbol_rate" — two parameters the caller had not
+    # passed, about a value that was not the problem
+    check_sample_rate(sample_rate)
     window = sample_iq(path, offset, length)
     x = window.samples
     hi = max_symbol_rate if max_symbol_rate is not None else sample_rate / 2
@@ -767,7 +773,11 @@ def survey_iq(
     else:
         lo = min(_default_rate_floor(x.size, sample_rate), hi / 2)
     if not 0 < lo < hi:
-        raise ValueError("require 0 < min_symbol_rate < max_symbol_rate")
+        raise ValueError(
+            f"symbol-rate search band is empty: lo={lo:g} hi={hi:g}; require "
+            f"0 < min_symbol_rate < max_symbol_rate (defaults derive from "
+            f"sample_rate={sample_rate:g} and the analyzed span)"
+        )
     check_deadline()
     spectrum = _spectrum(x, sample_rate)
     return SurveyResult(

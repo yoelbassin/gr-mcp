@@ -9,7 +9,7 @@ from pydantic import Field, StrictInt, model_validator
 from pydantic_core import PydanticCustomError
 
 from marconi.engine.compile.compile_context import CompileContext
-from marconi.engine.stages.base import RxStage, Stage
+from marconi.engine.stages.base import Stage
 from marconi.engine.types.bounds import (
     MAX_DECODER_ITERATIONS,
     MAX_FRAME_ITEMS,
@@ -33,7 +33,7 @@ class DeinterleaveStep(Step):
         return self
 
 
-class Deinterleave(RxStage[CompileContext, DeinterleaveStep]):
+class Deinterleave(Stage[CompileContext, DeinterleaveStep]):
     """Generic block permute, BITS->BITS (carrier passes through). Stock
     blockinterleaver_ff: out[t]=in[perm[t]] per block of len(perm)."""
 
@@ -77,7 +77,7 @@ class DepunctureStep(Step):
         return self
 
 
-class Depuncture(RxStage[CompileContext, DepunctureStep]):
+class Depuncture(Stage[CompileContext, DepunctureStep]):
     """Generic depuncture, BITS->BITS soft. Scatters soft into a wider codeword per
     a keep-mask (0 = erasure), from STOCK GR blocks: patterned_interleaver pulls
     kept positions from the stream and erasures from a null_source.
@@ -123,7 +123,7 @@ class HardenStep(Step):
     conv: Literal["harden"] = "harden"
 
 
-class Harden(RxStage[CompileContext, HardenStep]):
+class Harden(Stage[CompileContext, HardenStep]):
     """Soft-LLR -> hard-bit decision, BITS->BITS. The non-FEC soft->hard bridge
     (fec is the FEC one): this engine's LLR is bit 1 = negative, so negate to the
     slicer's >=0 -> 1 convention then binary_slicer. Lets a soft correlate/gate
@@ -172,7 +172,7 @@ class SyncAlignStep(Step):
         return self
 
 
-class SyncAlign(RxStage[CompileContext, SyncAlignStep]):
+class SyncAlign(Stage[CompileContext, SyncAlignStep]):
     name = "sync_align"
     description = (
         "Correlate an access code on the soft bit stream and GATE: keep "
@@ -256,7 +256,7 @@ def _emit_cc(b: CompileContext, step: FecStep) -> None:
 _FEC_EMIT: dict[str, Callable[[CompileContext, FecStep], None]] = {"cc": _emit_cc}
 
 
-class Fec(RxStage[CompileContext, FecStep]):
+class Fec(Stage[CompileContext, FecStep]):
     """Generic FEC decode, BITS soft -> BITS hard. `scheme` selects the decoder via
     a factory map (no if/else); `cc` wires gnuradio.trellis. The soft->hard boundary
     is here."""
@@ -335,7 +335,7 @@ class PolarStep(Step):
         return self
 
 
-class Polar(RxStage[CompileContext, PolarStep]):
+class Polar(Stage[CompileContext, PolarStep]):
     """Polar decode, BITS soft -> BITS hard, via stock gr-fec
     (fec.polar_decoder_sc[_list] in fec.extended_decoder). list_size=1 is plain
     successive-cancellation; >1 selects the SC-list decoder. block_size (N),
@@ -415,7 +415,7 @@ class LdpcStep(Step):
         return self.block_size - len(self.check_nodes)
 
 
-class Ldpc(RxStage[CompileContext, LdpcStep]):
+class Ldpc(Stage[CompileContext, LdpcStep]):
     """LDPC decode, BITS soft -> BITS hard, via stock gr-fec (soft belief-
     propagation fec.ldpc_decoder in fec.extended_decoder). The parity-check
     matrix -- given sparsely as the variable indices each check connects -- plus

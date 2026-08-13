@@ -17,12 +17,10 @@ from marconi.engine.coding.stages_bits import (
     MarkFrame,
     Permute,
     PermuteStep,
-    Realign,
-    RealignStep,
     SyncWord,
     SyncWordStep,
 )
-from marconi.engine.stages.base import CodingStage, StageDirectionError
+from marconi.engine.stages.base import CodingStage
 from marconi.engine.types.enums import EmitMode
 
 
@@ -56,7 +54,6 @@ def test_block_code_window_scope_decodes_per_window_stride() -> None:
 def test_all_bit_stages_are_coding_stages() -> None:
     for cls in CODING_BITS_STAGES:
         assert issubclass(cls, CodingStage)
-        assert cls().directions == frozenset({"rx"})
 
 
 def test_descramble_restarts_sequence_per_window() -> None:
@@ -509,11 +506,6 @@ def test_realign_seeded_advances_cursor() -> None:
     c = CodingCarrier(bits=np.zeros(10, np.uint8), windows=[Window(2, 2)])
     out = ops_bits.realign_rx(c, bit_offset=3)
     assert [(w.start, w.cursor) for w in _wins(out)] == [(2, 5)]
-
-
-def test_realign_emit_tx_raises() -> None:
-    with pytest.raises(StageDirectionError):
-        Realign().emit_tx(CodingBuilder(), RealignStep(bit_offset=3))
 
 
 def _differential_encode(bits: np.ndarray, invert: bool) -> np.ndarray:

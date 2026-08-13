@@ -6,7 +6,7 @@ from pydantic import StrictFloat, StrictInt, model_validator
 from pydantic_core import PydanticCustomError
 
 from marconi.engine.compile.compile_context import CompileContext
-from marconi.engine.stages.base import DuplexStage, Stage
+from marconi.engine.stages.base import Stage
 from marconi.engine.types.bounds import (
     MAX_CHIRP_PREFIX_SAMPLES,
     MAX_DECHIRP_FFT,
@@ -97,8 +97,7 @@ class ChirpSyncStep(Step):
         _check_osr_pad(self.sf, self.oversample, self.zero_pad)
         if self.preamble_len < 5:
             raise PydanticCustomError("value_error", "preamble_len must be >= 5")
-        # the TX prefix materializes this many complex samples as one Python
-        # list on its way into vector_insert_c
+        # the preamble span the sync searcher scans and holds references for
         prefix = round(
             (self.preamble_len + self.sfd_symbols) * self.oversample * (1 << self.sf)
         )
@@ -128,8 +127,8 @@ class ChirpSyncStep(Step):
         return self
 
 
-class ChirpSync(DuplexStage[CompileContext, ChirpSyncStep]):
-    """CSS acquisition, IQ<->IQ. TX prepends a preamble (up-chirps) and an
+class ChirpSync(Stage[CompileContext, ChirpSyncStep]):
+    """CSS acquisition, IQ->IQ. Detects the preamble (up-chirps) and an
     optional start-of-frame delimiter (down-chirps). RX detects the preamble,
     aligns on the SFD when one is declared (sfd_symbols >= 1) or on the end of
     the preamble run when none is (sfd_symbols = 0, where the CFO/STO split is
@@ -156,20 +155,11 @@ class ChirpSync(DuplexStage[CompileContext, ChirpSyncStep]):
             sync_symbols=step.sync_symbols,
         )
 
-    def emit_tx(self, b: CompileContext, step: ChirpSyncStep) -> None:
-        b.chain(
-            "chirp_prepend",
-            sf=step.sf,
-            oversample=step.oversample,
-            preamble_len=step.preamble_len,
-            sfd_symbols=step.sfd_symbols,
-        )
 
-
-class Dechirp(DuplexStage[CompileContext, DechirpStep]):
+class Dechirp(Stage[CompileContext, DechirpStep]):
     """CSS demod, IQ<->SYMBOLS. RX dechirps each symbol window (FFT, fold, argmax)
     to a hard symbol index (int16) -- decision-directed, so HARD at the seam (the
-    hard@SYMBOLS rule, enforced by accepts_carrier). TX modulates symbol indices to
+    hard@SYMBOLS rule, enforced by accepts_carrier). Dechirps symbol windows to
     chirps."""
 
     name = "dechirp"
@@ -211,9 +201,6 @@ class Dechirp(DuplexStage[CompileContext, DechirpStep]):
         b.chain("stream_to_vector_f", vlen=bins)
         b.chain("peak_decision", vlen=bins, divisor=step.zero_pad, modulo=n)
 
-    def emit_tx(self, b: CompileContext, step: DechirpStep) -> None:
-        b.chain("chirp_mod", sf=step.sf, oversample=step.oversample)
-
     def out_descriptor(self, in_desc: Descriptor, step: DechirpStep) -> Descriptor:
         return Descriptor(
             Level.SYMBOLS, ItemType.S, Carrier.HARD, order=1 << int(step.sf)
@@ -232,9 +219,9 @@ class Dechirp(DuplexStage[CompileContext, DechirpStep]):
         return symbol_rate
 
 
-class CssDemap(DuplexStage[CompileContext, CssDemapStep]):
+class CssDemap(Stage[CompileContext, CssDemapStep]):
     """CSS symbol<->bits, SYMBOLS<->BITS. RX Gray-decodes the symbol index and
-    unpacks sf bits (MSB-first). TX packs sf bits + Gray-encodes."""
+    unpacks sf bits (MSB-first)."""
 
     name = "css_demap"
     from_level = Level.SYMBOLS
@@ -246,9 +233,6 @@ class CssDemap(DuplexStage[CompileContext, CssDemapStep]):
 
     def emit_rx(self, b: CompileContext, step: CssDemapStep) -> None:
         b.chain("css_demap", sf=int(step.sf))
-
-    def emit_tx(self, b: CompileContext, step: CssDemapStep) -> None:
-        b.chain("css_map", sf=int(step.sf))
 
     def out_descriptor(self, in_desc: Descriptor, step: CssDemapStep) -> Descriptor:
         return Descriptor(Level.BITS, ItemType.B, Carrier.HARD)

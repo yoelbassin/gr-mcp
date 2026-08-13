@@ -15,6 +15,7 @@ from typing import Any
 
 import numpy as np
 import pytest
+from helpers import _synth as synth
 from pydantic import ValidationError
 
 from marconi.engine.modulation.css.stages import (
@@ -117,18 +118,6 @@ def test_css_params_bound_oversample() -> None:
                 DechirpStep(sf=7, oversample=osr, zero_pad=4)
 
 
-# ─── Direction support ────────────────────────────────────────────────────────
-
-
-def test_all_css_stages_support_rx_and_tx() -> None:
-    from marconi.engine.modulation.css.stages import ChirpSync, CssDemap, Dechirp
-
-    for cls in (ChirpSync, Dechirp, CssDemap):
-        s = cls()
-        assert "rx" in s.directions, f"{cls.name} missing rx"
-        assert "tx" in s.directions, f"{cls.name} missing tx"
-
-
 # ─── SYMBOLS-terminal compile+run smoke ──────────────────────────────────────
 
 
@@ -157,7 +146,6 @@ def test_symbols_terminal_routing_smoke(tmp_path: Path) -> None:
     Verify the int16 symbols file is written and, after Gray-decode, the
     recovered bits match the transmitted payload bits.
     """
-    from helpers._dsp import write_bits
 
     from marconi.engine.backends.gnuradio.runner import (
         GnuRadioBackend,
@@ -174,7 +162,6 @@ def test_symbols_terminal_routing_smoke(tmp_path: Path) -> None:
 
     reg = stage_registry()
     bits = np.random.default_rng(42).integers(0, 2, SF * N_SYMS).astype(np.uint8)
-    bits_path = write_bits(tmp_path / "in.bits", bits)
     iq_path = tmp_path / "frame.iq"
     sym_path = tmp_path / "out.sym"
 
@@ -189,16 +176,15 @@ def test_symbols_terminal_routing_smoke(tmp_path: Path) -> None:
     dechirp = DechirpStep(sf=SF, oversample=OS, zero_pad=4)
     demap = CssDemapStep(sf=SF)
 
-    # --- TX: bits → IQ frame (via [chirp_sync, dechirp, css_demap]) ---
-    tx_modem = Modem(symbol_rate=SYMBOL_RATE, path=[chirp_sync, dechirp, demap])
-    tx_pipe = compile_modem(
-        tx_modem,
-        reg,
-        direction="tx",
-        sample_rate=SAMPLE_RATE,
-        start=IQ,
-        source_io={"path": str(bits_path)},
-        sink_io={"path": str(iq_path)},
+    # --- the IQ frame this routing test decodes, synthesized ---
+    iq_path = synth.write(
+        iq_path,
+        synth.from_steps(
+            [chirp_sync, dechirp, demap],
+            bits,
+            sample_rate=SAMPLE_RATE,
+            symbol_rate=SYMBOL_RATE,
+        ),
     )
 
     # --- RX: IQ → SYMBOLS sink (int16) via [chirp_sync, dechirp] ---
@@ -206,7 +192,6 @@ def test_symbols_terminal_routing_smoke(tmp_path: Path) -> None:
     rx_pipe = compile_modem(
         rx_modem,
         reg,
-        direction="rx",
         sample_rate=SAMPLE_RATE,
         start=IQ,
         source_io={"path": str(iq_path)},
@@ -215,8 +200,6 @@ def test_symbols_terminal_routing_smoke(tmp_path: Path) -> None:
 
     ensure_worker_warm()
     be = GnuRadioBackend()
-    tx_result = be.run_pipeline(tx_pipe)
-    assert tx_result.status == "ok", f"TX pipeline failed: {tx_result}"
 
     rx_result = be.run_pipeline(rx_pipe)
     assert rx_result.status == "ok", f"RX pipeline failed: {rx_result}"
@@ -379,7 +362,11 @@ def test_preamble_end_pending_vs_miss() -> None:
     assert chirp._preamble_end(pending, 0, grid, cap) is None
 
     found = np.concatenate(
-        [np.tile(up, pl), chirp._modulate_symbol(40, sf, os_), np.tile(up, 2)]
+        [
+            np.tile(up, pl),
+            synth.chirp_symbols([40], sf=sf, oversample=os_),
+            np.tile(up, 2),
+        ]
     ).astype(np.complex64)
     assert chirp._preamble_end(found, 0, grid, cap) == pl * sn
 

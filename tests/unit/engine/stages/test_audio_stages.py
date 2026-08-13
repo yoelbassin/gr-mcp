@@ -33,7 +33,6 @@ def _compile(modem: Modem) -> GrPipeline:
     return compile_modem(
         modem,
         stage_registry(),
-        direction="rx",
         sample_rate=48000.0,
         start=IQ,
         source_io={"path": "/dev/null"},

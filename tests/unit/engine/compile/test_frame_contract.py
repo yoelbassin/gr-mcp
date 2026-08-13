@@ -41,7 +41,6 @@ def _compile(path: list[Step]) -> None:
     compile_modem(
         Modem(symbol_rate=1.0, path=path),
         stage_registry(),
-        direction="rx",
         sample_rate=1.0,
         start=BITS_F,
         source_io={"path": "/dev/null"},

@@ -3,12 +3,12 @@ from typing import Literal
 
 import numpy as np
 import pytest
+from helpers import _synth as synth
 from helpers._dsp import (
     aligned_ber,
     read_bits,
     read_complex,
     upconvert_widen,
-    write_bits,
 )
 
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
@@ -39,7 +39,6 @@ def _compile(
     return compile_modem(
         modem,
         stage_registry(),
-        direction=direction,
         sample_rate=sample_rate,
         start=IQ,
         source_io={"path": str(src)},
@@ -77,13 +76,14 @@ def test_channelize_ber0_offset_capture(center: float, tmp_path: Path) -> None:
     ensure_worker_warm()
     be = GnuRadioBackend()
     bits = np.random.default_rng(1).integers(0, 2, 2048).astype(np.uint8)
-    bp = write_bits(tmp_path / "in.bits", bits)
     base, wide, op = tmp_path / "b.iq", tmp_path / "w.iq", tmp_path / "out.bits"
     # baseband FSK at rate 8 via the fsk modem TX
-    assert (
-        be.run_pipeline(_compile(_fsk_modem(), "tx", _BASE_RATE, bp, base)).status
-        == "ok"
-    )
+    assert synth.write(
+        base,
+        synth.from_steps(
+            _fsk_modem().path, bits, sample_rate=_BASE_RATE, symbol_rate=_SYM
+        ),
+    ).is_file()
     # widen x2 to rate 16, place the signal at +center, add AWGN
     upconvert_widen(
         base, wide, up=_UP, offset_hz=center, rate_wide=16.0, snr_db=12.0, seed=2
@@ -99,12 +99,13 @@ def test_invert_ber0_mirrored_capture(tmp_path: Path) -> None:
     ensure_worker_warm()
     be = GnuRadioBackend()
     bits = np.random.default_rng(3).integers(0, 2, 2048).astype(np.uint8)
-    bp = write_bits(tmp_path / "in.bits", bits)
     base, mirror, op = tmp_path / "b.iq", tmp_path / "m.iq", tmp_path / "out.bits"
-    assert (
-        be.run_pipeline(_compile(_fsk_modem(), "tx", _BASE_RATE, bp, base)).status
-        == "ok"
-    )
+    assert synth.write(
+        base,
+        synth.from_steps(
+            _fsk_modem().path, bits, sample_rate=_BASE_RATE, symbol_rate=_SYM
+        ),
+    ).is_file()
     # mirror the capture (spectral conjugate) — what invert must undo
     np.conj(read_complex(base)).astype(np.complex64).tofile(mirror)
     assert (

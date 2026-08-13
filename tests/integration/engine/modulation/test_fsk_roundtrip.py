@@ -1,7 +1,8 @@
 from pathlib import Path
 
 import numpy as np
-from helpers._dsp import aligned_ber, channel, read_bits, write_bits
+from helpers import _synth as synth
+from helpers._dsp import aligned_ber, channel, read_bits
 
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
 from marconi.engine.compile.compiler import compile_modem
@@ -27,15 +28,12 @@ def _modem() -> Modem:
     )
 
 
-def _tx(bits_path: Path, iq_path: Path) -> GrPipeline:
-    return compile_modem(
-        _modem(),
-        stage_registry(),
-        direction="tx",
-        sample_rate=_SR,
-        start=IQ,
-        source_io={"path": str(bits_path)},
-        sink_io={"path": str(iq_path)},
+def _tx(bits: np.ndarray, iq_path: Path) -> Path:
+    """The signal under test, synthesized independently of the engine — see
+    tests/helpers/_synth.py for why the generator is not the demod's twin."""
+    return synth.write(
+        iq_path,
+        synth.cpfsk(bits, sps=int(_SR / _SYM), deviation=_DEV, sample_rate=_SR),
     )
 
 
@@ -43,7 +41,6 @@ def _rx(iq_path: Path, bits_path: Path) -> GrPipeline:
     return compile_modem(
         _modem(),
         stage_registry(),
-        direction="rx",
         sample_rate=_SR,
         start=IQ,
         source_io={"path": str(iq_path)},
@@ -55,10 +52,8 @@ def test_fsk_roundtrip_clean_ber0(tmp_path: Path) -> None:
     ensure_worker_warm()
     be = GnuRadioBackend()
     bits = np.random.default_rng(0).integers(0, 2, 512).astype(np.uint8)
-    bp = write_bits(tmp_path / "in.bits", bits)
-    ip = tmp_path / "sig.iq"
+    ip = _tx(bits, tmp_path / "sig.iq")
     op = tmp_path / "out.bits"
-    assert be.run_pipeline(_tx(bp, ip)).status == "ok"
     assert be.run_pipeline(_rx(ip, op)).status == "ok"
     assert aligned_ber(read_bits(op), bits) == 0.0
 
@@ -67,11 +62,9 @@ def test_fsk_roundtrip_survives_combined_impairments(tmp_path: Path) -> None:
     ensure_worker_warm()
     be = GnuRadioBackend()
     bits = np.random.default_rng(3).integers(0, 2, 512).astype(np.uint8)
-    bp = write_bits(tmp_path / "in.bits", bits)
-    clean = tmp_path / "clean.iq"
+    clean = _tx(bits, tmp_path / "clean.iq")
     imp = tmp_path / "imp.iq"
     op = tmp_path / "out.bits"
-    assert be.run_pipeline(_tx(bp, clean)).status == "ok"
     # >=244 ppm actually resamples 2048 samples; 50 ppm rounds to a no-op
     channel(
         clean,

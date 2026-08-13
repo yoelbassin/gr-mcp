@@ -59,7 +59,6 @@ def test_am_afsk_decodes_ber0(tmp_path: Path) -> None:
     pipe = compile_modem(
         modem,
         stage_registry(),
-        direction="rx",
         sample_rate=RATE,
         start=IQ,
         source_io={"path": str(src)},

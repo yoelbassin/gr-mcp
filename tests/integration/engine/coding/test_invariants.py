@@ -92,13 +92,6 @@ def test_no_coding_stage_touches_the_frames_level() -> None:
         assert stage.to_level in coding_levels, (name, stage.to_level)
 
 
-def test_coding_stages_are_rx_only() -> None:
-    # the coded-TX path is a compile error (test_partition.py);
-    # every stage the registry offers on this engine backs that up statically.
-    for name, stage in _coding_stages().items():
-        assert stage.directions == frozenset({"rx"}), (name, stage.directions)
-
-
 def test_bits_entry_coding_stages_declare_hard_bit_input() -> None:
     for name, stage in _coding_stages().items():
         if stage.from_level is Level.BITS:
@@ -114,7 +107,6 @@ def test_soft_bits_into_sync_word_is_a_compile_error() -> None:
         compile_pipeline(
             spec,
             stage_registry(),
-            direction="rx",
             sample_rate=1.0,
             start=Descriptor(Level.BITS, ItemType.F, carrier=Carrier.SOFT),
             source_io={},
@@ -131,7 +123,6 @@ def test_soft_symbols_into_a_hard_symbol_stage_is_a_compile_error() -> None:
         compile_pipeline(
             spec,
             stage_registry(),
-            direction="rx",
             sample_rate=1.0,
             start=Descriptor(Level.SYMBOLS, ItemType.F, carrier=Carrier.SOFT),
             source_io={},

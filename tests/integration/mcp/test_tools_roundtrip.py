@@ -5,8 +5,9 @@ from typing import cast
 
 import numpy as np
 import pytest
+from helpers import _synth as synth
 
-from marconi.mcp.tools import read_stream, run_rx_tool, run_tx_tool
+from marconi.mcp.tools import read_stream, run_rx_tool
 
 _TXRX = {
     "symbol_rate": 1.0,
@@ -14,14 +15,26 @@ _TXRX = {
 }
 
 
+def _fsk_capture(tmp_path: Path, bits: np.ndarray, name: str = "fsk.cf32") -> str:
+    """The capture these RX tests decode. Synthesized, not round-tripped
+    through a modulator: what is under test is run_rx's reporting — the bit
+    page, the soft-stream sign convention, the symbol-stream suffix — and a
+    generator that shares the demod's assumptions cannot challenge any of it."""
+    return str(
+        synth.write(
+            tmp_path / name,
+            synth.cpfsk(bits, sps=4, deviation=1.0, sample_rate=4.0),
+        )
+    )
+
+
 def test_tx_rx_roundtrip_ber0(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("MARCONI_WORKSPACE", str(tmp_path))
     rng = np.random.default_rng(11)
-    bits = "".join("01"[b] for b in rng.integers(0, 2, 2048))
-    tx = run_tx_tool(_TXRX, sample_rate=4.0, bits=bits)
-    assert tx["status"] == "ok", tx
-    assert cast(int, tx["num_samples"]) > 0
-    rx = run_rx_tool(_TXRX, sample_rate=4.0, capture_path=cast(str, tx["iq_path"]))
+    bit_array = rng.integers(0, 2, 2048).astype(np.uint8)
+    bits = "".join("01"[b] for b in bit_array)
+    capture = _fsk_capture(tmp_path, bit_array)
+    rx = run_rx_tool(_TXRX, sample_rate=4.0, capture_path=capture)
     assert rx["status"] == "ok", rx
     stream = cast(dict[str, object], rx["stream"])
     assert stream["item_type"] == "b"
@@ -69,9 +82,7 @@ def test_soft_terminal_path_is_its_own_soft_stream(
 ) -> None:
     monkeypatch.setenv("MARCONI_WORKSPACE", str(tmp_path))
     rng = np.random.default_rng(7)
-    bits = "".join("01"[b] for b in rng.integers(0, 2, 512))
-    tx = run_tx_tool(_TXRX, sample_rate=4.0, bits=bits)
-    assert tx["status"] == "ok", tx
+    capture = _fsk_capture(tmp_path, rng.integers(0, 2, 512).astype(np.uint8))
     rx = run_rx_tool(
         {
             "symbol_rate": 1.0,
@@ -81,7 +92,7 @@ def test_soft_terminal_path_is_its_own_soft_stream(
             ],
         },
         sample_rate=4.0,
-        capture_path=cast(str, tx["iq_path"]),
+        capture_path=capture,
     )
     assert rx["status"] == "ok", rx
     stream = cast(dict[str, object], rx["stream"])
@@ -113,16 +124,20 @@ def test_css_symbols_stream_pages_with_i16_suffix_inference(
         "oversample": oversample,
         "zero_pad": zero_pad,
     }
-    tx_spec = {
-        "symbol_rate": symbol_rate,
-        "path": [css_sync, dechirp, {"conv": "css_demap", "sf": sf}],
-    }
     rx_spec = {"symbol_rate": symbol_rate, "path": [css_sync, dechirp]}
-    rng = np.random.default_rng(5)
-    bits = "".join("01"[b] for b in rng.integers(0, 2, sf * 20))
-    tx = run_tx_tool(tx_spec, sample_rate=rate, bits=bits)
-    assert tx["status"] == "ok", tx
-    rx = run_rx_tool(rx_spec, sample_rate=rate, capture_path=cast(str, tx["iq_path"]))
+    symbols = np.random.default_rng(5).integers(0, 1 << sf, 20)
+    capture = synth.write(
+        tmp_path / "css.cf32",
+        np.concatenate(
+            [
+                synth.chirp_preamble(
+                    sf=sf, oversample=oversample, preamble_len=8, sfd_symbols=2.25
+                ),
+                synth.chirp_symbols(symbols, sf=sf, oversample=oversample),
+            ]
+        ),
+    )
+    rx = run_rx_tool(rx_spec, sample_rate=rate, capture_path=str(capture))
     assert rx["status"] == "ok", rx
     stream = cast(dict[str, object], rx["stream"])
     assert stream["item_type"] == "s"

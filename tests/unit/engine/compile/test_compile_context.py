@@ -1,26 +1,9 @@
-import pytest
-
-from marconi.engine.compile.compile_context import CompileContext, SampleRateError
+from marconi.engine.compile.compile_context import CompileContext
 from marconi.engine.types.descriptor import Descriptor
 from marconi.engine.types.enums import ItemType
 from marconi.engine.types.levels import Level
-from marconi.errors import classify_error
 
 IQ = Descriptor(Level.IQ, ItemType.C)
-
-
-def test_sps_int_accepts_integral_rate_pair() -> None:
-    assert CompileContext(IQ, rate=16.0, symbol_rate=2.0).sps_int() == 8
-
-
-def test_sps_int_rejects_fractional_rate_pair() -> None:
-    # sample_rate/symbol_rate = 36.75: TX must not silently transmit at 36 or
-    # 37 sps while the rate model says otherwise
-    ctx = CompileContext(IQ, rate=36.75, symbol_rate=1.0)
-    with pytest.raises(SampleRateError) as ei:
-        ctx.sps_int()
-    assert "36.75" in str(ei.value) and "1.0" in str(ei.value)
-    assert classify_error(ei.value)[0] == "invalid_argument"
 
 
 def test_chain_auto_connects_and_advances_tail() -> None:

@@ -6,7 +6,7 @@ from typing import Any, Literal
 from pydantic import Field, StrictInt
 
 from marconi.engine.compile.compile_context import CompileContext
-from marconi.engine.stages.base import DuplexStage, Stage
+from marconi.engine.stages.base import Stage
 from marconi.engine.types.bounds import MAX_FILTER_TAPS
 from marconi.engine.types.descriptor import Amplitude, Carrier, Descriptor
 from marconi.engine.types.enums import ItemType, QamOrder
@@ -25,7 +25,7 @@ class QamDemodStep(Step):
     span: StrictInt = Field(default=11, ge=1, le=MAX_FILTER_TAPS)
 
 
-class QamDemod(DuplexStage[CompileContext, QamDemodStep]):
+class QamDemod(Stage[CompileContext, QamDemodStep]):
     """QAM demod, IQ<->SYMBOLS. QAM's multi-radius constellation defeats a
     phase-only costas loop, so carrier recovery uses the constellation-aware,
     decision-directed `constellation_receiver_cb` ("costas for an arbitrary
@@ -33,7 +33,7 @@ class QamDemod(DuplexStage[CompileContext, QamDemodStep]):
     symbol decision (an index byte) — QAM cannot hand off soft complex symbols
     the way PSK does, so the seam at SYMBOLS is HARD (byte symbol indices). Soft
     QAM is deferred to the soft-seam (bits) design. RX: RRC matched filter +
-    Gardner timing + constellation_receiver_cb -> hard symbol indices. TX: map
+    Gardner timing + constellation_receiver_cb -> hard symbol indices. Map
     indices to constellation points + RRC pulse-shape. rate_factor stays 1.0
     (symbol decimation is internal via ctx.sps; the modulator reads the IQ rate).
     """
@@ -61,17 +61,6 @@ class QamDemod(DuplexStage[CompileContext, QamDemodStep]):
         b.chain("symbol_sync_cc", sps=b.sps, loop_bw=step.loop_bw)
         b.chain("constellation_receiver_cb", scheme="qam", order=int(step.order))
 
-    def emit_tx(self, b: CompileContext, step: QamDemodStep) -> None:
-        b.chain("chunks_to_symbols_bc", scheme="qam", order=int(step.order))
-        b.chain(
-            "rrc_filter_ccf",
-            interpolation=b.sps_int(),
-            rate=b.rate,
-            sps=b.sps,
-            alpha=step.alpha,
-            span=step.span,
-        )
-
     def out_descriptor(self, in_desc: Descriptor, step: QamDemodStep) -> Descriptor:
         return Descriptor(
             Level.SYMBOLS, ItemType.B, Carrier.HARD, order=int(step.order)
@@ -88,12 +77,11 @@ class QamDemapStep(Step):
     order: QamOrder
 
 
-class QamDemap(DuplexStage[CompileContext, QamDemapStep]):
-    """Symbol-index <-> bits, SYMBOLS<->BITS. The constellation (Gray map) lives
-    in the demod (constellation_receiver_cb decides the index on RX;
-    chunks_to_symbols maps it back on TX), so the demap is a pure pack/unpack of
-    the k-bit symbol index. RX: unpack index byte to bits. TX: pack bits into an
-    index byte. Hard bits at the seam (mirrors the general Slice)."""
+class QamDemap(Stage[CompileContext, QamDemapStep]):
+    """Symbol-index -> bits, SYMBOLS->BITS. The constellation (Gray map) lives
+    in the demod (constellation_receiver_cb decides the index), so the demap is
+    a pure unpack of the k-bit symbol index to bits. Hard bits at the seam
+    (mirrors the general Slice)."""
 
     name = "qam_demap"
     from_level = Level.SYMBOLS
@@ -105,9 +93,6 @@ class QamDemap(DuplexStage[CompileContext, QamDemapStep]):
 
     def emit_rx(self, b: CompileContext, step: QamDemapStep) -> None:
         b.chain("unpack_k_bits_bb", k=int(math.log2(int(step.order))))
-
-    def emit_tx(self, b: CompileContext, step: QamDemapStep) -> None:
-        b.chain("pack_k_bits_bb", k=int(math.log2(int(step.order))))
 
     def out_descriptor(self, in_desc: Descriptor, step: QamDemapStep) -> Descriptor:
         return Descriptor(Level.BITS, ItemType.B, Carrier.HARD)

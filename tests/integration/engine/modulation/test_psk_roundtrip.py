@@ -5,13 +5,13 @@ from typing import Any, Literal
 import numpy as np
 import numpy.typing as npt
 import pytest
+from helpers import _synth as synth
 from helpers._dsp import (
     channel,
     read_bits,
     read_complex,
     resolved_ser,
     tx_sym_indices,
-    write_bits,
 )
 
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
@@ -80,7 +80,6 @@ def _compile(
     return compile_modem(
         modem,
         _stage_registry(),
-        direction=direction,
         sample_rate=_SR,
         start=start,
         source_io={"path": str(src)},
@@ -101,10 +100,12 @@ def test_psk_demod_ser0_under_impairments(order: int, tmp_path: Path) -> None:
     n_bits, cfo_frac, settle = _CFG[order]
     points, k = _const_points(order)
     bits = np.random.default_rng(order).integers(0, 2, n_bits).astype(np.uint8)
-    bp = write_bits(tmp_path / "in.bits", bits)
     clean, imp, sym = tmp_path / "c.iq", tmp_path / "i.iq", tmp_path / "s.cf32"
     # TX bits -> IQ via the full modem
-    assert be.run_pipeline(_compile(_full(order), "tx", IQ, bp, clean)).status == "ok"
+    synth.write(
+        clean,
+        synth.from_steps(_full(order).path, bits, sample_rate=_SR, symbol_rate=_SYM),
+    )
     channel(
         clean,
         imp,
@@ -129,10 +130,11 @@ def test_psk_demap_clean_ber0(order: int, tmp_path: Path) -> None:
     be = GnuRadioBackend()
     n_bits = _CFG[order][0]
     bits = np.random.default_rng(0).integers(0, 2, n_bits).astype(np.uint8)
-    bp = write_bits(tmp_path / "in.bits", bits)
     sym, op = tmp_path / "s.cf32", tmp_path / "out.bits"
     modem = Modem(symbol_rate=_SYM, path=[PskDemapStep(order=PskOrder(order))])
-    assert be.run_pipeline(_compile(modem, "tx", SYM_C, bp, sym)).status == "ok"
+    synth.write(
+        sym, synth.from_steps(modem.path, bits, sample_rate=_SR, symbol_rate=_SYM)
+    )
     assert be.run_pipeline(_compile(modem, "rx", SYM_C, sym, op)).status == "ok"
     out = read_bits(op)
     k = int(log2(order))

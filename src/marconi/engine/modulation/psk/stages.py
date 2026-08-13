@@ -8,7 +8,7 @@ from pydantic import Field, StrictInt, model_validator
 from pydantic_core import PydanticCustomError
 
 from marconi.engine.compile.compile_context import CompileContext
-from marconi.engine.stages.base import DuplexStage, RxStage, Stage
+from marconi.engine.stages.base import Stage
 from marconi.engine.types.bounds import (
     MAX_DELAY_ITEMS,
     MAX_FILTER_TAPS,
@@ -72,7 +72,7 @@ SYMBOL_SYNC_OPEN_LOOP_HINT = (
 )
 
 
-class SymbolSync(RxStage[CompileContext, SymbolSyncStep]):
+class SymbolSync(Stage[CompileContext, SymbolSyncStep]):
     name = "symbol_sync"
     min_input_sps = 2.0
     description = (
@@ -133,7 +133,7 @@ class SampleSymbolsStep(Step):
     conv: Literal["sample_symbols"] = "sample_symbols"
 
 
-class SampleSymbols(RxStage[CompileContext, SampleSymbolsStep]):
+class SampleSymbols(Stage[CompileContext, SampleSymbolsStep]):
     """IQ->SYMBOLS at 1 sps with no carrier loop: the timing-only rung.
     Emits no blocks - the level move is the whole stage - so an externally
     recovered or differentially absorbed carrier can reach the symbol seam."""
@@ -184,7 +184,7 @@ class DifferentialDemodStep(Step):
     )
 
 
-class DifferentialDemod(RxStage[CompileContext, DifferentialDemodStep]):
+class DifferentialDemod(Stage[CompileContext, DifferentialDemodStep]):
     """SYMBOLS->SYMBOLS continuous differential: z[i] = x[i] * conj(x[i-delay]),
     optionally rotated by exp(j*rotate). delay > 1 serves symbol-interleaved
     differential schemes. The output alphabet is the DIFFERENCE alphabet, which
@@ -255,9 +255,9 @@ class PskDemodStep(Step):
         return self
 
 
-class PskDemod(DuplexStage[CompileContext, PskDemodStep]):
+class PskDemod(Stage[CompileContext, PskDemodStep]):
     """Coherent linear demod, IQ<->SYMBOLS. RX: RRC matched filter + Gardner
-    symbol timing + costas carrier recovery -> soft complex symbols. TX: RRC
+    symbol timing + costas carrier recovery -> soft complex symbols. RRC
     pulse-shape/upsample. rate_factor stays 1.0 (symbol decimation is internal
     via ctx.sps; the modulator reads the IQ-domain rate)."""
 
@@ -286,16 +286,6 @@ class PskDemod(DuplexStage[CompileContext, PskDemodStep]):
         b.chain("symbol_sync_cc", sps=b.sps, loop_bw=step.loop_bw)
         b.chain("costas_loop_cc", order=int(step.order), loop_bw=step.loop_bw)
 
-    def emit_tx(self, b: CompileContext, step: PskDemodStep) -> None:
-        b.chain(
-            "rrc_filter_ccf",
-            interpolation=b.sps_int(),
-            rate=b.rate,
-            sps=b.sps,
-            alpha=step.alpha,
-            span=step.span,
-        )
-
     def out_descriptor(self, in_desc: Descriptor, step: PskDemodStep) -> Descriptor:
         return Descriptor(
             Level.SYMBOLS, ItemType.C, Carrier.SOFT, order=int(step.order)
@@ -312,10 +302,9 @@ class PskDemapStep(Step):
     order: PskOrder
 
 
-class PskDemap(DuplexStage[CompileContext, PskDemapStep]):
-    """Constellation map/demap, SYMBOLS<->BITS. RX: hard min-distance decode +
-    unpack to bits. TX: pack bits into symbol indices + map to constellation
-    points. Hard bits at the seam (mirrors the general Slice)."""
+class PskDemap(Stage[CompileContext, PskDemapStep]):
+    """Constellation demap, SYMBOLS->BITS: hard min-distance decode + unpack to
+    bits. Hard bits at the seam (mirrors the general Slice)."""
 
     name = "psk_demap"
     from_level = Level.SYMBOLS
@@ -329,11 +318,6 @@ class PskDemap(DuplexStage[CompileContext, PskDemapStep]):
         order = int(step.order)
         b.chain("constellation_decoder_cb", scheme="psk", order=order)
         b.chain("unpack_k_bits_bb", k=int(math.log2(order)))
-
-    def emit_tx(self, b: CompileContext, step: PskDemapStep) -> None:
-        order = int(step.order)
-        b.chain("pack_k_bits_bb", k=int(math.log2(order)))
-        b.chain("chunks_to_symbols_bc", scheme="psk", order=order)
 
     def out_descriptor(self, in_desc: Descriptor, step: PskDemapStep) -> Descriptor:
         return Descriptor(Level.BITS, ItemType.B, Carrier.HARD)
@@ -352,7 +336,7 @@ class PskSoftDemapStep(Step):
     order: PskOrder
 
 
-class PskSoftDemap(RxStage[CompileContext, PskSoftDemapStep]):
+class PskSoftDemap(Stage[CompileContext, PskSoftDemapStep]):
     """Constellation soft demap, SYMBOLS->BITS soft. RX-only: stock
     constellation_soft_decoder, one LLR per bit. The soft counterpart of
     psk_demap, and the single-carrier entry point to the soft coding lane

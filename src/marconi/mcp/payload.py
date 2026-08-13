@@ -5,7 +5,7 @@ from pathlib import Path
 
 import numpy as np
 
-from marconi.engine.backends.base import BlockCensus, Diagnostic, RunResult
+from marconi.engine.backends.base import BlockCensus, Diagnostic
 from marconi.engine.compile.compiler import CompiledPipeline
 from marconi.engine.quality import QualityReport
 from marconi.engine.run import PipelineResult, TraceStage
@@ -164,27 +164,6 @@ def diagnostic_rows(
             )
         )
     return out
-
-
-class RunTxPayload(Payload):
-    status: str
-    iq_path: str
-    num_samples: int
-    sample_rate: float
-    census: list[CensusRow]
-    error: str | None = None
-
-
-def run_tx_payload(r: RunResult, out: Path, sample_rate: float) -> dict[str, object]:
-    n = out.stat().st_size // ItemType.C.item_bytes if out.is_file() else 0
-    return RunTxPayload.build(
-        status=r.status,
-        iq_path=str(out),
-        num_samples=n,
-        sample_rate=sample_rate,
-        census=census_rows(r.census),
-        error=r.error,
-    ).as_payload()
 
 
 class ErrorRow(Payload):

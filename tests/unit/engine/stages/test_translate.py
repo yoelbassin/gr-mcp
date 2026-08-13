@@ -27,7 +27,6 @@ def test_translate_emits_rotator_shifting_center_to_dc() -> None:
     pipe = compile_modem(
         _modem(f0),
         stage_registry(),
-        direction="rx",
         sample_rate=fs,
         start=IQ,
         source_io={"path": "in.cf32"},
@@ -49,7 +48,6 @@ def test_translate_preserves_rate_and_amplitude() -> None:
     cp = compile_pipeline(
         Modem(symbol_rate=1.0, path=[TranslateStep(center_hz=1_000.0)]),
         stage_registry(),
-        direction="rx",
         sample_rate=48_000.0,
         start=Descriptor(Level.IQ, ItemType.C, Carrier.HARD, Amplitude.RMS_UNITY),
         source_io={"path": "in.cf32"},
@@ -68,7 +66,6 @@ def test_translate_shifts_a_tone_to_dc(tmp_path: Path) -> None:
     pipe = compile_modem(
         _modem(f0),
         stage_registry(),
-        direction="rx",
         sample_rate=fs,
         start=IQ,
         source_io={"path": str(src)},

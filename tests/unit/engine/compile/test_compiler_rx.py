@@ -31,7 +31,6 @@ def _compile_rx(modem: Modem, sample_rate: float) -> GrPipeline:
     return compile_modem(
         modem,
         fixture_registry(),
-        direction="rx",
         sample_rate=sample_rate,
         start=IQ,
         source_io={"path": "in.iq"},
@@ -98,20 +97,6 @@ def test_pipeline_sample_rate_metadata() -> None:
 def test_unknown_stage_raises_compile_error() -> None:
     with pytest.raises(CompileError):
         _compile_rx(_modem(Step(conv="nope"), symbol_rate=1.0), 4.0)
-
-
-def test_bad_direction_raises_compile_error() -> None:
-    with pytest.raises(CompileError):
-        compile_modem(
-            _modem(FakeDemodStep(), symbol_rate=1.0),
-            fixture_registry(),
-            # the runtime guard is the subject under test
-            direction="sideways",  # type: ignore[arg-type]
-            sample_rate=4.0,
-            start=IQ,
-            source_io={},
-            sink_io={},
-        )
 
 
 def test_step_carries_conv_with_no_extra_params() -> None:

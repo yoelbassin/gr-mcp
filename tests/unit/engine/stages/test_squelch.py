@@ -35,7 +35,6 @@ def _run(
     pipe = compile_modem(
         Modem(symbol_rate=_SYM, path=path),
         stage_registry(),
-        direction="rx",
         sample_rate=_SR,
         start=IQ if agc is not None else IQ_NORMALIZED,
         source_io={"path": str(src)},
@@ -78,7 +77,6 @@ def test_squelch_requires_a_known_scale() -> None:
                 path=[SquelchStep(threshold_db=-20.0)],
             ),
             stage_registry(),
-            direction="rx",
             sample_rate=_SR,
             start=IQ,
             source_io={"path": "in.cf32"},

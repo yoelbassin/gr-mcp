@@ -4,6 +4,7 @@ from marconi.engine.quality import (
     Assessment,
     QualityEvidence,
     QualityMetric,
+    Verdict,
     verdict_from,
 )
 
@@ -70,3 +71,30 @@ def test_bare_demod_soft_eye_alone_is_not_decoded() -> None:
     )
     assert verdict == "uncertain"
     assert "detection only" in rationale
+
+
+def test_a_detection_positive_does_not_rebut_a_decode_negative() -> None:
+    """Tier gated PROMOTION to "decoded" and nothing else, so it was consulted
+    in one direction only. marks_evidence emits an unconditional positive for a
+    single burst mark — the one producer here with no null hypothesis — and
+    that was enough to turn a decode-grade refutation into "conflicting
+    evidence", so any path with burst acquisition could never read no_signal."""
+    bad_words = _ev(Assessment.NEGATIVE, QualityMetric.WORD_VALIDITY)
+    one_mark = _ev(Assessment.POSITIVE, QualityMetric.BURST_MARKS)
+    verdict, rationale = verdict_from([one_mark, bad_words])
+    assert verdict is Verdict.NO_SIGNAL
+    # the detection evidence is still reported, just not as a rebuttal
+    assert "burst_marks" in rationale and "word_validity" in rationale
+
+
+def test_a_decode_positive_still_conflicts_with_a_decode_negative() -> None:
+    conflict = [
+        _ev(Assessment.POSITIVE, QualityMetric.SYNC_MATCHES),
+        _ev(Assessment.NEGATIVE, QualityMetric.WORD_VALIDITY),
+    ]
+    assert verdict_from(conflict)[0] is Verdict.UNCERTAIN
+
+
+def test_detection_alone_still_cannot_reach_decoded() -> None:
+    only_detection = [_ev(Assessment.POSITIVE, QualityMetric.BURST_MARKS)]
+    assert verdict_from(only_detection)[0] is Verdict.UNCERTAIN

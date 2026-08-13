@@ -9,11 +9,10 @@ file and the operator had no way to tell which stage stopped passing data.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Literal
 
 import numpy as np
 import pytest
-from helpers._dsp import write_bits
+from helpers import _synth as synth
 
 from marconi.engine.backends.base import RunResult
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
@@ -36,15 +35,12 @@ _SR, _SYM, _NBITS = 8.0, 1.0, 4096
 _QPSK = PskOrder.QPSK
 
 
-def _run(
-    path: list[Step], src: Path, snk: Path, direction: Literal["rx", "tx"] = "rx"
-) -> RunResult:
+def _run(path: list[Step], src: Path, snk: Path) -> RunResult:
     pipe = compile_modem(
         Modem(symbol_rate=_SYM, path=path),
         stage_registry(),
-        direction=direction,
         sample_rate=_SR,
-        start=IQ if direction == "tx" else IQ_NORMALIZED,
+        start=IQ_NORMALIZED,
         source_io={"path": str(src)},
         sink_io={"path": str(snk)},
     )
@@ -53,11 +49,11 @@ def _run(
 
 def _signal(tmp_path: Path) -> Path:
     bits = np.random.default_rng(0).integers(0, 2, _NBITS).astype(np.uint8)
-    bp = write_bits(tmp_path / "in.bits", bits)
-    iq = tmp_path / "sig.iq"
     tx: list[Step] = [PskDemodStep(order=_QPSK), PskDemapStep(order=_QPSK)]
-    assert _run(tx, bp, iq, "tx").status == "ok"
-    return iq
+    return synth.write(
+        tmp_path / "sig.iq",
+        synth.from_steps(tx, bits, sample_rate=_SR, symbol_rate=_SYM),
+    )
 
 
 def _by_kind(res: RunResult, kind: str) -> list[int | None]:

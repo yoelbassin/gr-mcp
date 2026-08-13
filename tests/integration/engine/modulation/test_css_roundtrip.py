@@ -3,7 +3,8 @@ from typing import Literal
 
 import numpy as np
 import pytest
-from helpers._dsp import aligned_ber, channel, read_bits, write_bits
+from helpers import _synth as synth
+from helpers._dsp import aligned_ber, channel, read_bits
 
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
 from marconi.engine.compile.compiler import compile_modem
@@ -50,7 +51,6 @@ def _compile(
     return compile_modem(
         modem,
         stage_registry(),
-        direction=direction,
         sample_rate=rate,
         start=IQ,
         source_io={"path": str(src)},
@@ -70,10 +70,11 @@ def test_css_ber0_impaired(sf: int, osr: int, tmp_path: Path) -> None:
     rate = osr * (1 << sf) * _SYM  # oversample * bandwidth
     bw = _SYM * (1 << sf)
     bits = np.random.default_rng(sf).integers(0, 2, sf * 40).astype(np.uint8)
-    bp = write_bits(tmp_path / "in.bits", bits)
     clean, imp, op = tmp_path / "c.iq", tmp_path / "i.iq", tmp_path / "o.bits"
     m = _modem(sf, osr)
-    assert be.run_pipeline(_compile(m, "tx", rate, bp, clean)).status == "ok"
+    synth.write(
+        clean, synth.from_steps(m.path, bits, sample_rate=rate, symbol_rate=_SYM)
+    )
     # The joint up/down-chirp estimator recovers FRACTIONAL sample timing (and a
     # clean CFO), so the block dechirp now decodes through a sub-sample STO that
     # previously smeared marginal symbols (the old integer-only sto=2.0 limit).
@@ -151,10 +152,8 @@ def test_css_two_burst_capture_decodes_both(tmp_path: Path) -> None:
     bits2 = rng.integers(0, 2, sf * 30).astype(np.uint8)
     m = _modem(sf, osr)
     f1, f2 = tmp_path / "f1.iq", tmp_path / "f2.iq"
-    b1 = write_bits(tmp_path / "b1.bits", bits1)
-    b2 = write_bits(tmp_path / "b2.bits", bits2)
-    assert be.run_pipeline(_compile(m, "tx", rate, b1, f1)).status == "ok"
-    assert be.run_pipeline(_compile(m, "tx", rate, b2, f2)).status == "ok"
+    synth.write(f1, synth.from_steps(m.path, bits1, sample_rate=rate, symbol_rate=_SYM))
+    synth.write(f2, synth.from_steps(m.path, bits2, sample_rate=rate, symbol_rate=_SYM))
     i1, i2 = tmp_path / "i1.iq", tmp_path / "i2.iq"
     channel(f1, i1, cfo_hz=0.03 * bw, sample_rate=rate, seed=1)
     channel(f2, i2, cfo_hz=-0.04 * bw, sample_rate=rate, seed=2)
@@ -222,10 +221,11 @@ def test_css_nosfd_ber0_impaired(
     # Departure from the preamble anchors on the first non-base window, so the
     # first payload symbol must sit clear of bin 0 — set its MSB.
     bits[0] = 1
-    bp = write_bits(tmp_path / "in.bits", bits)
     clean, imp, op = tmp_path / "c.iq", tmp_path / "i.iq", tmp_path / "o.bits"
     m = _anatomy_modem(sf, osr, sfd_symbols=0.0, sync_symbols=0)
-    assert be.run_pipeline(_compile(m, "tx", rate, bp, clean)).status == "ok"
+    synth.write(
+        clean, synth.from_steps(m.path, bits, sample_rate=rate, symbol_rate=_SYM)
+    )
     channel(
         clean,
         imp,
@@ -252,10 +252,11 @@ def test_css_single_symbol_sfd_ber0(tmp_path: Path) -> None:
     rate = osr * (1 << sf) * _SYM
     bw = _SYM * (1 << sf)
     bits = np.random.default_rng(3).integers(0, 2, sf * 40).astype(np.uint8)
-    bp = write_bits(tmp_path / "in.bits", bits)
     clean, imp, op = tmp_path / "c.iq", tmp_path / "i.iq", tmp_path / "o.bits"
     m = _anatomy_modem(sf, osr, sfd_symbols=1.0, sync_symbols=0)
-    assert be.run_pipeline(_compile(m, "tx", rate, bp, clean)).status == "ok"
+    synth.write(
+        clean, synth.from_steps(m.path, bits, sample_rate=rate, symbol_rate=_SYM)
+    )
     channel(
         clean,
         imp,
@@ -279,7 +280,6 @@ def test_css_long_sync_gap_locks(tmp_path: Path) -> None:
     letting gap symbols pollute the estimator's median (low same-sign gap
     bins outnumber the preamble windows in the look-back, so a median over
     the mixture lands on a gap bin, not the preamble's)."""
-    from marconi.engine.backends.gnuradio.embedded import chirp
 
     ensure_worker_warm()
     be = GnuRadioBackend()
@@ -297,10 +297,18 @@ def test_css_long_sync_gap_locks(tmp_path: Path) -> None:
     frame = np.concatenate(
         [
             lead.astype(np.complex64),
-            chirp.chirp_prefix(sf, osr, pl, 0.0),
-            np.concatenate([chirp._modulate_symbol(s, sf, osr) for s in sync_syms]),
-            chirp.chirp_prefix(sf, osr, 0, 2.25),
-            np.concatenate([chirp._modulate_symbol(s, sf, osr) for s in payload]),
+            synth.chirp_preamble(
+                sf=sf, oversample=osr, preamble_len=pl, sfd_symbols=0.0
+            ),
+            np.concatenate(
+                [synth.chirp_symbols([s], sf=sf, oversample=osr) for s in sync_syms]
+            ),
+            synth.chirp_preamble(
+                sf=sf, oversample=osr, preamble_len=0, sfd_symbols=2.25
+            ),
+            np.concatenate(
+                [synth.chirp_symbols([s], sf=sf, oversample=osr) for s in payload]
+            ),
             tail.astype(np.complex64),
         ]
     ).astype(np.complex64)
@@ -344,10 +352,11 @@ def test_css_ber0_sfo_documents_gap(sf: int, tmp_path: Path) -> None:
     rate = _OS * (1 << sf) * _SYM
     bw = _SYM * (1 << sf)
     bits = np.random.default_rng(sf).integers(0, 2, sf * 40).astype(np.uint8)
-    bp = write_bits(tmp_path / "in.bits", bits)
     clean, imp, op = tmp_path / "c.iq", tmp_path / "i.iq", tmp_path / "o.bits"
     m = _modem(sf)
-    assert be.run_pipeline(_compile(m, "tx", rate, bp, clean)).status == "ok"
+    synth.write(
+        clean, synth.from_steps(m.path, bits, sample_rate=rate, symbol_rate=_SYM)
+    )
     channel(
         clean,
         imp,

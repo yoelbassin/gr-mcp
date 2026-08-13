@@ -8,12 +8,12 @@ from pathlib import Path
 from typing import Literal
 
 import numpy as np
+from helpers import _synth as synth
 
 from marconi.engine.backends.base import RunResult
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
 from marconi.engine.compile.compiler import compile_modem
 from marconi.engine.compile.ir import GrPipeline
-from marconi.engine.io.bitfile import write_bits
 from marconi.engine.modulation.css.stages import (
     ChirpSyncStep,
     CssDemapStep,
@@ -40,7 +40,6 @@ def _compile(
     return compile_modem(
         m,
         stage_registry(),
-        direction=direction,
         sample_rate=_RATE,
         start=IQ,
         source_io={"path": str(src)},
@@ -81,12 +80,14 @@ def test_synced_burst_marks_offset_zero(tmp_path: Path) -> None:
     rng = np.random.default_rng(5)
     bits = rng.integers(0, 2, 7 * 30).astype(np.uint8)
     pad = rng.integers(0, 2, 7 * 12).astype(np.uint8)
-    src = tmp_path / "in.bits"
-    write_bits(src, np.concatenate([bits, pad]))
-    iq = tmp_path / "tx.iq"
-    assert (
-        be.run_pipeline(_compile(_spec(probe=False, sync=True), "tx", src, iq)).status
-        == "ok"
+    iq = synth.write(
+        tmp_path / "tx.iq",
+        synth.from_steps(
+            _spec(probe=False, sync=True).path,
+            np.concatenate([bits, pad]),
+            sample_rate=_RATE,
+            symbol_rate=_SYM,
+        ),
     )
     out = tmp_path / "out.bits"
     r = be.run_pipeline(_compile(_spec(probe=True, sync=True), "rx", iq, out))
@@ -98,12 +99,14 @@ def test_untagged_stream_yields_no_marks(tmp_path: Path) -> None:
     ensure_worker_warm()
     be = GnuRadioBackend()
     bits = np.random.default_rng(6).integers(0, 2, 7 * 20).astype(np.uint8)
-    src = tmp_path / "in.bits"
-    write_bits(src, bits)
-    iq = tmp_path / "tx.iq"
-    assert (
-        be.run_pipeline(_compile(_spec(probe=False, sync=False), "tx", src, iq)).status
-        == "ok"
+    iq = synth.write(
+        tmp_path / "tx.iq",
+        synth.from_steps(
+            _spec(probe=False, sync=False).path,
+            bits,
+            sample_rate=_RATE,
+            symbol_rate=_SYM,
+        ),
     )
     out = tmp_path / "out.bits"
     r = be.run_pipeline(_compile(_spec(probe=True, sync=False), "rx", iq, out))

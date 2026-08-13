@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import stat
 import time
 import uuid
@@ -35,12 +36,17 @@ def discarded_if_unused(run_dir: Path) -> Iterator[Path]:
     A run that failed before producing anything leaves no trace; one that wrote
     even a partial stream keeps it, because partial output is evidence. Without
     this every failing call left an empty directory behind — 29 of them in one
-    working checkout."""
+    working checkout.
+
+    "Nothing written" means no FILE at any depth, not an empty top level: a
+    trace=True run mkdirs run_dir/trace before the graph starts, and a plain
+    rmdir then failed on the very case this exists for."""
     try:
         yield run_dir
     finally:
         try:
-            run_dir.rmdir()
+            if not any(p.is_file() for p in run_dir.rglob("*")):
+                shutil.rmtree(run_dir)
         except OSError:
             pass
 
@@ -70,9 +76,14 @@ def touch_cache_entry(path: Path) -> None:
         pass
 
 
-def evict_conversion_cache(budget: int | None = None) -> int:
+def evict_conversion_cache(budget: int | None = None, incoming: int = 0) -> int:
     """Delete least-recently-used cache entries until the directory fits its
-    budget. Returns the bytes freed.
+    budget, leaving room for an `incoming` entry about to be written. Returns
+    the bytes freed.
+
+    `incoming` is what makes "the budget bounds the peak" true rather than
+    aspirational: evicting to the plain limit and then writing left the cache
+    at limit + one slice, and a slice can be gigabytes.
 
     Two passes. The first spares entries inside the grace window, which is what
     keeps a concurrent run's input alive. The second runs only if the cache is
@@ -80,7 +91,7 @@ def evict_conversion_cache(budget: int | None = None) -> int:
     toward the total but could never be evicted, so a burst of large slices
     inside one grace window left the budget unenforceable — the one case it
     exists for."""
-    limit = conversion_cache_budget() if budget is None else budget
+    limit = max(0, (conversion_cache_budget() if budget is None else budget) - incoming)
     cutoff = time.time() - _EVICT_GRACE_S
     entries: list[tuple[float, int, Path]] = []
     total = 0

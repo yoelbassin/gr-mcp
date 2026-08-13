@@ -61,7 +61,6 @@ class Envelope(Payload):
     spec_envelope: SpecEnvelope
     levels: dict[str, str]
     item_types: dict[str, str]
-    direction: str
 
 
 ENVELOPE = Envelope(
@@ -72,10 +71,6 @@ ENVELOPE = Envelope(
     ),
     levels={lv.value: gloss for lv, gloss in _LEVEL_GLOSS.items()},
     item_types={t.value: gloss for t, gloss in _ITEM_GLOSS.items()},
-    direction=(
-        "the same path compiles rx (decode) and tx (generate); "
-        "stages declare which directions they support"
-    ),
 )
 
 
@@ -88,7 +83,6 @@ class StageEntry(Payload):
 
     name: str
     levels: str
-    dir: str
     description: str | None = None
     family: str | None = None
     step_conditional: list[str] | None = None
@@ -104,7 +98,6 @@ def _index_entry(stage: Stage[Any, Any]) -> StageEntry:
     return StageEntry.build(
         name=stage.name,
         levels=f"{stage.from_level.value}>{stage.to_level.value}",
-        dir=",".join(sorted(stage.directions)),
         description=stage.description or None,
     )
 

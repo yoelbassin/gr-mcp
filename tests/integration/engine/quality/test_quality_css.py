@@ -14,12 +14,12 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from helpers._dsp import channel, write_bits
+from helpers import _synth as synth
+from helpers._dsp import channel
 
-from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
-from marconi.engine.compile.compiler import compile_modem
+from marconi.engine.backends.gnuradio.runner import ensure_worker_warm
 from marconi.engine.io.source import SourceSlice
-from marconi.engine.modulation.css.stages import CssDemapStep, DechirpStep
+from marconi.engine.modulation.css.stages import DechirpStep
 from marconi.engine.run import PipelineResult, run_rx
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Descriptor
@@ -35,27 +35,11 @@ _N_SYM = 60
 
 def _tx_iq(tmp_path: Path, snr_db: float | None) -> Path:
     ensure_worker_warm()
-    bits = np.random.default_rng(0).integers(0, 2, _N_SYM * _SF).astype(np.uint8)
-    bits_in = tmp_path / "tx_bits.u8"
-    write_bits(bits_in, bits)
-    clean = tmp_path / "clean.cf32"
-    modem = Modem(
-        symbol_rate=1.0,
-        path=[
-            DechirpStep(sf=_SF, oversample=_OS, zero_pad=_ZP),
-            CssDemapStep(sf=_SF),
-        ],
+    symbols = np.random.default_rng(0).integers(0, 1 << _SF, _N_SYM)
+    clean = synth.write(
+        tmp_path / "clean.cf32",
+        synth.chirp_symbols(symbols, sf=_SF, oversample=_OS),
     )
-    gr = compile_modem(
-        modem,
-        stage_registry(),
-        direction="tx",
-        sample_rate=_RATE,
-        start=IQ,
-        source_io={"path": str(bits_in)},
-        sink_io={"path": str(clean)},
-    )
-    assert GnuRadioBackend().run_pipeline(gr).status == "ok"
     if snr_db is None:
         return clean
     return channel(clean, tmp_path / "noisy.cf32", snr_db=snr_db)

@@ -10,12 +10,11 @@ import ast
 from typing import Any
 
 import numpy as np
+from helpers import _synth as synth
 from helpers._fakegr import FAKE_GR, drive
 from helpers._paths import SRC_MARCONI
 
 from marconi.engine.backends.gnuradio.embedded.chirp import (
-    _modulate_symbol,
-    chirp_prefix,
     make_chirp_sync,
 )
 from marconi.engine.backends.gnuradio.embedded.lifecycle import OutQueue, forecast_drain
@@ -95,7 +94,14 @@ def test_chirp_sync_memory_bounded_under_slow_consumer() -> None:
     rng = np.random.default_rng(3)
     payload = 0.7 * (rng.standard_normal(400 * sn) + 1j * rng.standard_normal(400 * sn))
     sfd, sync = 2.25, 2
-    sig = np.concatenate([chirp_prefix(sf, osr, pl, sfd), payload]).astype(np.complex64)
+    sig = np.concatenate(
+        [
+            synth.chirp_preamble(
+                sf=sf, oversample=osr, preamble_len=pl, sfd_symbols=sfd
+            ),
+            payload,
+        ]
+    ).astype(np.complex64)
 
     blk = make_chirp_sync(FAKE_GR, sf, osr, 4, pl, float(1 << sf), sfd, sync)
     pos = 0
@@ -129,13 +135,18 @@ def test_chirp_sync_eof_probe_flushes_withheld_tail() -> None:
     rng = np.random.default_rng(7)
     payload = np.concatenate(
         [
-            _modulate_symbol(int(s), sf, osr)
+            synth.chirp_symbols([int(s)], sf=sf, oversample=osr)
             for s in rng.integers(1, 1 << sf, payload_syms)
         ]
     )
-    sig = np.concatenate([chirp_prefix(sf, osr, pl, 2.25), payload]).astype(
-        np.complex64
-    )
+    sig = np.concatenate(
+        [
+            synth.chirp_preamble(
+                sf=sf, oversample=osr, preamble_len=pl, sfd_symbols=2.25
+            ),
+            payload,
+        ]
+    ).astype(np.complex64)
 
     class _Exhausted:
         # exhausted() true from the first call — the small-capture reality

@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Literal
 
 import numpy as np
+from helpers import _synth as synth
 from helpers._dsp import aligned_ber_best, channel, read_bits, write_bits
 
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
@@ -43,7 +44,6 @@ def _run(direction: Literal["rx", "tx"], modem: Modem, src: Path, snk: Path) -> 
     pipe = compile_modem(
         modem,
         stage_registry(),
-        direction=direction,
         sample_rate=_SR,
         start=IQ,
         source_io={"path": str(src)},
@@ -67,7 +67,9 @@ def test_msk_roundtrip_clean_ber0(tmp_path: Path) -> None:
     bits = np.random.default_rng(0).integers(0, 2, 2048).astype(np.uint8)
     bp, ip, op = tmp_path / "in.bits", tmp_path / "sig.iq", tmp_path / "out.bits"
     write_bits(bp, bits)
-    _run("tx", _tx_modem(), bp, ip)
+    synth.write(
+        ip, synth.from_steps(_tx_modem().path, bits, sample_rate=_SR, symbol_rate=_SYM)
+    )
     _run("rx", _rx_modem(), ip, op)
     out = read_bits(op)
     assert out.size >= bits.size - 64, f"tail loss: {out.size}/{bits.size}"
@@ -80,7 +82,10 @@ def test_msk_roundtrip_survives_impairments(tmp_path: Path) -> None:
     bp = tmp_path / "in.bits"
     clean, imp, op = tmp_path / "clean.iq", tmp_path / "imp.iq", tmp_path / "o.bits"
     write_bits(bp, bits)
-    _run("tx", _tx_modem(), bp, clean)
+    synth.write(
+        clean,
+        synth.from_steps(_tx_modem().path, bits, sample_rate=_SR, symbol_rate=_SYM),
+    )
     # cfo bound from the measured tracking range. msk_demod's bit clock
     # free-runs at the nominal baud (embedded/msk.py: the DECOUPLED path) with
     # no active SFO tracking, only sub-sample polyphase timing; empirically

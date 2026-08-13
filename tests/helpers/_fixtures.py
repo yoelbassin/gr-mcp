@@ -4,7 +4,7 @@ from typing import Any, Literal
 
 from marconi.engine.backends.stub import BlockArity
 from marconi.engine.compile.compile_context import CompileContext
-from marconi.engine.stages.base import DuplexStage, RxStage, Stage
+from marconi.engine.stages.base import Stage
 from marconi.engine.types.descriptor import Carrier, Descriptor
 from marconi.engine.types.enums import ItemType
 from marconi.engine.types.levels import Level
@@ -37,7 +37,7 @@ class RxOnlyDemodStep(Step):
     conv: Literal["rx_only_demod"] = "rx_only_demod"
 
 
-class FakeResampler(DuplexStage[CompileContext, FakeResamplerStep]):
+class FakeResampler(Stage[CompileContext, FakeResamplerStep]):
     name = "fake_resampler"
     from_level = Level.IQ
     to_level = Level.IQ
@@ -47,14 +47,11 @@ class FakeResampler(DuplexStage[CompileContext, FakeResamplerStep]):
     def emit_rx(self, b: CompileContext, step: FakeResamplerStep) -> None:
         b.chain("fake_resampler", interp=step.interp, decim=step.decim)
 
-    def emit_tx(self, b: CompileContext, step: FakeResamplerStep) -> None:
-        b.chain("fake_resampler", interp=step.interp, decim=step.decim)
-
     def rate_factor(self, step: FakeResamplerStep) -> float:
         return step.interp / step.decim
 
 
-class FakeDemod(DuplexStage[CompileContext, FakeDemodStep]):
+class FakeDemod(Stage[CompileContext, FakeDemodStep]):
     name = "fake_demod"
     from_level = Level.IQ
     to_level = Level.SYMBOLS
@@ -64,14 +61,11 @@ class FakeDemod(DuplexStage[CompileContext, FakeDemodStep]):
     def emit_rx(self, b: CompileContext, step: FakeDemodStep) -> None:
         b.chain("fake_demod", sps=b.sps)
 
-    def emit_tx(self, b: CompileContext, step: FakeDemodStep) -> None:
-        b.chain("fake_mod", sps=b.sps)
-
     def out_descriptor(self, in_desc: Descriptor, step: FakeDemodStep) -> Descriptor:
         return Descriptor(Level.SYMBOLS, ItemType.S, in_desc.carrier)
 
 
-class FakeDemap(DuplexStage[CompileContext, FakeDemapStep]):
+class FakeDemap(Stage[CompileContext, FakeDemapStep]):
     name = "fake_demap"
     from_level = Level.SYMBOLS
     to_level = Level.BITS
@@ -81,14 +75,11 @@ class FakeDemap(DuplexStage[CompileContext, FakeDemapStep]):
     def emit_rx(self, b: CompileContext, step: FakeDemapStep) -> None:
         b.chain("fake_demap")
 
-    def emit_tx(self, b: CompileContext, step: FakeDemapStep) -> None:
-        b.chain("fake_map")
-
     def out_descriptor(self, in_desc: Descriptor, step: FakeDemapStep) -> Descriptor:
         return Descriptor(Level.BITS, ItemType.B, Carrier.HARD)
 
 
-class FakeSoftDemap(DuplexStage[CompileContext, FakeSoftDemapStep]):
+class FakeSoftDemap(Stage[CompileContext, FakeSoftDemapStep]):
     name = "fake_soft_demap"
     from_level = Level.SYMBOLS
     to_level = Level.BITS
@@ -98,16 +89,13 @@ class FakeSoftDemap(DuplexStage[CompileContext, FakeSoftDemapStep]):
     def emit_rx(self, b: CompileContext, step: FakeSoftDemapStep) -> None:
         b.chain("fake_soft_demap")
 
-    def emit_tx(self, b: CompileContext, step: FakeSoftDemapStep) -> None:
-        b.chain("fake_soft_map")
-
     def out_descriptor(
         self, in_desc: Descriptor, step: FakeSoftDemapStep
     ) -> Descriptor:
         return Descriptor(Level.BITS, ItemType.F, Carrier.SOFT)
 
 
-class FakeSoftFec(RxStage[CompileContext, FakeSoftFecStep]):
+class FakeSoftFec(Stage[CompileContext, FakeSoftFecStep]):
     name = "fake_soft_fec"
     from_level = Level.BITS
     to_level = Level.BITS
@@ -123,7 +111,7 @@ class FakeSoftFec(RxStage[CompileContext, FakeSoftFecStep]):
         return Descriptor(Level.BITS, ItemType.B, Carrier.HARD)
 
 
-class RxOnlyDemod(RxStage[CompileContext, RxOnlyDemodStep]):
+class RxOnlyDemod(Stage[CompileContext, RxOnlyDemodStep]):
     name = "rx_only_demod"
     from_level = Level.IQ
     to_level = Level.SYMBOLS

@@ -15,6 +15,7 @@ from typing import Literal
 
 import numpy as np
 import pytest
+from helpers import _synth as synth
 from pydantic import ValidationError
 
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend, ensure_worker_warm
@@ -50,7 +51,6 @@ def _run(
     pipe = compile_modem(
         Modem(symbol_rate=_SYM_RATE, path=path),
         stage_registry(),
-        direction=direction,
         sample_rate=_SR,
         start=start,
         source_io={"path": str(src)},
@@ -159,10 +159,13 @@ def test_c4fm_chain_decodes_through_the_real_discriminator(tmp_path: Path) -> No
     levels = np.concatenate(
         [_levels_for(coded, _C4FM, 2), np.full(_TAIL_PAD, _C4FM[0], np.float32)]
     )
-    src = tmp_path / "lv.f32"
-    levels.tofile(src)
     fsk = FskStep(deviation=_DEV)
-    iq = _run([fsk], src, tmp_path / "tx.cf32", IQ, direction="tx")
+    iq = synth.write(
+        tmp_path / "tx.cf32",
+        synth.fm_levels(
+            levels, sps=int(_SR / _SYM_RATE), deviation=_DEV, sample_rate=_SR
+        ),
+    )
     out = read_bits(_run([fsk, _demap(_C4FM), _fec()], iq, tmp_path / "rx.u8", IQ))
     assert out.size == _FRAME_BITS
     assert np.array_equal(out, info), f"BER {float(np.mean(out != info))}"

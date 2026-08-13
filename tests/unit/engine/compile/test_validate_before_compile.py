@@ -8,8 +8,6 @@ from helpers._fixtures import (
     FakeSoftDemapStep,
     FakeSoftFec,
     FakeSoftFecStep,
-    RxOnlyDemod,
-    RxOnlyDemodStep,
     fixture_registry,
 )
 from pydantic import ValidationError
@@ -40,20 +38,11 @@ def _compile(
     return compile_modem(
         modem,
         registry or fixture_registry(),
-        direction=direction,
         sample_rate=8.0,
         start=IQ,
         source_io={"path": "a"},
         sink_io={"path": "b"},
     )
-
-
-def test_tx_over_rx_only_stage_raises_before_emit() -> None:
-    reg = {**fixture_registry(), "rx_only_demod": RxOnlyDemod()}
-    m = _modem(RxOnlyDemodStep(), FakeDemapStep(), symbol_rate=2.0)
-    with pytest.raises(CompileError) as e:
-        _compile(m, "tx", reg)
-    assert "direction" in str(e.value)
 
 
 def test_missing_param_names_the_field() -> None:
