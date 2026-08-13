@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import cast
 
 import numpy as np
 import pytest
@@ -68,3 +69,44 @@ def test_stream_stats_complex_all_zero_ratio_is_none_not_a_perfect_ring(
     s = stream_stats(p, item_type="c", clusters=0)
     assert s["mean_magnitude"] == 0.0
     assert s["constant_modulus_ratio"] is None
+
+
+def test_the_constellation_measures_the_docstring_promises_are_real(
+    tmp_path: Path,
+) -> None:
+    """std_magnitude, magnitude_histogram and phase_histogram are named in
+    stream_stats' tool docstring — the agent's only instructions — and
+    std_magnitude also ships in every trace row. Nothing executed any of them,
+    so a renderer wired to the wrong measure would have shipped unnoticed.
+
+    Two rings at radius 1 and 2, four phases each: every number below is
+    read off that geometry rather than off the implementation."""
+    rng = np.random.default_rng(0)
+    phases = np.array([0.0, np.pi / 2, np.pi, -np.pi / 2])
+    radii = np.array([1.0, 2.0])
+    z = (
+        radii[rng.integers(0, 2, 8000)] * np.exp(1j * phases[rng.integers(0, 4, 8000)])
+    ).astype(np.complex64)
+    s = stream_stats(_write(tmp_path, z), item_type="c", clusters=8, bins=41)
+
+    # |z| is 1 or 2 in equal measure: mean 1.5, population std 0.5
+    assert s["mean_magnitude"] == pytest.approx(1.5, abs=0.05)
+    assert s["std_magnitude"] == pytest.approx(0.5, abs=0.05)
+    assert s["constant_modulus_ratio"] == pytest.approx(0.5 / 1.5, abs=0.05)
+
+    mag_hist, phase_hist = s["magnitude_histogram"], s["phase_histogram"]
+    assert isinstance(mag_hist, dict) and isinstance(phase_hist, dict)
+    # the axis is derivable, never shipped: bin i sits at start + i*step
+    assert set(mag_hist) == set(phase_hist) == {"start", "step", "counts"}
+    assert sum(mag_hist["counts"]) == sum(phase_hist["counts"]) == s["sampled_items"]
+    # two magnitude modes, four phase modes - the shape the geometry dictates
+    assert sum(1 for n in mag_hist["counts"] if n > 100) == 2
+    assert sum(1 for n in phase_hist["counts"] if n > 100) == 4
+
+    # phase_deg is degrees, not radians, and sorted by angle
+    lobes = cast(list[dict[str, float]], s["clusters"])
+    degrees = [c["phase_deg"] for c in lobes]
+    assert degrees == sorted(degrees)
+    assert all(-180.0 <= d <= 180.0 for d in degrees)
+    for want in (-90.0, 0.0, 90.0, 180.0):
+        assert any(abs(d - want) < 5.0 for d in degrees), f"no lobe near {want} deg"

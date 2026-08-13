@@ -306,16 +306,16 @@ def _nonfinite_input(
     )
 
 
-def _flag_empty_stream(result: PipelineResult) -> PipelineResult:
+def _flag_empty_stream(result: PipelineResult, *, tail: str) -> PipelineResult:
     """The engine's mirror of the GR worker's empty-sink flag: a run whose final
     stream holds zero items decoded nothing, and 'ok' would be a lie. Name the
     first census row whose items or windows fell to zero — the gradient a
     parameter search needs.
 
-    Applies to BOTH tails. It used to guard the coding tail only, so a GR-only
-    run leaned entirely on the worker's check — which returns early when the
-    census is empty, and _harvest_census returns [] on any exception. A harvest
-    failure therefore reported status 'ok' over a zero-item stream."""
+    Applies to BOTH tails, and `tail` is which one ran: the message named the
+    coding tail unconditionally, so a path with no coding stage in it (bare
+    fsk -> slice) was told its coding tail produced nothing and the operator was
+    sent to inspect a stage their spec does not contain."""
     if result.status is not RunStatus.OK:
         return result
     items = (
@@ -330,10 +330,15 @@ def _flag_empty_stream(result: PipelineResult) -> PipelineResult:
     )
     where = ""
     if stall is not None:
-        what = "windows" if stall.windows_out == 0 and stall.items_out else "items"
+        # items_out == 0 means nothing flowed at all, the more fundamental
+        # reading; windows otherwise. Keyed off items_out ALONE — conjoining it
+        # with a truthy items_out reported "no items" for a row that reported no
+        # item count at all (items_out None, windows_out 0), naming the one
+        # measure the row was silent about.
+        what = "items" if stall.items_out == 0 else "windows"
         where = f" (no {what} past {stall.kind})"
     return result.as_empty(
-        error=f"coding tail produced 0 items{where}",
+        error=f"{tail} produced 0 items{where}",
         stalled_at=stall.block if stall else None,
     )
 
@@ -642,7 +647,9 @@ def _run_coding_tail(
             marks,
             [w.start for w in out.windows or []],
         )
-    result = _flag_empty_stream(result)
+    result = _flag_empty_stream(
+        result, tail="signal path" if cp.coding is None else "coding tail"
+    )
     if seg.empty is not None and result.status in (RunStatus.OK, RunStatus.EMPTY):
         # the worker's stall is the upstream truth; the coding tail's
         # recomputation over the same census would only echo it less precisely.

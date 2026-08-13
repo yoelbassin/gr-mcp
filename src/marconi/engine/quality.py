@@ -174,15 +174,25 @@ def _word_excess_significant(valid: int, total: int, chance: float) -> bool:
 
 
 def _sync_assessment(found: int, expected: float, scanned: int) -> Assessment | None:
-    """None = untestable: either the hit count is indistinguishable from chance
-    (found something, but no more than random bits would match), or the search
-    covered too little of the stream for zero hits to mean anything."""
+    """None = untestable: the hit count is indistinguishable from chance (found
+    something, but no more than random bits would match), the search covered too
+    little of the stream for zero hits to mean anything, or there is no chance
+    model to judge the hits against at all."""
     if found == 0:
         return (
             Assessment.NEGATIVE
             if scanned >= _SYNC_NEGATIVE_MIN_ITEMS
             else None  # searched too little to call it absent
         )
+    if expected <= 0.0:
+        # A non-positive expectation is not a very strict null, it is the
+        # ABSENCE of one: both bars below multiply it, so 0.0 clears them for
+        # any hit count and one match would certify the whole decode. Reachable
+        # without a malformed harvest — _chance_valid_rate underflows to exactly
+        # 0.0 past ~1075 pattern bits, and _surrogate_chance returns 0 when the
+        # rotation matches nowhere, so max() of the two is 0.0. Zero hits are
+        # still judged above, on search extent: that reading needs no model.
+        return None
     if found <= expected + _SYNC_CHANCE_SIGMA * math.sqrt(expected):
         return None
     if found < _SYNC_CHANCE_RATIO * expected:
@@ -237,13 +247,6 @@ def tag_sync_evidence(diagnostics: Sequence[Diagnostic]) -> list[QualityEvidence
             # the correlator never consumed anything, or reported tags without
             # the chance expectation they must be judged against: untestable,
             # not absent.
-            continue
-        if chance <= 0.0 and tags:
-            # a non-positive expectation is not a very strict one, it is no
-            # expectation at all: it clears both the sigma and the ratio bar,
-            # so a single chance-level hit would certify. tag_gate refuses to
-            # be built without a real chance, so reaching here is a malformed
-            # harvest. Zero tags are judged below, on search extent.
             continue
         assessment = _sync_assessment(tags, chance, items)
         if assessment is None:

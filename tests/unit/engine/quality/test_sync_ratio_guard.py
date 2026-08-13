@@ -20,7 +20,13 @@ def test_measured_live_false_positive_is_not_positive() -> None:
         (1350, 136.0, "positive"),  # ~10x: real-gate class
         (408, 136.0, "positive"),  # exactly 3.0x and >5 sigma
         (407, 136.0, None),  # just under 3x
-        (3, 0.0, "positive"),  # zero-chance path unchanged
+        # Was pinned "positive" as the zero-chance path UNCHANGED — a record of
+        # what the ratio-guard commit did not touch, not a decision that a
+        # missing null can certify. It cannot: both bars multiply the
+        # expectation, so 0.0 clears them for any count. The GR-lane twin
+        # already refused this exact reading (test_tag_sync_without_a_chance_
+        # cannot_certify), so the tree asserted both answers at once.
+        (3, 0.0, None),  # no null to judge against: untestable
         (0, 136.0, "negative"),  # absent, over a stream long enough to say so
         (140, 136.0, None),  # inside sigma band stays untestable
     ],

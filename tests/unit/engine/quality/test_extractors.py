@@ -61,6 +61,44 @@ def test_sync_hits_well_above_chance_floor_are_positive() -> None:
     assert [e.assessment for e in ev] == ["positive"]
 
 
+def test_a_chance_of_zero_certifies_nothing() -> None:
+    """A non-positive expectation is the ABSENCE of a null, not a strict one:
+    the 5-sigma and 3x bars both multiply it, so 0.0 clears them for any hit
+    count and ONE match read verdict "decoded".
+
+    Reachable without a malformed harvest: _chance_valid_rate underflows to
+    exactly 0.0 past ~1075 pattern bits and _surrogate_chance returns 0 when the
+    rotation matches nowhere, so sync_word_rx's max() of the two is 0.0. Zero
+    hits stay negative — that reading needs no chance model."""
+    for hits in (1, 5, 6250):
+        rows = [
+            _row("sync_word", windows_out=hits, chance_windows=0.0, items_in=60_000)
+        ]
+        assert sync_evidence(rows, stage_registry()) == []
+    absent = [_row("sync_word", windows_out=0, chance_windows=0.0, items_in=60_000)]
+    assert [e.assessment for e in sync_evidence(absent, stage_registry())] == [
+        "negative"
+    ]
+
+
+def test_both_sync_lanes_agree_about_a_missing_chance_model() -> None:
+    """The rule lived only in tag_sync_evidence, so the GR lane refused to judge
+    a zero expectation while the coding lane certified on it — the same reading,
+    two answers. It now sits in _sync_assessment, which both lanes call."""
+    coding = sync_evidence(
+        [_row("sync_word", windows_out=1, chance_windows=0.0, items_in=60_000)],
+        stage_registry(),
+    )
+    gr = tag_sync_evidence(
+        [
+            Diagnostic(block="sync_align[0]", key="sync_tags", count=1),
+            Diagnostic(block="sync_align[0]", key="sync_items_scanned", count=60_000),
+            Diagnostic(block="sync_align[0]", key="sync_chance", value=0.0),
+        ]
+    )
+    assert coding == gr == []
+
+
 def test_unconditional_seeders_are_not_evidence() -> None:
     rows = [_row("segment", windows_out=9), _row("mark_frame", windows_out=1)]
     assert sync_evidence(rows, stage_registry()) == []

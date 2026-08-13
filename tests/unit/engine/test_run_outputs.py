@@ -97,7 +97,7 @@ def test_a_zero_item_stream_is_never_ok_even_with_no_census() -> None:
     """The GR-only tail used to lean entirely on the worker's empty-sink check,
     which returns early when the census is empty — and _harvest_census returns
     [] on any exception. A harvest failure reported 'ok' over zero items."""
-    flagged = _flag_empty_stream(_ok_with(0, []))
+    flagged = _flag_empty_stream(_ok_with(0, []), tail="signal path")
     assert flagged.status is RunStatus.EMPTY
     assert flagged.bitstream is None
     assert flagged.error is not None
@@ -108,7 +108,7 @@ def test_a_zero_item_stream_names_where_the_signal_died() -> None:
         BlockCensus(block="b0", kind="fsk", items_in=1000, items_out=500),
         BlockCensus(block="b1", kind="sync_word", items_in=500, items_out=0),
     ]
-    flagged = _flag_empty_stream(_ok_with(0, census))
+    flagged = _flag_empty_stream(_ok_with(0, census), tail="coding tail")
     assert flagged.status is RunStatus.EMPTY
     assert flagged.stalled_at == "b1"
     assert "sync_word" in (flagged.error or "")
@@ -118,4 +118,43 @@ def test_a_zero_item_stream_names_where_the_signal_died() -> None:
 
 def test_a_nonempty_stream_is_left_alone() -> None:
     result = _ok_with(64, [])
-    assert _flag_empty_stream(result) is result
+    assert _flag_empty_stream(result, tail="signal path") is result
+
+
+def test_an_empty_run_never_names_a_tail_the_path_does_not_have() -> None:
+    """The message named the coding tail unconditionally, so a bare fsk->slice
+    path with no coding stage in it was told its CODING TAIL produced nothing —
+    sending the operator to inspect a stage their spec does not contain."""
+    census = [BlockCensus(block="b0", kind="fsk", items_in=1000, items_out=0)]
+    gr_only = _flag_empty_stream(_ok_with(0, census), tail="signal path")
+    coded = _flag_empty_stream(_ok_with(0, census), tail="coding tail")
+    assert "coding tail" not in (gr_only.error or "")
+    assert (gr_only.error or "").startswith("signal path produced 0 items")
+    assert (coded.error or "").startswith("coding tail produced 0 items")
+
+
+def test_a_stall_names_the_measure_the_row_actually_reported() -> None:
+    """`windows if windows_out == 0 and items_out else items` reported "no
+    items" for a row that reported NO ITEM COUNT AT ALL (items_out None), which
+    is the one measure it was silent about."""
+    silent_on_items = BlockCensus(
+        block="b0", kind="sync_word", items_in=500, windows_out=0
+    )
+    counted_both = BlockCensus(
+        block="b0", kind="sync_word", items_in=500, items_out=500, windows_out=0
+    )
+    nothing_flowed = BlockCensus(
+        block="b0", kind="sync_word", items_in=500, items_out=0, windows_out=0
+    )
+    assert "no windows past" in (
+        _flag_empty_stream(_ok_with(0, [silent_on_items]), tail="coding tail").error
+        or ""
+    )
+    assert "no windows past" in (
+        _flag_empty_stream(_ok_with(0, [counted_both]), tail="coding tail").error or ""
+    )
+    # both at zero: nothing flowed at all is the more fundamental reading
+    assert "no items past" in (
+        _flag_empty_stream(_ok_with(0, [nothing_flowed]), tail="coding tail").error
+        or ""
+    )

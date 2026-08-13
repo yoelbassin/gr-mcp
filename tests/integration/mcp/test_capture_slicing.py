@@ -35,6 +35,72 @@ def test_capture_offset_decodes_a_bounded_slice(
     assert 1700 <= _items(half) <= 2300
 
 
+def test_capture_samples_bounds_the_slice_length(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """capture_offset moves the start; capture_samples bounds the LENGTH, and
+    only the start half was ever exercised. Three tool docstrings send the agent
+    to this parameter instead of raising timeout ("the answer to a capture too
+    large for one run"), and it also keys the conversion cache and gates the
+    non-finite scan — the whole length half rested on nothing."""
+    monkeypatch.setenv("MARCONI_WORKSPACE", str(tmp_path))
+    iq = make_clean_capture(tmp_path)  # 4096 bits at 4 sps
+    full = run_rx_tool(_SPEC, sample_rate=4.0, capture_path=str(iq))
+    quarter = run_rx_tool(
+        _SPEC, sample_rate=4.0, capture_path=str(iq), capture_samples=4096
+    )
+    to_eof = run_rx_tool(
+        _SPEC, sample_rate=4.0, capture_path=str(iq), capture_samples=0
+    )
+    assert quarter["status"] == "ok" and to_eof["status"] == "ok"
+    assert _items(quarter) == pytest.approx(1024, abs=64)
+    # 0 samples means "to EOF", not "no samples"
+    assert _items(to_eof) == _items(full)
+
+
+def test_capture_samples_bounds_a_converted_capture_too(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The cf32 path slices while streaming; a ci16/ci8/cu8 capture is converted
+    into the cache first, with the slice BAKED IN at offset 0. Two different
+    mechanisms reaching the same answer, and only the cf32 one was covered."""
+    import numpy as np
+
+    monkeypatch.setenv("MARCONI_WORKSPACE", str(tmp_path))
+    sig = np.fromfile(make_clean_capture(tmp_path), np.complex64)
+    raw = tmp_path / "capture.ci16"
+    inter = np.empty(sig.size * 2, np.float32)
+    inter[0::2], inter[1::2] = sig.real, sig.imag
+    (inter * 32767.0).astype(np.int16).tofile(raw)
+    kw: dict[str, Any] = {"capture_path": str(raw), "capture_dtype": "ci16"}
+    whole = run_rx_tool(_SPEC, sample_rate=4.0, **kw)
+    quarter = run_rx_tool(_SPEC, sample_rate=4.0, capture_samples=4096, **kw)
+    assert whole["status"] == "ok" and quarter["status"] == "ok"
+    assert _items(quarter) == pytest.approx(1024, abs=64)
+    assert _items(quarter) < _items(whole)
+
+
+def test_corruption_after_the_slice_length_does_not_reject_the_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The offset half of this was covered; the length half was not. A glitch
+    PAST capture_samples is outside what the run reads, so the non-finite scan
+    must stop at the slice end rather than walking to EOF."""
+    import numpy as np
+
+    monkeypatch.setenv("MARCONI_WORKSPACE", str(tmp_path))
+    sig = np.fromfile(make_clean_capture(tmp_path), np.complex64)
+    sig[12000] = np.nan + 0j
+    bad = tmp_path / "tail_glitch.cf32"
+    sig.tofile(bad)
+    whole = run_rx_tool(_SPEC, sample_rate=4.0, capture_path=str(bad))
+    assert whole["status"] == "error" and "non-finite" in str(whole["error"])
+    sliced = run_rx_tool(
+        _SPEC, sample_rate=4.0, capture_path=str(bad), capture_samples=8192
+    )
+    assert sliced["status"] == "ok", sliced
+
+
 def test_corruption_outside_the_slice_does_not_reject_the_run(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
