@@ -7,6 +7,7 @@ anyone comparing them."""
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import Any, Literal, TypeVar
 
 import numpy as np
@@ -66,6 +67,36 @@ def percentile_span(
         mid = 0.5 * (lo + hi)
         lo, hi = mid - 0.5 * floor, mid + 0.5 * floor
     return lo, hi
+
+
+class Tail(StrEnum):
+    """What a histogram does with the samples outside its percentile span.
+
+    The two callers need different answers and used to reach them by writing
+    different numpy calls, which read as an accident rather than a choice.
+    CLIP keeps every sample, so the counts sum to the number summarized — right
+    where a caller may total them (stream_stats). DROP discards them, so the
+    end bins are not spiked by the 1% living in the tails — right where the
+    counts are peak-picked (survey's inst_freq tone readout), because a clipped
+    edge spike is found as a tone that is not there."""
+
+    CLIP = "clip"
+    DROP = "drop"
+
+
+def binned_counts(
+    x: npt.NDArray[np.floating[Any]],
+    bins: int,
+    span: tuple[float, float],
+    tail: Tail,
+) -> tuple[npt.NDArray[np.int64], npt.NDArray[np.float64]]:
+    """(counts, edges) over `span`. One home for the tail policy, named at
+    every call site."""
+    lo, hi = span
+    edges = np.linspace(lo, hi, bins + 1)
+    data = np.clip(x, lo, hi) if tail is Tail.CLIP else x
+    counts, _ = np.histogram(data, bins=edges)
+    return counts.astype(np.int64), edges
 
 
 def _clip_range(x: npt.NDArray[np.float64]) -> tuple[float, float]:

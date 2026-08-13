@@ -88,12 +88,29 @@ is wherever it's *least likely to drift relative to its source of truth*:
 - **Code narration** ("loop twice because…", "returns early when…") — source of truth is
   the code itself; the note just duplicates it. **Delete.** Same for ASCII banners and
   docstrings that echo the signature.
+- **A measured constant's provenance** — what was measured, on what, and what the
+  number would break if moved (`_SOFT_POSITIVE = 2.0` and the SNR ladder behind it,
+  `_RISE_RATIO`, `_DOMINANCE_MARGIN`, every threshold in `quality.py`). **Keep, next
+  to the constant.** This does not drift the way narration does: the note's source of
+  truth is an experiment that already happened, and the code cannot restate it — a
+  reader who deletes it has no way to re-derive the number short of re-running the
+  measurement. It is also the note most likely to stop someone "tidying" a calibrated
+  threshold. The rule this exception encodes: **write the why where the why cannot be
+  read off the code, and nowhere else.**
+- **A refuted hypothesis** — "X looks like the fix here and is not, because measured Y".
+  **Keep.** It is the only thing standing between the next reader and a re-litigated
+  dead end.
 
 Per-protocol values (CRC params, bit order, charset) don't live in the Marconi ecosystem.
 
 **Exception to all of the above:** once an MCP surface exists, its `@tool`-decorated
 docstrings are the tool descriptions surfaced to the LLM agent — functional product,
-never touched.
+never touched. Because they are product, they are also TESTED: a composition or a
+field a docstring names must be exercised by
+`tests/unit/engine/stages/test_documented_compositions.py` or an equivalent gate. A
+docstring claim with nothing executing it is an untested feature, and three shipped
+false (a stage description advertising a path the compiler rejected, a cache bound the
+eviction did not deliver, a resolution that described one of two branches).
 
 ### Errors
 

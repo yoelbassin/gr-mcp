@@ -15,7 +15,14 @@ import numpy.typing as npt
 from marconi.deadline import bounded, check_deadline
 from marconi.engine.io.source import SourceSlice
 from marconi.engine.types.enums import CaptureDtype, ItemType
-from marconi.levelfit import kmeans_1d, kmeans_2d, nearest_labels, percentile_span
+from marconi.levelfit import (
+    Tail,
+    binned_counts,
+    kmeans_1d,
+    kmeans_2d,
+    nearest_labels,
+    percentile_span,
+)
 from marconi.mcp.workspace import (
     conversion_cache_dir,
     evict_conversion_cache,
@@ -436,9 +443,9 @@ def _sample_stream(path: Path, dtype: np.dtype[_S]) -> StreamSample[_S]:
 
 
 def _hist(x: npt.NDArray[np.float64], bins: int) -> Histogram:
-    lo, hi = percentile_span(x)
-    edges = np.linspace(lo, hi, bins + 1)
-    counts, _ = np.histogram(np.clip(x, lo, hi), bins=edges)
+    # CLIP: a caller may total these counts against sampled_items
+    span = percentile_span(x)
+    counts, edges = binned_counts(x, bins, span, Tail.CLIP)
     return Histogram(
         start=round(float((edges[0] + edges[1]) / 2.0), 6),
         step=round(float(edges[1] - edges[0]), 6),

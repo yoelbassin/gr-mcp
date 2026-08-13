@@ -10,7 +10,13 @@ from scipy.signal import find_peaks, welch
 from scipy.stats import kurtosis
 
 from marconi.deadline import check_deadline
-from marconi.levelfit import fit_levels, percentile_span, windowed_power
+from marconi.levelfit import (
+    Tail,
+    binned_counts,
+    fit_levels,
+    percentile_span,
+    windowed_power,
+)
 from marconi.survey.iqfile import iter_iq, iter_probes, sample_iq
 from marconi.wire import Payload, replace
 
@@ -540,8 +546,10 @@ def _inst_freq(x: npt.NDArray[np.complex64], sample_rate: float) -> InstFreqStat
         f, _burst_power_gate_pairs(x, _SURVEY_ACTIVE_FRACTION, _SURVEY_BURST_WINDOW)
     )
     spread = float(f.std())
-    lo, hi = percentile_span(f, bins=_SURVEY_IFREQ_BINS)
-    counts, edges = np.histogram(f, bins=_SURVEY_IFREQ_BINS, range=(lo, hi))
+    # DROP: these counts are peak-picked below, and a clipped edge spike is
+    # found as a tone that is not there
+    span = percentile_span(f, bins=_SURVEY_IFREQ_BINS)
+    counts, edges = binned_counts(f, _SURVEY_IFREQ_BINS, span, Tail.DROP)
     centers = (edges[:-1] + edges[1:]) / 2
     step = float(edges[1] - edges[0]) if edges.size > 1 else 0.0
     prom = max(float(counts.max()) * 0.05, 1.0)

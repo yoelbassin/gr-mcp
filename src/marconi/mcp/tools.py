@@ -240,18 +240,17 @@ def run_rx_tool(
     'f' input, and the output of a path ending at a demod stage, e.g. bare
     fsk) slice POSITIVE to bit 1. A path may instead end at complex
     constellation symbols (item_type "c", a .cf32 file — psk_demod,
-    sample_symbols, and the ofdm cell stages land there); the final
-    validate_modem trace row's item_type says which a spec produces. Inspect
-    a "c" stream with stream_stats(item_type="c") and read its
-    constant_modulus_ratio exactly as that tool documents — it, not EVM, is
-    the false-lock check.
+    sample_symbols, and the ofdm cell stages land there). Inspect a "c" stream
+    with stream_stats(item_type="c") and read its constant_modulus_ratio
+    exactly as that tool documents — it, not EVM, is the false-lock check.
 
-    A path may also end BEFORE any demod, at conditioned IQ (level "iq", the
-    same "c" .cf32 wire) — e.g. channelize->agc with no demod stage. The
-    result "stream" is then the conditioned sub-band itself, to feed back into
-    survey (characterize the cleaned channel), stream_stats, or your own soft
-    work; this is how you extract a specific multi-stage conditioning chain
-    that survey's plain center_hz/decim cannot reproduce.
+    A path may also end BEFORE any demod, at conditioned IQ — the same "c"
+    .cf32 wire, distinguished by the result's stream.level ("iq" rather than
+    "symbols") — e.g. channelize->agc with no demod stage. The result "stream"
+    is then the conditioned sub-band itself, to feed back into survey
+    (characterize the cleaned channel), stream_stats, or your own soft work;
+    this is how you extract a specific multi-stage conditioning chain that
+    survey's plain center_hz/decim cannot reproduce.
 
     trace=True taps EVERY GR-segment stage's output to its own sidecar and
     returns a "trace" list — one row per stage {after "conv[i]", level,
@@ -268,8 +267,13 @@ def run_rx_tool(
 
     The result omits null-valued fields throughout (a census row lists only
     the ports/measures its block has); "stream" and "soft_stream" alone stay
-    explicit when null. It carries: status; "stream" {path, item_type,
-    items} — page it with read_stream; "soft_stream" {path, item_type "f",
+    explicit when null. It carries: status; "stream" {path, item_type, level,
+    items} — page it with read_stream. "level" is the rung the items sit on
+    and it is what tells two same-wire streams apart: item_type "f" is a
+    per-symbol demod value at level "symbols" and an LLR of the OPPOSITE sign
+    convention at level "bits", and item_type "c" is a constellation symbol at
+    level "symbols" but conditioned IQ at level "iq". Read it before parsing.
+    Then "soft_stream" {path, item_type "f",
     items, level, bit1_sign} — the demod tap or soft seam the quality layer
     scored, for your own soft-decision work (PPM/Manchester pair
     comparisons, soft correlation, confidence-weighted CRC repair; pass
