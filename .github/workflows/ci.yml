@@ -17,7 +17,7 @@ jobs:
       run:
         shell: bash -el {0}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: mamba-org/setup-micromamba@v3
         with:
           environment-name: marconi
@@ -39,12 +39,14 @@ jobs:
   assets:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@v7
+      # Exact version, not @v10: setup-uv stopped publishing floating major tags
+      # after v7, so @v10 resolves to nothing and the job fails to start.
+      - uses: astral-sh/setup-uv@v10.0.0
         with:
           cache-dependency-glob: pyproject.toml
       - run: uv sync --extra mcp
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: artifacts
           key: assets-${{ hashFiles('tests/assets.toml') }}
@@ -58,7 +60,7 @@ jobs:
       run:
         shell: bash -el {0}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: mamba-org/setup-micromamba@v3
         with:
           environment-name: marconi
@@ -74,7 +76,7 @@ jobs:
       - run: uv pip install --python "$CONDA_PREFIX/bin/python" -e ".[mcp]" --group dev
       - name: GNU Radio imports against the installed numpy
         run: python -c "import numpy; from gnuradio import gr; print(gr.version(), numpy.__version__)"
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: artifacts
           key: assets-${{ hashFiles('tests/assets.toml') }}
