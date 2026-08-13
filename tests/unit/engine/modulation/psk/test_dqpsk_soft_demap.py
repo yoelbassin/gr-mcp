@@ -42,7 +42,13 @@ def _demap(
         sink_io={"path": str(snk)},
     )
     r = GnuRadioBackend().run_pipeline(pipe, timeout=30.0)
-    assert r.status == "ok", r
+    # Per-block counts, not the RunResult: this chain feeds keep_m_in_n exactly
+    # one n-block, so a single item lost upstream writes an empty sink, and the
+    # default repr truncates the census that names where it went.
+    assert r.status == "ok", (
+        " | ".join(f"{c.block}:{c.items_in}->{c.items_out}" for c in (r.census or []))
+        + f" err={r.error}"
+    )
     soft = read_llrs(snk)
     assert soft.size == DS * NC * 2  # PRS dropped, 2 soft/carrier
     return soft
