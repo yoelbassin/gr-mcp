@@ -13,12 +13,18 @@ from marconi.engine.stages.base import RxStage, Stage
 from marconi.engine.types.descriptor import Carrier, Descriptor
 from marconi.engine.types.enums import ItemType
 from marconi.engine.types.levels import Level
+from marconi.engine.types.perm import check_block_permutation
 from marconi.engine.types.step import Step
 
 
 class DeinterleaveStep(Step):
     conv: Literal["deinterleave"] = "deinterleave"
     perm: list[int]
+
+    @model_validator(mode="after")
+    def _permutes(self) -> "DeinterleaveStep":
+        check_block_permutation(self.perm, field="perm")
+        return self
 
 
 class Deinterleave(RxStage[CompileContext, DeinterleaveStep]):

@@ -12,6 +12,7 @@ from marconi.engine.stages.base import CodingStage, Stage
 from marconi.engine.types.descriptor import Carrier
 from marconi.engine.types.enums import DecodeMode, EmitMode, ItemType
 from marconi.engine.types.levels import Level
+from marconi.engine.types.perm import check_gather_indices
 from marconi.engine.types.step import Step
 
 if TYPE_CHECKING:
@@ -422,13 +423,8 @@ class PermuteStep(Step):
     perm: list[int] = Field(min_length=1)
 
     @model_validator(mode="after")
-    def _non_negative(self) -> "PermuteStep":
-        if any(i < 0 for i in self.perm):
-            raise PydanticCustomError(
-                "value_error",
-                "perm indices must be >= 0; a negative index would wrap and "
-                "understate the input stride",
-            )
+    def _gathers(self) -> "PermuteStep":
+        check_gather_indices(self.perm, field="perm")
         return self
 
 

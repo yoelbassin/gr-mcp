@@ -13,6 +13,7 @@ from marconi.engine.stages.base import RxStage, Stage
 from marconi.engine.types.descriptor import Carrier, Descriptor
 from marconi.engine.types.enums import ItemType
 from marconi.engine.types.levels import Level
+from marconi.engine.types.perm import check_block_permutation
 from marconi.engine.types.step import Step
 
 
@@ -123,6 +124,7 @@ class OfdmDemodStep(Step):
             bad.append("bin_perm needs one entry per FFT bin")
         if bad:
             raise ValueError("; ".join(bad))
+        check_block_permutation(self.bin_perm, field="bin_perm")
         return self
 
 
@@ -474,12 +476,7 @@ class CellSelectStep(Step):
 
     @model_validator(mode="after")
     def _shaped(self) -> "CellSelectStep":
-        if sorted(self.select_perm) != list(range(len(self.select_perm))):
-            raise PydanticCustomError(
-                "value_error",
-                "select_perm must be a permutation of 0..len-1; the gather "
-                "walks one whole block per output block",
-            )
+        check_block_permutation(self.select_perm, field="select_perm")
         if self.keep > len(self.select_perm):
             raise PydanticCustomError(
                 "value_error",
