@@ -12,22 +12,59 @@ def _manifest(tmp_path: Path, body: str) -> Path:
     return p
 
 
-def test_list_missing_prints_absent_assets(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    m = _manifest(
+def _mixed_manifest(tmp_path: Path, root: Path) -> Path:
+    (root / "P").mkdir(parents=True)
+    (root / "P" / "present.bin").write_bytes(b"x")
+    return _manifest(
         tmp_path,
         """
+[[asset]]
+kind = "local"
+path = "P/present.bin"
+
 [[asset]]
 kind = "local"
 path = "P/absent.bin"
 """,
     )
-    code = main(
-        ["list", "--missing", "--manifest", str(m), "--root", str(tmp_path / "a")]
-    )
+
+
+def test_list_prints_all_manifest_names(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = tmp_path / "a"
+    m = _mixed_manifest(tmp_path, root)
+    code = main(["list", "--manifest", str(m), "--root", str(root)])
     assert code == 0
-    assert "P/absent.bin" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "P/present.bin" in out
+    assert "P/absent.bin" in out
+
+
+def test_list_missing_prints_only_absent_assets(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = tmp_path / "a"
+    m = _mixed_manifest(tmp_path, root)
+    code = main(["list", "--missing", "--manifest", str(m), "--root", str(root)])
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "P/absent.bin" in out
+    assert "P/present.bin" not in out
+
+
+def test_verify_reports_presence_per_asset(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = tmp_path / "a"
+    m = _mixed_manifest(tmp_path, root)
+    code = main(["verify", "--manifest", str(m), "--root", str(root)])
+    assert code == 0
+    lines = capsys.readouterr().out.splitlines()
+    present_line = next(line for line in lines if "P/present.bin" in line)
+    absent_line = next(line for line in lines if "P/absent.bin" in line)
+    assert present_line.startswith("ok")
+    assert absent_line.startswith("MISS")
 
 
 def test_fetch_returns_nonzero_when_something_is_unresolvable(
