@@ -24,8 +24,8 @@ def _pocsag_slice(src: Path, dst: Path) -> None:
         if w.getframerate() != _POCSAG_RATE:
             raise DeriveError(f"{src}: expected {_POCSAG_RATE} Hz")
         pcm = np.frombuffer(w.readframes(w.getnframes()), dtype=np.uint8)
-    # centred on 127.5 and left unscaled, exactly as make_pocsag_slice.py did:
-    # the gate's amplitude contract is calibrated against these magnitudes
+    # centred on 127.5 and left unscaled: the gate's amplitude contract is
+    # calibrated against these magnitudes, and the manifest pins the digest
     iq = pcm.astype(np.float32).reshape(-1, 2) - 127.5
     z = (iq[:, 0] + 1j * iq[:, 1]).astype(np.complex64)
     want = int((_POCSAG_END_S - _POCSAG_START_S) * _POCSAG_RATE)

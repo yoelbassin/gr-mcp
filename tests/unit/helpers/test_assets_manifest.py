@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
+from helpers._paths import TESTS_ROOT
+from helpers.assets.derive import DERIVERS
 from helpers.assets.manifest import (
     DerivedAsset,
     FetchedAsset,
@@ -11,6 +14,8 @@ from helpers.assets.manifest import (
     Strategy,
     load_manifest,
 )
+
+_ASSET_CALL = re.compile(r"(?:require_asset|asset_fixture)\(\s*\"([^\"]+)\"")
 
 
 def _write(tmp_path: Path, body: str) -> Path:
@@ -146,3 +151,65 @@ typo_field = 1
 """,
             )
         )
+
+
+def test_discard_after_derive_without_a_child_is_refused(tmp_path: Path) -> None:
+    with pytest.raises(ManifestError, match="derives from it"):
+        load_manifest(
+            _write(
+                tmp_path,
+                """
+[[asset]]
+kind = "fetched"
+path = "A/x.wav"
+url = "https://example.invalid/a.wav"
+discard_after_derive = true
+""",
+            )
+        )
+
+
+def test_discard_after_derive_cannot_be_ci_required(tmp_path: Path) -> None:
+    with pytest.raises(ManifestError, match="ci_required"):
+        load_manifest(
+            _write(
+                tmp_path,
+                """
+[[asset]]
+kind = "fetched"
+path = "A/x.wav"
+url = "https://example.invalid/a.wav"
+discard_after_derive = true
+ci_required = true
+
+[[asset]]
+kind = "derived"
+path = "A/x.cf32"
+derive_from = "A/x.wav"
+derive = "s"
+""",
+            )
+        )
+
+
+def test_the_shipped_manifest_loads_and_names_registered_derivers() -> None:
+    index = load_manifest()
+    assert index
+    for asset in index.values():
+        if isinstance(asset, DerivedAsset):
+            assert asset.derive in DERIVERS, asset.path
+
+
+def test_the_shipped_manifest_and_the_gates_agree_on_every_name() -> None:
+    # a gate that names an asset the manifest does not have is invisible to
+    # the strict verdict; a ci_required asset no gate names is dead weight
+    index = load_manifest()
+    asked = {
+        name
+        for source in (TESTS_ROOT / "e2e").rglob("*.py")
+        for name in _ASSET_CALL.findall(source.read_text())
+    }
+    required = {name for name, a in index.items() if a.ci_required}
+    assert required
+    assert required <= asked
+    assert asked <= set(index)

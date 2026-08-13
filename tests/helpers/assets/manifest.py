@@ -58,6 +58,10 @@ Asset = Annotated[FetchedAsset | DerivedAsset | LocalAsset, Field(discriminator=
 _ADAPTER: TypeAdapter[list[Asset]] = TypeAdapter(list[Asset])
 
 
+def is_consumed(asset: Asset) -> bool:
+    return isinstance(asset, FetchedAsset) and asset.discard_after_derive
+
+
 def _check_members(assets: list[Asset]) -> None:
     for a in assets:
         if isinstance(a, FetchedAsset) and a.strategy in _ZIP_STRATEGIES:
@@ -93,6 +97,21 @@ def _check_graph(index: dict[str, Asset]) -> None:
             cur = node.derive_from
 
 
+def _check_discard(index: dict[str, Asset]) -> None:
+    parents = {a.derive_from for a in index.values() if isinstance(a, DerivedAsset)}
+    for name, a in index.items():
+        if not is_consumed(a):
+            continue
+        if name not in parents:
+            raise ManifestError(
+                f"{name}: discard_after_derive but no asset derives from it"
+            )
+        if a.ci_required:
+            raise ManifestError(
+                f"{name}: discard_after_derive cannot also be ci_required"
+            )
+
+
 def load_manifest(path: Path = MANIFEST_PATH) -> dict[str, Asset]:
     raw: dict[str, Any] = tomllib.loads(path.read_text())
     try:
@@ -102,4 +121,5 @@ def load_manifest(path: Path = MANIFEST_PATH) -> dict[str, Asset]:
     _check_members(assets)
     index = _index(assets)
     _check_graph(index)
+    _check_discard(index)
     return index

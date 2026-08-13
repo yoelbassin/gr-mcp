@@ -1,10 +1,7 @@
 from __future__ import annotations
 
-import hashlib
 import http.client
-import os
 import struct
-import tempfile
 import urllib.error
 import urllib.request
 import zlib
@@ -13,6 +10,7 @@ from pathlib import Path
 from typing import cast
 
 from helpers.assets.manifest import FetchedAsset, Strategy
+from helpers.assets.store import IntegrityError, check, publish
 
 BROWSER_UA = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
@@ -45,22 +43,6 @@ def head_prefix(url: str, n: int, *, ua: str | None = None) -> bytes:
         return r.read(n)
 
 
-def _verify(asset: FetchedAsset, tmp: Path) -> None:
-    size = tmp.stat().st_size
-    if asset.bytes is not None and size != asset.bytes:
-        raise FetchError(f"{asset.path}: expected {asset.bytes} bytes, got {size}")
-    if asset.sha256 is None:
-        return
-    h = hashlib.sha256()
-    with tmp.open("rb") as f:
-        while chunk := f.read(_CHUNK):
-            h.update(chunk)
-    if h.hexdigest() != asset.sha256:
-        raise FetchError(
-            f"{asset.path}: sha256 {h.hexdigest()} != manifest {asset.sha256}"
-        )
-
-
 def _stream_to(url: str, ua: str | None, tmp: Path) -> None:
     with _open(url, ua) as r, tmp.open("wb") as out:
         while chunk := r.read(_CHUNK):
@@ -82,20 +64,19 @@ _STRATEGIES: dict[Strategy, Callable[[FetchedAsset, Path], None]] = {
 
 
 def fetch(asset: FetchedAsset, dest: Path) -> None:
-    handler = _STRATEGIES.get(asset.strategy)
-    if handler is None:
+    found = _STRATEGIES.get(asset.strategy)
+    if found is None:
         raise FetchError(f"{asset.path}: no handler for {asset.strategy.value!r}")
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    fd, name = tempfile.mkstemp(dir=dest.parent, suffix=".part")
-    os.close(fd)
-    tmp = Path(name)
-    try:
+    handler: Callable[[FetchedAsset, Path], None] = found
+
+    def _write(tmp: Path) -> None:
         handler(asset, tmp)
-        _verify(asset, tmp)
-        os.replace(tmp, dest)
-    except BaseException:
-        tmp.unlink(missing_ok=True)
-        raise
+        try:
+            check(asset, tmp)
+        except IntegrityError as exc:
+            raise FetchError(f"{asset.path}: {exc}") from exc
+
+    publish(dest, _write)
 
 
 _EOCD_SIG = b"PK\x05\x06"
@@ -108,9 +89,12 @@ def _content_length(url: str, ua: str | None) -> int:
         req.add_header("User-Agent", ua)
     try:
         with urllib.request.urlopen(req, timeout=_TIMEOUT) as r:  # noqa: S310
-            return int(r.headers["Content-Length"])
+            declared = cast("str | None", r.headers.get("Content-Length"))
     except urllib.error.URLError as exc:
         raise FetchError(f"{url}: {exc}") from exc
+    if declared is None:
+        raise FetchError(f"{url}: no Content-Length, so the zip tail is unlocatable")
+    return int(declared)
 
 
 def _range(url: str, ua: str | None, start: int, end: int) -> bytes:
