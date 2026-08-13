@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from helpers.assets.derive import DERIVERS
+from helpers.assets.derive import DERIVERS, DeriveError
 from helpers.assets.manifest import load_manifest
 from helpers.assets.resolve import ResolveError, resolve, resolve_all
 
@@ -23,6 +23,14 @@ def doubling(monkeypatch: pytest.MonkeyPatch) -> None:
         dst.write_bytes(src.read_bytes() * 2)
 
     monkeypatch.setitem(DERIVERS, "double", _double)
+
+
+@pytest.fixture
+def exploding(monkeypatch: pytest.MonkeyPatch) -> None:
+    def _explode(src: Path, dst: Path) -> None:
+        raise DeriveError("simulated derive failure")
+
+    monkeypatch.setitem(DERIVERS, "explode", _explode)
 
 
 def test_fetches_a_root_then_derives_its_leaf(
@@ -81,6 +89,35 @@ derive = "double"
     assert not (root / "P" / "r.bin").exists()
 
 
+def test_a_failed_derive_never_discards_the_parent(
+    local_server: tuple[str, Path], tmp_path: Path, exploding: None
+) -> None:
+    base, www = local_server
+    (www / "r.bin").write_bytes(PAYLOAD)
+    index = load_manifest(
+        _manifest(
+            tmp_path,
+            f"""
+[[asset]]
+kind = "fetched"
+path = "P/r.bin"
+url = "{base}/r.bin"
+discard_after_derive = true
+
+[[asset]]
+kind = "derived"
+path = "P/leaf.bin"
+derive_from = "P/r.bin"
+derive = "explode"
+""",
+        )
+    )
+    root = tmp_path / "artifacts"
+    with pytest.raises(DeriveError):
+        resolve("P/leaf.bin", index, root=root)
+    assert (root / "P" / "r.bin").exists()
+
+
 def test_an_existing_file_is_not_refetched(
     local_server: tuple[str, Path], tmp_path: Path
 ) -> None:
@@ -110,11 +147,11 @@ def test_a_local_asset_that_is_absent_raises(tmp_path: Path) -> None:
 [[asset]]
 kind = "local"
 path = "P/only.bin"
-note = "no upstream"
+note = "ask the ops channel"
 """,
         )
     )
-    with pytest.raises(ResolveError, match="no upstream"):
+    with pytest.raises(ResolveError, match="ask the ops channel"):
         resolve("P/only.bin", index, root=tmp_path / "artifacts")
 
 
@@ -137,6 +174,36 @@ path = "P/b.bin"
         "P/a.bin",
         "P/b.bin",
     ]
+
+
+def test_resolve_all_skips_discard_only_parents(
+    local_server: tuple[str, Path], tmp_path: Path, doubling: None
+) -> None:
+    base, www = local_server
+    (www / "r.bin").write_bytes(PAYLOAD)
+    index = load_manifest(
+        _manifest(
+            tmp_path,
+            f"""
+[[asset]]
+kind = "derived"
+path = "P/leaf.bin"
+derive_from = "P/r.bin"
+derive = "double"
+
+[[asset]]
+kind = "fetched"
+path = "P/r.bin"
+url = "{base}/r.bin"
+discard_after_derive = true
+""",
+        )
+    )
+    root = tmp_path / "artifacts"
+    unresolved = resolve_all(index, root=root)
+    assert "P/r.bin" not in unresolved
+    assert (root / "P" / "leaf.bin").exists()
+    assert not (root / "P" / "r.bin").exists()
 
 
 def test_unknown_deriver_is_named(
