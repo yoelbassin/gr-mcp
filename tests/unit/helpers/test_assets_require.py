@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import importlib.util
+import os
+import subprocess
+import sys
 from pathlib import Path
 from types import ModuleType
 from typing import cast
@@ -10,6 +13,7 @@ from helpers.assets import SKIPPED, asset_path, require_asset, strict_failures
 from helpers.assets.manifest import LocalAsset, load_manifest
 
 _CONFTEST_PATH = Path(__file__).resolve().parents[2] / "conftest.py"
+_REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
 def _manifest(tmp_path: Path, body: str) -> Path:
@@ -190,3 +194,43 @@ def test_sessionfinish_fails_the_run_when_strict_and_ci_required_missing(
         "ASSETS STRICT: required assets absent, gates did not run:",
         "  P/needed.bin",
     ]
+
+
+def _run_pocsag_gate_directory(
+    tmp_path: Path, *, strict: bool
+) -> subprocess.CompletedProcess[str]:
+    env = dict(os.environ)
+    env["MARCONI_ASSET_ROOT"] = str(tmp_path / "assets")
+    if strict:
+        env["MARCONI_ASSETS_STRICT"] = "1"
+    else:
+        env.pop("MARCONI_ASSETS_STRICT", None)
+    return subprocess.run(
+        [sys.executable, "-m", "pytest", "tests/e2e/pocsag", "-q", "-rs"],
+        cwd=_REPO_ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+
+
+def test_pocsag_gate_directory_exits_zero_when_lenient_and_asset_absent(
+    tmp_path: Path,
+) -> None:
+    # A regression to a module-level `require_asset(...)` call (instead of
+    # `asset_fixture(...)`) would skip the whole module at collection time,
+    # collecting zero items and exiting 5 (NO_TESTS_COLLECTED) instead of 0 -
+    # this asserts the exit code, not just "no failure", so it catches that.
+    result = _run_pocsag_gate_directory(tmp_path, strict=False)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "POCSAG/pocsag.cf32" in result.stdout
+
+
+def test_pocsag_gate_directory_exits_one_when_strict_and_asset_absent(
+    tmp_path: Path,
+) -> None:
+    result = _run_pocsag_gate_directory(tmp_path, strict=True)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "ASSETS STRICT: required assets absent" in result.stdout
+    assert "POCSAG/pocsag.cf32" in result.stdout

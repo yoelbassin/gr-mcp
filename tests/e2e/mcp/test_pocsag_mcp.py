@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 from fastmcp import Client
 from helpers import framing
-from helpers.assets import require_asset
+from helpers.assets import asset_fixture
 
 from marconi.mcp.server import build_server
 
@@ -56,7 +56,7 @@ def _pocsag_rics(bits: np.ndarray, windows: list[int]) -> dict[int, int]:
     return found
 
 
-_SLICE = require_asset("POCSAG/pocsag.cf32")
+pocsag_slice = asset_fixture("POCSAG/pocsag.cf32")
 
 
 def _pocsag_spec() -> dict[str, object]:
@@ -87,7 +87,7 @@ def _pocsag_spec() -> dict[str, object]:
 
 
 async def test_pocsag_offair_through_mcp(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, pocsag_slice: Path
 ) -> None:
     monkeypatch.setenv("MARCONI_WORKSPACE", str(tmp_path))
     async with Client(build_server()) as client:
@@ -107,7 +107,7 @@ async def test_pocsag_offair_through_mcp(
                 {
                     "spec": _pocsag_spec(),
                     "sample_rate": RATE,
-                    "capture_path": str(_SLICE),
+                    "capture_path": str(pocsag_slice),
                 },
             )
         ).data

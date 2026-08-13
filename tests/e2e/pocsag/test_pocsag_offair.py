@@ -28,7 +28,7 @@ from pathlib import Path
 
 import numpy as np
 from helpers import framing
-from helpers.assets import require_asset
+from helpers.assets import asset_fixture
 
 from marconi.engine.backends.gnuradio.runner import ensure_worker_warm
 from marconi.engine.coding.stages_bits import (
@@ -52,7 +52,7 @@ from marconi.engine.types.models import Modem
 
 IQ = Descriptor(Level.IQ, ItemType.C)
 RATE = 128000.0
-_SLICE = require_asset("POCSAG/pocsag.cf32")
+pocsag_slice = asset_fixture("POCSAG/pocsag.cf32")
 
 # POCSAG constants (caller data — a protocol lives in the fixture, not production).
 SC = 0x7CD215D8  # frame sync codeword
@@ -156,7 +156,7 @@ def _pocsag_rics(bits: np.ndarray, windows: list[int]) -> dict[int, int]:
     return found
 
 
-def test_pocsag_offair(tmp_path: Path) -> None:
+def test_pocsag_offair(tmp_path: Path, pocsag_slice: Path) -> None:
     ensure_worker_warm()
     res = run_rx(
         _pocsag_modem(),
@@ -164,7 +164,7 @@ def test_pocsag_offair(tmp_path: Path) -> None:
         sample_rate=RATE,
         start=IQ,
         workdir=tmp_path,
-        source=SourceSlice(path=_SLICE),
+        source=SourceSlice(path=pocsag_slice),
     )
     assert res.status == "ok", res
     assert res.windows, "no POCSAG batches framed"
@@ -173,7 +173,7 @@ def test_pocsag_offair(tmp_path: Path) -> None:
     assert found == ORACLE, f"decoded {found}, oracle {ORACLE}"
 
 
-def test_pocsag_offair_sync_align(tmp_path: Path) -> None:
+def test_pocsag_offair_sync_align(tmp_path: Path, pocsag_slice: Path) -> None:
     """Off-air exercise of the GR-native sync_align: the frame sync codeword is
     detected and each batch gated inside the GR flowgraph (correlate_access_code
     + tag_gate), then decoded to the same multimon RICs. Exercises sync_align's
@@ -187,7 +187,7 @@ def test_pocsag_offair_sync_align(tmp_path: Path) -> None:
         sample_rate=RATE,
         start=IQ,
         workdir=tmp_path,
-        source=SourceSlice(path=_SLICE),
+        source=SourceSlice(path=pocsag_slice),
     )
     assert res.status == "ok", res
     assert res.windows, "no POCSAG batches gated by sync_align"

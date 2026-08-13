@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 
 import pytest
+from _pytest.fixtures import FixtureFunctionDefinition
 from helpers.assets.manifest import Asset
 from helpers.assets.resolve import ASSET_ROOT
 
@@ -26,10 +27,15 @@ def require_asset(name: str) -> Path:
     if path.exists():
         return path
     SKIPPED.add(name)
-    pytest.skip(
-        f"asset {name!r} absent; fetch with: {_FETCH_HINT}",
-        allow_module_level=True,
-    )
+    pytest.skip(f"asset {name!r} absent; fetch with: {_FETCH_HINT}")
+
+
+def asset_fixture(name: str) -> FixtureFunctionDefinition:
+    @pytest.fixture(scope="module")
+    def _resolved() -> Path:
+        return require_asset(name)
+
+    return _resolved
 
 
 def strict_failures(index: dict[str, Asset], skipped: set[str]) -> list[str]:
