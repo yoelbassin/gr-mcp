@@ -40,6 +40,50 @@ def check_match_tolerance(max_errors: int, pattern_bits: int, *, field: str) -> 
         )
 
 
+def channelization_problem(
+    *, rate: float, decim: int, bandwidth_hz: float, center_hz: float
+) -> str | None:
+    """What is wrong with a sub-band request, or None. ONE rule for the two
+    channelizers: the `channelize` stage (a GR freq_xlating_fir_filter) and
+    survey's own streaming numpy channelizer, which are different DSP and
+    cannot share an implementation but must not disagree about what a caller
+    may ask for. survey's used to validate `decim >= 1` and nothing else while
+    the stage refused the same request three ways, under a docstring telling
+    the agent both describe that channel alone."""
+    if not 1 <= decim <= MAX_DECIM:
+        return f"decim must be in [1, {MAX_DECIM}], got {decim}"
+    if abs(center_hz) > 0.5 * rate:
+        return (
+            f"center_hz {center_hz:g} lies outside the +-{0.5 * rate:g} Hz "
+            f"Nyquist span of the {rate:g} Hz input; a mixer wraps mod the "
+            f"sample rate and would silently tune an aliased sub-band"
+        )
+    if bandwidth_hz <= 0:
+        return f"bandwidth_hz must be > 0, got {bandwidth_hz:g}"
+    if bandwidth_hz < MIN_TRANSITION_FRAC * rate:
+        return (
+            f"bandwidth_hz {bandwidth_hz:g} is narrower than "
+            f"{MIN_TRANSITION_FRAC:g} of the {rate:g} Hz input rate; the "
+            f"anti-alias filter's tap count scales as rate/transition, so "
+            f"this asks for a filter too long to run (the flowgraph would "
+            f"reach its deadline with nothing to show). Decimate first, "
+            f"then channelize the narrow band at the lower rate"
+        )
+    if bandwidth_hz > rate / decim:
+        return (
+            f"bandwidth_hz {bandwidth_hz:g} exceeds the decimated "
+            f"output rate {rate / decim:g}; the passband folds after "
+            f"decimation — reduce bandwidth_hz or decim"
+        )
+    return None
+
+
+# firdes sizes the FIR as roughly rate/transition taps, so a transition tied
+# 1:1 to a narrow passband is unbounded: 20 Hz on a 2.048 Msps capture asks for
+# ~493k taps (~1e12 MACs over a 2 M-sample run) and compiles clean, then dies
+# on the wall-clock deadline with no indication which parameter did it.
+MIN_TRANSITION_FRAC = 1.0e-3
+
 # FIR lengths a stage hands a backend to design. firdes/firwin cost scales with
 # the tap count, and the taps are held in memory for the run's whole life.
 MAX_FILTER_TAPS = 8192

@@ -368,9 +368,8 @@ def run_tx_tool(
     Returns the IQ file path, sample count, and per-block census."""
     if (bits is None) == (bits_path is None):
         raise ValueError("pass exactly one of bits or bits_path")
-    with set_deadline(timeout):
+    with set_deadline(timeout), discarded_if_unused(new_run_dir("tx")) as run_dir:
         modem = Modem.from_spec(spec, step_models())
-        run_dir = new_run_dir("tx")
         if bits is not None:
             bits_file = run_dir / "tx_bits.u8"
             parse_bits(bits).tofile(bits_file)

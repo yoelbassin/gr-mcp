@@ -497,7 +497,14 @@ def _symbol_rate(
         eye_confirmed=_eye_cleared([c.eye for c in ranked]),
         search_lo_hz=round(lo, 1),
         search_hi_hz=round(hi, 1),
-        clock_resolution_hz=round(float(dfa), 1),
+        # the COARSER of the two branches. candidates_hz merges peaks from
+        # both, and the phase branch is gated (idle removed) so its record is
+        # shorter and its bin wider — measured 98.3 Hz against the amplitude
+        # branch's 80.0 on a 20%-duty capture. Reporting dfa alone understated
+        # the quantization of every candidate the phase branch contributed,
+        # under a docstring that tells the caller a hypothesis within one bin
+        # is a match.
+        clock_resolution_hz=round(max(float(dfa), float(dfg)), 1),
     )
 
 

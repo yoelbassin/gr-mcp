@@ -9,6 +9,7 @@ import numpy.typing as npt
 from scipy.signal import firwin, upfirdn
 
 from marconi.deadline import check_deadline
+from marconi.engine.types.bounds import channelization_problem
 from marconi.errors import register_error
 
 _SURVEY_SAMPLE_ITEMS = 1 << 20
@@ -154,26 +155,34 @@ def channelize_to_file(
     history across blocks (overlap-save), so the result is independent of the read
     chunking. ``bandwidth_hz`` is the filter passband width (cutoff = bandwidth_hz/2,
     matching the channelize stage); default passes most of the decimated band."""
-    if decim < 1:
-        raise ValueError(f"decim must be >= 1, got {decim}")
     if abs(center_hz) > 0.5 * sample_rate:
         looks_absolute = abs(center_hz) > 1.0e6 and abs(center_hz) > 10.0 * sample_rate
-        hint = (
-            " — this looks like an absolute RF frequency. survey's center_hz "
-            "is an OFFSET from the capture's own centre, not the frequency the "
-            "radio was tuned to; capture's returned center_hz is the latter. "
-            "Use survey's carrier.offset_hz to re-centre."
-            if looks_absolute
-            else "; the mixer wraps mod the sample rate and would silently "
-            "tune an aliased sub-band"
-        )
-        raise ValueError(
-            f"center_hz {center_hz:g} lies outside the +-{0.5 * sample_rate:g} Hz "
-            f"Nyquist span of the {sample_rate:g} Hz capture{hint}"
-        )
-    out_rate = sample_rate / decim
-    cutoff = (bandwidth_hz / 2.0) if bandwidth_hz is not None else 0.45 * out_rate
-    cutoff = min(cutoff, 0.5 * out_rate)
+        if looks_absolute:
+            raise ValueError(
+                f"center_hz {center_hz:g} lies outside the "
+                f"+-{0.5 * sample_rate:g} Hz Nyquist span of the "
+                f"{sample_rate:g} Hz capture — this looks like an absolute RF "
+                "frequency. survey's center_hz is an OFFSET from the capture's "
+                "own centre, not the frequency the radio was tuned to; "
+                "capture's returned center_hz is the latter. Use survey's "
+                "carrier.offset_hz to re-centre."
+            )
+    out_rate = sample_rate / decim if decim >= 1 else sample_rate
+    # The passband survey would actually use, checked by the SAME rule the
+    # channelize stage applies — the two are different DSP and cannot share an
+    # implementation, but a caller must not be able to ask survey for a
+    # sub-band the stage would refuse, under a docstring saying both
+    # characterize that channel alone.
+    effective_bw = bandwidth_hz if bandwidth_hz is not None else 0.9 * out_rate
+    problem = channelization_problem(
+        rate=sample_rate,
+        decim=decim,
+        bandwidth_hz=effective_bw,
+        center_hz=center_hz,
+    )
+    if problem is not None:
+        raise ValueError(problem)
+    cutoff = min(effective_bw / 2.0, 0.5 * out_rate)
     if cutoff >= 0.5 * sample_rate:
         # decim=1 translate-only: firwin needs 0 < normalized < 1; the band
         # passes whole either way

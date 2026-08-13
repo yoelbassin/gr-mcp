@@ -147,12 +147,15 @@ def sync_word_rx(
 
 
 def mark_frame_rx(c: CodingCarrier, *, offset_bits: int = 0) -> CodingCarrier:
+    # sorted+deduped HERE, by the step that turns marks into windows: window
+    # cursors must be non-decreasing (window_spans raises CarrierInvariantError
+    # otherwise, which is classified internal_error and blames the engine), and
+    # this was upheld only by whatever produced the marks upstream — a
+    # diagnostic harvest that sorts, or a Symbolstream validator. The consumer
+    # owns its own precondition.
     bits = np.asarray(c.bits, np.uint8)
-    windows: list[Window] = []
-    for m in c.marks:
-        start = int(m) + offset_bits
-        if 0 <= start < bits.size:
-            windows.append(Window(start=start, cursor=start))
+    starts = sorted({int(m) + offset_bits for m in c.marks})
+    windows = [Window(start=s, cursor=s) for s in starts if 0 <= s < bits.size]
     return CodingCarrier(bits=bits, windows=windows, marks=c.marks)
 
 

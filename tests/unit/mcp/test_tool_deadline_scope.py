@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 
 from marconi.deadline import RunTimeout, bounded, set_deadline
-from marconi.mcp.tools import run_rx_tool, validate_modem
+from marconi.mcp.tools import run_rx_tool, run_tx_tool, validate_modem
 from marconi.mcp.workspace import discarded_if_unused, new_run_dir
 
 # a (15,11) Hamming-like shape asking for 2-error correction: the validator
@@ -92,3 +92,36 @@ def test_run_dir_survives_when_it_holds_output(
     with discarded_if_unused(new_run_dir("rx")) as d:
         (d / "out.u8").write_bytes(b"\x01")
     assert d.is_dir()
+
+
+def test_a_failed_run_tx_leaves_no_directory_behind(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """run_tx was the one run-dir path the cleanup did not reach; every failing
+    call left an empty directory under marconi-runs/."""
+    monkeypatch.setenv("MARCONI_WORKSPACE", str(tmp_path))
+    runs = tmp_path / "marconi-runs"
+    with pytest.raises(FileNotFoundError):
+        run_tx_tool(
+            spec={"symbol_rate": 1e3, "path": [{"conv": "slice"}]},
+            sample_rate=1e3,
+            bits_path=str(tmp_path / "missing.u8"),
+        )
+    assert list(runs.glob("tx-*")) == []
+
+
+def test_run_tx_keeps_the_directory_holding_its_input_bits(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An inline `bits` string is written into the run dir, so a failure after
+    that point still has something worth keeping."""
+    monkeypatch.setenv("MARCONI_WORKSPACE", str(tmp_path))
+    runs = tmp_path / "marconi-runs"
+    with pytest.raises(FileNotFoundError):
+        run_tx_tool(
+            spec={"symbol_rate": 1e3, "path": [{"conv": "slice"}]},
+            sample_rate=1e3,
+            bits="0101",
+            out_path=str(tmp_path / "nope" / "out.cf32"),
+        )
+    assert len(list(runs.glob("tx-*"))) == 1
