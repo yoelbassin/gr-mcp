@@ -5,8 +5,12 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 uv.lock
-# Binary/IQ capture data — large, not tracked
+# Binary/IQ capture data — large, not tracked. Both forms: the trailing
+# slash matches directories only, so a symlink named `artifacts` slipped
+# past it into a commit and a later checkout replaced the real directory
+# with it, taking the ignored contents with it.
 artifacts/
+artifacts
 # Superpowers working scaffolding (ephemeral plans/notes; lasting facts live in docs/)
 docs/superpowers/
 # Default MCP workspace when MARCONI_WORKSPACE is unset
