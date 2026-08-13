@@ -74,13 +74,23 @@ def test_fetch_returns_nonzero_when_something_is_unresolvable(
         tmp_path,
         """
 [[asset]]
-kind = "local"
-path = "P/absent.bin"
+kind = "fetched"
+path = "P/r.bin"
+url = "does-not-matter"
+
+[[asset]]
+kind = "derived"
+path = "P/leaf.bin"
+derive_from = "P/r.bin"
+derive = "nope"
 """,
     )
-    code = main(["fetch", "--manifest", str(m), "--root", str(tmp_path / "a")])
+    root = tmp_path / "a"
+    (root / "P").mkdir(parents=True)
+    (root / "P" / "r.bin").write_bytes(b"x")
+    code = main(["fetch", "--manifest", str(m), "--root", str(root)])
     assert code == 1
-    assert "P/absent.bin" in capsys.readouterr().out
+    assert "P/leaf.bin" in capsys.readouterr().out
 
 
 def test_fetch_succeeds_when_everything_resolves(
@@ -100,3 +110,54 @@ url = "{base}/r.bin"
     root = tmp_path / "a"
     assert main(["fetch", "--manifest", str(m), "--root", str(root)]) == 0
     assert (root / "P" / "r.bin").read_bytes() == b"x" * 32
+
+
+def test_fetch_ignores_an_absent_local_asset_and_still_fetches_the_rest(
+    local_server: tuple[str, Path],
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    base, www = local_server
+    (www / "r.bin").write_bytes(b"x" * 32)
+    m = _manifest(
+        tmp_path,
+        f"""
+[[asset]]
+kind = "local"
+path = "P/absent.bin"
+
+[[asset]]
+kind = "fetched"
+path = "P/r.bin"
+url = "{base}/r.bin"
+""",
+    )
+    root = tmp_path / "a"
+    code = main(["fetch", "--manifest", str(m), "--root", str(root)])
+    out = capsys.readouterr().out
+    assert code == 0
+    assert (root / "P" / "r.bin").read_bytes() == b"x" * 32
+    assert "local (no upstream): P/absent.bin" in out
+    assert not (root / "P" / "absent.bin").exists()
+
+
+def test_fetch_exits_zero_for_a_ci_required_local_asset_that_is_absent(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """fetch reports only what it could have obtained; ci_required enforcement
+    for an unobtainable local asset is the strict session hook's job, not
+    this command's — a local asset has no upstream for fetch to fail against."""
+    m = _manifest(
+        tmp_path,
+        """
+[[asset]]
+kind = "local"
+path = "P/absent.bin"
+ci_required = true
+""",
+    )
+    root = tmp_path / "a"
+    code = main(["fetch", "--manifest", str(m), "--root", str(root)])
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "local (no upstream): P/absent.bin" in out

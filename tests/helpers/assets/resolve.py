@@ -55,8 +55,18 @@ def resolve_all(index: dict[str, Asset], root: Path = ASSET_ROOT) -> list[str]:
     for name, asset in index.items():
         if isinstance(asset, FetchedAsset) and asset.discard_after_derive:
             continue
+        if isinstance(asset, LocalAsset):
+            continue
         try:
             resolve(name, index, root=root)
         except ResolveError:
             unresolved.append(name)
     return unresolved
+
+
+def absent_local_assets(index: dict[str, Asset], root: Path = ASSET_ROOT) -> list[str]:
+    return [
+        name
+        for name, asset in index.items()
+        if isinstance(asset, LocalAsset) and not (root / name).exists()
+    ]

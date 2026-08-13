@@ -155,7 +155,7 @@ note = "ask the ops channel"
         resolve("P/only.bin", index, root=tmp_path / "artifacts")
 
 
-def test_resolve_all_reports_the_names_it_could_not_get(tmp_path: Path) -> None:
+def test_resolve_all_skips_absent_local_assets(tmp_path: Path) -> None:
     index = load_manifest(
         _manifest(
             tmp_path,
@@ -170,10 +170,35 @@ path = "P/b.bin"
 """,
         )
     )
-    assert sorted(resolve_all(index, root=tmp_path / "artifacts")) == [
-        "P/a.bin",
-        "P/b.bin",
-    ]
+    assert resolve_all(index, root=tmp_path / "artifacts") == []
+
+
+def test_resolve_all_still_reports_a_real_fetch_failure(tmp_path: Path) -> None:
+    index = load_manifest(
+        _manifest(
+            tmp_path,
+            """
+[[asset]]
+kind = "local"
+path = "P/absent.bin"
+
+[[asset]]
+kind = "fetched"
+path = "P/r.bin"
+url = "does-not-matter"
+
+[[asset]]
+kind = "derived"
+path = "P/leaf.bin"
+derive_from = "P/r.bin"
+derive = "nope"
+""",
+        )
+    )
+    root = tmp_path / "artifacts"
+    (root / "P").mkdir(parents=True)
+    (root / "P" / "r.bin").write_bytes(PAYLOAD)
+    assert resolve_all(index, root=root) == ["P/leaf.bin"]
 
 
 def test_resolve_all_skips_discard_only_parents(

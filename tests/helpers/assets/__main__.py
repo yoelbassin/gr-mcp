@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import cast
 
 from helpers.assets.manifest import MANIFEST_PATH, Asset, load_manifest
-from helpers.assets.resolve import ASSET_ROOT, resolve_all
+from helpers.assets.resolve import ASSET_ROOT, absent_local_assets, resolve_all
 
 
 @dataclass(frozen=True)
@@ -58,6 +58,8 @@ def _run_fetch(index: dict[str, Asset], args: _Args) -> int:
     unresolved = resolve_all(index, root=args.root)
     for name in sorted(unresolved):
         print(f"unresolved: {name}")
+    for name in sorted(absent_local_assets(index, root=args.root)):
+        print(f"local (no upstream): {name}")
     return 1 if unresolved else 0
 
 
