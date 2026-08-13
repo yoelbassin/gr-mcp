@@ -46,14 +46,22 @@ class Softstream(BaseModel):
 
 
 class Symbolstream(BaseModel):
-    """Values at the SYMBOLS rung: hard int16 symbol indices for "s", soft
-    float32 symbol values for "f", complex64 constellation points for "c",
-    one per symbol, plus burst-start marks (symbol offsets) when acquisition
-    tagged them. Sibling to Bitstream, never an optional field on it."""
+    """A non-bit output wire: hard int16 symbol indices for "s", soft float32
+    values for "f", complex64 constellation points for "c" — one item per
+    stream position, plus burst-start marks (item offsets) when acquisition
+    tagged them. Sibling to Bitstream, never an optional field on it.
+
+    `level` is the rung those items sit on and is NOT always symbols: a path
+    ending at a soft demap emits bits-level LLRs on the same "f" wire, and a
+    path ending before any demod emits conditioned IQ on the "c" wire. Carrying
+    the rung is what lets num_symbols mean "items" honestly and lets the wire
+    say which sign convention an "f" stream follows, instead of the reader
+    inferring the rung from a separate soft_stream field."""
 
     path: Path
     num_symbols: int = Field(ge=0)
     item_type: ItemType = ItemType.S
+    level: Level = Level.SYMBOLS
     marks: list[int] = []
 
     @model_validator(mode="after")

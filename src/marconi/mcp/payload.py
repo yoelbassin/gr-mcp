@@ -228,8 +228,16 @@ def spec_trace_rows(modem: Modem, cp: CompiledPipeline) -> list[SpecTraceRow]:
 
 
 class StreamSummary(Payload):
+    """The run's output stream. `level` is the rung its items sit on, and it
+    is not inferable from item_type: "f" is a per-symbol demod value at symbols
+    and an LLR (opposite sign convention) at bits, and "c" is a constellation
+    symbol at symbols but conditioned IQ at iq. Both used to send the reader to
+    a different field — soft_stream, or the validate_modem trace — to find out
+    which stream they were holding."""
+
     path: str
     item_type: ItemType
+    level: Level
     items: int
 
 
@@ -271,12 +279,14 @@ def stream_summary(result: PipelineResult) -> StreamSummary | None:
         return StreamSummary(
             path=str(result.bitstream.path),
             item_type=ItemType.B,
+            level=Level.BITS,
             items=result.bitstream.num_bits,
         )
     if result.symbolstream is not None:
         return StreamSummary(
             path=str(result.symbolstream.path),
             item_type=result.symbolstream.item_type,
+            level=result.symbolstream.level,
             items=result.symbolstream.num_symbols,
         )
     return None

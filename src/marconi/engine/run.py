@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -173,27 +173,34 @@ def _entry_carrier(boundary: Descriptor, path: Path, marks: list[int]) -> Coding
     )
 
 
-@dataclass(frozen=True)
-class RunOutputs:
-    """What every successful run reports alongside its output stream. One
-    object so a new per-run field reaches both wrap paths at once."""
-
-    marks: list[int]
-    census: list[BlockCensus]
-    diagnostics: list[Diagnostic]
-    windows: list[int] = field(default_factory=list)
-
-
-def _ok(stream: Bitstream | Symbolstream, out: RunOutputs) -> PipelineResult:
+def _ok(
+    stream: Bitstream | Symbolstream,
+    seg: "GrSegment",
+    marks: list[int],
+    windows: list[int] | None = None,
+) -> PipelineResult:
+    """The one constructor for a run that produced a stream. Both tails reach
+    it, so a new per-run field lands on both at once — it used to take a
+    RunOutputs carrier through a per-tail _wrap_* wrapper each, four layers to
+    put a path and a count in a model."""
     return PipelineResult(
         status=RunStatus.OK,
         bitstream=stream if isinstance(stream, Bitstream) else None,
         symbolstream=stream if isinstance(stream, Symbolstream) else None,
-        windows=out.windows,
-        marks=out.marks,
-        census=out.census,
-        diagnostics=out.diagnostics,
+        windows=windows or [],
+        marks=marks,
+        census=seg.census,
+        diagnostics=seg.diagnostics,
     )
+
+
+def _items_on_disk(path: Path, item_type: ItemType) -> int:
+    """An output stream's length, from the size the filesystem already knows.
+    Reading the file to take its .size was the same answer at whole-file cost —
+    and read_bits enforces the bits-layer memory budget, so a GR-only decode
+    that wrote more than that raised CaptureTooLarge ("decode a bounded slice")
+    at the REPORTING step of a run whose output was on disk and pageable."""
+    return int(path.stat().st_size // item_type.item_bytes)
 
 
 def _gr_only_stream(
@@ -201,7 +208,9 @@ def _gr_only_stream(
 ) -> Bitstream | Symbolstream:
     if cp.final.item_type is ItemType.B and cp.final.level is Level.SYMBOLS:
         # hard symbol indices on the u8 wire (a qam-class demod final): a
-        # Bitstream label would invite bitwise parsing of symbol indices
+        # Bitstream label would invite bitwise parsing of symbol indices.
+        # The only branch that must read — it converts the wire, and the
+        # bits-layer budget genuinely applies to holding it.
         symbols = read_bits(path).astype(np.int16)
         sym_path = path.with_suffix(".i16")
         write_symbols(sym_path, symbols)
@@ -210,50 +219,31 @@ def _gr_only_stream(
             path=sym_path,
             num_symbols=int(symbols.size),
             item_type=ItemType.S,
+            level=Level.SYMBOLS,
             marks=marks,
         )
     if cp.final.item_type is ItemType.B:
-        return Bitstream(path=path, num_bits=int(read_bits(path).size))
-    if cp.final.item_type is ItemType.C:
-        num = int(path.stat().st_size // ItemType.C.item_bytes)
-        return Symbolstream(
-            path=path, num_symbols=num, item_type=ItemType.C, marks=marks
-        )
-    item_type = cp.final.item_type.require_symbol()
-    stream: npt.NDArray[np.int16] | npt.NDArray[np.float32] = read_symbols(
-        path, item_type
-    )
+        return Bitstream(path=path, num_bits=_items_on_disk(path, ItemType.B))
+    item_type = cp.final.item_type
     return Symbolstream(
-        path=path, num_symbols=int(stream.size), item_type=item_type, marks=marks
-    )
-
-
-def _wrap_gr_only(
-    cp: CompiledPipeline,
-    seam: Path,
-    marks: list[int],
-    census: list[BlockCensus],
-    diagnostics: list[Diagnostic],
-) -> PipelineResult:
-    path = seam.with_suffix(cp.final.item_type.suffix)
-    if path != seam:
-        seam.replace(path)
-    return _ok(
-        _gr_only_stream(cp, path, marks),
-        RunOutputs(marks=marks, census=census, diagnostics=diagnostics),
+        path=path,
+        num_symbols=_items_on_disk(path, item_type),
+        item_type=item_type,
+        level=cp.final.level,
+        marks=marks,
     )
 
 
 def _coded_stream(
     final: Descriptor, carrier: CodingCarrier, workdir: Path
 ) -> Bitstream | Symbolstream:
-    if final.level is Level.BITS:
+    if final.level is Level.BITS and final.item_type is ItemType.B:
         path = workdir / "out.u8"
         write_bits(path, carrier.bits)
         return Bitstream(path=path, num_bits=int(carrier.bits.size))
     symbols = carrier.symbols if carrier.symbols is not None else np.zeros(0, np.int16)
     item_type = final.item_type.require_symbol()
-    if final.item_type is ItemType.F:
+    if item_type is ItemType.F:
         path = workdir / "out.f32"
         write_llrs(path, symbols)
     else:
@@ -263,26 +253,8 @@ def _coded_stream(
         path=path,
         num_symbols=int(np.asarray(symbols).size),
         item_type=item_type,
+        level=final.level,
         marks=list(carrier.marks),
-    )
-
-
-def _wrap_result(
-    final: Descriptor,
-    carrier: CodingCarrier,
-    workdir: Path,
-    marks: list[int],
-    census: list[BlockCensus],
-    diagnostics: list[Diagnostic],
-) -> PipelineResult:
-    return _ok(
-        _coded_stream(final, carrier, workdir),
-        RunOutputs(
-            marks=marks,
-            census=census,
-            diagnostics=diagnostics,
-            windows=[w.start for w in carrier.windows or []],
-        ),
     )
 
 
@@ -334,11 +306,16 @@ def _nonfinite_input(
     )
 
 
-def _flag_empty_coding(result: PipelineResult) -> PipelineResult:
-    """The coding tail's mirror of the GR worker's empty-sink flag: a run whose
-    final stream holds zero items decoded nothing, and 'ok' would be a lie.
-    Name the first census row whose items or windows fell to zero — the
-    gradient a parameter search needs."""
+def _flag_empty_stream(result: PipelineResult) -> PipelineResult:
+    """The engine's mirror of the GR worker's empty-sink flag: a run whose final
+    stream holds zero items decoded nothing, and 'ok' would be a lie. Name the
+    first census row whose items or windows fell to zero — the gradient a
+    parameter search needs.
+
+    Applies to BOTH tails. It used to guard the coding tail only, so a GR-only
+    run leaned entirely on the worker's check — which returns early when the
+    census is empty, and _harvest_census returns [] on any exception. A harvest
+    failure therefore reported status 'ok' over a zero-item stream."""
     if result.status is not RunStatus.OK:
         return result
     items = (
@@ -636,13 +613,20 @@ def _run_coding_tail(
     marks: list[int],
 ) -> PipelineResult:
     if cp.coding is None:
-        result = _wrap_gr_only(cp, seam, marks, seg.census, seg.diagnostics)
+        path = seam.with_suffix(cp.final.item_type.suffix)
+        if path != seam:
+            seam.replace(path)
+        result = _ok(_gr_only_stream(cp, path, marks), seg, marks)
     else:
         carrier = _entry_carrier(cp.boundary, entry_path, marks)
         out = run_coding(cp.coding, carrier, seg.census)
-        result = _flag_empty_coding(
-            _wrap_result(cp.final, out, workdir, marks, seg.census, seg.diagnostics)
+        result = _ok(
+            _coded_stream(cp.final, out, workdir),
+            seg,
+            marks,
+            [w.start for w in out.windows or []],
         )
+    result = _flag_empty_stream(result)
     if seg.empty is not None and result.status in (RunStatus.OK, RunStatus.EMPTY):
         # the worker's stall is the upstream truth; the coding tail's
         # recomputation over the same census would only echo it less precisely.

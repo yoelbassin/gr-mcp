@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+from dataclasses import replace
 from typing import Any, Literal
 
 from pydantic import Field, StrictInt, model_validator
@@ -164,13 +165,29 @@ class DifferentialDemodStep(Step):
     conv: Literal["differential_demod"] = "differential_demod"
     delay: StrictInt = Field(default=1, ge=1)
     rotate: float = 0.0
+    out_order: PskOrder | None = Field(
+        default=None,
+        description=(
+            "Alphabet size of the phase DIFFERENCE this stage emits, when it "
+            "differs from the input's. Plain M-DPSK differences stay order M, "
+            "so the default (null) carries the input order through. A "
+            "staggered quaternary alphabet does not: its symbols occupy an "
+            "order-8 grid, so the demod upstream must be told 8, while the "
+            "consecutive-symbol differences take only 4 values — set "
+            "out_order=4 there (with rotate=-pi/4 to land them on the plain "
+            "QPSK grid), or the downstream demap's order check fails against "
+            "an alphabet this stage no longer emits."
+        ),
+    )
 
 
 class DifferentialDemod(RxStage[CompileContext, DifferentialDemodStep]):
     """SYMBOLS->SYMBOLS continuous differential: z[i] = x[i] * conj(x[i-delay]),
-    optionally rotated by exp(j*rotate). With rotate=-pi/4 this lands pi/4-DQPSK
-    on the plain QPSK constellation; delay > 1 serves symbol-interleaved
-    differential schemes."""
+    optionally rotated by exp(j*rotate). delay > 1 serves symbol-interleaved
+    differential schemes. The output alphabet is the DIFFERENCE alphabet, which
+    the input order alone does not determine — see out_order; for pi/4-shifted
+    quaternary that is psk_demod order 8 -> differential_demod
+    {rotate: -0.7853981633974483, out_order: 4} -> an order-4 demap."""
 
     name = "differential_demod"
     from_level = Level.SYMBOLS
@@ -179,6 +196,17 @@ class DifferentialDemod(RxStage[CompileContext, DifferentialDemodStep]):
     step_model = DifferentialDemodStep
     accepts_item_type = ItemType.C
     accepts_carrier = Carrier.SOFT
+
+    def out_descriptor(
+        self, in_desc: Descriptor, step: DifferentialDemodStep
+    ) -> Descriptor:
+        # The one stage whose job IS changing the alphabet was the one
+        # inheriting the base "same level, same order" passthrough, so the
+        # pi/4-quaternary composition its own description advertises failed
+        # the compiler's order check.
+        if step.out_order is None:
+            return replace(in_desc)
+        return replace(in_desc, order=int(step.out_order))
 
     def emit_rx(self, b: CompileContext, step: DifferentialDemodStep) -> None:
         src = b.require_tail()
