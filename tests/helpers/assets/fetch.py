@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import hashlib
+import http.client
 import os
 import tempfile
 import urllib.error
 import urllib.request
 from collections.abc import Callable
 from pathlib import Path
+from typing import cast
 
 from helpers.assets.manifest import FetchedAsset, Strategy
 
@@ -22,23 +24,23 @@ class FetchError(Exception):
     pass
 
 
-def _open(  # type: ignore[no-untyped-def]
+def _open(
     url: str, ua: str | None, extra: dict[str, str] | None = None
-):
+) -> http.client.HTTPResponse:
     headers = dict(extra or {})
     if ua:
         headers["User-Agent"] = ua
     req = urllib.request.Request(url, headers=headers)
     try:
-        return urllib.request.urlopen(req, timeout=_TIMEOUT)  # noqa: S310
+        resp = urllib.request.urlopen(req, timeout=_TIMEOUT)  # noqa: S310
+        return cast(http.client.HTTPResponse, resp)
     except urllib.error.URLError as exc:
         raise FetchError(f"{url}: {exc}") from exc
 
 
 def head_prefix(url: str, n: int, *, ua: str | None = None) -> bytes:
     with _open(url, ua, {"Range": f"bytes=0-{n - 1}"}) as r:
-        data: bytes = r.read(n)
-    return data
+        return r.read(n)
 
 
 def _verify(asset: FetchedAsset, tmp: Path) -> None:

@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 from helpers.assets.fetch import FetchError, fetch, head_prefix
 from helpers.assets.manifest import FetchedAsset, Strategy
+from unit.helpers.conftest import _Handler
 
 PAYLOAD = bytes(range(256)) * 64
 
@@ -63,3 +64,5 @@ def test_head_prefix_reads_only_the_first_n_bytes(
     base, root = local_server
     (root / "x.bin").write_bytes(PAYLOAD)
     assert head_prefix(f"{base}/x.bin", 16) == PAYLOAD[:16]
+    assert _Handler.last_status == 206
+    assert _Handler.last_range == (0, 15)
