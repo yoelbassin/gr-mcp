@@ -109,3 +109,25 @@ def test_missing_member_is_named_in_the_error(
     _zip(root)
     with pytest.raises(FetchError, match="pack/absent.bin"):
         fetch(_asset(f"{base}/a.zip", "pack/absent.bin"), tmp_path / "o.bin")
+
+
+def test_unsupported_compression_method_is_named_in_the_error(
+    local_server: tuple[str, Path], tmp_path: Path
+) -> None:
+    base, root = local_server
+    with zipfile.ZipFile(root / "b.zip", "w") as z:
+        z.writestr("odd.bin", b"hello world" * 100, compress_type=zipfile.ZIP_BZIP2)
+    with pytest.raises(FetchError, match="12"):
+        fetch(_asset(f"{base}/b.zip", "odd.bin"), tmp_path / "o.bin")
+
+
+def test_zero_byte_member_extracts_as_an_empty_file(
+    local_server: tuple[str, Path], tmp_path: Path
+) -> None:
+    base, root = local_server
+    with zipfile.ZipFile(root / "c.zip", "w", zipfile.ZIP_STORED) as z:
+        z.writestr("empty.bin", b"")
+    dest = tmp_path / "o.bin"
+    fetch(_asset(f"{base}/c.zip", "empty.bin"), dest)
+    assert dest.exists()
+    assert dest.read_bytes() == b""

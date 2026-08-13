@@ -158,6 +158,14 @@ def _fetch_zip_member(asset: FetchedAsset, tmp: Path) -> None:
         )
     _name, _usize, local_off, packed = row
     method, csize = packed >> 32, packed & 0xFFFFFFFF
+    if method not in (0, 8):
+        raise FetchError(
+            f"{asset.path}: member {asset.member!r} uses unsupported "
+            f"zip compression method {method}"
+        )
+    if csize == 0:
+        tmp.write_bytes(b"")
+        return
     header = _range(asset.url, ua, local_off, local_off + 29)
     nlen, elen = struct.unpack("<HH", header[26:30])
     start = local_off + 30 + nlen + elen
