@@ -1,2 +1,20 @@
 # Off-air capture assets. Paths are relative to repo-root artifacts/assets/.
 # Entries are added in Task 8 as each gate migrates.
+
+[[asset]]
+kind = "fetched"
+path = "POCSAG/POCSAG_IQ.wav"
+url = "https://www.sigidwiki.com/images/6/65/POCSAG_IQ.zip"
+strategy = "zip_member"
+member = "POCSAG_IQ.wav"
+discard_after_derive = true
+note = "sigidwiki 403s a default urllib User-Agent; the deriver expects a raw wav, so this extracts the single member via ranged requests instead of downloading the whole archive"
+
+[[asset]]
+kind = "derived"
+path = "POCSAG/pocsag.cf32"
+derive_from = "POCSAG/POCSAG_IQ.wav"
+derive = "pocsag_slice"
+ci_required = true
+sha256 = "69eec598042f3c55c1fc3bbd3bb10e79814afd4632189f42871b61d99e75bdcd"
+bytes = 7168000

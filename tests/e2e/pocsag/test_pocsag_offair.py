@@ -27,8 +27,8 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
-import pytest
 from helpers import framing
+from helpers.assets import require_asset
 
 from marconi.engine.backends.gnuradio.runner import ensure_worker_warm
 from marconi.engine.coding.stages_bits import (
@@ -52,13 +52,7 @@ from marconi.engine.types.models import Modem
 
 IQ = Descriptor(Level.IQ, ItemType.C)
 RATE = 128000.0
-_SLICE = (
-    Path(__file__).resolve().parents[3]
-    / "artifacts"
-    / "assets"
-    / "POCSAG"
-    / "pocsag.cf32"
-)
+_SLICE = require_asset("POCSAG/pocsag.cf32")
 
 # POCSAG constants (caller data — a protocol lives in the fixture, not production).
 SC = 0x7CD215D8  # frame sync codeword
@@ -162,10 +156,6 @@ def _pocsag_rics(bits: np.ndarray, windows: list[int]) -> dict[int, int]:
     return found
 
 
-@pytest.mark.skipif(
-    not _SLICE.exists(),
-    reason="POCSAG slice absent — run tests/e2e/pocsag/make_pocsag_slice.py",
-)
 def test_pocsag_offair(tmp_path: Path) -> None:
     ensure_worker_warm()
     res = run_rx(
@@ -183,10 +173,6 @@ def test_pocsag_offair(tmp_path: Path) -> None:
     assert found == ORACLE, f"decoded {found}, oracle {ORACLE}"
 
 
-@pytest.mark.skipif(
-    not _SLICE.exists(),
-    reason="POCSAG slice absent — run tests/e2e/pocsag/make_pocsag_slice.py",
-)
 def test_pocsag_offair_sync_align(tmp_path: Path) -> None:
     """Off-air exercise of the GR-native sync_align: the frame sync codeword is
     detected and each batch gated inside the GR flowgraph (correlate_access_code

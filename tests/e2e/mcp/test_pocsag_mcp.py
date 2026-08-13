@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 from fastmcp import Client
 from helpers import framing
+from helpers.assets import require_asset
 
 from marconi.mcp.server import build_server
 
@@ -55,13 +56,7 @@ def _pocsag_rics(bits: np.ndarray, windows: list[int]) -> dict[int, int]:
     return found
 
 
-_SLICE = (
-    Path(__file__).resolve().parents[3]
-    / "artifacts"
-    / "assets"
-    / "POCSAG"
-    / "pocsag.cf32"
-)
+_SLICE = require_asset("POCSAG/pocsag.cf32")
 
 
 def _pocsag_spec() -> dict[str, object]:
@@ -91,10 +86,6 @@ def _pocsag_spec() -> dict[str, object]:
     }
 
 
-@pytest.mark.skipif(
-    not _SLICE.exists(),
-    reason="POCSAG slice absent — run tests/e2e/pocsag/make_pocsag_slice.py",
-)
 async def test_pocsag_offair_through_mcp(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
