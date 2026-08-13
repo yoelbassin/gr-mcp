@@ -7,7 +7,8 @@ from typing import Any
 
 import numpy as np
 import numpy.typing as npt
-from scipy.ndimage import uniform_filter1d
+
+from marconi.levelfit import windowed_power
 
 # Lock threshold for cp_symbol_sync's CP-correlation ratio. Measured: noise
 # 1.3-1.6, real lock >= 2.0. Lives here because both the stage default and the
@@ -54,9 +55,9 @@ def find_null(
     a step fit on raw power around the envelope crossing — exact on clean
     nulls, unbiased when the null is filled with receiver noise.
     """
-    p = np.abs(x) ** 2
+    p = np.abs(x) ** 2  # raw power: the step fit below reads it unsmoothed
     w = min(win, null_len)
-    env = uniform_filter1d(p, w, mode="constant", cval=0.0)
+    env = windowed_power(x, w, mode="constant")
     thresh = 0.25 * np.median(env)
     low = env < thresh
     # run detection in one pass - the acquisition ladder re-calls this per
