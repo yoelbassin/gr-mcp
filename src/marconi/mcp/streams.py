@@ -15,7 +15,7 @@ import numpy.typing as npt
 from marconi.deadline import bounded, check_deadline
 from marconi.engine.io.source import SourceSlice
 from marconi.engine.types.enums import CaptureDtype, ItemType
-from marconi.levelfit import kmeans_1d, percentile_span
+from marconi.levelfit import kmeans_1d, kmeans_2d, nearest_labels, percentile_span
 from marconi.mcp.workspace import (
     conversion_cache_dir,
     evict_conversion_cache,
@@ -38,7 +38,6 @@ _STATS_SAMPLE_ITEMS = 65536
 _STATS_SAMPLE_CHUNKS = 16
 _STATS_MAX_CLUSTERS = 16
 _STATS_MAX_BINS = 200
-_STATS_KMEANS_ITERS = 100
 
 
 class PageType(StrEnum):
@@ -447,49 +446,6 @@ def _hist(x: npt.NDArray[np.float64], bins: int) -> Histogram:
     )
 
 
-_N = TypeVar("_N", np.float64, np.complex128)
-
-
-def _nearest_labels(
-    values: npt.NDArray[_N], centers: npt.NDArray[_N]
-) -> npt.NDArray[np.intp]:
-    return np.abs(values[:, None] - centers[None, :]).argmin(1)
-
-
-def _farthest_point_seeds(
-    points: npt.NDArray[np.complex128], k: int
-) -> npt.NDArray[np.complex128]:
-    # deterministic greedy k-means++ (no RNG): each seed is the point farthest
-    # from every seed chosen so far. Data-driven, not a fixed angular grid, so
-    # it has no unlucky-rotation basin (a grid seeded exactly between a
-    # constellation's lobes can converge with two lobes merged into one seed).
-    seeds = np.empty(k, dtype=np.complex128)
-    seeds[0] = points[np.argmax(np.abs(points - points.mean()))]
-    dist = np.abs(points - seeds[0])
-    for i in range(1, k):
-        seeds[i] = points[np.argmax(dist)]
-        dist = np.minimum(dist, np.abs(points - seeds[i]))
-    return seeds
-
-
-def _kmeans_2d(
-    points: npt.NDArray[np.complex128], k: int
-) -> npt.NDArray[np.complex128]:
-    centers = _farthest_point_seeds(points, k)
-    for _ in range(_STATS_KMEANS_ITERS):
-        labels = _nearest_labels(points, centers)
-        moved = np.array(
-            [
-                points[labels == j].mean() if np.any(labels == j) else centers[j]
-                for j in range(k)
-            ]
-        )
-        if np.allclose(moved, centers):
-            break
-        centers = moved
-    return centers
-
-
 def stream_stats(
     path: Path, *, item_type: str | None, clusters: int, bins: int = 41
 ) -> dict[str, object]:
@@ -557,7 +513,7 @@ def _real_stats(
     if clusters < 1:
         return stats
     centers = kmeans_1d(x, clusters)
-    labels = _nearest_labels(x, centers)
+    labels = nearest_labels(x, centers)
     counts = np.array([int((labels == j).sum()) for j in range(centers.size)])
     keep = counts > 0
     # "centers" was also shipped verbatim as "levels": two names, one array,
@@ -595,8 +551,8 @@ def _constellation_stats(
 
 
 def _cluster_fit(z: npt.NDArray[Any], clusters: int) -> dict[str, object]:
-    centers = _kmeans_2d(z, clusters)
-    labels = _nearest_labels(z, centers)
+    centers = kmeans_2d(z, clusters)
+    labels = nearest_labels(z, centers)
     counts = np.array([int((labels == j).sum()) for j in range(clusters)])
     # `labels` indexes `centers` only in its current, pre-reindex form
     assigned = centers[labels]

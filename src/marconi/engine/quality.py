@@ -9,7 +9,6 @@ from typing import Any
 import numpy as np
 import numpy.typing as npt
 from pydantic import BaseModel
-from scipy.ndimage import uniform_filter1d
 
 from marconi.deadline import check_deadline
 from marconi.engine.backends.base import (
@@ -20,7 +19,7 @@ from marconi.engine.backends.base import (
 )
 from marconi.engine.stages.base import Stage
 from marconi.engine.types.enums import ItemType
-from marconi.levelfit import fit_levels
+from marconi.levelfit import fit_levels, windowed_power
 
 
 class Assessment(StrEnum):
@@ -301,19 +300,13 @@ def lock_evidence(diagnostics: Sequence[Diagnostic]) -> list[QualityEvidence]:
     return out
 
 
-# Peak dominance is the CSS analog of soft_confidence: the argmax over the
-# dechirped spectrum IS the symbol decision, and peak/median of that vector
-# measures how decisively each one was made. The deciding block reports its
-# own calibrated tallies and chance ceiling (decision.py holds the measured
-# floor); here only the run's fractions are judged, word_validity-style: a
-# positive needs a dominant majority plus Chernoff mass against the chance
-# ceiling, a negative a near-chance fraction over enough symbols. Like
-# soft_confidence this attests decision quality, not symbol identity.
-# Measured honest limits (pinned in the css quality tests): around -18 dB
-# (symbol errors just beginning) the dominant fraction falls to ~0.08 and
-# the run reads uncertain-to-negative, and the worst noise corner (32-bin
-# vector at critical sampling, 12% chance tail) reads uncertain rather than
-# no_signal — both fail conservative.
+# The CSS analog of soft_confidence: the argmax over the dechirped spectrum IS
+# the symbol decision, so peak/median of that vector measures how decisively
+# each one was made. The deciding block owns the calibrated tallies and the
+# chance ceiling (decision.py); here only the run's fractions are judged,
+# word_validity-style. Like soft_confidence it attests decision quality, not
+# symbol identity. Bars straddled by test_verdict_constants; the honest limits
+# are pinned in the css quality tests.
 _DOMINANCE_POSITIVE = 0.5
 _DOMINANCE_NEGATIVE = 0.05
 
@@ -361,33 +354,20 @@ _SOFT_SAMPLE_ITEMS = 65536
 # orders of magnitude below the cap; the cap only tames the reported number).
 _SOFT_VALUE_CAP = 1e6
 
-# Measured on a real off-air 4-level FSK capture through a bare demod front
-# end: several real inter-burst noise gaps all read order=2, separation
-# 2.51-2.78; the capture's real bursts all read order=4, separation
-# 5.07-8.12 -- a clean, non-overlapping gap between real noise and real
-# signal. The synthetic fixtures corroborate at the extremes (unimodal
-# blob ~2.7-3.6, clean synthetic 4-level ~25-40) but say nothing about where
-# a REAL demodulated signal lands: the prior 8.0 bar was calibrated against
-# synthetics alone and sat above every real burst measured, rejecting all of
-# them as no_signal. 4.0 sits with margin above the real noise ceiling
-# (~2.8) and below the real signal floor (~5.07).
+# Separation above which a multi-level fit is real signal rather than a noise
+# blob. Straddled by test_verdict_constants, which is where the calibration
+# lives now — restating measurements here left the comment as the only record
+# of an experiment nothing re-ran.
 _SOFT_MULTILEVEL_SEPARATION = 4.0
 
-# Calibrated on measured FSK-discriminator streams (|x| mean/std): clean 19.9,
-# SNR 14/9/5/3 dB -> 8.6/5.0/3.1/2.5, demod noise floor 1.6. The positive bar
-# admits the whole decodable envelope; the old 6.0 sat above it and starved
-# real mid-SNR signals into "uncertain". The bar alone cannot reject a
-# wrong-rate decode (2x-oversampled artifact measures 4.6), so a positive
-# also demands whitened decisions via consecutive-sign correlation - which
-# is ~0 only for SCRAMBLED/random payloads (2x oversample 0.41, tone 1.0).
-# HONEST LIMITS, both measured: (a) structured unscrambled data suppresses
-# the positive (run-length-8 NRZ +0.87, chip-rate Manchester -0.50, heavy
-# 1010 idle <= -0.2) - conservative, the stream reads uncertain, and
-# sync/validity evidence still applies; (b) rate errors milder than ~1.2x
-# slip under the guard (1.1x measures corr 0.095, ratio 2.85 -> positive),
-# and UNDERSAMPLING emits genuinely clean decisions of aliased bits - both
-# invisible to every stream statistic. Soft confidence attests decision
-# quality, not bit identity; only sync/validity evidence catches aliasing.
+# |x| mean/std bars on a demodulated stream. The ratio alone cannot reject a
+# wrong-rate decode, so a positive also demands whitened decisions via
+# consecutive-sign correlation. Two limits worth knowing, both pinned in
+# test_verdict_constants: structured unscrambled data suppresses the positive
+# (conservative — the stream reads uncertain and sync/validity evidence still
+# applies), and undersampling emits genuinely clean decisions of aliased bits,
+# which no stream statistic can see. Soft confidence attests decision quality,
+# never bit identity.
 _SOFT_POSITIVE = 2.0
 _SOFT_NEGATIVE = 1.45
 _SOFT_MIN_POLARITY_FRACTION = 0.02
@@ -435,9 +415,10 @@ def _active_mask(x: npt.NDArray[np.float32]) -> npt.NDArray[np.bool_]:
     noise samples."""
     if x.size <= _SOFT_ACTIVE_WINDOW:
         return np.ones(x.size, dtype=bool)
-    power: npt.NDArray[np.float64] = uniform_filter1d(
-        (x * x).astype(np.float64), _SOFT_ACTIVE_WINDOW, mode="constant", cval=0.0
-    )
+    # zero-padded edges, top-decile reference: survey's two burst gates reflect
+    # their edges and reference the top decile's MEDIAN. Three gates, one
+    # smoothing (levelfit.windowed_power), three deliberately different bars.
+    power = windowed_power(x, _SOFT_ACTIVE_WINDOW, mode="constant")
     threshold = _SOFT_ACTIVE_FRACTION * float(
         np.percentile(power, _SOFT_ACTIVE_HI_PCTILE)
     )

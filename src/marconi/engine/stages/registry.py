@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import Counter
 from typing import Any
 
 from marconi.engine.coding.stages_bits import CODING_BITS_STAGES
@@ -38,8 +39,21 @@ _GROUPS: tuple[tuple[type[Stage[Any, Any]], ...], ...] = (
 
 
 def stage_registry() -> dict[str, Stage[Any, Any]]:
-    stages = (cls() for group in _GROUPS for cls in group)
-    return {s.name: s for s in stages}
+    """Every stage by name. A dict comprehension alone let two classes claiming
+    one name collapse to whichever was listed last, silently taking the other
+    out of describe_stages, step_models and every path resolution — the largest
+    vocabulary in the tree, with no uniqueness check on it."""
+    stages = [cls() for group in _GROUPS for cls in group]
+    registry = {s.name: s for s in stages}
+    if len(registry) != len(stages):
+        clashes = sorted(
+            name for name, n in Counter(s.name for s in stages).items() if n > 1
+        )
+        raise RuntimeError(
+            f"stage names must be unique; {clashes} is claimed by more than one "
+            "class, and only the last would survive"
+        )
+    return registry
 
 
 def step_models() -> dict[str, type[Step]]:

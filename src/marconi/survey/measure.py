@@ -6,12 +6,11 @@ from typing import Any, Literal, TypeVar
 
 import numpy as np
 import numpy.typing as npt
-from scipy.ndimage import uniform_filter1d
 from scipy.signal import find_peaks, welch
 from scipy.stats import kurtosis
 
 from marconi.deadline import check_deadline
-from marconi.levelfit import fit_levels, percentile_span
+from marconi.levelfit import fit_levels, percentile_span, windowed_power
 from marconi.survey.iqfile import iter_iq, iter_probes, sample_iq
 from marconi.wire import Payload, replace
 
@@ -338,9 +337,7 @@ def _magnitude_gate_pairs(
 def _burst_power_gate(
     x: npt.NDArray[np.complex64], fraction: float, window: int
 ) -> npt.NDArray[np.bool_]:
-    power: npt.NDArray[np.float64] = uniform_filter1d(
-        np.abs(x).astype(np.float64) ** 2, window
-    )
+    power = windowed_power(x, window)
     # reference the top-decile median, not the max: a single hot interferer
     # burst inside the span would otherwise set the threshold and gate the
     # actual signal of interest out of the mask entirely
@@ -671,10 +668,7 @@ def _burst_threshold(path: Path, offset: int, length: int) -> float:
 
 
 def _smooth_power(block: npt.NDArray[np.complex64]) -> npt.NDArray[np.float64]:
-    power: npt.NDArray[np.float64] = uniform_filter1d(
-        np.abs(block).astype(np.float64) ** 2, _SURVEY_BURST_WINDOW
-    )
-    return power
+    return windowed_power(block, _SURVEY_BURST_WINDOW)
 
 
 def _bursts(path: Path, offset: int, length: int) -> BurstStats:

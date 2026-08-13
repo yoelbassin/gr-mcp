@@ -193,13 +193,6 @@ class RxStage(Stage[B, S]):
         raise StageDirectionError(self.name, "tx", self.directions)
 
 
-class TxStage(Stage[B, S]):
-    directions: frozenset[str] = frozenset({"tx"})
-
-    def emit_rx(self, b: B, step: S) -> None:
-        raise StageDirectionError(self.name, "rx", self.directions)
-
-
 class DuplexStage(Stage[B, S]):
     directions: frozenset[str] = frozenset({"rx", "tx"})
 

@@ -1,21 +1,49 @@
+"""Stream statistics shared by the quality layer, the survey blocks and the
+paging surface: nearest-centre assignment, Lloyd clustering in one and two
+dimensions, and the windowed-power gate. Each lived in two or three copies,
+which is how three activity gates came to differ in their filter mode without
+anyone comparing them."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal, TypeVar
 
 import numpy as np
 import numpy.typing as npt
+from scipy.ndimage import uniform_filter1d
 
 _KMEANS_ITERS = 100
 _SEPARATION_EPS = 1e-9
 _LEVEL_KS = (2, 4, 8)
 _CLIP_PERCENTILES = (1.0, 99.0)
 
+_N = TypeVar("_N", np.float64, np.complex128)
 
-def _assign(
-    x: npt.NDArray[np.float64], centers: npt.NDArray[np.float64]
+
+def nearest_labels(
+    values: npt.NDArray[_N], centers: npt.NDArray[_N]
 ) -> npt.NDArray[np.intp]:
-    return np.argmin(np.abs(x[:, None] - centers[None, :]), axis=1)
+    """Index of the closest centre per value. Real and complex alike — the
+    distance is |value - centre| either way."""
+    return np.argmin(np.abs(values[:, None] - centers[None, :]), axis=1)
+
+
+def windowed_power(
+    x: npt.NDArray[Any],
+    window: int,
+    *,
+    mode: Literal["reflect", "constant"] = "reflect",
+) -> npt.NDArray[np.float64]:
+    """Boxcar-smoothed instantaneous power, the input every activity gate
+    thresholds. Callers keep their own bar — a noise-floor multiple, a
+    top-decile fraction — because those are different measurements; only the
+    smoothing is shared. `mode` is explicit for the same reason: the soft-stream
+    gate zero-pads its edges, the burst gates reflect."""
+    power: npt.NDArray[np.float64] = uniform_filter1d(
+        np.abs(x).astype(np.float64) ** 2, window, mode=mode, cval=0.0
+    )
+    return power
 
 
 def percentile_span(
@@ -54,7 +82,7 @@ def _seeded_lloyd_1d(
     if centers.size < k:
         centers = np.linspace(lo, hi, k)
     for _ in range(_KMEANS_ITERS):
-        labels = _assign(xc, centers)
+        labels = nearest_labels(xc, centers)
         moved = centers.copy()
         for j in range(centers.size):
             members = xc[labels == j]
@@ -76,6 +104,41 @@ def kmeans_1d(x: npt.ArrayLike, k: int) -> npt.NDArray[np.float64]:
     return _seeded_lloyd_1d(xc, k, lo, hi)
 
 
+def _farthest_point_seeds(
+    points: npt.NDArray[np.complex128], k: int
+) -> npt.NDArray[np.complex128]:
+    # deterministic greedy k-means++ (no RNG): each seed is the point farthest
+    # from every seed chosen so far. Data-driven, not a fixed angular grid, so
+    # it has no unlucky-rotation basin (a grid seeded exactly between a
+    # constellation's lobes can converge with two lobes merged into one seed).
+    seeds = np.empty(k, dtype=np.complex128)
+    seeds[0] = points[np.argmax(np.abs(points - points.mean()))]
+    dist = np.abs(points - seeds[0])
+    for i in range(1, k):
+        seeds[i] = points[np.argmax(dist)]
+        dist = np.minimum(dist, np.abs(points - seeds[i]))
+    return seeds
+
+
+def kmeans_2d(points: npt.NDArray[np.complex128], k: int) -> npt.NDArray[np.complex128]:
+    """Constellation clustering: Lloyd from farthest-point seeds. The 1-D
+    sibling seeds from quantiles instead — a real level ladder is ordered and a
+    constellation is not — but the iteration is the same one."""
+    centers = _farthest_point_seeds(points, k)
+    for _ in range(_KMEANS_ITERS):
+        labels = nearest_labels(points, centers)
+        moved = np.array(
+            [
+                points[labels == j].mean() if np.any(labels == j) else centers[j]
+                for j in range(k)
+            ]
+        )
+        if np.allclose(moved, centers):
+            break
+        centers = moved
+    return centers
+
+
 @dataclass(frozen=True)
 class LevelFit:
     order: int
@@ -91,7 +154,7 @@ def _fit_at_k(xc: npt.NDArray[np.float64], k: int, lo: float, hi: float) -> Leve
     empty = LevelFit(0, np.zeros(0), np.zeros(0, dtype=np.int64), 0.0, 0.0, 0.0)
     if centers.size == 0:
         return empty
-    labels = _assign(xc, centers)
+    labels = nearest_labels(xc, centers)
     occ_c: list[float] = []
     occ_n: list[int] = []
     ssq = 0.0
