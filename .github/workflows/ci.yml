@@ -1,0 +1,28 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync --extra mcp
+      - run: uv run mypy .
+      - run: uv run pytest tests/unit tests/integration -q -n auto
+
+  assets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync --extra mcp
+      - uses: actions/cache@v4
+        with:
+          path: artifacts
+          key: assets-${{ hashFiles('tests/assets.toml') }}
+      - run: PYTHONPATH=tests uv run python -m helpers.assets fetch
+      - run: PYTHONPATH=tests uv run python -m helpers.assets verify
