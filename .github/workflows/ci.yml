@@ -4,25 +4,45 @@ on:
   push:
   pull_request:
 
+# GNU Radio comes from conda-forge, not apt: Ubuntu's gnuradio is compiled
+# against numpy 1.x while this project requires numpy>=2, and mixing the two
+# aborts every `from gnuradio import ...` with "numpy.core.multiarray failed to
+# import". The conda-forge build tracks numpy 2 and matches the GNU Radio
+# release used for local development.
+
 jobs:
   unit:
     runs-on: ubuntu-latest
-    env:
-      UV_PROJECT_ENVIRONMENT: .venv
+    defaults:
+      run:
+        shell: bash -el {0}
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
-      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends gnuradio python3-soapysdr
-      - run: uv venv --python /usr/bin/python3.12 --system-site-packages
-      - run: uv sync --extra mcp
-      - run: uv run mypy .
-      - run: uv run pytest tests/unit tests/integration -q -n auto
+      - uses: mamba-org/setup-micromamba@v3
+        with:
+          environment-name: marconi
+          condarc: |
+            channels:
+              - conda-forge
+          create-args: >-
+            python=3.12
+            gnuradio-core
+            gnuradio-soapy
+            uv
+          init-shell: bash
+      - run: uv pip install --python "$CONDA_PREFIX/bin/python" -e ".[mcp]" --group dev
+      - name: GNU Radio imports against the installed numpy
+        run: python -c "import numpy; from gnuradio import gr; print(gr.version(), numpy.__version__)"
+      - run: mypy .
+      - run: pytest tests/unit tests/integration -q -n auto
 
   assets:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
+        with:
+          cache-dependency-glob: pyproject.toml
       - run: uv sync --extra mcp
       - uses: actions/cache@v4
         with:
@@ -34,17 +54,29 @@ jobs:
   e2e:
     needs: assets
     runs-on: ubuntu-latest
-    env:
-      UV_PROJECT_ENVIRONMENT: .venv
+    defaults:
+      run:
+        shell: bash -el {0}
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
-      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends gnuradio python3-soapysdr
-      - run: uv venv --python /usr/bin/python3.12 --system-site-packages
-      - run: uv sync --extra mcp
+      - uses: mamba-org/setup-micromamba@v3
+        with:
+          environment-name: marconi
+          condarc: |
+            channels:
+              - conda-forge
+          create-args: >-
+            python=3.12
+            gnuradio-core
+            gnuradio-soapy
+            uv
+          init-shell: bash
+      - run: uv pip install --python "$CONDA_PREFIX/bin/python" -e ".[mcp]" --group dev
+      - name: GNU Radio imports against the installed numpy
+        run: python -c "import numpy; from gnuradio import gr; print(gr.version(), numpy.__version__)"
       - uses: actions/cache@v4
         with:
           path: artifacts
           key: assets-${{ hashFiles('tests/assets.toml') }}
-      - run: PYTHONPATH=tests uv run python -m helpers.assets fetch
-      - run: MARCONI_ASSETS_STRICT=1 uv run pytest tests/e2e
+      - run: PYTHONPATH=tests python -m helpers.assets fetch
+      - run: MARCONI_ASSETS_STRICT=1 pytest tests/e2e
