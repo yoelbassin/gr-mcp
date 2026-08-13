@@ -71,6 +71,55 @@ def segment_rx(c: CodingCarrier, *, frame_body_len: int) -> CodingCarrier:
     return CodingCarrier(bits=c.bits, windows=windows, marks=c.marks)
 
 
+def _correlate(
+    stream: npt.NDArray[np.uint8], pat: npt.NDArray[np.uint8], max_errors: int
+) -> list[int]:
+    """Non-overlapping positions where pat matches stream within max_errors.
+    One O(n) mismatch accumulator per pattern bit, never an (n, m) array: at
+    the bits-layer budget an n x m compare is tens of GiB."""
+    m = pat.size
+    size = stream.size - m + 1
+    counts = np.zeros(size, np.min_scalar_type(m))
+    for j in range(m):
+        check_deadline()
+        counts += stream[j : j + size] != pat[j]
+    out: list[int] = []
+    reach = 0
+    for i in np.flatnonzero(counts <= max_errors):
+        if i < reach:
+            continue
+        out.append(int(i))
+        reach = int(i) + m
+    return out
+
+
+# Rotations of the pattern used as surrogate nulls, at two different fractions
+# of the length so a pattern whose own period divides one shift is still
+# measured against the other.
+_SURROGATE_SHIFTS = (2, 3)
+
+
+def _surrogate_chance(
+    stream: npt.NDArray[np.uint8], pat: npt.NDArray[np.uint8], max_errors: int
+) -> float:
+    """How often this stream matches a MEANINGLESS pattern of the same length
+    and weight — the pattern rotated off its own phase.
+
+    The uniform-bit expectation is a lower bound that collapses toward zero as
+    the pattern lengthens, so on a degenerate stream every long pattern clears
+    it: a dead all-zero demod searched for an all-zero sync word scored 6250
+    hits against an expectation of 4.66e-05 and read "decoded". A rotation is
+    matched by the stream's own structure but not by a real sync, so it
+    measures this stream instead of assuming a uniform one."""
+    best = 0
+    for divisor in _SURROGATE_SHIFTS:
+        shift = pat.size // divisor
+        if not shift or shift == pat.size:
+            continue
+        best = max(best, len(_correlate(stream, np.roll(pat, shift), max_errors)))
+    return float(best)
+
+
 def sync_word_rx(
     c: CodingCarrier, *, sync: str = "", bits: str = "", max_errors: int = 0
 ) -> CodingCarrier:
@@ -81,30 +130,17 @@ def sync_word_rx(
     )
     stream = np.asarray(c.bits, dtype=np.uint8)
     m = pat.size
-    windows: list[Window] = []
     if m == 0 or stream.size < m:
         # no search ran (the stream cannot contain the pattern): no stats, so
         # the quality extractor treats it as untestable rather than negative
-        return CodingCarrier(bits=stream, windows=windows, marks=c.marks)
-    # one O(n) mismatch accumulator per pattern bit, never an (n, m) array:
-    # at the bits-layer budget an n x m compare is tens of GiB
+        return CodingCarrier(bits=stream, windows=[], marks=c.marks)
     size = stream.size - m + 1
-    chance = float(size) * _chance_valid_rate(m, m, max_errors, 2)
-    counts = np.zeros(size, np.min_scalar_type(m))
-    for j in range(m):
-        check_deadline()
-        counts += stream[j : j + size] != pat[j]
-    hits = np.flatnonzero(counts <= max_errors)
-    reach = 0
-    for i in hits:
-        if i < reach:
-            continue
-        start = int(i) + m
-        windows.append(Window(start=start, cursor=start))
-        reach = int(i) + m
+    uniform = float(size) * _chance_valid_rate(m, m, max_errors, 2)
+    hits = _correlate(stream, pat, max_errors)
+    chance = max(uniform, _surrogate_chance(stream, pat, max_errors))
     return CodingCarrier(
         bits=stream,
-        windows=windows,
+        windows=[Window(start=i + m, cursor=i + m) for i in hits],
         marks=c.marks,
         stats=StepStats(chance_windows=chance),
     )
@@ -147,6 +183,17 @@ def _check_table_entries(fwd: npt.NDArray[np.int64], code_bits: int) -> None:
 
 NEAREST_MAX_CODE_BITS = 63  # nearest decode packs codewords through int64
 
+# The (words, codewords, code_bits) distance cube is the peak allocation of a
+# nearest decode, so the word chunk is sized from a BYTE budget rather than a
+# fixed word count: at a flat 65536 words a (24,12) spec the validator accepts
+# asked numpy for a single 6.44 GB temporary, and the deadline check runs
+# before the allocation, so the timeout could not save it either.
+_NEAREST_CUBE_BYTES = 64 << 20
+
+
+def _nearest_chunk(codewords: int, code_bits: int) -> int:
+    return max(1, _NEAREST_CUBE_BYTES // max(1, codewords * code_bits))
+
 
 def _nearest_values(
     grouped: npt.NDArray[np.uint8], table: list[int], code_bits: int
@@ -162,7 +209,7 @@ def _nearest_values(
     for j in range(code_bits):
         tbl[:, j] = (fwd >> (code_bits - 1 - j)) & 1
     out = np.empty(grouped.shape[0], np.int64)
-    chunk = 1 << 16
+    chunk = _nearest_chunk(int(fwd.size), code_bits)
     for lo in range(0, grouped.shape[0], chunk):
         check_deadline()
         seg = grouped[lo : lo + chunk]

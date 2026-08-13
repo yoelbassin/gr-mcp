@@ -71,9 +71,24 @@ class SyncWordStep(Step):
         return self
 
 
+# The table the caller must supply is 2**data_bits entries, so this is also
+# the largest codebook anyone can write. Checked BEFORE the shift below: a
+# 113-byte spec naming data_bits=2**33 made CPython materialize a 1 GB integer
+# just to compare its length, and rendering it into the error raised again
+# ("Exceeds the limit (4300 digits)"), so the agent got <unprintable int object>.
+MAX_CODEBOOK_DATA_BITS = 16
+
+
 def check_codebook_sizing(
     code_bits: int, data_bits: int, table: list[int], decode: DecodeMode
 ) -> None:
+    if data_bits > MAX_CODEBOOK_DATA_BITS:
+        raise PydanticCustomError(
+            "value_error",
+            "data_bits={data_bits} needs a 2**data_bits-entry table; {max} is "
+            "the ceiling",
+            {"data_bits": data_bits, "max": MAX_CODEBOOK_DATA_BITS},
+        )
     if len(table) != (1 << data_bits):
         raise PydanticCustomError(
             "value_error",

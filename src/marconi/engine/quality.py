@@ -118,14 +118,11 @@ def _names(evidence: Sequence[QualityEvidence]) -> str:
     return ", ".join(sorted({e.metric.value for e in evidence}))
 
 
-# A sync count is only evidence once it clears what pure chance would find on
-# random bits: expected chance matches plus a 5-sigma Poisson margin. Short or
-# error-tolerant sync words raise the bar on their own; a 32-bit sync keeps
-# expecting ~0 so a single hit still counts. Chance is modeled on UNIFORM
-# bits: a degenerate low-entropy stream against a matching low-entropy sync
-# word can still exceed the floor — measured live (impulsive RFI band):
-# 332 found vs 136 chance is 16 sigma yet 100% garbage, so a positive must
-# also clear a 3x chance RATIO, which structured interference does not.
+# A sync count is evidence once it clears the expectation its searcher
+# measured (ops_bits._surrogate_chance), by a 5-sigma Poisson margin AND a 3x
+# ratio. Both bars are only as good as that expectation: a uniform-bit model
+# collapses to ~0 for any long pattern, which is why the searcher measures the
+# stream it is about to judge rather than assuming one.
 _SYNC_CHANCE_SIGMA = 5.0
 _SYNC_CHANCE_RATIO = 3.0
 
@@ -209,9 +206,14 @@ def tag_sync_evidence(diagnostics: Sequence[Diagnostic]) -> list[QualityEvidence
         if not scanned.get(block) or chance is None:
             # the correlator never consumed anything, or reported tags without
             # the chance expectation they must be judged against: untestable,
-            # not absent. A smuggled 0.0 default would clear both the sigma
-            # and the ratio bar, promoting a single chance-level hit to
-            # positive sync evidence (lock_evidence refuses the same pairing).
+            # not absent.
+            continue
+        if chance <= 0.0 and tags:
+            # a non-positive expectation is not a very strict one, it is no
+            # expectation at all: it clears both the sigma and the ratio bar,
+            # so a single chance-level hit would certify. tag_gate refuses to
+            # be built without a real chance, so reaching here is a malformed
+            # harvest. Zero tags stay negative — that reading needs no model.
             continue
         assessment = _sync_assessment(tags, chance)
         if assessment is None:

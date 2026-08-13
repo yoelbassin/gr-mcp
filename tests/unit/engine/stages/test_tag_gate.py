@@ -4,13 +4,27 @@ from typing import Any
 
 import numpy as np
 import numpy.typing as npt
+import pytest
 from helpers._fakegr import FAKE_GR, FakeTag, drive
 
 from marconi.engine.backends.gnuradio.embedded.framing import make_tag_gate
 
 
-def _gate(frame_len: int) -> Any:
-    return make_tag_gate(FAKE_GR, frame_len=frame_len, tag_name="sync")
+def _gate(frame_len: int, chance_per_item: float = 2.0**-32) -> Any:
+    return make_tag_gate(
+        FAKE_GR,
+        frame_len=frame_len,
+        tag_name="sync",
+        chance_per_item=chance_per_item,
+    )
+
+
+def test_gate_refuses_a_non_positive_chance() -> None:
+    # zero clears every significance bar downstream, so a caller that cannot
+    # state a chance must not get a silent one
+    for bad in (0.0, -1.0):
+        with pytest.raises(ValueError, match="chance_per_item"):
+            _gate(8, chance_per_item=bad)
 
 
 def _stream(

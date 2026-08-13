@@ -138,10 +138,17 @@ def _tag_rows(tags: int, chance: float, scanned: int = 60_000) -> list[Diagnosti
 
 
 def test_tag_sync_above_chance_is_positive() -> None:
-    ev = tag_sync_evidence(_tag_rows(12, 0.0))
+    ev = tag_sync_evidence(_tag_rows(12, 0.5))
     assert [e.assessment for e in ev] == ["positive"]
     assert ev[0].metric == "sync_matches"
     assert ev[0].value == 12.0
+
+
+def test_tag_sync_without_a_chance_cannot_certify() -> None:
+    # a zero expectation is no expectation: it clears both the sigma and the
+    # ratio bar, so it would promote any hit to positive. tag_gate refuses to
+    # be built without a real chance; one arriving here is untestable
+    assert tag_sync_evidence(_tag_rows(12, 0.0)) == []
 
 
 def test_tag_sync_at_chance_level_is_no_evidence() -> None:

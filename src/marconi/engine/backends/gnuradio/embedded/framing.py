@@ -9,7 +9,7 @@ from marconi.engine.backends.gnuradio.embedded.lifecycle import Diagnostics, bum
 
 
 def make_tag_gate(
-    gr: Any, *, frame_len: int, tag_name: str, chance_per_item: float = 0.0
+    gr: Any, *, frame_len: int, tag_name: str, chance_per_item: float
 ) -> Any:
     """Keep exactly ``frame_len`` float items after each ``tag_name`` tag, drop
     everything between frames. The stock counterpart to sym_strip's skip: an
@@ -21,7 +21,15 @@ def make_tag_gate(
 
     Also the sync-evidence census point: it counts the correlator's tags in the
     consumed region plus the chance expectation (``chance_per_item`` x items
-    scanned) into diagnostics, so GR-native sync paths feed the quality layer."""
+    scanned) into diagnostics, so GR-native sync paths feed the quality layer.
+    ``chance_per_item`` has no default: zero clears every significance bar, so
+    a caller that cannot state one must not get a silent 0.0."""
+    if chance_per_item <= 0.0:
+        raise ValueError(
+            f"tag_gate needs a positive chance_per_item, got {chance_per_item!r}; "
+            "the tag count it reports is judged against this expectation and "
+            "zero would certify a single chance-level hit"
+        )
 
     pmt = gr.pmt
 
