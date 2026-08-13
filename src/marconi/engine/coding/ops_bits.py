@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Callable
+from collections.abc import Callable, Iterable, Iterator
 from dataclasses import replace
 from typing import Any, Literal
 
@@ -405,6 +405,29 @@ def _word_stats(
     )
 
 
+def _rescaled(
+    marks: Iterable[int], src: tuple[int, int], dst: tuple[int, int]
+) -> Iterator[int]:
+    """Marks landing in the input span `src`, mapped onto the output span `dst`.
+    Every scoped decode is a fixed-width block map, so a mark's offset within a
+    span scales by that span's own ratio. Marks outside the span are dropped:
+    they name bits this decode did not consume."""
+    lo, hi = src
+    out_lo, out_hi = dst
+    width = hi - lo
+    if width <= 0:
+        return
+    for m in marks:
+        if lo <= m < hi:
+            yield out_lo + (int(m) - lo) * (out_hi - out_lo) // width
+
+
+def _ordered(marks: Iterable[int]) -> tuple[int, ...]:
+    """Strictly increasing, as every mark consumer requires: a rescale can map
+    two input marks onto one output position."""
+    return tuple(sorted({int(m) for m in marks}))
+
+
 def _decode_scoped(
     c: CodingCarrier,
     decode: Callable[
@@ -414,15 +437,26 @@ def _decode_scoped(
     *,
     chance_word_rate: float | None = None,
 ) -> CodingCarrier:
+    """A scoped decode changes the bit basis, so the carrier's marks are
+    rescaled onto it rather than dropped. Dropping them was silent: `normalize`
+    reads `if not c.marks: return c` and became a no-op with nothing in the
+    census to say so, and a `mark_frame` after any bits-level coding stage
+    seeded zero windows."""
     tallies: list[tuple[int, int]] = []
     if c.windows is None:
-        out, tally = decode(np.asarray(c.bits, np.uint8))
+        src = np.asarray(c.bits, np.uint8)
+        out, tally = decode(src)
         if tally is not None:
             tallies.append(tally)
-        return CodingCarrier(bits=out, stats=_word_stats(tallies, chance_word_rate))
+        return CodingCarrier(
+            bits=out,
+            marks=_ordered(_rescaled(c.marks, (0, int(src.size)), (0, int(out.size)))),
+            stats=_word_stats(tallies, chance_word_rate),
+        )
     bits = np.asarray(c.bits, np.uint8)
     pieces: list[npt.NDArray[np.uint8]] = []
     windows: list[Window] = []
+    marks: list[int] = []
     pos = 0
     for lo, hi in c.window_spans():
         check_deadline()
@@ -430,11 +464,15 @@ def _decode_scoped(
         if tally is not None:
             tallies.append(tally)
         windows.append(Window(start=pos, cursor=pos, end=pos + int(dec.size)))
+        marks.extend(_rescaled(c.marks, (lo, hi), (pos, pos + int(dec.size))))
         pieces.append(dec)
         pos += int(dec.size)
     joined = np.concatenate(pieces) if pieces else np.zeros(0, np.uint8)
     return CodingCarrier(
-        bits=joined, windows=windows, stats=_word_stats(tallies, chance_word_rate)
+        bits=joined,
+        windows=windows,
+        marks=_ordered(marks),
+        stats=_word_stats(tallies, chance_word_rate),
     )
 
 
