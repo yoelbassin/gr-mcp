@@ -29,6 +29,7 @@ from marconi.engine.types.enums import ItemType
 from marconi.engine.types.levels import Level
 from marconi.engine.types.models import Modem
 from marconi.engine.types.step import Step
+from marconi.mcp.streams import stream_stats
 
 SYM_F = Descriptor(Level.SYMBOLS, ItemType.F, carrier=Carrier.SOFT)
 IQ = Descriptor(Level.IQ, ItemType.C)
@@ -122,6 +123,37 @@ def test_levels_must_be_a_distinct_power_of_two_set() -> None:
         with pytest.raises(ValidationError):
             model.model_validate({"levels": bad})
     model.model_validate({"levels": _C4FM})
+
+
+def test_stream_stats_centers_paste_readiness_matches_the_docstring(
+    tmp_path: Path,
+) -> None:
+    """The stream_stats and mfsk_soft_demap docstrings both promise: "centers"
+    is paste-ready for mfsk_soft_demap only when the requested clusters count
+    K is itself a power of two. A non-power-of-two K matched exactly by the
+    data (5 asked, 5 real modes found) ships that count as-is and
+    mfsk_soft_demap's levels validator REJECTS it; a power-of-two K is
+    guaranteed paste-ready whether the fit lands on it directly or snaps down
+    to it. Both halves of the documented contract, exercised end to end
+    through the real stream_stats implementation, not a hand-built list."""
+    rng = np.random.default_rng(11)
+    modes = np.array([-4.0, -2.0, 0.0, 2.0, 4.0])
+    data = rng.choice(modes, size=10000) + rng.normal(0, 0.02, 10000)
+    src = tmp_path / "modes.f32"
+    data.astype(np.float32).tofile(src)
+
+    exact = stream_stats(src, item_type=None, clusters=5, bins=41)
+    exact_centers = exact["centers"]
+    assert isinstance(exact_centers, list) and len(exact_centers) == 5
+    with pytest.raises(ValidationError):
+        MfskSoftDemapStep(levels=exact_centers)
+
+    pow2 = stream_stats(src, item_type=None, clusters=8, bins=41)
+    pow2_centers = pow2["centers"]
+    assert isinstance(pow2_centers, list)
+    n = len(pow2_centers)
+    assert n >= 2 and n & (n - 1) == 0, "count must be a power of two"
+    MfskSoftDemapStep(levels=pow2_centers)
 
 
 def test_soft_lane_corrects_errors_the_hard_decision_makes(tmp_path: Path) -> None:

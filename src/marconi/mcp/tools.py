@@ -382,10 +382,15 @@ def stream_stats(
     numbers describe a subset, so check the run that wrote the stream, and
     a "histogram" {start, step, counts} over the 0.5..99.5 percentile range
     — bin i's center is start + i*step. clusters=K (1..16) also fits up to K
-    levels: sorted "centers" with matching "cluster_counts". "centers" is the
-    paste-ready level list for mfsk_soft_demap: when fewer real modes exist
-    than you asked for, the fit re-runs at the largest supported power of
-    two so the count stays one mfsk_soft_demap accepts. A single center
+    levels: sorted "centers" with matching "cluster_counts". "centers" is
+    paste-ready for mfsk_soft_demap only when K itself is a power of two (2,
+    4, 8, 16): if fewer real modes exist than K, the fit re-runs at the
+    largest supported power of two so the count still lands on one
+    mfsk_soft_demap accepts; if every requested cluster carries real mass,
+    it ships exactly K instead. A non-power-of-two K matched exactly by the
+    data (asked 5, found 5 real modes) ships that count as-is, which
+    mfsk_soft_demap's power-of-two-only levels validator REJECTS — request a
+    power-of-two K when the target is mfsk_soft_demap. A single center
     means no multilevel structure to demap at all — read the histogram to
     judge modality. Bits (.u8) report only ones_fraction.
 

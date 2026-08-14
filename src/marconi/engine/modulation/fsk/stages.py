@@ -188,9 +188,10 @@ class MfskSoftDemap(Stage[CompileContext, MfskSoftDemapStep]):
     name = "mfsk_soft_demap"
     description = (
         "Soft M-ary FSK demap: fsk's frequency symbols to per-bit LLRs against an "
-        "explicit level ladder (levels= the fitted centers from stream_stats, "
-        "power-of-two count). The evidence-bearing alternative to slice for FSK "
-        "paths."
+        "explicit level ladder (levels= the fitted centers from stream_stats "
+        "requested with a power-of-two clusters count, 2/4/8/16 - that is what "
+        "keeps the returned centers list itself a power-of-two count). The "
+        "evidence-bearing alternative to slice for FSK paths."
     )
     from_level = Level.SYMBOLS
     to_level = Level.BITS
