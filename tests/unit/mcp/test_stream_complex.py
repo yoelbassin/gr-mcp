@@ -110,3 +110,18 @@ def test_the_constellation_measures_the_docstring_promises_are_real(
     assert all(-180.0 <= d <= 180.0 for d in degrees)
     for want in (-90.0, 0.0, 90.0, 180.0):
         assert any(abs(d - want) < 5.0 for d in degrees), f"no lobe near {want} deg"
+
+
+def test_magnitude_axis_holds_at_the_capture_lsb_scale(tmp_path: Path) -> None:
+    # a weak capture quantized at the ci16 LSB (1/32768) lives four LSBs from
+    # the origin: the fixed 6-decimal round shipped step=4e-06 against a true
+    # 4.21057e-06 - 5% axis error, two whole bins of drift by bin 40
+    rng = np.random.default_rng(3)
+    lsb = 1.0 / 32768.0
+    z = (rng.integers(-4, 5, 20_000) + 1j * rng.integers(-4, 5, 20_000)) * lsb
+    s = stream_stats(_write(tmp_path, z), item_type="c", clusters=0, bins=41)
+    hist = cast(dict[str, float], s["magnitude_histogram"])
+    mag = np.abs(np.asarray(z, np.complex64).astype(np.complex128))
+    lo, hi = (float(v) for v in np.percentile(mag, [0.5, 99.5]))
+    assert hist["step"] == pytest.approx((hi - lo) / 41, rel=1e-4)
+    assert hist["start"] == pytest.approx(lo + hist["step"] / 2, rel=1e-4)

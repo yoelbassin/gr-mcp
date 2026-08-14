@@ -348,20 +348,24 @@ def read_stream(
     LLRs, bit 1 NEGATIVE; symbols-level (a path ending at a demod stage,
     e.g. bare fsk) slices POSITIVE to bit 1. Complex constellation symbols
     (.cf32, a path ending at a bare demod, e.g. psk_demod) return
-    "real"/"imag" lists. item_type b/s/f/l/c overrides suffix inference
-    (required for suffix-less paths). count defaults per item type to keep a
-    page a few KB (b 4096, s 2048, f/l 1024, c 256) and is capped per type
-    (b 16384, s 6144, f 3840, l 2048, c 1792) — the ceilings differ because
-    an item's WORST JSON cost does: a bit is 1 byte, an int16 up to 7, a
-    float up to ~12, an int64 up to 21, a complex pair up to ~26, so a full
-    page of any type stays under 48 KB even at extreme values. A count past
-    the cap is clamped and the page reports capped_at ONLY when items were
-    actually withheld — a page short of your count with no capped_at is the
-    end of the stream; use offset to walk longer streams — total_items
-    reports the full length. Stream files live under $MARCONI_WORKSPACE
-    (default ~/.cache/marconi) in marconi-runs/ until externally removed; a
-    missing path returns a [not_found] error asking you to re-run the
-    spec."""
+    "real"/"imag" lists. Every float ships at 6 significant figures, and a
+    NaN or infinite item ships as the string "nan"/"inf"/"-inf" (JSON has no
+    number for either) with the page reporting non_finite_items, present
+    only when some were found — they are the run's own product, so read its
+    quality verdict rather than paging around them. item_type b/s/f/l/c
+    overrides suffix inference (required for suffix-less paths). count
+    defaults per item type to keep a page a few KB (b 4096, s 2048, f/l
+    1024, c 256) and is capped per type (b 16384, s 6144, f 2304, l 2048,
+    c 1152) — the ceilings differ because an item's WORST JSON cost does: a
+    bit is 1 byte, an int16 up to 7, a float up to 20, an int64 up to 21, a
+    complex pair up to 40, so a full page of any type stays under 48 KB even
+    at extreme values. A count past the cap is clamped and the page reports
+    capped_at ONLY when items were actually withheld — a page short of your
+    count with no capped_at is the end of the stream; use offset to walk
+    longer streams — total_items reports the full length. Stream files live
+    under $MARCONI_WORKSPACE (default ~/.cache/marconi) in marconi-runs/
+    until externally removed; a missing path returns a [not_found] error
+    asking you to re-run the spec."""
     return render_page(Path(path), offset=offset, count=count, item_type=item_type)
 
 

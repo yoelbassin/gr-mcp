@@ -25,6 +25,26 @@ async def test_all_tools_are_registered() -> None:
     }
 
 
+async def test_a_poisoned_page_names_its_non_finite_items_on_the_wire(
+    tmp_path: Path,
+) -> None:
+    # the in-process dict and the wire disagreed: render_page put python
+    # nan/inf in the page (json.dumps writes the non-RFC tokens NaN/Infinity)
+    # and the server's pydantic serializer turned every one of them into
+    # `null` - unmarked, and with nan-vs-inf lost. Only a real client can
+    # price what the agent actually receives.
+    p = tmp_path / "poison.f32"
+    np.array([1.5, np.nan, np.inf, -np.inf], np.float32).tofile(p)
+    async with Client(build_server()) as client:
+        res = await client.call_tool("read_stream", {"path": str(p)})
+    page = res.structured_content
+    assert page is not None
+    assert page["values"] == [1.5, "nan", "inf", "-inf"]
+    assert page["non_finite_items"] == 3
+    text_bytes = sum(len(getattr(c, "text", "") or "") for c in res.content)
+    assert text_bytes == 0
+
+
 async def test_roundtrip_through_client(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

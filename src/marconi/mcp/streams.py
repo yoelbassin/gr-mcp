@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import math
 import os
 import tempfile
 from collections.abc import Callable
@@ -45,13 +46,14 @@ register_error(EmptyStreamError, "failed_precondition")
 _MAX_INLINE_BITS = 1_048_576
 # Per-type ceilings chosen from what an item COSTS as JSON at its WORST
 # legal rendering, not a typical one: a bit is 1 byte, an int16 at -32768 is
-# 7, a float at 4 decimals up to ~12, a complex pair ~26, an int64 up to 21.
-# The previous caps were priced against benign samples (half-range ints,
-# unit-scale floats) and three of five types blew the budget at values the
-# product itself validates - m_slice(levels=[-32768, 32767]) paged 57,434
-# bytes against the 49,152 budget. test_streams pins the budget against
-# extreme legal values, so a future retune is measured against the worst
-# cost, not a friendly one.
+# 7, a float 20, a complex pair 40, an int64 up to 21. The previous caps
+# were priced against benign samples (half-range ints, unit-scale floats)
+# and blew the budget at values the product itself validates -
+# m_slice(levels=[-32768, 32767]) paged 57,434 bytes, and a full float page
+# of legal float32 measured 92,235 against the 49,152 budget. test_streams
+# SEARCHES for the widest-rendering legal value rather than assuming one
+# (the widest float32 is not the largest: see _WIRE_SIGFIGS), so a future
+# retune is measured against the worst cost, not a friendly one.
 _MAX_PAGE_BYTES = 48 * 1024
 _CHUNK_ITEMS = 1 << 20
 
@@ -87,6 +89,14 @@ class PageHeader(Payload):
     count: int
     total_items: int
     capped_at: int | None = None
+    # How many items on THIS page are NaN or ±inf, ABSENT when none are.
+    # They ship as the strings "nan"/"inf"/"-inf" because JSON has no number
+    # for either: as bare floats they left the page carrying the NaN/Infinity
+    # tokens json.dumps(allow_nan=False) rejects, and the server's pydantic
+    # serializer turned every one into `null` - a value that reads as "no
+    # value here" and loses nan-vs-inf, which on a soft stream is the
+    # difference between a corrupt sample and a saturated decision.
+    non_finite_items: int | None = None
 
 
 class BitsPage(PageHeader):
@@ -99,14 +109,15 @@ class SymbolsPage(PageHeader):
 
 class ValuesPage(PageHeader):
     """Soft floats and the int64 sidecar lists share a key: both are a plain
-    sequence of numbers with no per-item structure."""
+    sequence of numbers with no per-item structure. A float item may also be
+    one of the non-finite names — see PageHeader.non_finite_items."""
 
-    values: list[float] | list[int]
+    values: list[float | str] | list[int]
 
 
 class ComplexPage(PageHeader):
-    real: list[float]
-    imag: list[float]
+    real: list[float | str]
+    imag: list[float | str]
 
 
 StreamPage = BitsPage | SymbolsPage | ValuesPage | ComplexPage
@@ -278,15 +289,50 @@ def _render_ints(key: str) -> Callable[[npt.NDArray[Any]], dict[str, object]]:
     return render
 
 
+# Six significant figures is what EVERY float this module puts on the wire is
+# rendered to, and the number is priced twice over. WIDTH: measured across 80k
+# legal float32 values (uniform bit patterns plus the 1e13..1e17 band python
+# renders in fixed notation, where the widest live - the widest float32 is not
+# the largest one), six figures cost at most 19 JSON characters
+# ("-1872558093762560.0") against 23 for the round(v, 4) they replace
+# ("-3.4028234663852886e+38"); the page ceilings above are priced from that 19.
+# PRECISION: a fixed decimal round is an absolute quantum wherever the data
+# sits, so round(v, 6) shipped an N(0, 1e-8) stream as min=max=std=-0.0 with a
+# histogram step of 0.0 - 41 identical bin centers, indistinguishable from
+# constant zero - and round(v, 4) paged a capture weaker than its own ci16 LSB
+# (3.05e-5) as all zeros.
+_WIRE_SIGFIGS = 6
+
+
+def _wire_float(v: float) -> float:
+    return float(f"{v:.{_WIRE_SIGFIGS}g}")
+
+
+def _wire_number(v: float) -> float | str:
+    if math.isnan(v):
+        return "nan"
+    if math.isinf(v):
+        return "inf" if v > 0 else "-inf"
+    return _wire_float(v)
+
+
+def _non_finite_items(items: npt.NDArray[Any]) -> int | None:
+    return int((~np.isfinite(items)).sum()) or None
+
+
 def _render_complex(items: npt.NDArray[Any]) -> dict[str, object]:
     return {
-        "real": [round(float(v.real), 6) for v in items],
-        "imag": [round(float(v.imag), 6) for v in items],
+        "real": [_wire_number(float(v.real)) for v in items],
+        "imag": [_wire_number(float(v.imag)) for v in items],
+        "non_finite_items": _non_finite_items(items),
     }
 
 
 def _render_floats(items: npt.NDArray[Any]) -> dict[str, object]:
-    return {"values": [round(float(v), 4) for v in items]}
+    return {
+        "values": [_wire_number(float(v)) for v in items],
+        "non_finite_items": _non_finite_items(items),
+    }
 
 
 _PAGE_SPECS: dict[PageType, PageSpec] = {
@@ -297,10 +343,10 @@ _PAGE_SPECS: dict[PageType, PageSpec] = {
         ItemType.S.np_dtype, ".i16", 2048, 6144, _render_ints("symbols"), SymbolsPage
     ),
     PageType.F: PageSpec(
-        ItemType.F.np_dtype, ".f32", 1024, 3840, _render_floats, ValuesPage
+        ItemType.F.np_dtype, ".f32", 1024, 2304, _render_floats, ValuesPage
     ),
     PageType.C: PageSpec(
-        ItemType.C.np_dtype, ".cf32", 256, 1792, _render_complex, ComplexPage
+        ItemType.C.np_dtype, ".cf32", 256, 1152, _render_complex, ComplexPage
     ),
     PageType.L: PageSpec(
         np.dtype(np.int64), ".i64", 1024, 2048, _render_ints("values"), ValuesPage
@@ -498,8 +544,8 @@ def _hist(x: npt.NDArray[np.float64], bins: int) -> Histogram:
     span = percentile_span(x)
     counts, edges = binned_counts(x, bins, span, Tail.CLIP)
     return Histogram(
-        start=round(float((edges[0] + edges[1]) / 2.0), 6),
-        step=round(float(edges[1] - edges[0]), 6),
+        start=_wire_float(float((edges[0] + edges[1]) / 2.0)),
+        step=_wire_float(float(edges[1] - edges[0])),
         counts=[int(n) for n in counts],
     )
 
@@ -541,7 +587,7 @@ def stream_stats_payload(
             {
                 **header,
                 "sampled_items": int(sample.size),
-                "ones_fraction": round(float((sample & np.uint8(1)).mean()), 6),
+                "ones_fraction": _wire_float(float((sample & np.uint8(1)).mean())),
             }
         )
     if kind is PageType.C:
@@ -574,10 +620,10 @@ def _real_stats(
         {
             **header,
             "sampled_items": int(x.size),
-            "min": round(float(x.min()), 6),
-            "max": round(float(x.max()), 6),
-            "mean": round(float(x.mean()), 6),
-            "std": round(float(x.std()), 6),
+            "min": _wire_float(float(x.min())),
+            "max": _wire_float(float(x.max())),
+            "mean": _wire_float(float(x.mean())),
+            "std": _wire_float(float(x.std())),
             "histogram": _hist(x, bins),
         }
     )
@@ -611,7 +657,7 @@ def _real_stats(
     # twice the tokens. centers IS the paste-ready list.
     return replace(
         stats,
-        centers=[round(float(v), 6) for v in centers[keep]],
+        centers=[_wire_float(float(v)) for v in centers[keep]],
         cluster_counts=[int(n) for n in counts[keep]],
     )
 
@@ -625,10 +671,10 @@ def _constellation_stats(
     stats = ConstellationStats.build(
         **header,
         sampled_items=int(z.size),
-        mean_magnitude=round(mean_mag, 6),
-        std_magnitude=round(float(mag.std()), 6),
+        mean_magnitude=_wire_float(mean_mag),
+        std_magnitude=_wire_float(float(mag.std())),
         constant_modulus_ratio=(
-            round(float(mag.std() / mean_mag), 6) if mean_mag > 0 else None
+            _wire_float(float(mag.std() / mean_mag)) if mean_mag > 0 else None
         ),
         magnitude_histogram=_hist(mag, bins),
         phase_histogram=_hist(np.angle(z), bins),
@@ -654,13 +700,13 @@ def _cluster_fit(z: npt.NDArray[Any], clusters: int) -> dict[str, object]:
     order = np.argsort(np.angle(centers))
     centers, counts = centers[order], counts[order]
     return {
-        "evm": round(err / ref, 6) if ref > 0 else None,
+        "evm": _wire_float(err / ref) if ref > 0 else None,
         "clusters": [
             ConstellationCluster(
-                real=round(float(c.real), 6),
-                imag=round(float(c.imag), 6),
-                magnitude=round(float(abs(c)), 6),
-                phase_deg=round(float(np.degrees(np.angle(c))), 6),
+                real=_wire_float(float(c.real)),
+                imag=_wire_float(float(c.imag)),
+                magnitude=_wire_float(float(abs(c))),
+                phase_deg=_wire_float(float(np.degrees(np.angle(c)))),
                 count=int(n),
             )
             for c, n in zip(centers, counts)

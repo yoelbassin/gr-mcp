@@ -190,6 +190,30 @@ def test_non_finite_items_are_counted_not_silently_dropped(tmp_path: Path) -> No
     assert out["mean"] == 2.0
 
 
+def test_small_magnitude_stats_and_axis_are_not_rounded_to_zero(
+    tmp_path: Path,
+) -> None:
+    # a fixed 6-DECIMAL round is an absolute 1e-6 quantum: an N(0, 1e-8)
+    # stream shipped min=max=mean=std=-0.0 with histogram start=-0.0 step=0.0,
+    # so all 41 reconstructed bin centers were identical and the stream was
+    # indistinguishable from a constant zero.
+    x = (np.random.default_rng(11).standard_normal(20_000) * 1e-8).astype(np.float32)
+    out = stream_stats(_f32(tmp_path, x), item_type=None, clusters=0, bins=41)
+    assert cast(float, out["std"]) == pytest.approx(float(x.std()), rel=1e-4)
+    assert cast(float, out["min"]) == pytest.approx(float(x.min()), rel=1e-4)
+    assert cast(float, out["max"]) == pytest.approx(float(x.max()), rel=1e-4)
+    hist = cast(dict[str, object], out["histogram"])
+    step = cast(float, hist["step"])
+    assert step > 0
+    # the shipped axis must reconstruct the documented 0.5..99.5 percentile
+    # span - bin i's center is start + i*step
+    lo, hi = (float(v) for v in np.percentile(x.astype(np.float64), [0.5, 99.5]))
+    assert step == pytest.approx((hi - lo) / 41, rel=1e-4)
+    start = cast(float, hist["start"])
+    assert start == pytest.approx(lo + step / 2, rel=1e-4)
+    assert start + 40 * step == pytest.approx(hi - step / 2, rel=1e-4)
+
+
 def test_a_clean_stream_carries_no_non_finite_key(tmp_path: Path) -> None:
     # absent, not zero: the omission rule means a reader never pays for a
     # measurement that had nothing to report

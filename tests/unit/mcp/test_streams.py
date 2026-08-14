@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
+import numpy.typing as npt
 import pytest
 
 from marconi.engine.io.source import SourceSlice
@@ -166,6 +167,69 @@ def test_page_reports_the_ceiling_that_clamped_it(tmp_path: Path) -> None:
     assert tail["count"] == 32 and "capped_at" not in tail
 
 
+def _read_stream_doc() -> str:
+    # the docstring is wrapped for the agent's eye; the claims it makes are
+    # sentences, not lines
+    return " ".join((read_stream.__doc__ or "").split())
+
+
+# the test's own page header carries a 4-digit total_items; a 100 GB stream
+# carries 12-digit offset/total_items and one more key, so the ceilings are
+# priced with this much room left for the header they ship under
+_HEADER_HEADROOM = 256
+
+
+def _float32_candidates() -> npt.NDArray[np.float32]:
+    rng = np.random.default_rng(20260815)
+    bits = rng.integers(0, 2**32, size=60_000, dtype=np.uint64).astype(np.uint32)
+    sampled = bits.view(np.float32)
+    # |x| in [1e15, 1e16) is the band python renders in FIXED notation (16
+    # digits + ".0"), wider than any exponential rendering - and uniform bit
+    # patterns land there about once in 300k draws, so it is sampled directly
+    band = rng.uniform(1e13, 1e17, size=20_000) * rng.choice([-1.0, 1.0], size=20_000)
+    edges = np.array(
+        [
+            np.finfo(np.float32).max,
+            -np.finfo(np.float32).max,
+            np.finfo(np.float32).tiny,
+            np.finfo(np.float32).smallest_subnormal,
+            -np.finfo(np.float32).smallest_subnormal,
+        ],
+        np.float32,
+    )
+    every = np.concatenate([sampled, band.astype(np.float32), edges])
+    return cast("npt.NDArray[np.float32]", every[np.isfinite(every)])
+
+
+def _widest_rendered_float() -> int:
+    rendered = _PAGE_SPECS[PageType.F].render(_float32_candidates())["values"]
+    return max(len(json.dumps(v)) for v in cast(list[object], rendered))
+
+
+def _widest_float32() -> float:
+    candidates = _float32_candidates()
+    rendered = cast(list[object], _PAGE_SPECS[PageType.F].render(candidates)["values"])
+    widths = [len(json.dumps(v)) for v in rendered]
+    return float(candidates[int(np.argmax(widths))])
+
+
+def _worst_legal_fill(dtype: Any, n: int) -> npt.NDArray[Any]:
+    """The most expensive page of `n` legal items of `dtype`. One item is
+    non-finite on purpose: that is the true worst for float/complex, adding
+    the non_finite_items key to the header while costing only one wide
+    value."""
+    if np.issubdtype(dtype, np.complexfloating):
+        widest = _widest_float32()
+        raw = np.full(n, complex(-abs(widest), -abs(widest))).astype(dtype)
+        raw[0] = complex(np.inf, np.nan)
+        return raw
+    if np.issubdtype(dtype, np.floating):
+        raw = np.full(n, _widest_float32()).astype(dtype)
+        raw[0] = -np.inf
+        return raw
+    return np.full(n, np.iinfo(dtype).min).astype(dtype)
+
+
 @pytest.mark.parametrize(
     "suffix,dtype",
     [
@@ -185,30 +249,92 @@ def test_a_full_page_of_every_type_fits_the_context_budget(
     # through, and sampling half-range ints / unit-scale floats pinned the
     # budget against a benign page: the i16 cap validated -32768 (m_slice's
     # own bounds test permits it) yet a full page of them measured 57,434
-    # bytes against the 49,152 budget.
+    # bytes against the 49,152 budget. The float/complex fills used to be
+    # hand-picked "big-looking" numbers (-12345.6789) under this same
+    # comment, and a full page of legal float32 measured 92,235 bytes
+    # against the budget they claimed to pin - so the fill is now SEARCHED,
+    # not assumed.
     p = tmp_path / f"page{suffix}"
     n = max(s.max_items for s in _PAGE_SPECS.values()) + 32
-    if np.issubdtype(dtype, np.complexfloating):
-        worst = -1234.567891 - 1234.567891j
-        raw = np.full(n, worst).astype(dtype)
-    elif np.issubdtype(dtype, np.floating):
-        raw = np.full(n, -12345.6789).astype(dtype)
-    else:
-        info = np.iinfo(dtype)
-        raw = np.full(n, info.min).astype(dtype)
-    raw.tofile(p)
+    _worst_legal_fill(dtype, n).tofile(p)
     page = render_page(p, offset=0, count=n, item_type=None)
     size = len(json.dumps(page, separators=(",", ":")))
-    assert size <= _MAX_PAGE_BYTES, f"{suffix}: {size} bytes > {_MAX_PAGE_BYTES}"
+    assert (
+        size + _HEADER_HEADROOM <= _MAX_PAGE_BYTES
+    ), f"{suffix}: {size} bytes > {_MAX_PAGE_BYTES} - {_HEADER_HEADROOM}"
     kind = PageType(str(page["item_type"]))
     assert page["capped_at"] == _PAGE_SPECS[kind].max_items
 
 
 def test_read_stream_docstring_states_every_page_bound() -> None:
-    doc = read_stream.__doc__ or ""
+    doc = _read_stream_doc()
     for kind, spec in _PAGE_SPECS.items():
         for bound in (spec.default_items, spec.max_items):
             assert str(bound) in doc, f"{kind}={bound} missing from read_stream doc"
+
+
+def test_the_float_page_caps_are_priced_from_the_measured_worst_item() -> None:
+    # the arithmetic the ceilings were chosen by, executed: worst rendered
+    # width + 1 separator, times the ceiling, must fit the budget - and the
+    # docstring must name the same per-item cost it sells to the agent.
+    per_float = _widest_rendered_float() + 1
+    doc = _read_stream_doc()
+    assert f"a float up to {per_float}" in doc, per_float
+    assert f"a complex pair up to {2 * per_float}" in doc
+    for kind, cost in ((PageType.F, per_float), (PageType.C, 2 * per_float)):
+        spent = _PAGE_SPECS[kind].max_items * cost
+        assert spent + _HEADER_HEADROOM <= _MAX_PAGE_BYTES, (kind, spent)
+
+
+def test_non_finite_page_items_are_named_not_nulled(tmp_path: Path) -> None:
+    # they used to reach the wire as bare NaN/Infinity tokens in-process
+    # (which json.dumps(allow_nan=False) rejects outright) and as `null`
+    # through the server's serializer - unmarked, and with nan-vs-inf lost
+    p = tmp_path / "poison.f32"
+    np.array([1.5, np.nan, np.inf, -np.inf, 0.25], np.float32).tofile(p)
+    page = render_page(p, offset=0, count=None, item_type=None)
+    assert page["values"] == [1.5, "nan", "inf", "-inf", 0.25]
+    assert page["non_finite_items"] == 3
+    json.dumps(page, allow_nan=False)  # RFC 8259 has no NaN/Infinity literal
+    doc = _read_stream_doc()
+    for claim in ('"nan"', '"inf"', '"-inf"', "non_finite_items"):
+        assert claim in doc, f"the page ships {claim}; the docstring never says so"
+
+
+def test_a_complex_page_names_the_non_finite_half(tmp_path: Path) -> None:
+    p = tmp_path / "poison.cf32"
+    np.array(
+        [complex(np.nan, 0.5), complex(1.0, -np.inf), complex(0.25, 0.5)], np.complex64
+    ).tofile(p)
+    page = render_page(p, offset=0, count=None, item_type=None)
+    assert page["real"] == ["nan", 1.0, 0.25]
+    assert page["imag"] == [0.5, "-inf", 0.5]
+    assert page["non_finite_items"] == 2
+    json.dumps(page, allow_nan=False)
+
+
+def test_a_finite_page_carries_no_non_finite_key(tmp_path: Path) -> None:
+    # absent, not zero: a reader never pays for a measurement with nothing
+    # to report
+    p = tmp_path / "clean.f32"
+    np.array([1.5, 0.25], np.float32).tofile(p)
+    page = render_page(p, offset=0, count=None, item_type=None)
+    assert "non_finite_items" not in page
+
+
+def test_small_page_values_survive_their_own_rounding(tmp_path: Path) -> None:
+    # a fixed 4-DECIMAL round zeroed every soft value below ~1e-4 - a ci16
+    # capture's own LSB is 3.05e-5, so a weak stream paged as all zeros
+    p = tmp_path / "tiny.f32"
+    np.array([1.2345678e-8, -3.05e-5, 1.23456789], np.float32).tofile(p)
+    page = render_page(p, offset=0, count=None, item_type=None)
+    values = cast(list[float], page["values"])
+    assert values[0] == pytest.approx(1.2345678e-8, rel=1e-5)
+    assert values[1] == pytest.approx(-3.05e-5, rel=1e-5)
+    # the docstring sells 6 significant figures - the width the ceilings are
+    # priced from, so it is the promise that has to hold at every magnitude
+    assert values[2] == 1.23457
+    assert "6 significant figures" in _read_stream_doc()
 
 
 def test_failed_read_does_not_touch_the_filesystem(
