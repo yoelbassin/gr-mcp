@@ -110,6 +110,20 @@ class BlockParams:
     def ints(self, name: str) -> list[int]:
         return [_element_int(name, x) for x in self._sequence(name)]
 
+    def nonneg_ints(self, name: str) -> list[int]:
+        """Non-empty, all >= 0 — for reads GR dies on rather than rejects:
+        stream_mux(lengths=[]) SIGSEGVs at construction and [-1, 4] SIGBUSes
+        at run, so the worker exits by signal naming no block at all. Zero
+        stays legal: the CSS dechirp chain runs a length-0 mux arm at
+        zero_pad=1, and GR rejects an all-zero list cleanly on its own."""
+        vals = self.ints(name)
+        if not vals or any(v < 0 for v in vals):
+            raise BackendError(
+                f"param {name!r} needs a non-empty list of integers >= 0, "
+                f"got {vals!r}"
+            )
+        return vals
+
     def _sequence(self, name: str) -> list[float | int]:
         v = self._read(name, _MISSING)
         if not isinstance(v, list):
@@ -135,6 +149,13 @@ def _element_int(name: str, v: float | int) -> int:
 
 
 def _complex_syms(i: list[float], q: list[float]) -> list[complex]:
+    if len(i) < 2:
+        # constellation_calcdist over a single point decodes EVERY symbol to
+        # index 0 - a silent all-zeros decode, not an error; and a 1-point
+        # preamble correlates with everything
+        raise BackendError(
+            f"points need at least 2 constellation entries, got {len(i)}"
+        )
     return [complex(a, b) for a, b in zip(i, q)]
 
 
@@ -494,7 +515,7 @@ GR_BLOCKS: dict[str, Callable[[_GrModules, BlockParams], Any]] = {
     "multiply_cc": lambda c, p: c.blocks.multiply_cc(),
     "null_source_c": lambda c, p: c.blocks.null_source(c.gr.sizeof_gr_complex),
     "stream_mux_c": lambda c, p: c.blocks.stream_mux(
-        c.gr.sizeof_gr_complex, p.ints("lengths")
+        c.gr.sizeof_gr_complex, p.nonneg_ints("lengths")
     ),
     "vector_to_stream_f": lambda c, p: c.blocks.vector_to_stream(
         c.gr.sizeof_float, p.i("vlen")

@@ -5,6 +5,7 @@ from helpers._fixtures import (
     fixture_registry,
     stub_factories,
 )
+from pydantic import ValidationError
 
 from marconi.engine.backends.base import BackendError
 from marconi.engine.backends.stub import StubBackend
@@ -43,13 +44,14 @@ def test_unknown_kind_raises() -> None:
 
 
 def test_connection_to_unknown_block_raises() -> None:
-    pipe = GrPipeline(
-        sample_rate=1.0,
-        blocks=[GrBlock(id="a", kind="iq_file_source")],
-        connections=[GrConnection(src_block="a", dst_block="ghost")],
-    )
-    with pytest.raises(BackendError):
-        StubBackend(stub_factories()).instantiate(pipe)
+    # the reference check moved to GrPipeline itself, so the typo fails at
+    # validation before any backend sees it
+    with pytest.raises(ValidationError, match="ghost"):
+        GrPipeline(
+            sample_rate=1.0,
+            blocks=[GrBlock(id="a", kind="iq_file_source")],
+            connections=[GrConnection(src_block="a", dst_block="ghost")],
+        )
 
 
 def test_out_of_range_port_raises() -> None:

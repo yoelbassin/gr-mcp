@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import multiprocessing
 import os
+import sys
 import tempfile
 import time
 from collections.abc import Callable
@@ -55,6 +56,17 @@ def ensure_worker_warm() -> None:
     proc = _CTX.Process(target=_warmup_noop)  # type: ignore[attr-defined]
     proc.start()
     proc.join()
+    if proc.exitcode != 0:
+        # the preload imports gnuradio, so this is where a missing/broken GR
+        # first shows; swallowing the exitcode kept the server's startup
+        # silent and the user learned only at their first run_rx
+        print(
+            f"marconi: worker warmup child exited {proc.exitcode}; GNU Radio "
+            "may not be importable in the worker (`python -c 'from gnuradio "
+            "import gr'` inside the same environment will say why). run_rx "
+            "will fail until this is fixed.",
+            file=sys.stderr,
+        )
     _warmed = True
 
 

@@ -3,6 +3,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from pydantic import ValidationError
 
 from marconi.engine.backends.base import BackendError
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend
@@ -63,19 +64,23 @@ def test_unknown_kind_raises_backend_error() -> None:
         GnuRadioBackend().instantiate(pipe)
 
 
-def test_dangling_connection_raises_backend_error(tmp_path: Path) -> None:
+def test_dangling_connection_is_rejected_at_pipeline_validation(
+    tmp_path: Path,
+) -> None:
+    # was a BackendError from instantiate(); the reference check moved to
+    # GrPipeline itself so a typo'd endpoint (or terminal_sink, which used
+    # to silently disable the empty-sink verdict) fails before any backend
     (tmp_path / "i.iq").write_bytes(b"\x00" * 8)
-    pipe = GrPipeline(
-        name="x",
-        sample_rate=1.0,
-        blocks=[
-            GrBlock(
-                id="s",
-                kind="iq_file_source",
-                params={"path": str(tmp_path / "i.iq")},
-            )
-        ],
-        connections=[GrConnection(src_block="s", dst_block="ghost")],
-    )
-    with pytest.raises(BackendError):
-        GnuRadioBackend().instantiate(pipe)
+    with pytest.raises(ValidationError, match="ghost"):
+        GrPipeline(
+            name="x",
+            sample_rate=1.0,
+            blocks=[
+                GrBlock(
+                    id="s",
+                    kind="iq_file_source",
+                    params={"path": str(tmp_path / "i.iq")},
+                )
+            ],
+            connections=[GrConnection(src_block="s", dst_block="ghost")],
+        )

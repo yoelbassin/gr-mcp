@@ -71,6 +71,31 @@ class GrPipeline(BaseModel):
             raise ValueError(f"duplicate block ids: {dupes}")
         return self
 
+    @model_validator(mode="after")
+    def _references_resolve(self) -> GrPipeline:
+        """Every block reference must name a block that exists, or the
+        failure surfaces downstream wearing the wrong cause: a typo'd
+        terminal_sink made the empty-sink verdict silently unreachable
+        (worker.py's `if not sinks` amnesty), and a typo'd connection
+        endpoint died in the worker instead of at validation."""
+        ids = {b.id for b in self.blocks}
+        if self.terminal_sink is not None and self.terminal_sink not in ids:
+            raise ValueError(
+                f"terminal_sink {self.terminal_sink!r} names no block; "
+                f"blocks: {sorted(ids)}"
+            )
+        ghosts = sorted(
+            {
+                end
+                for c in self.connections
+                for end in (c.src_block, c.dst_block)
+                if end not in ids
+            }
+        )
+        if ghosts:
+            raise ValueError(f"connection endpoints name no block: {ghosts}")
+        return self
+
     @property
     def block_ids(self) -> list[str]:
         return [b.id for b in self.blocks]

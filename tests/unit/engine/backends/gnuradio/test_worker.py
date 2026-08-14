@@ -376,3 +376,60 @@ def test_empty_aggregate_rule_holds_for_unmarked_ir() -> None:
     )
     out = worker_mod._flag_empty_sink(result, _tapped_pipeline(None))
     assert out.status == "ok"
+
+
+def test_scheduler_abort_matches_thread_body_wrapper_messages() -> None:
+    """The OTHER half of the detector: an exception escaping a C++ block's
+    work() is logged by the thread_body_wrapper logger, not block_executor,
+    and GR 3.10.12's catch-all text is "caught unrecognized exception"
+    ("unhandled" appears nowhere in the shipped binary - verified via
+    strings(1) on libgnuradio-runtime). Both shapes verbatim from a live
+    file_sink failure; a run whose block thread died reported status ok
+    with a silently truncated stream."""
+    from marconi.engine.backends.base import RunResult
+    from marconi.engine.backends.gnuradio.worker import _flag_scheduler_abort
+    from marconi.engine.types.enums import RunStatus
+
+    ok = RunResult(status=RunStatus.OK)
+    real = (
+        "thread_body_wrapper :error: ERROR thread[thread-per-block[3]: "
+        "<block file_sink(0)>]: file_sink write failed with error 8\n"
+    )
+    assert _flag_scheduler_abort(ok, real).status is RunStatus.ERROR
+    unrecognized = "ERROR thread[thread-per-block[2]]: caught unrecognized exception\n"
+    assert _flag_scheduler_abort(ok, unrecognized).status is RunStatus.ERROR
+    benign = (
+        "vmcircbuf :info: sysv_shm is not available\n"
+        "thread_body_wrapper :info: starting 4 threads\n"
+    )
+    assert _flag_scheduler_abort(ok, benign).status is RunStatus.OK
+
+
+def test_trampoline_wraps_hooks_inherited_through_the_mro() -> None:
+    """vars(cls) only sees the exact class: a work() inherited from a base
+    class was left unwrapped, and its raise re-opened the very hang the
+    trampoline exists to close - silently, since the miss had no diagnostic."""
+    from marconi.engine.backends.gnuradio.worker import _arm_crash_trampoline
+
+    class _Base:
+        def work(self, input_items: object, output_items: object) -> int:
+            raise RuntimeError("boom from an inherited hook")
+
+    class _Child(_Base):
+        pass
+
+    class _Tb:
+        def __init__(self) -> None:
+            self._py_instances = {"b0": _Child()}
+            self.stopped = False
+
+        def stop(self) -> None:
+            self.stopped = True
+
+    tb = _Tb()
+    crashes: list[str] = []
+    _arm_crash_trampoline(tb, crashes)
+    blk = tb._py_instances["b0"]
+    assert blk.work(None, None) == -1  # trampolined: recorded, not raised
+    assert crashes and "inherited hook" in crashes[0]
+    assert tb.stopped

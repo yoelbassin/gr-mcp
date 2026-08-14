@@ -63,3 +63,25 @@ def test_list_reads_validate_every_element() -> None:
         _p(lens=[2, 4.5]).ints("lens")
     with pytest.raises(BackendError, match="taps"):
         _p(taps=3.0).floats("taps")
+
+
+def test_stream_mux_lengths_are_guarded_before_gr() -> None:
+    # measured: lengths=[] SIGSEGVs at construction, [-1, 4] SIGBUSes at run
+    # - the worker dies by signal and the runner reports exitcode -11 naming
+    # no block. The read is the documented last line of defense. Zero stays
+    # legal: the CSS dechirp chain runs a length-0 mux arm at zero_pad=1.
+    with pytest.raises(BackendError, match="lengths"):
+        _p(lengths=[]).nonneg_ints("lengths")
+    with pytest.raises(BackendError, match="lengths"):
+        _p(lengths=[-1, 4]).nonneg_ints("lengths")
+    assert _p(lengths=[256, 0]).nonneg_ints("lengths") == [256, 0]
+
+
+def test_explicit_constellation_needs_two_points() -> None:
+    # constellation_calcdist over a single point decodes EVERY symbol to
+    # index 0 - a silent all-zeros decode, not an error
+    from marconi.engine.backends.gnuradio.blocks import _complex_syms
+
+    with pytest.raises(BackendError, match="points"):
+        _complex_syms([1.0], [0.0])
+    assert _complex_syms([1.0, -1.0], [0.0, 0.0]) == [(1 + 0j), (-1 + 0j)]

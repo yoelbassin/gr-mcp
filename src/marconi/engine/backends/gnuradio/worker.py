@@ -22,8 +22,17 @@ from marconi.engine.compile.ir import FILE_SINK_KINDS, GrPipeline
 from marconi.engine.types.enums import RunStatus
 from marconi.wire import replace
 
+# Two logger channels, verified against GR 3.10.12: buffer/forecast
+# complaints arrive via block_executor, but an exception escaping a C++
+# block's work() is logged by thread_body_wrapper ("ERROR thread[...]"), and
+# the catch-all text is "caught UNRECOGNIZED exception" - "unhandled" appears
+# nowhere in the shipped binary (strings(1) on libgnuradio-runtime). The old
+# pattern matched only the first channel, so a run whose block thread died
+# reported status ok over a silently truncated stream.
 _SCHED_ABORT = re.compile(
-    r"block_executor.*error|caught unhandled exception", re.IGNORECASE
+    r"block_executor\s*:\s*error|thread_body_wrapper\s*:\s*error"
+    r"|ERROR thread\[|caught unrecognized exception",
+    re.IGNORECASE,
 )
 
 
@@ -67,17 +76,30 @@ def _trampolined_forecast(
     return wrapped
 
 
+def _defines_python_hook(cls: type, name: str) -> bool:
+    """Whether `name` resolves to a Python-defined function anywhere in the
+    MRO (a pybind builtin is not one and must stay unwrapped). vars(cls)
+    alone saw only the exact class, so a hook inherited from a base class
+    was left unwrapped and its raise re-opened the very hang the trampoline
+    exists to close - silently."""
+    for klass in cls.__mro__:
+        fn = vars(klass).get(name)
+        if fn is not None:
+            return inspect.isfunction(fn)
+    return False
+
+
 def _arm_crash_trampoline(tb: Any, crashes: list[str]) -> None:
     """A raise on a GR block thread never unwinds tb.run() — the graph hangs
     until the runner kills the worker (probed). Wrap every Python-defined
     block hook so the exception is recorded and the graph stops instead."""
     for blk in getattr(tb, "_py_instances", {}).values():
         cls = type(blk)
-        if inspect.isfunction(vars(cls).get("general_work")):
+        if _defines_python_hook(cls, "general_work"):
             blk.general_work = _trampolined_work(blk.general_work, tb, crashes)
-        if inspect.isfunction(vars(cls).get("work")):
+        if _defines_python_hook(cls, "work"):
             blk.work = _trampolined_work(blk.work, tb, crashes)
-        if inspect.isfunction(vars(cls).get("forecast")):
+        if _defines_python_hook(cls, "forecast"):
             blk.forecast = _trampolined_forecast(blk.forecast, tb, crashes)
 
 
