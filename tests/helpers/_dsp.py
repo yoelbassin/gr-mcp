@@ -227,16 +227,20 @@ def aligned_ber(rx: np.ndarray, tx: np.ndarray, max_shift: int = 256) -> float:
     ~0.46 random. Searching both directions is a superset of the forward-only
     search, so it never raises the score of an already-aligned path.
 
-    WARNING: the half-overlap floor launders systematic tail
-    truncation — measured, not hypothetical. Requiring full coverage instead
-    fails 19/30 phy round-trips: clock_correct emits 1260/1350 bits (90-bit
-    tail lost, scored 0.0 today), and even the clean FSK/OOK paths truncate.
-    Fixing this honestly needs a per-path tail-loss investigation (inherent
-    streaming group-delay vs real bug) plus explicit bounded-tail assertions;
-    tracked in the issue, deliberately not curve-fitted here."""
+    WARNING: the overlap floor launders systematic tail truncation up to its
+    complement — measured, not hypothetical. At the original len(tx)//2 a
+    decode that LOST 45% OF THE PAYLOAD scored BER 0.0, and mutating the
+    reader to truncate at 55% left the whole 9-stage x 3-gain invariance
+    matrix green (4 failed / 62 passed). The floor is 3/4 now: every real
+    path's tail loss measures under 10% (clock_correct is the worst at
+    1260/1350 = 93.3% coverage), so 75% holds with margin while bounding the
+    laundering at 25%. Full coverage still fails 19/30 round-trips on
+    inherent streaming group-delay; a per-path bounded-tail assertion is the
+    honest end state and needs the per-path investigation this floor
+    deliberately does not fake."""
     rx = np.asarray(rx, dtype=np.uint8)
     tx = np.asarray(tx, dtype=np.uint8)
-    floor = len(tx) // 2
+    floor = (3 * len(tx)) // 4
     best = 1.0
     # (lead, lag) = (rx, tx): rx delayed; (tx, rx): rx advanced (negative lag).
     for lead, lag in ((rx, tx), (tx, rx)):

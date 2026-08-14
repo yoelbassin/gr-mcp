@@ -40,7 +40,12 @@ def test_tx_rx_roundtrip_ber0(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     assert stream["item_type"] == "b"
     page = read_stream(cast(str, stream["path"]), offset=0, count=4096)
     decoded = cast(str, page["bits"])
-    assert bits in decoded or decoded in bits or _aligned_equal(bits, decoded)
+    # the reverse-substring arm (`decoded in bits`) accepted ANY decode that
+    # happened to be a substring of the 2048 transmitted bits - a 10-bit one
+    # included; a decode must carry nearly all of the payload before any
+    # alignment-shape acceptance applies
+    assert len(decoded) >= int(0.9 * len(bits)), (len(decoded), len(bits))
+    assert bits in decoded or _aligned_equal(bits, decoded)
     # the demod tap feeding the slicer is surfaced for soft-decision work
     soft = cast(dict[str, object], rx["soft_stream"])
     assert soft["item_type"] == "f"

@@ -57,4 +57,9 @@ async def test_roundtrip_through_client(
                 {"path": rx["stream"]["path"], "count": 1024},
             )
         ).data
-        assert set(page["bits"]) <= {"0", "1"}
+        # against the TRANSMITTED bits, not "is it a bit string" (true by
+        # construction): the mutation "every page reads all-zeros" - a
+        # previously shipped failure mode - passed the old assertion
+        want = "".join(str(b) for b in bits)
+        got = page["bits"]
+        assert want[: len(got)] == got or want in got, (want[:40], got[:40])

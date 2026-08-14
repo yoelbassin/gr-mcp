@@ -78,11 +78,18 @@ def test_a_detail_call_costs_no_more_than_its_budget() -> None:
     _MAX_INLINE_LIST, _SPECTRUM_BINS); this one did not, and it is the biggest
     response the surface can produce. Measured before the budget: the coding
     family alone returned 13017 bytes — more than all eight tool docstrings
-    together — and grew with the family."""
+    together — and grew with the family.
+
+    16384 is a LITERAL, deliberately not MAX_DETAIL_BYTES: the budget and the
+    truncation both come from that constant, so asserting against the import
+    is a tautology — measured: raising it to 12 MiB left this test green
+    while a single detail call could return 12 MB of JSON. A retune must
+    meet this number in person."""
+    assert MAX_DETAIL_BYTES <= 16384
     for family in sorted({s.family for s in stage_registry().values()}):
         payload = describe_stages(family=family)
         size = len(json.dumps(payload))
-        assert size <= MAX_DETAIL_BYTES, f"{family} detail call is {size} bytes"
+        assert size <= 16384, f"{family} detail call is {size} bytes"
 
 
 def test_a_dropped_stage_is_named_so_it_can_be_fetched() -> None:

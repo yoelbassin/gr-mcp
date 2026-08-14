@@ -4,7 +4,11 @@ garbage frames. The 3x ratio kills that class; real gates run >>3x."""
 
 import pytest
 
-from marconi.engine.quality import _SYNC_NEGATIVE_MIN_ITEMS, _sync_assessment
+from marconi.engine.quality import (
+    _SYNC_NEGATIVE_MIN_ITEMS,
+    Assessment,
+    _sync_assessment,
+)
 
 _SCANNED = 10 * _SYNC_NEGATIVE_MIN_ITEMS
 
@@ -49,4 +53,6 @@ def test_zero_hits_over_too_little_stream_is_untestable(scanned: int) -> None:
 
 
 def test_zero_hits_over_a_long_enough_stream_is_still_negative() -> None:
-    assert _sync_assessment(0, 1e-9, _SYNC_NEGATIVE_MIN_ITEMS) is not None
+    # the verdict itself, not `is not None`: a POSITIVE would have satisfied
+    # the old assertion while the name promises negative
+    assert _sync_assessment(0, 1e-9, _SYNC_NEGATIVE_MIN_ITEMS) is Assessment.NEGATIVE

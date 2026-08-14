@@ -154,12 +154,19 @@ def test_symbol_sync_rejects_invalid_params() -> None:
             model.model_validate(bad)
 
 
-def test_symbol_sync_output_carries_soft_iq() -> None:
+def test_symbol_sync_passes_item_type_and_carrier_through() -> None:
+    # the old name claimed "carries soft IQ" while the fixture deliberately
+    # fed carrier=HARD and only item_type was asserted - the test was
+    # "c" == "c". symbol_sync does not override out_descriptor: BOTH fields
+    # pass through, which is the actual contract worth pinning.
     stage = stage_registry()["symbol_sync"]
-    out = stage.out_descriptor(
-        Descriptor(Level.IQ, ItemType.C, carrier=Carrier.HARD), SymbolSyncStep(sps=_SPS)
-    )
-    assert out.item_type == "c"
+    for carrier in (Carrier.HARD, Carrier.SOFT):
+        out = stage.out_descriptor(
+            Descriptor(Level.IQ, ItemType.C, carrier=carrier),
+            SymbolSyncStep(sps=_SPS),
+        )
+        assert out.item_type == "c"
+        assert out.carrier == carrier
 
 
 def test_rrc_length_is_bounded_as_a_product() -> None:

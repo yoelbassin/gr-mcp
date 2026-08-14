@@ -599,7 +599,15 @@ def test_control_arm_without_agc(name: str, tmp_path: Path) -> None:
         _measure(tmp_path, name, g, with_agc=False, condition="static") for g in _GAINS
     ]
     print(f"\ncontrol {name} no-agc BER vs gain -> {dict(zip(_GAINS, bers))}")
-    assert bers[_GAINS.index(1.0)] == 0.0, f"{name} baseline broken: {bers}"
+    # A no-amplitude declaration IS a claim - "this stage is scale-invariant"
+    # - so every raw gain must decode clean, which is the measurement that
+    # re-derives the declaration. These BERs were previously computed,
+    # printed and never asserted; only the unity baseline was checked, which
+    # test_static_offset_invariance already covers.
+    assert all(b == 0.0 for b in bers), (
+        f"{name} declares no amplitude requirement but is level-sensitive: "
+        f"{dict(zip(_GAINS, bers))}"
+    )
 
 
 _BURST_RECIPE = "ook_envelope"
@@ -708,7 +716,11 @@ _CHAINS: dict[str, list[Step]] = {
         FskStep(deviation=1.0),
         SliceStep(),
     ],
+    # the agc is part of the claim: psk_demod requires a NORMALIZED stream
+    # (the compiler rejects a bare chain), and the invariance being pinned
+    # is end-to-end - any input gain through any normalizer decodes clean
     "psk": [
+        AgcStep(mode=AgcMode.FEEDFORWARD),
         PskDemodStep(order=PskOrder(2)),
         PskDemapStep(order=PskOrder(2)),
     ],
@@ -755,8 +767,29 @@ def _assert_level_invariant(name: str, table: dict[float, GainResult]) -> None:
     ), f"{name} is level-sensitive: {table}"
 
 
+def _assert_level_invariant_settling(name: str, table: dict[float, GainResult]) -> None:
+    """Identical BER at EVERY gain (that is the invariance), with a small
+    settle allowance: the costas/timing loops burn ~140 of 4096 bits
+    acquiring, at every gain equally - measured 0.03468 bit-identical
+    across 1e-3..1e3."""
+    for gain, result in table.items():
+        assert (
+            result.status is RunStatus.OK
+        ), f"{name}@{gain} status {result.status}: {table}"
+    bers = {r.ber for r in table.values()}
+    assert len(bers) == 1, f"{name} is level-sensitive: {table}"
+    assert bers.pop() < 0.05, f"{name} settle allowance exceeded: {table}"
+
+
 _EXPECT: dict[str, Callable[[str, dict[float, GainResult]], None]] = {
     "fsk": _assert_level_invariant,
+    # this arm was written for psk_demod's measured gain sweep and then
+    # never wired into _EXPECT, so the chain was maintained and never run
+    # (collection confirmed ONE item). Reviving it immediately measured two
+    # facts the dead arm hid: a bare psk chain does not even COMPILE (the
+    # amplitude contract demands a normalizer), and the invariant is
+    # identical-BER-per-gain with a settle transient, not BER 0.
+    "psk": _assert_level_invariant_settling,
 }
 
 
@@ -766,3 +799,68 @@ def test_v2_level_sensitivity(name: str, tmp_path: Path) -> None:
     table = {g: _ber_at_gain(tmp_path, name, g) for g in _V2_GAINS}
     print(f"\nV2 {name} BER vs gain -> {table}")
     _EXPECT[name](name, table)
+
+
+def test_qam_rms_only_declaration_is_re_derived_by_measurement(
+    tmp_path: Path,
+) -> None:
+    """The dangerous direction. The invariance sweep reads accepts_amplitude
+    from the registry and the compiler reads the same attribute, so WIDENING
+    QamDemod's declaration (say, admitting PEAK_UNITY) moves both sides
+    together and nothing failed - the only catcher was a hardcoded literal
+    copy of the declaration. This is the measurement itself: one capture,
+    normalized to each statistic, with the start descriptor claiming exactly
+    what the file delivers. The declaration's comment says peak-normalized
+    input is SER 0.91 at every gain; re-derived here so a wrong declaration
+    fails a MEASUREMENT, not a copy of itself."""
+    ensure_worker_warm()
+    be = GnuRadioBackend()
+    rate = _sample_rate("qam_demod")
+    bits = np.random.default_rng(0).integers(0, 2, _QAM_N_BITS).astype(np.uint8)
+    clean = tmp_path / "qam_clean.iq"
+    _synth_tx(
+        [
+            QamDemodStep(order=QamOrder(_QAM_ORDER)),
+            QamDemapStep(order=QamOrder(_QAM_ORDER)),
+        ],
+        bits,
+        rate,
+        clean,
+    )
+    base = tmp_path / "qam_base.iq"
+    channel(clean, base, sample_rate=rate, seed=0, sto=_QAM_STO)
+    z = np.fromfile(base, dtype=np.complex64)
+    points, k = _qam_oracle(_QAM_ORDER)
+    tsi = tx_sym_indices(bits, k)
+
+    def ser_with(norm: np.ndarray, tag: str) -> float:
+        src = tmp_path / f"qam_{tag}.iq"
+        norm.astype(np.complex64).tofile(src)
+        out = tmp_path / f"qam_{tag}.u8"
+        start = Descriptor(Level.IQ, ItemType.C, Carrier.HARD, Amplitude.RMS_UNITY)
+        pipe = _compile_pipeline(
+            "rx",
+            [QamDemodStep(order=QamOrder(_QAM_ORDER))],
+            rate,
+            _SYM,
+            start,
+            src,
+            out,
+        )
+        assert be.run_pipeline(pipe).status == "ok"
+        try:
+            return resolved_ser_hard(
+                read_bits(out), tsi, points, settle=_QAM_SETTLE_SYMS
+            )
+        except AlignmentNotFound:
+            # the peak-normalized decode is broken past the oracle's
+            # no-lock bar - which IS the measurement
+            return 1.0
+
+    rms = float(np.sqrt(np.mean(np.abs(z) ** 2)))
+    peak = float(np.max(np.abs(z)))
+    ser_rms = ser_with(z / rms, "rms")
+    ser_peak = ser_with(z / peak, "peak")
+    print(f"\nqam SER rms-normalized={ser_rms:.4f} peak-normalized={ser_peak:.4f}")
+    assert ser_rms < 0.05, ser_rms  # the statistic the declaration names
+    assert ser_peak > 0.5, ser_peak  # the one a widened declaration admits

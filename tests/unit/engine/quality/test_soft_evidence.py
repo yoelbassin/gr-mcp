@@ -102,7 +102,10 @@ def test_noise_lead_does_not_read_negative(tmp_path: Path) -> None:
     noise = rng.normal(0, 1.0, 100_000)
     signal = rng.choice([-2.0, 2.0], size=100_000) + rng.normal(0, 0.3, 100_000)
     ev = soft_evidence(_llr_file(tmp_path, np.concatenate([noise, signal])))
-    assert all(e.assessment != "negative" for e in ev)
+    # ev != [] FIRST: a regression that stops finding the burst returns []
+    # and "not negative" is vacuously true of nothing (mutated soft_evidence
+    # to always return [] - this test still passed)
+    assert [e.assessment for e in ev] == ["positive"]
 
 
 def test_gaussian_noise_llrs_are_negative(tmp_path: Path) -> None:
@@ -161,7 +164,9 @@ def test_four_level_noise_blob_is_not_positive(tmp_path: Path) -> None:
     # rather than the new multi-level branch, which stays silent on it
     blob = np.random.default_rng(1).normal(0.0, 1.0, 6000).astype(np.float32)
     ev = soft_evidence(_llr_file(tmp_path, blob))
-    assert not any(e.assessment == "positive" for e in ev)
+    # the binary path must SPEAK (noise ratio ~1.3 reads negative), not just
+    # not-positive: "not any positive" was vacuously true of [] too
+    assert [e.assessment for e in ev] == ["negative"]
 
 
 def test_symbols_level_clean_eye_is_detection_grade(tmp_path: Path) -> None:

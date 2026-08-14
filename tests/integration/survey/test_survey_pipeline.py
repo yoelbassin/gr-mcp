@@ -20,7 +20,10 @@ def test_survey_iq_recovers_fsk_ground_truth(tmp_path: Path) -> None:
     x.tofile(p)
     r = survey_iq(p, fs)
     assert r.span_samples == x.size
-    assert min(abs(c - rate) for c in r.symbol_rate.candidates_hz) < 0.05 * rate
+    # rank 0, not membership in an unbounded list: the product's documented
+    # claim is that candidates_hz[0] is the rate, and the true rate measured
+    # rank 4 of 5 here without this pin
+    assert abs(r.symbol_rate.candidates_hz[0] - rate) < 0.05 * rate
     assert len(r.symbol_rate.eye_openness) == len(r.symbol_rate.candidates_hz)
     assert 3 <= len(r.inst_freq.peaks_hz) <= 5
     assert r.envelope.const_envelope_ratio < 0.1
