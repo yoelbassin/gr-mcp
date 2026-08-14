@@ -13,7 +13,7 @@ import pytest
 from helpers import _synth
 
 from marconi.survey.iqfile import CaptureNotRaw, sample_iq
-from marconi.survey.measure import survey_iq
+from marconi.survey.measure import _symbol_rate, survey_iq
 
 _FS = 1_000_000.0
 
@@ -45,6 +45,52 @@ def test_continuous_emitter_does_not_delete_weak_bursts(tmp_path: Path) -> None:
         n_bursts += 1
     res = survey_iq(_write(tmp_path, x), _FS)
     assert res.bursts.count >= int(0.8 * n_bursts), (res.bursts.count, n_bursts)
+
+
+@pytest.mark.parametrize("duty", [0.76, 0.80, 0.90])
+def test_high_duty_bursts_are_not_read_as_a_dead_band(
+    tmp_path: Path, duty: float
+) -> None:
+    # once within-probe duty passed 0.75, the p25 of smoothed power was the
+    # SIGNAL level in every probe, the aggregate floor rode it, and the 4x bar
+    # sat above the signal itself: measured cliff — duty 0.74 -> count 128,
+    # duty 0.737; duty 0.76 -> count 0, duty 0.0 ("the band is dead")
+    rng = np.random.default_rng(int(duty * 100))
+    n = 1 << 19
+    noise = 0.05 * (rng.standard_normal(n) + 1j * rng.standard_normal(n)) / np.sqrt(2)
+    period = 4096
+    mask = (np.arange(n) % period) < int(duty * period)
+    x = (_tone(n, 100_000.0, _FS) * mask + noise).astype(np.complex64)
+    res = survey_iq(_write(tmp_path, x), _FS)
+    assert res.bursts.count > 0, res.bursts.count
+    assert abs(res.bursts.duty_cycle - duty) <= 0.1, res.bursts.duty_cycle
+    assert res.bursts.dominant_period_samples is not None
+
+
+def test_continuous_carrier_reports_duty_near_one(tmp_path: Path) -> None:
+    # an emitter that never turns off leaves no observable noise floor, and
+    # the bar built from its own level read it as a DEAD band: duty 0.0.
+    # genuinely continuous means count may be 0 — but duty must say "always
+    # on", not "never on".
+    rng = np.random.default_rng(11)
+    n = 1 << 19
+    noise = 0.05 * (rng.standard_normal(n) + 1j * rng.standard_normal(n)) / np.sqrt(2)
+    x = (_tone(n, 100_000.0, _FS) + noise).astype(np.complex64)
+    res = survey_iq(_write(tmp_path, x), _FS)
+    assert res.bursts.duty_cycle >= 0.9, res.bursts.duty_cycle
+
+
+def test_dead_noise_band_still_reads_duty_zero(tmp_path: Path) -> None:
+    # the continuous-carrier fallback must not turn a dead band into an
+    # always-on one: pure noise has the same probe-scale power profile as a
+    # carrier, and only the raw-sample envelope shape tells them apart.
+    rng = np.random.default_rng(12)
+    n = 1 << 19
+    x = (0.05 * (rng.standard_normal(n) + 1j * rng.standard_normal(n))).astype(
+        np.complex64
+    )
+    res = survey_iq(_write(tmp_path, x), _FS)
+    assert res.bursts.duty_cycle < 0.1, res.bursts.duty_cycle
 
 
 def test_burst_cadence_stays_out_of_the_default_rate_band(tmp_path: Path) -> None:
@@ -143,6 +189,39 @@ def test_wav_container_is_refused_with_the_fix_named(tmp_path: Path) -> None:
         payload.tofile(f)
     with pytest.raises(CaptureNotRaw, match="raw"):
         sample_iq(p)
+
+
+def _noisy_2fsk(snr_db: float, seed: int, n: int = 1 << 18) -> np.ndarray:
+    sps = 8
+    dev = 0.35 * _FS / sps
+    rng = np.random.default_rng(seed)
+    bits = rng.integers(0, 2, n // sps + 2)
+    f = np.repeat(np.where(bits, dev, -dev), sps)[:n]
+    x = np.exp(2j * np.pi * np.cumsum(f) / _FS)
+    scale = 10 ** (-snr_db / 20)
+    noise = scale * (rng.standard_normal(n) + 1j * rng.standard_normal(n)) / np.sqrt(2)
+    out: np.ndarray = (x + noise).astype(np.complex64)
+    return out
+
+
+def test_eye_rerank_does_not_crown_a_noise_line(tmp_path: Path) -> None:
+    # On 2FSK + AWGN the eye at ANY rate samples the modulation's bimodal
+    # instantaneous frequency, so noise-rate lines carry eyes 6.9-11.3 at
+    # SNR 20-25 — clearing the eye bar and the 0.6x-of-max fraction — and
+    # min-by-rate crowned a strength-0.04-0.05 noise line as candidates_hz[0]
+    # with eye_confirmed True on 5/5 seeds. Strength is the discriminator:
+    # the same sweep measured every real line >= 0.8 of max.
+    true_rate = _FS / 8
+    for seed in (5, 6, 7, 8, 9):
+        s = _symbol_rate(_noisy_2fsk(20.0, seed), _FS, _FS / 1000, _FS / 2)
+        near_true = abs(s.candidates_hz[0] - true_rate) < 0.03 * true_rate
+        assert near_true or not s.eye_confirmed, (
+            seed,
+            s.candidates_hz,
+            s.strengths,
+            s.eye_openness,
+            s.eye_confirmed,
+        )
 
 
 def test_segments_accumulation_is_bounded(tmp_path: Path) -> None:

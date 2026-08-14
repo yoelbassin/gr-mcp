@@ -142,12 +142,16 @@ largest raw line and can read well under 1.0 on a confident detection. The true
 rate itself can never be mistaken for such a comb's fundamental.
 
 eye_openness is how cleanly a multi-level symbol eye opens when the capture is
-resampled at that rate — near zero for a smeared or wrong guess, sharply higher
-for a genuine eye. candidates_hz re-heads toward whichever candidate's eye
-CLEARLY opens, preferring the lower rate when several do (a harmonic's eye can
+resampled at that rate. It is NOT near zero for every wrong guess: on a
+constant-envelope signal a wrong rate still samples the modulation's own
+frequency levels, so even a noise-frequency line can carry a sizable eye at
+high SNR. candidates_hz therefore re-heads only among candidates that ALSO
+carry real cyclostationary strength, toward whichever such candidate's eye
+clearly opens, preferring the lower rate when several do (a harmonic's eye can
 look clean too), else falls back to strength order — so candidates_hz order
 need not match strengths order. eye_confirmed says which regime you are in:
-true => candidates_hz[0] is eye-corroborated, false => strength-ranked only.
+true => candidates_hz[0] was promoted on its eye AND its strength together,
+false => strength-ranked only.
 
 WHEN THE EYE NEVER CLEARS: on noisy or pulse-shaped off-air signals the eye can
 fail to clear even at the true rate (usual for constant-envelope signals, and
@@ -194,8 +198,16 @@ out frequency modulation.
 Activity segments, duty_cycle, and dominant_period_samples from burst spacing
 (the TDMA cadence).
 
-The activity bar is referenced to the slice's own noise floor, so a loud
-emitter does not hide weaker transmissions elsewhere in the capture.
+The activity bar is referenced to the slice's own noise floor, taken from its
+quietest stretches — between probes and, within a probe, from a genuine quiet
+side under a loud emitter — so an emitter with ANY observable off-time does
+not hide weaker transmissions elsewhere in the capture. An emitter that never
+turns off masks weaker total-power activity physically: the bar then rides its
+level, and when the raw envelope says constant carrier rather than noise, the
+result reports duty_cycle near 1.0 with count 0 (always on, genuinely
+continuous). An always-on amplitude-modulated emitter (QAM/OOK envelope) can
+still read duty 0.0 — its envelope minima are indistinguishable from a quiet
+band at sample scale — so read duty with the spectrum block, not alone.
 
 segments is capped at 512 with a segments_total count and NO sidecar —
 re-window with capture_offset/capture_samples to inspect a busier span, which

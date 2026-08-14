@@ -218,6 +218,22 @@ def _claimed_order(scores: dict[int, float]) -> int | None:
     )
 
 
+def _variant_order(
+    scores: dict[int, float],
+    lines: dict[int, float],
+    sample_rate: float,
+    anchor_hz: float,
+    n_samples: int,
+) -> int | None:
+    order = _claimed_order(scores)
+    if order == 4 and scores[8] >= _MPSK_CONC_THRESH:
+        off4 = _dealias_offset(lines[4], 4, sample_rate, anchor_hz)
+        off8 = _dealias_offset(lines[8], 8, sample_rate, anchor_hz)
+        if abs(off8 - off4) > _STAGGER_TOL_BINS * sample_rate / n_samples:
+            order = 8
+    return order
+
+
 def _carrier(
     x: npt.NDArray[np.complex64],
     sample_rate: float,
@@ -239,19 +255,18 @@ def _carrier(
     # per-order max so signal-at-DC stays visible either way.
     xd = xb - _active_mean(xb, active)
     scores, lines = _fold(xd, active, sample_rate, dof)
-    order = _claimed_order(scores)
     raw_scores, raw_lines = _fold(xb, active, sample_rate, dof)
+    order = _variant_order(scores, lines, sample_rate, anchor_hz, xb.size)
     if order is None:
-        raw_order = _claimed_order(raw_scores)
-        if raw_order is not None:
-            order, lines = raw_order, raw_lines
-            scores = dict(raw_scores)
+        order = _variant_order(raw_scores, raw_lines, sample_rate, anchor_hz, xb.size)
+        if order is not None:
+            lines = raw_lines
+    # The per-order max is REPORT-ONLY, computed after every decision: commit
+    # 27eee43 merged it above the stagger gate, and the raw variant's spur-fed
+    # 8-line armed a gate whose lines were the subtracted variant's — measured
+    # (QPSK +50 kHz, SNR +3 dB, constant spur): order 8 at a noise line's
+    # offset with offset_ambiguous False.
     scores = {m: max(scores[m], raw_scores[m]) for m in _MPSK_ORDERS}
-    if order == 4 and scores[8] >= _MPSK_CONC_THRESH:
-        off4 = _dealias_offset(lines[4], 4, sample_rate, anchor_hz)
-        off8 = _dealias_offset(lines[8], 8, sample_rate, anchor_hz)
-        if abs(off8 - off4) > _STAGGER_TOL_BINS * sample_rate / xb.size:
-            order = 8
     # a signal whose occupied band wraps +-fs/2 has no trustworthy coarse
     # anchor at all: dealiasing against one reported +499 kHz as -999.9 Hz
     # with every confidence flag clear
@@ -316,8 +331,30 @@ _SURVEY_COMB_DAMPING = 0.05
 _EYE_MIN_SYMBOLS = 64
 _EYE_MAX_SYMBOLS = 2000
 _EYE_PHASE_STEPS = 8
-_CLEAR_EYE = 8.0  # measured: unimodal / wrong-rate smear tops out ~3.6; a real eye ~25
+# The old note here — "wrong-rate smear tops out ~3.6" — is REFUTED: on
+# constant-envelope FM the eye at ANY rate samples the modulation's bimodal
+# instantaneous frequency, so it measures level structure, not rate
+# correctness, and rises with SNR (2FSK h=0.7 sps 8, 5 seeds/point: noise-rate
+# lines read 6.9-7.2 at SNR 20 and 10.1-11.3 at SNR 25). 8.0 still earns its
+# keep as the SNR gate: at SNR <= 15 every line's eye — true included — reads
+# <= 5.8 and promotion must not fire; at SNR 20 the true line reads 8.1-8.4.
+# What excludes the noise lines is _EYE_STRENGTH_FRAC below, not this bar.
+_CLEAR_EYE = 8.0
+# Harmonics of the true rate carry cleaner-looking eyes than the fundamental
+# (2R read ~1.2x the true line's eye at every SNR in the sweep: 10.2 vs 8.3,
+# 18.1 vs 14.7), so the promotion pool keeps every eligible line whose eye is
+# within this fraction of the best and takes the LOWEST rate. Raising it past
+# the measured true/2R ratio ~0.8 would hand the fundamental's crown to its
+# own harmonic.
 _HARMONIC_FRAC = 0.6
+# Eye-based promotion is restricted to lines carrying real cyclostationary
+# strength: in the same sweep every true/harmonic line measured >= 0.76 of the
+# max strength while noise lines measured 0.028-0.050 wherever any eye
+# cleared _CLEAR_EYE (their 0.26-0.30 readings occur only at SNR <= 10, where
+# every eye is <= 3.6). 0.2 sits 4x over the dangerous-regime noise and keeps
+# the rescue of a true line down-ranked to 0.2x by a decoy (the strongest
+# measured decoy left the true line at 0.92x).
+_EYE_STRENGTH_FRAC = 0.2
 
 
 class InstFreqStats(Payload):
@@ -477,10 +514,6 @@ def _damp_harmonics(
 
 
 def _eye_cleared(eyes: list[float]) -> bool:
-    # A candidate's eye "clears" only above the measured smear ceiling, so this
-    # is the single source for both the re-rank trigger and the caller-facing
-    # eye_confirmed flag — when False, candidates_hz is strength-ranked only and
-    # untrustworthy for constant-envelope or pulse-shaped (e.g. GMSK) signals.
     return bool(eyes) and max(eyes) >= _CLEAR_EYE
 
 
@@ -494,17 +527,26 @@ class RateCandidate:
     eye: float
 
 
-def _rerank_by_eye(candidates: list[RateCandidate]) -> list[RateCandidate]:
-    eyes = [c.eye for c in candidates]
-    if not _eye_cleared(eyes):
-        return candidates
-    thresh = _HARMONIC_FRAC * max(eyes)
-    strong = [c for c in candidates if c.eye >= thresh]
+def _rerank_by_eye(
+    candidates: list[RateCandidate],
+) -> tuple[list[RateCandidate], bool]:
+    """Ranked candidates plus the eye_confirmed flag, one decision: True means
+    the head of the list was promoted by its eye AND its strength — when False,
+    candidates_hz is strength-ranked only and untrustworthy for
+    constant-envelope or pulse-shaped (e.g. GMSK) signals."""
+    if not candidates:
+        return candidates, False
+    strength_bar = _EYE_STRENGTH_FRAC * max(c.strength for c in candidates)
+    eligible = [c for c in candidates if c.strength >= strength_bar]
+    if not _eye_cleared([c.eye for c in eligible]):
+        return candidates, False
+    thresh = _HARMONIC_FRAC * max(c.eye for c in eligible)
+    strong = [c for c in eligible if c.eye >= thresh]
     primary = min(strong, key=lambda c: c.rate_hz)
     rest = sorted(
         (c for c in candidates if c is not primary), key=lambda c: c.eye, reverse=True
     )
-    return [primary, *rest]
+    return [primary, *rest], True
 
 
 def _symbol_rate(
@@ -545,7 +587,7 @@ def _symbol_rate(
     strg = np.concatenate([sa, sg]) / norm
     tol_floor = 2.0 * max(float(dfa), float(dfg))
     rates, strengths = _merge_candidates(cand, strg, tol_floor)
-    ranked = _rerank_by_eye(
+    ranked, confirmed = _rerank_by_eye(
         [
             RateCandidate(
                 rate_hz=r,
@@ -559,7 +601,7 @@ def _symbol_rate(
         candidates_hz=[round(c.rate_hz, 1) for c in ranked],
         strengths=[_sig(c.strength) for c in ranked],
         eye_openness=[_sig(c.eye) for c in ranked],
-        eye_confirmed=_eye_cleared([c.eye for c in ranked]),
+        eye_confirmed=confirmed,
         search_lo_hz=round(lo, 1),
         search_hi_hz=round(hi, 1),
         # the COARSER of the two branches, kept as max() even though the
@@ -661,10 +703,42 @@ def _eye_openness(
     return best
 
 
-_SURVEY_BURST_FLOOR_PCTL = 25.0  # low percentile of smoothed power = the
-# noise floor, sampled across the whole slice
+_SURVEY_BURST_FLOOR_PCTL = 25.0  # a unimodal probe's floor sample: low enough
+# to sit under sparse activity, high enough that pure noise's own spread
+# (0.906-0.917 of the median at this percentile under the window-64
+# smoothing) stays near the median
 _SURVEY_BURST_RATIO = 4.0  # activity bar above that floor; matches the rise
 # ratio burst_sampler detects on, so survey and the demod agree on "active"
+# A probe whose smoothed power has a genuine quiet SIDE under a loud median —
+# the within-probe duty 0.5..~0.92 regime where the 25th-percentile floor
+# sample IS the emitter's level.
+# Adapted from embedded/burst.py's bimodality rule, re-measured for survey's
+# window-64 power smoothing (probe 16384): noise-only probes read p5/med
+# 0.779-0.85 (200 probes), 6.2x over the 1/8 bar, and the rule fires for
+# emitters >= 9 dB over the quiet side (measured firing at 9 dB, not at 6).
+# p5 rather than burst.py's p40: past duty 0.6 the p40 sits ON the signal, and
+# the review's cliff (duty 0.74 -> 128 bursts, 0.76 -> 0) needs the quiet side
+# found at duties where only the lowest few percent are quiet. Measured
+# ceiling at burst period 4096: the p5 still reads the true noise floor
+# (0.83-1.08x) through within-probe duty 0.92 and loses it at 0.94, where the
+# off-run minus the smoothing window no longer spans 5% of the probe.
+_QUIET_SIDE_PCTL = 5.0
+_QUIET_SIDE_FRAC = 1.0 / 8.0
+# Floor for an exactly-zero quiet side (digital silence smooths to true 0 and
+# a 0 floor turns the whole noise band "active"): keeps the bar >= 12 dB under
+# the probe's median, and sits under the 1/8 detection bound so a genuinely
+# measured noise floor wins whenever the emitter is below ~18 dB over it.
+_ZERO_QUIET_GUARD = 1.0 / 64.0
+# An always-on emitter leaves NO quiet reference anywhere in the slice, and
+# probe-scale smoothed power cannot tell it from dead noise (both unimodal:
+# noise reads p5/med ~0.8 smoothed). The raw per-sample envelope can: complex
+# noise power is exponential, p10/p50 = ln(10/9)/ln2 = 0.152 measured exactly,
+# while a constant-envelope carrier reads 0.912 at 20 dB and 0.738 at 10 dB.
+# 0.5 splits them with ~3x margin against noise. Amplitude-modulated always-on
+# emitters sit BELOW it (16QAM 0.193, 50%-ones OOK 0.043) — their envelope
+# minima are sample-scale indistinguishable from a quiet band, so they keep
+# reading duty 0.0; that limitation is documented at the explain surface.
+_CARRIER_SHAPE_MIN = 0.5
 
 
 _MAX_INLINE_SEGMENTS = 512
@@ -726,24 +800,75 @@ def _find_runs(mask: npt.NDArray[np.bool_]) -> list[tuple[int, int]]:
     return list(zip(starts, ends))
 
 
-def _burst_threshold(path: Path, offset: int, length: int) -> float:
+@dataclass(frozen=True)
+class _ProbeStats:
+    quiet_side: bool
+    floor_sample: float
+    median: float
+    envelope_shape: float
+    high_fraction: float
+
+
+def _probe_stats(block: npt.NDArray[np.complex64]) -> _ProbeStats:
+    power = _smooth_power(block)
+    quiet, low, med = (
+        float(v)
+        for v in np.percentile(
+            power, [_QUIET_SIDE_PCTL, _SURVEY_BURST_FLOOR_PCTL, 50.0]
+        )
+    )
+    quiet_side = quiet < _QUIET_SIDE_FRAC * med
+    floor_sample = max(quiet, _ZERO_QUIET_GUARD * med) if quiet_side else low
+    raw = np.abs(block).astype(np.float64) ** 2
+    r10, r50 = (float(v) for v in np.percentile(raw, [10.0, 50.0]))
+    return _ProbeStats(
+        quiet_side=quiet_side,
+        floor_sample=floor_sample,
+        median=med,
+        envelope_shape=r10 / r50 if r50 > 0.0 else 0.0,
+        high_fraction=(
+            float(np.mean(power >= med / _SURVEY_BURST_RATIO)) if med > 0.0 else 0.0
+        ),
+    )
+
+
+@dataclass(frozen=True)
+class _ActivityReference:
+    threshold: float
+    continuous_duty: float | None
+
+
+def _activity_reference(path: Path, offset: int, length: int) -> _ActivityReference:
     """Activity bar, referenced to the slice's own noise floor. Referenced
     instead to the loudest emitter's level, every transmission an order of
     magnitude below it fell under the bar and was reported as absent."""
-    lows = [
-        float(np.percentile(_smooth_power(block), _SURVEY_BURST_FLOOR_PCTL))
-        for block in iter_probes(path, offset, length)
-    ]
+    stats = [_probe_stats(block) for block in iter_probes(path, offset, length)]
+    if not stats:
+        return _ActivityReference(threshold=0.0, continuous_duty=None)
     # a LOW percentile across probes, never the median: a continuous emitter
     # contaminates every probe it is on in, and at duty >= 50% the median of
     # per-probe floors WAS the emitter - a +200 kHz carrier 20 dB over noise
     # raised the bar 100x and deleted all 57 weak bursts elsewhere in the
     # band ("the band is dead"). The 10th percentile keeps the reference on
-    # the cleanest probes up to ~90% emitter duty; a truly 100%-duty emitter
-    # masks weaker TOTAL-power activity physically, and no time-domain bar
-    # can recover that.
-    floor = float(np.percentile(lows, 10.0)) if lows else 0.0
-    return _SURVEY_BURST_RATIO * floor
+    # the cleanest probes when up to ~90% of PROBES are contaminated; a
+    # probe's own quiet SIDE covers within-probe duty to the measured ~0.92
+    # ceiling; an emitter continuous at BOTH scales masks weaker TOTAL-power
+    # activity physically — no time-domain bar can recover that, which is
+    # what continuous_duty reports instead of "dead".
+    floor = float(np.percentile([s.floor_sample for s in stats], 10.0))
+    typical = float(np.median([s.median for s in stats]))
+    quiet_evidence = (
+        any(s.quiet_side for s in stats) or floor < _QUIET_SIDE_FRAC * typical
+    )
+    shape = float(np.median([s.envelope_shape for s in stats]))
+    continuous_duty = (
+        float(np.mean([s.high_fraction for s in stats]))
+        if not quiet_evidence and typical > 0.0 and shape >= _CARRIER_SHAPE_MIN
+        else None
+    )
+    return _ActivityReference(
+        threshold=_SURVEY_BURST_RATIO * floor, continuous_duty=continuous_duty
+    )
 
 
 def _smooth_power(block: npt.NDArray[np.complex64]) -> npt.NDArray[np.float64]:
@@ -751,7 +876,8 @@ def _smooth_power(block: npt.NDArray[np.complex64]) -> npt.NDArray[np.float64]:
 
 
 def _bursts(path: Path, offset: int, length: int) -> BurstStats:
-    thr = _burst_threshold(path, offset, length)
+    ref = _activity_reference(path, offset, length)
+    thr = ref.threshold
     segs: list[tuple[int, int]] = []
     count = 0
     active_total = 0
@@ -784,9 +910,16 @@ def _bursts(path: Path, offset: int, length: int) -> BurstStats:
     starts = [s for s, _ in segs]
     deltas = np.diff(starts)
     dom = int(np.median(deltas)) if deltas.size else None
+    duty = _sig(active_total / pos) if pos else 0.0
+    if count == 0 and ref.continuous_duty is not None:
+        # nothing cleared a bar built with no quiet reference anywhere in the
+        # slice, and the raw envelope is carrier-shaped: the emitter is on the
+        # whole time, not absent — "always on" and "never on" both stream zero
+        # bursts, and only this distinction separates them.
+        duty = _sig(ref.continuous_duty)
     return BurstStats(
         count=count,
-        duty_cycle=_sig(active_total / pos) if pos else 0.0,
+        duty_cycle=duty,
         dominant_period_samples=dom,
         segments=segs,
     )

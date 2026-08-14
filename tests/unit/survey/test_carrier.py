@@ -242,6 +242,34 @@ def test_pi4_staggered_quaternary_reads_order_8_with_true_offset() -> None:
     assert abs(c.offset_hz - _FOFF) < 500.0, c.offset_hz
 
 
+def _spurred_qpsk(seed: int, n_sym: int = 131072) -> npt.NDArray[np.complex64]:
+    g = np.random.default_rng(seed)
+    x = _upsample(np.exp(1j * 2 * np.pi * g.integers(0, 4, n_sym) / 4))
+    x = x * np.exp(1j * 2 * np.pi * 50_000.0 / _FS * np.arange(x.size))
+    p = float(np.mean(np.abs(x) ** 2))
+    npow = p / (10 ** (3.0 / 10))
+    noise = np.sqrt(npow / 2) * (
+        g.standard_normal(x.size) + 1j * g.standard_normal(x.size)
+    )
+    spur = 2.0 * np.sqrt(p) * np.exp(1j * 0.7)
+    out: npt.NDArray[np.complex64] = (x + noise + spur).astype(np.complex64)
+    return out
+
+
+def test_constant_spur_at_low_snr_does_not_flip_qpsk_to_order_8() -> None:
+    # A constant LO-leakage spur (universal on RTL-SDR) folds into a huge
+    # 8-line in the RAW variant only. The stagger gate must read the CLAIMING
+    # variant's own scores and lines: armed by the cross-variant merged
+    # maxima, the raw spur fired it while the subtracted variant's noise
+    # line[8] supplied the offset — order 8 at a noise line's frequency with
+    # method "mpsk" and no ambiguity flag (seeds 11 and 23 both misreported).
+    for seed in (11, 23):
+        c = _carrier(_spurred_qpsk(seed), _FS, 150_000.0, 50_000.0)
+        assert c.psk_order == 4, (seed, c.psk_order, c.offset_hz)
+        assert abs(c.offset_hz - 50_000.0) < 500.0, (seed, c.offset_hz)
+        assert c.method == "mpsk"
+
+
 def test_hot_interferer_burst_does_not_gate_out_the_victim() -> None:
     # a short burst 30 dB above the victim must not become the activity mask's
     # reference level (an |x|^2 max would): the victim stays in the mask and
