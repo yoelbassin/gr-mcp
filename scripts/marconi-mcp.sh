@@ -43,12 +43,32 @@ gnuradio') or point MARCONI_PYTHON at an interpreter that can 'import gnuradio'.
         "$PY" -m venv --system-site-packages "$VENV" >&2
         "$VENV/bin/python" -m pip install -e "$ROOT[mcp]" >&2
     fi
+    cp "$ROOT/pyproject.toml" "$VENV/.marconi-pyproject-stamp"
 }
 
-[ -x "$VENV/bin/marconi-mcp" ] || bootstrap
+# Re-bootstrap when pyproject changed: the install is editable, so source
+# changes arrive free but NEW DEPENDENCIES do not - after a plugin update
+# they ImportError'd inside a tool call with nothing pointing here.
+if [ -x "$VENV/bin/marconi-mcp" ]; then
+    if ! cmp -s "$ROOT/pyproject.toml" "$VENV/.marconi-pyproject-stamp"; then
+        log "pyproject.toml changed since install: refreshing dependencies"
+        bootstrap
+    fi
+else
+    bootstrap
+fi
 
-"$VENV/bin/python" -c 'import gnuradio' >/dev/null 2>&1 || die "$VENV cannot \
-import gnuradio (it was probably created without --system-site-packages). \
-Delete it (rm -rf $VENV) and rerun."
+# Print the REAL import failure: discarding it and guessing at the cause
+# ("probably created without --system-site-packages") sent users into an
+# infinite delete-and-rebuild loop when the actual error was a numpy ABI
+# mismatch between the venv's numpy and the one GNU Radio was built against.
+if ! err="$("$VENV/bin/python" -c 'import numpy; import gnuradio' 2>&1)"; then
+    log "$VENV cannot import gnuradio. The actual error:"
+    printf '%s\n' "$err" >&2
+    die "if this is a numpy ABI mismatch, align the venv's numpy with the \
+one GNU Radio was built against; if gnuradio is missing entirely, the venv \
+was probably created without --system-site-packages - delete it \
+(rm -rf $VENV) and rerun."
+fi
 
 exec "$VENV/bin/marconi-mcp"

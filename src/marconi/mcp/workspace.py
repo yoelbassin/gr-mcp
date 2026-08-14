@@ -21,7 +21,15 @@ _EVICT_GRACE_S = 300.0
 
 
 def workspace_root() -> Path:
-    return Path(os.environ.get("MARCONI_WORKSPACE", ".")).resolve()
+    """MARCONI_WORKSPACE, else a per-user cache directory - never the CWD.
+    As a Claude Code plugin the server's CWD is the USER'S OWN PROJECT, and
+    the "." default silently accumulated run artifacts there (measured: 18 GB
+    across 711 run dirs in one checkout) that only this repo's .gitignore
+    knew to ignore - the user's `git add -A` would offer all of it."""
+    env = os.environ.get("MARCONI_WORKSPACE")
+    if env:
+        return Path(env).resolve()
+    return Path.home() / ".cache" / "marconi"
 
 
 def new_run_dir(label: str) -> Path:

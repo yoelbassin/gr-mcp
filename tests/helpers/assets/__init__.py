@@ -3,7 +3,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from _pytest.fixtures import FixtureFunctionDefinition
 from helpers.assets.manifest import Asset
 from helpers.assets.root import asset_root
 
@@ -21,7 +20,12 @@ def require_asset(name: str) -> Path:
     pytest.skip(f"asset {name!r} absent; fetch with: {_FETCH_HINT}")
 
 
-def asset_fixture(name: str) -> FixtureFunctionDefinition:
+def asset_fixture(name: str) -> object:
+    """`object`, not the concrete pytest type: the previous annotation
+    imported the private _pytest.fixtures.FixtureFunctionDefinition, which
+    did not exist before pytest 8.4 - any resolver landing on an older
+    pytest collection-errored the whole suite through this one import."""
+
     @pytest.fixture(scope="module")
     def _resolved() -> Path:
         return require_asset(name)

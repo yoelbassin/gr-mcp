@@ -1,12 +1,14 @@
 {
   "name": "marconi",
-  "description": "Marconi — LLM-driven RF through GNU Radio",
-  "owner": { "name": "Yoel Bassin" },
+  "description": "Marconi - receive-only LLM-driven RF through GNU Radio",
+  "owner": {
+    "name": "Yoel Bassin"
+  },
   "plugins": [
     {
       "name": "marconi",
       "source": "./",
-      "description": "LLM-driven RF assistant: turn IQ into FEC-corrected bits and back through GNU Radio, driven in natural language. Requires GNU Radio 3.10 on the host."
+      "description": "Receive-only LLM-driven RF assistant: survey a band, identify a signal, and turn IQ into FEC-corrected bits through GNU Radio, driven in natural language. Requires GNU Radio 3.10 on the host."
     }
   ]
 }

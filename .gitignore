@@ -4,14 +4,28 @@ __pycache__/
 .mypy_cache/
 .pytest_cache/
 .ruff_cache/
+.coverage
 uv.lock
-# Binary/IQ capture data — large, not tracked. Both forms: the trailing
-# slash matches directories only, so a symlink named `artifacts` slipped
-# past it into a commit and a later checkout replaced the real directory
-# with it, taking the ignored contents with it.
-artifacts/
-artifacts
+dist/
+build/
+*.egg-info
+.env
+# Binary/IQ capture data — large, not tracked. Three lessons encoded here:
+# the trailing slash matches directories only, so a symlink named `artifacts`
+# slipped past it into a commit and a later checkout replaced the real
+# directory with it, taking the ignored contents with it; the bare form
+# catches the symlink; and BOTH are anchored with a leading slash, because an
+# unanchored pattern matches at ANY depth — bare `artifacts` silently ignored
+# tests/artifacts/, leaving 31 MB of irreplaceable off-air ground truth
+# untracked on exactly one machine while its e2e gates skipped green in CI.
+/artifacts/
+/artifacts
 # Superpowers working scaffolding (ephemeral plans/notes; lasting facts live in docs/)
-docs/superpowers/
-# Default MCP workspace when MARCONI_WORKSPACE is unset
+/docs/superpowers/
+/docs/superpowers
+# Default MCP workspace when MARCONI_WORKSPACE is unset. Deliberately
+# UNANCHORED, unlike /artifacts: run output is generated junk that appears
+# wherever a server or test happened to run, never precious data — the
+# anchoring lesson protects irreplaceable trees, not disposable ones.
 marconi-runs/
+marconi-runs

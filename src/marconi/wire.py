@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-from typing import ClassVar, TypeVar, cast
+from typing import ClassVar, Self, TypeVar, cast
 
 from pydantic import BaseModel, ConfigDict
-from typing_extensions import Self
 
 _M = TypeVar("_M", bound=BaseModel)
 

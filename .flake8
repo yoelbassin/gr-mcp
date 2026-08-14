@@ -1,3 +1,6 @@
 [flake8]
 max-line-length = 88
 extend-ignore = E203, W503
+# flake8's defaults do not exclude virtualenvs: a bare `flake8` run produced
+# 61,129 findings from .venv and nothing from the tree
+extend-exclude = .venv,build,dist,marconi-runs,artifacts

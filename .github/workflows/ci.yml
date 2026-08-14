@@ -11,6 +11,19 @@ on:
 # release used for local development.
 
 jobs:
+  # the three style gates ran only inside pre-commit's private venvs on
+  # changed files; a contributor who never ran `pre-commit install` could
+  # merge unformatted code through a green CI. mypy+pytest need GNU Radio
+  # and stay in the unit job; this one is pure-Python and fast.
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.0.0
+      - run: uvx black==25.12.0 --check .
+      - run: uvx isort==7.0.0 --check-only .
+      - run: uvx flake8==7.3.0 .
+
   unit:
     runs-on: ubuntu-latest
     defaults:

@@ -1,12 +1,12 @@
 # Marconi
 
 **"Claude Code for RF."** Marconi is an MCP server that gives an LLM agent
-expert radio hands: it transforms between IQ and FEC-corrected bits — sync,
+expert radio hands: it turns IQ into FEC-corrected bits — sync,
 demodulation, symbol decisions, descrambling, deinterleaving, FEC — on top of
-GNU Radio. You describe a signal in natural language; the agent composes a
-modem spec, decodes your capture (or generates a signal of its own,
-simulation-only), and does the framing/CRC/field work itself on the bits
-Marconi returns.
+GNU Radio. You describe a signal in natural language; the agent surveys the
+band, composes a modem spec, decodes your capture, and does the
+framing/CRC/field work itself on the bits Marconi returns. Marconi is
+**receive-only**: there is no transmit path and no signal generation.
 
 ## Requirements
 
@@ -54,18 +54,20 @@ Point your client at the launcher as a stdio server:
 
 | Tool | What it does |
 | --- | --- |
+| `explain` | How to read a survey or run result — the interpretation manual, fetched per topic |
 | `describe_stages` | Marconi's stage vocabulary, generated live from the engine registry |
 | `validate_modem` | Compile a modem spec without running it — the fast iteration loop |
 | `run_rx` | Decode: run a modem spec over an IQ capture and return the full pipeline result |
-| `run_tx` | Generate: render bits through a modem spec into an IQ file — simulation only, nothing is transmitted |
 | `read_stream` | Page a decoded stream back as bits/symbols/soft values for framing, CRC, and field parsing |
 | `stream_stats` | Summarize a decoded stream's distribution shape and, on request, fitted modulation levels |
 | `survey` | Characterize a raw-IQ capture — spectrum, envelope, symbol rate, instantaneous frequency, and bursts; pre-demod measurements, no interpretation |
+| `capture` | Record IQ from an attached SDR (via gr-soapy) into a capture file for the tools above |
 
 ## Environment
 
 - `MARCONI_WORKSPACE` — where run artifacts (`marconi-runs/`) are written;
-  defaults to the server's working directory
+  defaults to `~/.cache/marconi` (never the server's working directory,
+  which as a plugin is your own project)
 - `MARCONI_PYTHON` — interpreter to build the venv from, if the launcher
   shouldn't autodetect the one with GNU Radio
 
