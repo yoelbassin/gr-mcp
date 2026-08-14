@@ -162,6 +162,20 @@ MAX_DELAY_ITEMS = 1 << 20
 # builds in ~12 ms and leaves generous margin.
 MAX_RS_PARITY_SYMBOLS = 256
 
+# RS decode work for ONE word, n*(n-k). The cap above bounds the codec's
+# one-time setup and says nothing about the decode: n runs to 65535 at
+# symbol_bits=16, and RS(65535, 65279) passed every check above, then spent
+# 3.56 s inside reedsolo per word. That is the deadline's granularity, because
+# a poll cannot interrupt a word in progress - so the spec has to bound it.
+# reedsolo is pure Python in this env (the cythonized creedsolo build is not a
+# PyPI package and cannot be a declared dependency) and its cost tracks this
+# product within 7% from (255, 32) through (65535, 256): 4.5 M units/s
+# uncorrectable, 2.7 M on the correctable path that runs Forney. 2^21 holds
+# one word to ~0.8 s, sits 257x above the widest spec in the suite
+# (RS(255,223) = 8160) and ~8x above the widest GF(2^12) code in real use.
+# Raising it raises the worst-case deadline overshoot by the same factor.
+MAX_RS_WORK = 1 << 21
+
 # A sync correlation costs one full stream pass PER PATTERN BIT (and the
 # diversity null costs up to another 64): measured 14.7 s for a 65,536-bit
 # pattern over a 200k-bit stream, from a spec validate_modem called valid.

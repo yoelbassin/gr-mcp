@@ -12,6 +12,7 @@ from marconi.engine.stages.base import CodingStage, Stage
 from marconi.engine.types.bounds import (
     MAX_FRAME_ITEMS,
     MAX_RS_PARITY_SYMBOLS,
+    MAX_RS_WORK,
     MAX_SYNC_PATTERN_BITS,
     check_match_tolerance,
 )
@@ -352,7 +353,18 @@ class BlockCodeStep(Step):
     conv: Literal["block_code"] = "block_code"
     code_bits: StrictInt = Field(ge=2, le=MAX_CODE_BITS)
     data_bits: StrictInt = Field(ge=1)
-    parity_masks: list[int]
+    parity_masks: list[int] = Field(
+        description=(
+            "One mask per parity bit, over the DATA bits only, LSB first: bit j "
+            "of parity_masks[p] set means data bit j enters parity equation p, "
+            "so every mask lies in [0, 2**data_bits). The code is systematic - "
+            "parity bit p is codeword bit data_bits+p and is implicit in the "
+            "equation - so a mask never names a parity position. A parity-check "
+            "matrix written full-width (n columns) must be narrowed to its data "
+            "columns first, and reversed if its rows are written MSB first. "
+            "Hamming(7,4) is [0b1011, 0b1101, 0b1110]."
+        )
+    )
     correct_single: bool | None = None
     correct: StrictInt | None = Field(default=None, ge=0, le=3)
     emit: EmitMode = EmitMode.DATA
@@ -370,6 +382,28 @@ class BlockCodeStep(Step):
                     "n": self.code_bits,
                     "k": self.data_bits,
                     "have": len(self.parity_masks),
+                },
+            )
+        # Every consumer of a mask iterates range(data_bits) - _syndrome_bits
+        # and the flip table's column signatures both - so a bit at or above
+        # data_bits is read by NOTHING. Silently: a full-width H row decoded a
+        # different code than the one written, 16/16 words "valid" through the
+        # engine against 2/16 under the H on paper.
+        limit = 1 << self.data_bits
+        out_of_basis = [
+            i for i, m in enumerate(self.parity_masks) if not 0 <= m < limit
+        ]
+        if out_of_basis:
+            raise PydanticCustomError(
+                "value_error",
+                "{named} must lie in [0, 2**data_bits) = [0, {limit}): a mask "
+                "names which of the {k} DATA bits enter its equation, LSB "
+                "first, and the decoder reads no position above that - a wider "
+                "mask decodes a different code than the one written",
+                {
+                    "named": ", ".join(f"parity_masks[{i}]" for i in out_of_basis[:5]),
+                    "limit": limit,
+                    "k": self.data_bits,
                 },
             )
         if self.correct is not None and self.correct_single is not None:
@@ -556,6 +590,23 @@ class RsCodeStep(Step):
                 "widest standardized RS codes carry ~64, and the decoder's "
                 "setup cost is quadratic in it)",
                 {"nsym": self.n - self.k, "cap": MAX_RS_PARITY_SYMBOLS},
+            )
+        work = self.n * (self.n - self.k)
+        if work > MAX_RS_WORK:
+            # the cap above prices the codec SETUP; this prices one decode,
+            # which is the deadline's granularity - a poll cannot interrupt a
+            # word in progress
+            raise PydanticCustomError(
+                "value_error",
+                "n*(n-k) = {work} symbol operations per word; {cap} is the "
+                "ceiling. A pure-Python Reed-Solomon decode runs ~4.5M of them "
+                "per second, so this spec spends ~{seconds} s inside a single "
+                "word, which no run deadline can interrupt. Narrow n or n-k",
+                {
+                    "work": work,
+                    "cap": MAX_RS_WORK,
+                    "seconds": f"{work / 4.5e6:.1f}",
+                },
             )
         if self.n > (1 << self.symbol_bits) - 1:
             raise PydanticCustomError("value_error", "n must be <= 2^symbol_bits - 1")

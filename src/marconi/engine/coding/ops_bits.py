@@ -62,13 +62,28 @@ def bits_to_bytes(bits: npt.ArrayLike, bit_order: str = "msb") -> bytes:
     ).tobytes()
 
 
+# Iterations of a per-item Python loop between deadline polls. A poll is a
+# contextvar read plus a clock read (measured 0.16 us), so at this length it
+# costs well under a tenth of a percent of either loop below and buys a
+# granularity of milliseconds: segment_rx builds ~1.7 M windows/s (2.4 ms per
+# chunk) and _correlate walks ~16 M candidate positions/s (0.25 ms). Both
+# loops ran to completion with no poll at all - segment_rx spent 2.417 s and
+# 708 MB past an already-expired deadline on 2^22 bits at frame_body_len=1,
+# which the spec permits.
+_POLL_CHUNK = 4096
+
+
 def segment_rx(c: CodingCarrier, *, frame_body_len: int) -> CodingCarrier:
     check_deadline()
+    total = len(c.bits) // frame_body_len
     windows: list[Window] = []
-    i = 0
-    while i + frame_body_len <= len(c.bits):
-        windows.append(Window(start=i, cursor=i, end=i + frame_body_len))
-        i += frame_body_len
+    for lo in range(0, total, _POLL_CHUNK):
+        check_deadline()
+        hi = min(lo + _POLL_CHUNK, total)
+        windows.extend(
+            Window(start=s, cursor=s, end=s + frame_body_len)
+            for s in range(lo * frame_body_len, hi * frame_body_len, frame_body_len)
+        )
     return CodingCarrier(bits=c.bits, windows=windows, marks=c.marks)
 
 
@@ -84,13 +99,16 @@ def _correlate(
     for j in range(m):
         check_deadline()
         counts += stream[j : j + size] != pat[j]
+    candidates = np.flatnonzero(counts <= max_errors)
     out: list[int] = []
     reach = 0
-    for i in np.flatnonzero(counts <= max_errors):
-        if i < reach:
-            continue
-        out.append(int(i))
-        reach = int(i) + m
+    for lo in range(0, candidates.size, _POLL_CHUNK):
+        check_deadline()
+        for i in candidates[lo : lo + _POLL_CHUNK].tolist():
+            if i < reach:
+                continue
+            out.append(i)
+            reach = i + m
     return out
 
 
@@ -571,6 +589,22 @@ def _decode_scoped(
     )
 
 
+# Symbol operations between deadline polls in an RS decode. reedsolo's cost
+# tracks n*(n-k) closely - measured 4.5 M of these units per second on the
+# uncorrectable path and 2.7 M on the correctable one that runs Forney, flat
+# within 7% from (255, 32) through (65535, 256) - so the poll cadence is
+# derived from the spec rather than fixed. The old fixed 256 words left
+# 0.448 s x 256 = ~2 minutes between polls on a spec the validator accepted;
+# 2^17 is ~50 ms of work at the slower rate, and collapses to one word (the
+# finest granularity there is: a poll cannot interrupt a decode) exactly when
+# a single word outgrows it. MAX_RS_WORK bounds that last word.
+_RS_POLL_WORK = 1 << 17
+
+
+def _rs_poll_stride(n: int, nsym: int) -> int:
+    return max(1, _RS_POLL_WORK // max(1, n * nsym))
+
+
 def _rs_decode_words(
     bits: npt.NDArray[np.uint8],
     codec: _rs.RSCodec,
@@ -584,8 +618,9 @@ def _rs_decode_words(
     total = syms.size // n
     valid = 0
     constant = 0
+    stride = _rs_poll_stride(n, n - k)
     for w in range(total):
-        if w & 0xFF == 0:
+        if w % stride == 0:
             check_deadline()
         word = [int(s) for s in syms[w * n : (w + 1) * n]]
         try:

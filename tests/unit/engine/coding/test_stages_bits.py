@@ -628,6 +628,42 @@ def test_block_code_auto_correct_rejects_degenerate_columns() -> None:
         )
 
 
+def test_block_code_rejects_a_parity_mask_wider_than_its_data_bits() -> None:
+    """Both consumers (_syndrome_bits and the flip table's column signatures)
+    iterate range(data_bits), so a bit at or above data_bits is read by
+    NOTHING. A caller writing a full-width H row — parity columns included,
+    the on-paper form — got a spec that validated and then decoded a different
+    code: measured on a non-systematic (7,4) H, 16/16 words "valid" through
+    the engine against 2/16 under the H as written."""
+    with pytest.raises(ValidationError, match=r"parity_masks\[1\]"):
+        BlockCodeStep(
+            code_bits=7,
+            data_bits=4,
+            parity_masks=[0b1011, 0b1_1101, 0b1110],
+            correct_single=False,
+        )
+    with pytest.raises(ValidationError, match=r"parity_masks\[0\]"):
+        BlockCodeStep(
+            code_bits=7,
+            data_bits=4,
+            parity_masks=[-1, 0b1101, 0b1110],
+            correct_single=False,
+        )
+    ok = BlockCodeStep(code_bits=7, data_bits=4, parity_masks=[0b1011, 0b1101, 0b1110])
+    assert max(ok.parity_masks) < 1 << ok.data_bits
+
+
+def test_block_code_schema_documents_the_parity_mask_basis() -> None:
+    # describe_stages surfaces model_json_schema to the driving agent, and the
+    # LSB-first, data-bits-only basis lived only in a source comment - the one
+    # convention a caller cannot guess from an on-paper parity-check matrix.
+    desc = BlockCodeStep.model_json_schema()["properties"]["parity_masks"][
+        "description"
+    ].lower()
+    assert "data" in desc and "lsb" in desc
+    assert "2**data_bits" in desc
+
+
 def test_block_code_detect_only_still_accepts_degenerate_columns() -> None:
     p = BlockCodeStep.model_validate(
         {
