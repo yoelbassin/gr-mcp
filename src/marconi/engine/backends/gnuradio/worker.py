@@ -38,13 +38,23 @@ _SCHED_ABORT = re.compile(
 
 # The SoapySDR RX overflow marker, verified against gr-soapy 3.10: the source
 # block's overflow handler writes the two characters "sO" to stderr per dropped
-# buffer and keeps streaming, so the run still delivers every requested item
-# with the dropped span spliced out — the marker is the only evidence the
-# recording is discontinuous in time. Repeats arrive back-to-back with no
-# delimiter ("sOsOsO"), and they are ordinary letters in a log full of words:
-# a bare text.count("sO") also counts the pair inside "isOpen", so each RUN is
-# matched at word boundaries and its markers counted within.
-_RX_OVERFLOW = re.compile(r"(?<![A-Za-z])(?:sO)+(?![A-Za-z])")
+# buffer — no newline, no separator — and keeps streaming, so the run still
+# delivers every requested item with the dropped span spliced out. The marker
+# is the only evidence the recording is discontinuous in time. Repeats arrive
+# back-to-back ("sOsOsO"), and the fd carrying them is the same one GR's C++
+# logger writes lines on, so a run pasted straight onto the next log line
+# ("sOsOsOthread_body_wrapper :info: ...") is the EXPECTED layout, not an odd
+# one. Hence the asymmetric boundary rule, and what it costs each way:
+#   - LEADING guard, kept: a bare text.count("sO") counts the pair inside
+#     "isOpen" — a phantom drop off an ordinary driver log line. The preceding
+#     letter is what rejects it.
+#   - TRAILING guard, deliberately absent: requiring a non-letter after the run
+#     zeroed every pasted run — measured, 500 real drops scanned as 0, which
+#     the capture surface then reports as "the driver reported no drops". The
+#     price of dropping it is one phantom per token that literally BEGINS "sO"
+#     at a word boundary ("sOverflow"); a bounded over-count beats a total
+#     miss, since the count only ever warns.
+_RX_OVERFLOW = re.compile(r"(?<![A-Za-z])(?:sO)+")
 
 
 def count_overflow_events(captured: str) -> int:

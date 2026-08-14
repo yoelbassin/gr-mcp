@@ -391,8 +391,20 @@ def test_overflow_scan_counts_one_event_per_marker() -> None:
     log = "gr::soapy :info: streaming\nsOsOsO\ndone\n"
     assert worker_mod.count_overflow_events(log) == 3
     assert worker_mod.count_overflow_events("sO\n") == 1
+    assert worker_mod.count_overflow_events("sOsOsO") == 3  # EOF, no newline
     assert worker_mod.count_overflow_events("") == 0
     assert worker_mod.count_overflow_events("nothing dropped here\n") == 0
+
+
+def test_overflow_scan_counts_a_run_pasted_onto_the_next_log_line() -> None:
+    """The marker carries no newline and shares one fd with GR's C++ logger, so
+    a run running straight into the next log line is the ordinary layout — the
+    one that matters most. Requiring a non-letter after the run scanned 500
+    real drops as 0, and the surface reports 0 as "no drops reported"."""
+    pasted = "sOsOsOthread_body_wrapper :info: starting 4 threads\n"
+    assert worker_mod.count_overflow_events(pasted) == 3
+    # a sibling driver marker (timeout) terminating the run, same shape
+    assert worker_mod.count_overflow_events("sOsOsT\n") == 2
 
 
 def test_overflow_scan_does_not_count_the_marker_inside_a_word() -> None:
@@ -400,6 +412,11 @@ def test_overflow_scan_does_not_count_the_marker_inside_a_word() -> None:
     # turned an ordinary driver log line into a phantom drop
     assert worker_mod.count_overflow_events("SoapySDR isOpen returned true\n") == 0
     assert worker_mod.count_overflow_events("isOpen\nsO\nisOpen\n") == 1
+    # and the accepted cost of dropping the trailing guard, pinned so a
+    # re-tightening shows up here rather than as a silent zero: a token that
+    # BEGINS with the pair counts one. Bounded over-count, and the count only
+    # ever warns — the alternative was missing whole runs.
+    assert worker_mod.count_overflow_events("sOverflow handler installed\n") == 1
 
 
 def test_result_pipe_outranks_timeout_kill() -> None:
