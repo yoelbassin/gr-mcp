@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping, Sequence
 from typing import TypeVar
 
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, ValidationError, model_validator
 
 from marconi.errors import register_error
 
@@ -14,9 +15,32 @@ def stage_label(index: int, conv: str) -> str:
     return f"{conv}[{index}]"
 
 
+def _non_finite_problem(name: str, value: object) -> str | None:
+    if isinstance(value, float) and not math.isfinite(value):
+        return f"{name} must be a finite number, got {value!r}"
+    if isinstance(value, list):
+        for index, item in enumerate(value):
+            if isinstance(item, float) and not math.isfinite(item):
+                return f"{name}[{index}] must be a finite number, got {item!r}"
+    return None
+
+
 class Step(BaseModel):
     model_config = ConfigDict(extra="forbid")
     conv: str
+
+    @model_validator(mode="after")
+    def _every_float_is_finite(self) -> "Step":
+        """NaN is False for every `x <= 0`-style hand-rolled guard, and +inf
+        clears every one-sided Field(gt=/ge=) constraint (inf > 0 is True);
+        unblocked, both validate, compile, and pass validate_modem, then die
+        inside the GR worker naming the IR field they corrupted, not the spec
+        field the caller actually got wrong."""
+        for name in type(self).model_fields:
+            problem = _non_finite_problem(name, getattr(self, name))
+            if problem is not None:
+                raise ValueError(problem)
+        return self
 
 
 S = TypeVar("S", bound=Step)

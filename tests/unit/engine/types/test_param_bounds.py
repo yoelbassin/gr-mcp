@@ -274,6 +274,52 @@ def test_a_list_param_bounds_its_elements(
     )
 
 
+# NaN and +-inf are False for every hand-rolled comparison guard a stage wrote
+# (`x <= 0`, `abs(x) > bound`) - unlike the 2**40 sweep above, physical
+# quantities are NOT exempt here: a NaN center_hz or ppm is not a cheap wrong
+# answer, it is a value that validates, compiles, passes validate_modem, and
+# then dies inside the GR worker (pydantic serializes NaN -> null crossing the
+# IR boundary) as a crash naming the IR field, not the spec field. No field in
+# the registry is expected to legitimately admit inf; a field that does should
+# fail this sweep loudly rather than be added to a silent exemption set.
+_NON_FINITE: tuple[float, ...] = (float("nan"), float("inf"), float("-inf"))
+
+
+def _float_scalar_fields() -> list[tuple[str, str]]:
+    return [(conv, field) for conv, field, is_int in _numeric_fields() if not is_int]
+
+
+def _float_list_fields() -> list[tuple[str, str]]:
+    return [(conv, field) for conv, field, is_float in _list_fields() if is_float]
+
+
+@pytest.mark.parametrize(
+    "conv, field, probe",
+    [(c, f, p) for c, f in _float_scalar_fields() for p in _NON_FINITE],
+    ids=lambda v: str(v),
+)
+def test_a_float_field_refuses_a_non_finite_value(
+    conv: str, field: str, probe: float
+) -> None:
+    with pytest.raises(ValidationError):
+        step_models()[conv].model_validate({"conv": conv, **_BASE[conv], field: probe})
+
+
+@pytest.mark.parametrize(
+    "conv, field, probe",
+    [(c, f, p) for c, f in _float_list_fields() for p in _NON_FINITE],
+    ids=lambda v: str(v),
+)
+def test_a_float_list_element_refuses_a_non_finite_value(
+    conv: str, field: str, probe: float
+) -> None:
+    base = _BASE[conv]
+    values = list(base[field])  # type: ignore[call-overload]
+    values[-1] = probe
+    with pytest.raises(ValidationError):
+        step_models()[conv].model_validate({"conv": conv, **base, field: values})
+
+
 @dataclass(frozen=True)
 class CoVaried:
     """One extreme value probed with the constraint that LINKS it satisfied.
