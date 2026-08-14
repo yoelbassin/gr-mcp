@@ -76,9 +76,12 @@ Point your client at the launcher as a stdio server:
 - **"no Python with GNU Radio found"** — install GNU Radio (see
   Requirements), or set `MARCONI_PYTHON` to an interpreter where
   `python -c 'import gnuradio'` succeeds.
-- **`.venv` exists but `gnuradio` won't import** — the venv was created
-  without `--system-site-packages`. Delete it (`rm -rf .venv` in the repo or
-  plugin directory) and relaunch; the bootstrap rebuilds it correctly.
+- **`.venv` exists but `gnuradio` won't import** — the launcher prints the
+  real import error; read it before acting. A `numpy` ABI mismatch (the venv's
+  `numpy` against the one GNU Radio was built with) survives a venv rebuild —
+  align the two instead. Only if `gnuradio` is missing entirely was the venv
+  likely created without `--system-site-packages`: delete it (`rm -rf .venv`
+  in the repo or plugin directory) and relaunch.
 - **Client times out on first launch** — the one-time bootstrap can outlast
   strict client timeouts; run `scripts/marconi-mcp.sh` once by hand, or raise
   the timeout (Claude Code: `MCP_TIMEOUT`, in ms).

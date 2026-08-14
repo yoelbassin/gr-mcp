@@ -156,8 +156,8 @@ def describe_stages(
     parameters. A contract that varies with the stage's own parameters is
     reported as null and listed in "step_conditional" — the stage's
     description states the rule (e.g. symbol_sync needs 4 samples per symbol
-    open-loop and has no floor closed-loop), and the compiler enforces the
-    value for the step you actually write. A detail call is capped for size:
+    open-loop and 2 closed-loop), and the compiler enforces the value for the
+    step you actually write. A detail call is capped for size:
     "omitted" names any stages it dropped, which you fetch with stage=<name>.
 
     Compose a modem spec as {"symbol_rate": <float>, "path":
@@ -283,14 +283,22 @@ def run_rx_tool(
     OR in the coding/quality tail after it delivered, the call returns
     status="timeout" with the evidence the run already had: census, diagnostics
     and any stream it finished decoding. Output streams live under
-    ./marconi-runs/ and are not auto-cleaned; page with read_stream (or
-    summarize with stream_stats) until you remove them."""
+    $MARCONI_WORKSPACE (default ~/.cache/marconi) in marconi-runs/ and are not
+    auto-cleaned; page with read_stream (or summarize with stream_stats) until
+    you remove them."""
     if (capture_path is None) == (input_path is None):
         raise ValueError("pass exactly one of capture_path or input_path")
     if capture_offset < 0 or capture_samples < 0:
         raise ValueError("capture_offset and capture_samples must be >= 0")
     if capture_path is None and (capture_offset or capture_samples):
         raise ValueError("capture_offset/capture_samples apply to capture_path only")
+    entry_args_passed = input_item_type is not None or input_level is not None
+    if capture_path is not None and entry_args_passed:
+        # the mirror: a capture enters as complex IQ by construction (its
+        # on-disk format is capture_dtype), so these were not merely
+        # inapplicable - they were DISCARDED, and a bits file passed as
+        # capture_path decoded as IQ to status ok
+        raise ValueError("input_item_type/input_level apply to input_path only")
     # the whole call, spec parse included: a step model can do real work in its
     # validator, and "hard cap on the entire call" has to mean the entire call
     with set_deadline(timeout), discarded_if_unused(new_run_dir("rx")) as run_dir:
@@ -558,8 +566,9 @@ def capture_tool(
     (device="driver=rtlsdr,serial=..." picks among several), applies gain_db
     (None = hardware AGC) and ppm correction, discards a short settle
     transient, and records duration_s seconds (max 300) at sample_rate under
-    ./marconi-runs/. The returned sample_rate and center_hz are DEVICE
-    READBACK — what the hardware delivered, not what was requested — and a
+    $MARCONI_WORKSPACE (default ~/.cache/marconi) in marconi-runs/. The
+    returned sample_rate and center_hz are DEVICE READBACK — what the hardware
+    delivered, not what was requested — and a
     warnings entry flags any divergence. Carry the returned SAMPLE_RATE into
     survey/run_rx; it is the same quantity there. The returned center_hz is
     the ABSOLUTE RF frequency the radio tuned, which is NOT what survey and
@@ -584,7 +593,7 @@ def capture_tool(
     re-capture (a warnings entry repeats the count). 0 is the driver
     reporting no drops. Iterate on ONE capture while forming hypotheses
     (same bits every run); re-capture only when you want fresh RF. Captures
-    persist under ./marconi-runs/ until you remove them."""
+    persist there until you remove them."""
     with discarded_if_unused(new_run_dir("capture")) as run_dir:
         result = capture_iq(
             run_dir / "iq.cf32",

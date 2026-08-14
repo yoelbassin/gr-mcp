@@ -18,10 +18,12 @@ from marconi.mcp.streams import EmptyStreamError
 from marconi.mcp.tools import (
     describe_stages,
     read_stream,
+    run_rx_tool,
     stream_stats,
     survey,
     validate_modem,
 )
+from marconi.survey.iqfile import CaptureNotRaw
 
 _SPEC = {"symbol_rate": 1000.0, "path": [{"conv": "agc"}]}
 
@@ -54,6 +56,72 @@ def test_survey_names_sample_rate_rather_than_the_bounds_it_derived(
     )
     with pytest.raises(ValueError, match="sample_rate"):
         survey(str(cap), sample_rate=0.0)
+
+
+@pytest.mark.parametrize("rate", [0.0, -2.048e6, math.nan])
+@pytest.mark.parametrize(
+    "channel",
+    [{"bandwidth_hz": 5000.0}, {"center_hz": 1000.0}, {"decim": 2}],
+    ids=["bandwidth", "center", "decim"],
+)
+def test_survey_names_sample_rate_before_the_channel_bounds_it_derives(
+    tmp_path: Path, rate: float, channel: dict[str, float]
+) -> None:
+    """The sub-band branch fed sample_rate to the channelizer before anything
+    checked it, so every bound derived from the bad rate blamed a different
+    parameter: "bandwidth_hz 5000 exceeds the decimated output rate 0",
+    "center_hz 1000 lies outside the +-0 Hz Nyquist span". The
+    non-channelized control named sample_rate all along."""
+    cap = tmp_path / "c.cf32"
+    rng = np.random.default_rng(1)
+    n = 4096
+    (rng.standard_normal(n) + 1j * rng.standard_normal(n)).astype(np.complex64).tofile(
+        cap
+    )
+    with pytest.raises(ValueError, match="sample_rate") as exc:
+        survey(str(cap), sample_rate=rate, **channel)  # type: ignore[arg-type]
+    assert "bandwidth_hz" not in str(exc.value)
+    assert "center_hz" not in str(exc.value)
+
+
+def test_a_container_capture_is_refused_by_the_decode_lane_too(
+    tmp_path: Path,
+) -> None:
+    """survey named the container and the sox/ffmpeg remedy; run_rx ran the
+    same .wav as raw IQ. With an all-finite int16 payload it reached status ok
+    on a 4997-item bit stream; with a payload that reinterprets non-finite it
+    answered "the capture is corrupt - repair or re-record it", a diagnosis of
+    the samples for a fault in the file format."""
+    wav = tmp_path / "cap.wav"
+    payload = (np.arange(40_000) % 97).astype(np.int16)
+    wav.write_bytes(b"RIFF" + (payload.size * 2 + 36).to_bytes(4, "little") + b"WAVE")
+    with wav.open("ab") as f:
+        payload.tofile(f)
+    spec = {"symbol_rate": 1200.0, "path": [{"conv": "agc", "mode": "feedback"}]}
+    with pytest.raises(CaptureNotRaw, match="RIFF/WAV") as exc:
+        run_rx_tool(spec, sample_rate=9600.0, capture_path=str(wav))
+    assert classify_error(exc.value)[0] == "invalid_argument"
+    with pytest.raises(CaptureNotRaw, match="RIFF/WAV"):
+        survey(str(wav), sample_rate=9600.0)
+
+
+def test_the_entry_descriptor_arguments_are_refused_with_a_capture(
+    tmp_path: Path,
+) -> None:
+    """capture_offset/capture_samples raise when passed with input_path; the
+    mirrored pair was silently DISCARDED — a bits file passed as capture_path
+    with input_item_type="b" decoded as complex IQ and returned status ok,
+    and with a coding-only spec the same call failed as "modem must start at
+    iq but segment starts at bits", blaming the spec for the ignored args.
+    (The other direction is test_capture_slice_params_reject_input_path_mode.)"""
+    cap = tmp_path / "cap.cf32"
+    np.zeros(4096, dtype=np.complex64).tofile(cap)
+    spec = {"symbol_rate": 1200.0, "path": [{"conv": "agc", "mode": "feedback"}]}
+    for extra in ({"input_item_type": "b"}, {"input_level": "bits"}):
+        with pytest.raises(ValueError, match="input_path only") as exc:
+            run_rx_tool(spec, 9600.0, capture_path=str(cap), **extra)  # type: ignore
+        assert "input_item_type" in str(exc.value)
+        assert "input_level" in str(exc.value)
 
 
 def test_read_stream_rejects_a_negative_count_like_it_rejects_an_offset(

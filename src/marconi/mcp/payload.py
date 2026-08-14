@@ -19,6 +19,7 @@ from marconi.mcp.streams import stream_stats_payload as _stats_model
 from marconi.survey import SurveyResult
 from marconi.wire import Payload, Ramp
 from marconi.wire import replace as wire_replace
+from marconi.wire import wire_float
 
 _MAX_INLINE_LIST = 512
 _RAMP_MIN_LEN = 64
@@ -258,16 +259,19 @@ class TraceRow(Payload):
 
 
 def _rounded_quality(quality: QualityReport | None) -> QualityReport | None:
-    """Evidence values round like every other float this module owns: the
-    engine's report passed through verbatim, and quality.evidence[].value was
-    the ONE full-precision float64 on the whole surface (17 characters where
-    its neighbors ship 9)."""
+    """Evidence values round like every other float on the wire: the engine's
+    report passed through verbatim, and quality.evidence[].value was the ONE
+    full-precision float64 on the whole surface (17 characters where its
+    neighbors ship 9). Significant figures, not decimal places — evidence
+    carries chance rates and null-model probabilities beside integer match
+    counts, and round(v, 6) shipped every rate below 5e-7 as "0.0". margin
+    keeps its decimal round: it is a rank over one path family, not a rate."""
     if quality is None:
         return quality
     return wire_replace(
         quality,
         margin=None if quality.margin is None else round(quality.margin, 4),
-        evidence=[wire_replace(e, value=round(e.value, 6)) for e in quality.evidence],
+        evidence=[wire_replace(e, value=wire_float(e.value)) for e in quality.evidence],
     )
 
 

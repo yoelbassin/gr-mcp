@@ -6,13 +6,14 @@ contained the noise, the DC estimate contained the carrier)."""
 
 from __future__ import annotations
 
+import gzip
 from pathlib import Path
 
 import numpy as np
 import pytest
 from helpers import _synth
 
-from marconi.survey.iqfile import CaptureNotRaw, sample_iq
+from marconi.survey.iqfile import _CONTAINER_MAGICS, CaptureNotRaw, sample_iq
 from marconi.survey.measure import _symbol_rate, survey_iq
 
 _FS = 1_000_000.0
@@ -234,6 +235,42 @@ def test_wav_container_is_refused_with_the_fix_named(tmp_path: Path) -> None:
         payload.tofile(f)
     with pytest.raises(CaptureNotRaw, match="raw"):
         sample_iq(p)
+
+
+@pytest.mark.parametrize("magic", sorted(_CONTAINER_MAGICS))
+def test_every_listed_container_signature_is_refused(
+    tmp_path: Path, magic: bytes
+) -> None:
+    # one entry was tested and the rest were a list: a signature that ships
+    # untested is a guard nobody has watched refuse anything
+    p = tmp_path / "cap.bin"
+    p.write_bytes(magic + b"\x00" * 16 + np.zeros(40_000, np.int16).tobytes())
+    with pytest.raises(CaptureNotRaw, match="raw"):
+        sample_iq(p)
+
+
+def test_the_containers_an_rf_workflow_writes_are_refused(tmp_path: Path) -> None:
+    """The guard listed the three audio containers and let through the ones a
+    numpy/ML radio workflow actually produces. Measured on the .npy: it
+    reproduced the guard comment's own incident signature - psd_db all inf,
+    carrier.offset_hz NaN, occupied_bw 0.0, peak at the -Nyquist edge bin -
+    because the header bytes reinterpret as finite-but-huge floats, which
+    CaptureNotFinite cannot see."""
+    samples = np.zeros(40_000, np.float32)
+    npy = tmp_path / "cap.npy"
+    np.save(npy, samples)
+    npz = tmp_path / "cap.npz"
+    np.savez(npz, iq=samples)
+    gz = tmp_path / "cap.cf32.gz"
+    with gzip.open(gz, "wb") as f:
+        f.write(samples.tobytes())
+    hdf5 = tmp_path / "cap.h5"
+    hdf5.write_bytes(b"\x89HDF\r\n\x1a\n" + samples.tobytes())
+    matlab = tmp_path / "cap.mat"
+    matlab.write_bytes(b"MATLAB 5.0 MAT-file" + b"\x00" * 109 + samples.tobytes())
+    for p in (npy, npz, gz, hdf5, matlab):
+        with pytest.raises(CaptureNotRaw, match="raw"):
+            sample_iq(p)
 
 
 def _noisy_2fsk(snr_db: float, seed: int, n: int = 1 << 18) -> np.ndarray:

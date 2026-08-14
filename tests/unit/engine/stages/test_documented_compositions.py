@@ -13,12 +13,15 @@ A recipe named in agent-facing text belongs here the day it is written.
 
 from __future__ import annotations
 
+import inspect
 import math
+import re
 from typing import Any
 
 import pytest
 
-from marconi.mcp.tools import validate_modem
+from marconi.engine.coding.stages_bits import DescrambleStep
+from marconi.mcp.tools import describe_stages, validate_modem
 
 # name -> (spec, sample_rate). Each must compile in the rx direction from a
 # complex-IQ entry; the assertion is only that the compiler accepts it, since
@@ -229,7 +232,81 @@ _DOCUMENTED: dict[str, tuple[dict[str, Any], float]] = {
         },
         192000.0,
     ),
+    # ook_envelope: "closed-loop needs normalized amplitude and sps>=4 - pair
+    # it with an agc"
+    "ook_closed_loop_at_its_floor": (
+        {
+            "symbol_rate": 4800.0,
+            "path": [
+                {"conv": "agc", "mode": "feedforward"},
+                {"conv": "ook_envelope", "loop_bw": 0.045},
+                {"conv": "slice"},
+            ],
+        },
+        19200.0,
+    ),
+    # descramble: "supply the whitening sequence explicitly as hex (sequence)
+    # or have the stage generate it from a Fibonacci LFSR (lfsr_mask/
+    # lfsr_seed/lfsr_len), exactly one of the two"
+    "descramble_from_an_explicit_sequence": (
+        {
+            "symbol_rate": 4800.0,
+            "path": [
+                {"conv": "fsk", "deviation": 2400.0},
+                {"conv": "slice"},
+                {"conv": "descramble", "sequence": "a5c3"},
+            ],
+        },
+        19200.0,
+    ),
+    "descramble_from_an_lfsr": (
+        {
+            "symbol_rate": 4800.0,
+            "path": [
+                {"conv": "fsk", "deviation": 2400.0},
+                {"conv": "slice"},
+                {
+                    "conv": "descramble",
+                    "lfsr_mask": 0x41,
+                    "lfsr_seed": 0x7F,
+                    "lfsr_len": 7,
+                },
+            ],
+        },
+        19200.0,
+    ),
 }
+
+
+def _symbol_sync_spec(sps: int, loop_bw: float) -> tuple[dict[str, Any], float]:
+    return (
+        {
+            "symbol_rate": 4800.0,
+            "path": [
+                {"conv": "agc", "mode": "feedback"},
+                {"conv": "symbol_sync", "sps": sps, "loop_bw": loop_bw, "alpha": 0.35},
+                {"conv": "sample_symbols"},
+            ],
+        },
+        4800.0 * sps,
+    )
+
+
+def _smallest_compiling_sps(loop_bw: float) -> int:
+    for sps in range(1, 9):
+        spec, sample_rate = _symbol_sync_spec(sps, loop_bw)
+        if validate_modem(spec, sample_rate=sample_rate)["valid"]:
+            return sps
+    raise AssertionError(f"symbol_sync compiles at no sps 1..8 at loop_bw={loop_bw}")
+
+
+_FLOOR_CLAIM = re.compile(r"(\d+)(?: samples per symbol)? (open-loop|closed-loop)")
+
+
+def _claimed_floors(text: str) -> dict[str, int]:
+    return {
+        mode: int(value) for value, mode in _FLOOR_CLAIM.findall(" ".join(text.split()))
+    }
 
 
 @pytest.mark.parametrize("name", sorted(_DOCUMENTED))
@@ -237,6 +314,63 @@ def test_a_documented_composition_compiles(name: str) -> None:
     spec, sample_rate = _DOCUMENTED[name]
     result = validate_modem(spec, sample_rate=sample_rate)
     assert result["valid"], f"{name}: {result.get('errors')}"
+
+
+def test_symbol_syncs_two_agent_texts_quote_the_floors_the_compiler_enforces() -> None:
+    """describe_stages said "4 samples per symbol open-loop and no floor
+    closed-loop" while the description it delegates to said "2 closed-loop, 4
+    open-loop", and the compiler agreed with the second: closed-loop sps=1 is
+    refused by the step model. Both texts are read back against the floors the
+    compiler actually applies, so neither can drift alone."""
+    measured = {
+        "open-loop": _smallest_compiling_sps(0.0),
+        "closed-loop": _smallest_compiling_sps(0.045),
+    }
+    rows = describe_stages(stage="symbol_sync")["stages"]
+    assert isinstance(rows, list)
+    published = str(rows[0]["description"])
+    assert _claimed_floors(published) == measured, published
+    assert _claimed_floors(inspect.getdoc(describe_stages) or "") == measured
+
+
+def test_the_closed_loop_ook_floor_refuses_the_rate_one_step_below_it() -> None:
+    """The field text offered sps>=2 closed-loop; the floor is 4, from the
+    measurement that Gardner's TED is degenerate on a rectangular envelope."""
+    spec, sample_rate = _DOCUMENTED["ook_closed_loop_at_its_floor"]
+    result = validate_modem(spec, sample_rate=sample_rate / 2.0)
+    assert not result["valid"]
+    assert "4 samples per symbol" in str(result["errors"])
+
+
+def test_the_descramble_description_names_every_input_its_validator_accepts() -> None:
+    """The description described one branch and prescribed a workaround for
+    the other ("for LFSR self-synchronizing scramblers, supply the expanded
+    sequence") — wrong on its own terms, since the lfsr_* mode is additive and
+    a multiplicative self-synchronizing descrambler is data-dependent with no
+    fixed sequence. descramble's parameters are not tunables but its two
+    exclusive MODES, and the index row is where the agent picks a stage."""
+    rows = describe_stages(stage="descramble")["stages"]
+    assert isinstance(rows, list)
+    published = str(rows[0]["description"])
+    modes = set(DescrambleStep.model_fields) - {"conv"}
+    assert modes
+    missing = sorted(name for name in modes if name not in published)
+    assert not missing, f"{missing} not named in: {published}"
+
+
+def test_descramble_takes_exactly_one_of_the_two_modes_it_advertises() -> None:
+    """The description named only the sequence branch, so the mode the stage
+    ships had to be discovered a level down in the schema. Both modes compile;
+    neither both nor neither does."""
+    spec, sample_rate = _DOCUMENTED["descramble_from_an_lfsr"]
+    both = [dict(step) for step in spec["path"]]
+    both[-1]["sequence"] = "a5c3"
+    assert not validate_modem({**spec, "path": both}, sample_rate=sample_rate)["valid"]
+    neither = [dict(step) for step in spec["path"]]
+    neither[-1] = {"conv": "descramble"}
+    result = validate_modem({**spec, "path": neither}, sample_rate=sample_rate)
+    assert not result["valid"]
+    assert "exactly one" in str(result["errors"])
 
 
 def test_the_ofdm_demap_recipe_is_checked_against_the_frame_above_it() -> None:

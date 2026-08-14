@@ -9,7 +9,7 @@ import numpy.typing as npt
 from scipy.signal import firwin, upfirdn
 
 from marconi.deadline import check_deadline
-from marconi.engine.types.bounds import channelization_problem
+from marconi.engine.types.bounds import channelization_problem, check_sample_rate
 from marconi.errors import register_error
 
 _SURVEY_SAMPLE_ITEMS = 1 << 20
@@ -30,14 +30,24 @@ _ITEMSIZE = np.dtype(np.complex64).itemsize
 # stopband; the cost is a 4x longer FIR on a streaming one-shot conversion.
 _CHANNELIZE_TAPS_PER_PHASE = 32
 
-# Container signatures that are definitely not raw IQ. A .wav read as cf32
-# surveyed "confidently": peak at the Nyquist bin, occupied_bw 0.0, and a
-# NaN carrier offset that is not even valid JSON on the wire.
+# Leading bytes that are definitely not raw IQ. A .wav read as cf32 surveyed
+# "confidently": peak at the Nyquist bin, occupied_bw 0.0, and a NaN carrier
+# offset that is not even valid JSON on the wire — and a header reinterprets
+# as finite-but-huge floats, so the non-finite guard below never sees it. The
+# array containers earn their place from the same measurement on a .npy.
+# Every entry is >= 3 bytes on purpose: a 2-byte signature matches arbitrary
+# IQ once in 65,536 captures, which would refuse real recordings.
 _CONTAINER_MAGICS: dict[bytes, str] = {
     b"RIFF": "a RIFF/WAV container",
     b"fLaC": "a FLAC container",
     b"OggS": "an Ogg container",
+    b"\x93NUM": "a numpy .npy container",
+    b"PK\x03\x04": "a zip container (.npz among them)",
+    b"\x89HDF": "an HDF5 container (.h5/.mat v7.3 among them)",
+    b"MATLAB": "a MATLAB .mat container",
+    b"\x1f\x8b\x08": "a gzip stream",
 }
+_MAGIC_BYTES = max(len(m) for m in _CONTAINER_MAGICS)
 
 
 class CaptureTooShort(Exception):
@@ -59,13 +69,16 @@ register_error(CaptureNotRaw, "invalid_argument")
 
 def reject_container(path: Path) -> None:
     with path.open("rb") as f:
-        magic = f.read(4)
-    kind = _CONTAINER_MAGICS.get(magic)
+        head = f.read(_MAGIC_BYTES)
+    kind = next(
+        (k for magic, k in _CONTAINER_MAGICS.items() if head.startswith(magic)), None
+    )
     if kind is not None:
         raise CaptureNotRaw(
-            f"{path.name} is {kind}, not raw IQ samples: surveying the header "
-            "as cf32 produces confident nonsense. Convert to a headerless "
-            "raw capture first (e.g. sox/ffmpeg to raw f32 interleaved I/Q, "
+            f"{path.name} is {kind}, not raw IQ samples: read as cf32 its "
+            "header becomes samples, and everything measured or decoded from "
+            "it is confident nonsense. Convert to a headerless raw capture "
+            "first (decompress it, or sox/ffmpeg to raw f32 interleaved I/Q, "
             "or re-record as .cf32), then pass that file."
         )
 
@@ -194,6 +207,11 @@ def channelize_to_file(
     chunking. ``bandwidth_hz`` is the filter passband width (cutoff = bandwidth_hz/2,
     matching the channelize stage); default passes most of the decimated band."""
     reject_container(src)
+    # before anything derives a bound from it: every check below (Nyquist span,
+    # decimated output rate, passband) is computed FROM sample_rate, so a zero
+    # or negative rate was reported as "bandwidth_hz 5000 exceeds the decimated
+    # output rate 0" - a parameter the caller may not even have passed
+    check_sample_rate(sample_rate)
     if abs(center_hz) > 0.5 * sample_rate:
         looks_absolute = abs(center_hz) > 1.0e6 and abs(center_hz) > 10.0 * sample_rate
         if looks_absolute:

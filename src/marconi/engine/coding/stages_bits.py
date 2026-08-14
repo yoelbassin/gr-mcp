@@ -663,9 +663,11 @@ class RsCode(CodingStage[RsCodeStep]):
 class Descramble(CodingStage[DescrambleStep]):
     name = "descramble"
     description = (
-        "XOR an explicit whitening sequence over the bits (restarting per window) "
-        "- additive descrambling with the sequence you supply. For LFSR self- "
-        "synchronizing scramblers, supply the expanded sequence."
+        "Additive (synchronous) descrambling: XOR a whitening sequence over the "
+        "bits, restarting at each window. Give the sequence one of two exclusive "
+        "ways - `sequence` as an explicit hex mask, or `lfsr_mask`/`lfsr_seed`/"
+        "`lfsr_len` to generate it from a Fibonacci LFSR reseeded per window. "
+        "Exactly one of the two."
     )
     from_level = Level.BITS
     to_level = Level.BITS

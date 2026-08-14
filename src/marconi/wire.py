@@ -7,6 +7,29 @@ from pydantic import BaseModel, ConfigDict
 _M = TypeVar("_M", bound=BaseModel)
 
 
+# Six significant figures is what EVERY float this tree puts on the wire is
+# rendered to, and the number is priced twice over. WIDTH: measured across 80k
+# legal float32 values (uniform bit patterns plus the 1e13..1e17 band python
+# renders in fixed notation, where the widest live - the widest float32 is not
+# the largest one), six figures cost at most 19 JSON characters
+# ("-1872558093762560.0") against 23 for the round(v, 4) they replace
+# ("-3.4028234663852886e+38"); read_stream's page ceilings are priced from
+# that 19. PRECISION: a fixed decimal round is an absolute quantum wherever
+# the data sits, so round(v, 6) shipped an N(0, 1e-8) stream as
+# min=max=std=-0.0 with a histogram step of 0.0 - 41 identical bin centers,
+# indistinguishable from constant zero - round(v, 4) paged a capture weaker
+# than its own ci16 LSB (3.05e-5) as all zeros, and round(v, 6) on quality
+# evidence shipped every chance rate below 5e-7 as "0.0", the reading error
+# the null models exist to prevent.
+_WIRE_SIGFIGS = 6
+
+
+def wire_float(v: float, figs: int = _WIRE_SIGFIGS) -> float:
+    """A float rounded for the wire. Non-finite values pass through as
+    themselves; the renderer that owns a surface decides how they ship."""
+    return float(f"{v:.{figs}g}")
+
+
 def replace(model: _M, **changes: object) -> _M:
     """A model with some fields replaced, RE-VALIDATED. pydantic's own
     model_copy(update=...) validates nothing: it stores a value the field's

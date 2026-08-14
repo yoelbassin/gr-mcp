@@ -19,7 +19,7 @@ from marconi.levelfit import (
     windowed_power,
 )
 from marconi.survey.iqfile import iter_iq, iter_probes, sample_iq
-from marconi.wire import Payload, replace
+from marconi.wire import Payload, replace, wire_float
 
 _SURVEY_NPERSEG = 4096
 # Agent-facing arrays stay small: a coarse PSD conveys the spectral shape, and
@@ -127,13 +127,11 @@ def _dealias_offset(
 
 
 def _sig(x: float, figs: int = 4) -> float:
-    # Round a scale-spanning dimensionless value to `figs` significant figures:
-    # keeps a small std and an O(1) ratio equally readable, and never rounds a
-    # positive to zero (unlike a fixed decimal place). Hz values round to 0.1
+    # A scale-spanning dimensionless value keeps `figs` significant figures:
+    # a small std and an O(1) ratio stay equally readable, and a positive never
+    # rounds to zero (unlike a fixed decimal place). Hz values round to 0.1
     # instead — an absolute grid the agent matches candidates against.
-    if not np.isfinite(x) or x == 0.0:
-        return float(x)
-    return float(round(x, figs - 1 - int(np.floor(np.log10(abs(x))))))
+    return wire_float(x, figs)
 
 
 def _spectrum(x: npt.NDArray[np.complex64], sample_rate: float) -> SpectrumStats:

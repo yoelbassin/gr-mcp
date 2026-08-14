@@ -27,7 +27,7 @@ class OokEnvelopeStep(Step):
             "the sampler normalizes each burst internally, and a sliding-"
             "window agc would step its gain mid-burst and defeat fixed-"
             "threshold slicing. Open-loop also runs at sps>=1 (closed-loop "
-            "still needs sps>=2), so a capture already at the symbol rate "
+            "still needs sps>=4), so a capture already at the symbol rate "
             "decodes with no resample stage - avoiding the anti-imaging "
             "low-pass that smears short pulses."
         ),

@@ -31,7 +31,8 @@ from marconi.mcp.workspace import (
     touch_cache_entry,
     workspace_root,
 )
-from marconi.wire import Histogram, Payload, replace
+from marconi.survey.iqfile import reject_container
+from marconi.wire import Histogram, Payload, replace, wire_float
 
 
 class EmptyStreamError(Exception):
@@ -52,7 +53,7 @@ _MAX_INLINE_BITS = 1_048_576
 # m_slice(levels=[-32768, 32767]) paged 57,434 bytes, and a full float page
 # of legal float32 measured 92,235 against the 49,152 budget. test_streams
 # SEARCHES for the widest-rendering legal value rather than assuming one
-# (the widest float32 is not the largest: see _WIRE_SIGFIGS), so a future
+# (the widest float32 is not the largest: see marconi.wire.wire_float), so a
 # retune is measured against the worst cost, not a friendly one.
 _MAX_PAGE_BYTES = 48 * 1024
 _CHUNK_ITEMS = 1 << 20
@@ -289,31 +290,12 @@ def _render_ints(key: str) -> Callable[[npt.NDArray[Any]], dict[str, object]]:
     return render
 
 
-# Six significant figures is what EVERY float this module puts on the wire is
-# rendered to, and the number is priced twice over. WIDTH: measured across 80k
-# legal float32 values (uniform bit patterns plus the 1e13..1e17 band python
-# renders in fixed notation, where the widest live - the widest float32 is not
-# the largest one), six figures cost at most 19 JSON characters
-# ("-1872558093762560.0") against 23 for the round(v, 4) they replace
-# ("-3.4028234663852886e+38"); the page ceilings above are priced from that 19.
-# PRECISION: a fixed decimal round is an absolute quantum wherever the data
-# sits, so round(v, 6) shipped an N(0, 1e-8) stream as min=max=std=-0.0 with a
-# histogram step of 0.0 - 41 identical bin centers, indistinguishable from
-# constant zero - and round(v, 4) paged a capture weaker than its own ci16 LSB
-# (3.05e-5) as all zeros.
-_WIRE_SIGFIGS = 6
-
-
-def _wire_float(v: float) -> float:
-    return float(f"{v:.{_WIRE_SIGFIGS}g}")
-
-
 def _wire_number(v: float) -> float | str:
     if math.isnan(v):
         return "nan"
     if math.isinf(v):
         return "inf" if v > 0 else "-inf"
-    return _wire_float(v)
+    return wire_float(v)
 
 
 def _non_finite_items(items: npt.NDArray[Any]) -> int | None:
@@ -440,7 +422,13 @@ def ensure_cf32(
     streaming. Raw integer formats convert only the requested slice, into a
     content-keyed LRU cache shared across runs: iterating specs against one
     capture must not write a fresh multi-GB copy per run, and the cache must
-    not grow without bound as the requested slices vary."""
+    not grow without bound as the requested slices vary.
+
+    The container guard lives HERE rather than in each caller: survey named a
+    .wav and its remedy while the decode lane ran the same file as raw IQ and
+    then blamed the samples ("the capture is corrupt"). Every capture consumer
+    resolves its input through this function."""
+    reject_container(src)
     kind = resolve_capture_dtype(dtype)
     if kind is CaptureDtype.CF32:
         return SourceSlice(path=src, offset=offset, length=samples)
@@ -544,8 +532,8 @@ def _hist(x: npt.NDArray[np.float64], bins: int) -> Histogram:
     span = percentile_span(x)
     counts, edges = binned_counts(x, bins, span, Tail.CLIP)
     return Histogram(
-        start=_wire_float(float((edges[0] + edges[1]) / 2.0)),
-        step=_wire_float(float(edges[1] - edges[0])),
+        start=wire_float(float((edges[0] + edges[1]) / 2.0)),
+        step=wire_float(float(edges[1] - edges[0])),
         counts=[int(n) for n in counts],
     )
 
@@ -587,7 +575,7 @@ def stream_stats_payload(
             {
                 **header,
                 "sampled_items": int(sample.size),
-                "ones_fraction": _wire_float(float((sample & np.uint8(1)).mean())),
+                "ones_fraction": wire_float(float((sample & np.uint8(1)).mean())),
             }
         )
     if kind is PageType.C:
@@ -620,10 +608,10 @@ def _real_stats(
         {
             **header,
             "sampled_items": int(x.size),
-            "min": _wire_float(float(x.min())),
-            "max": _wire_float(float(x.max())),
-            "mean": _wire_float(float(x.mean())),
-            "std": _wire_float(float(x.std())),
+            "min": wire_float(float(x.min())),
+            "max": wire_float(float(x.max())),
+            "mean": wire_float(float(x.mean())),
+            "std": wire_float(float(x.std())),
             "histogram": _hist(x, bins),
         }
     )
@@ -657,7 +645,7 @@ def _real_stats(
     # twice the tokens. centers IS the paste-ready list.
     return replace(
         stats,
-        centers=[_wire_float(float(v)) for v in centers[keep]],
+        centers=[wire_float(float(v)) for v in centers[keep]],
         cluster_counts=[int(n) for n in counts[keep]],
     )
 
@@ -671,10 +659,10 @@ def _constellation_stats(
     stats = ConstellationStats.build(
         **header,
         sampled_items=int(z.size),
-        mean_magnitude=_wire_float(mean_mag),
-        std_magnitude=_wire_float(float(mag.std())),
+        mean_magnitude=wire_float(mean_mag),
+        std_magnitude=wire_float(float(mag.std())),
         constant_modulus_ratio=(
-            _wire_float(float(mag.std() / mean_mag)) if mean_mag > 0 else None
+            wire_float(float(mag.std() / mean_mag)) if mean_mag > 0 else None
         ),
         magnitude_histogram=_hist(mag, bins),
         phase_histogram=_hist(np.angle(z), bins),
@@ -700,13 +688,13 @@ def _cluster_fit(z: npt.NDArray[Any], clusters: int) -> dict[str, object]:
     order = np.argsort(np.angle(centers))
     centers, counts = centers[order], counts[order]
     return {
-        "evm": _wire_float(err / ref) if ref > 0 else None,
+        "evm": wire_float(err / ref) if ref > 0 else None,
         "clusters": [
             ConstellationCluster(
-                real=_wire_float(float(c.real)),
-                imag=_wire_float(float(c.imag)),
-                magnitude=_wire_float(float(abs(c))),
-                phase_deg=_wire_float(float(np.degrees(np.angle(c)))),
+                real=wire_float(float(c.real)),
+                imag=wire_float(float(c.imag)),
+                magnitude=wire_float(float(abs(c))),
+                phase_deg=wire_float(float(np.degrees(np.angle(c)))),
                 count=int(n),
             )
             for c, n in zip(centers, counts)

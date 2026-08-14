@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import inspect
 from pathlib import Path
 
 import pytest
 
+from marconi.mcp.tools import TOOLS
 from marconi.mcp.workspace import new_run_dir, workspace_root
 
 
@@ -21,6 +23,30 @@ def test_run_dirs_are_fresh_and_distinct(
     assert a.is_dir() and b.is_dir()
     assert a.parent == tmp_path / "marconi-runs"
     assert a.name.startswith("rx-")
+
+
+def test_docstrings_name_the_directory_the_writing_tools_actually_write(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """run_rx and capture told the agent their output was in ./marconi-runs/ —
+    the CWD default this module deliberately abandoned, while read_stream in
+    the same surface named the real one. The claim is checked against the
+    directory new_run_dir returns under both roots, not against itself."""
+    monkeypatch.setenv("MARCONI_WORKSPACE", str(tmp_path))
+    assert new_run_dir("rx").parent == tmp_path / "marconi-runs"
+    monkeypatch.delenv("MARCONI_WORKSPACE")
+    assert workspace_root() == Path("~/.cache/marconi").expanduser()
+
+    docs = {
+        name: " ".join((inspect.getdoc(fn) or "").split()) for name, fn in TOOLS.items()
+    }
+    naming = {name for name, doc in docs.items() if "marconi-runs" in doc}
+    assert {"run_rx", "capture", "read_stream"} <= naming
+    for name in sorted(naming):
+        doc = docs[name]
+        assert "./marconi-runs" not in doc, name
+        assert "$MARCONI_WORKSPACE" in doc, name
+        assert "~/.cache/marconi" in doc, name
 
 
 def test_a_run_dir_holding_only_empty_subdirs_is_discarded(tmp_path: Path) -> None:

@@ -80,6 +80,50 @@ def test_soft_stream_summary_states_the_sign_convention_per_level() -> None:
     assert _soft_summary(PipelineResult(status=RunStatus.OK)) is None
 
 
+def test_a_chance_rate_below_the_rounding_quantum_survives_the_wire(
+    tmp_path: Path,
+) -> None:
+    """Evidence values were rounded to 6 DECIMALS, so every value below 5e-7
+    — chance rates and null-model probabilities among them — shipped as 0.0.
+    "chance = 0" on the wire is the reading error review #7 was about, this
+    time produced by the renderer rather than the estimator."""
+    from marconi.engine.quality import (
+        Assessment,
+        QualityEvidence,
+        QualityMetric,
+        Verdict,
+    )
+    from marconi.engine.run import PipelineResult
+    from marconi.mcp.payload import pipeline_payload
+
+    tiny = 3.21987e-9
+    result = PipelineResult(
+        status=RunStatus.OK,
+        quality=QualityReport(
+            verdict=Verdict.UNCERTAIN,
+            rationale="probe",
+            evidence=[
+                QualityEvidence(
+                    source="block_code[2]",
+                    metric=QualityMetric.WORD_VALIDITY,
+                    value=tiny,
+                    assessment=Assessment.NEGATIVE,
+                ),
+                QualityEvidence(
+                    source="sync_word[1]",
+                    metric=QualityMetric.SYNC_MATCHES,
+                    value=6250.0,
+                    assessment=Assessment.POSITIVE,
+                ),
+            ],
+        ),
+    )
+    payload = cast(dict[str, Any], pipeline_payload(result, tmp_path))
+    values = [e["value"] for e in cast(list[Any], payload["quality"]["evidence"])]
+    assert values[0] == pytest.approx(tiny, rel=1e-5), "a rate is not zero"
+    assert values[1] == 6250.0, "a count survives unchanged"
+
+
 def test_capture_slice_params_reject_input_path_mode(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
