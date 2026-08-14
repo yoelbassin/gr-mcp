@@ -8,6 +8,11 @@ from helpers._fakegr import FAKE_GR, FakeTag, drive
 from marconi.engine.backends.gnuradio.embedded.pilot_lattice import (
     make_pilot_lattice_equalizer,
 )
+from marconi.engine.modulation.ofdm.stages import OfdmCoherentSyncStep
+from marconi.engine.stages.registry import stage_registry
+from marconi.engine.types.descriptor import Descriptor
+from marconi.engine.types.enums import ItemType
+from marconi.engine.types.levels import Level
 
 
 def _evm(eq: np.ndarray, truth: np.ndarray) -> float:
@@ -64,6 +69,13 @@ def test_locks_and_equalizes_with_frame_phase_discovery() -> None:
     truth = grid[phi : phi + len(eq)]
     assert _evm(eq, truth) < 0.05
     assert blk.diagnostics["frames_emitted"] * _lattice.NS == len(eq)
+    # the stage's compile-time frame pin is this measured per-frame emit; a
+    # downstream fixed-geometry consumer checks itself against that number
+    pinned = stage_registry()["ofdm_coherent_sync"].out_descriptor(
+        Descriptor(Level.IQ, ItemType.C),
+        OfdmCoherentSyncStep(**_lattice.sync_params()),
+    )
+    assert pinned.frame_len == out.size // blk.diagnostics["frames_emitted"]
 
 
 def test_noise_never_locks_or_emits() -> None:

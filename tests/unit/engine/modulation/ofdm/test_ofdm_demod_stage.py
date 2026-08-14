@@ -38,27 +38,23 @@ def test_ofdm_demod_symbol_major(tmp_path: Path) -> None:
     src = tmp_path / "in.cf32"
     sig.astype(np.complex64).tofile(src)
     snk = tmp_path / "car.cf32"
-    modem = Modem(
-        name="od",
-        symbol_rate=float(2_048_000 / SYM),
-        path=[
-            OfdmDemodStep(
-                fft_len=FFT,
-                cp_len=CP,
-                sym_len=SYM,
-                null_len=NULL,
-                frame_len=FRAME,
-                data_syms=3,
-                n_carriers=NC,
-                bin_perm=BIN_PERM,
-            )
-        ],
+    step = OfdmDemodStep(
+        fft_len=FFT,
+        cp_len=CP,
+        sym_len=SYM,
+        null_len=NULL,
+        frame_len=FRAME,
+        data_syms=3,
+        n_carriers=NC,
+        bin_perm=BIN_PERM,
     )
+    modem = Modem(name="od", symbol_rate=float(2_048_000 / SYM), path=[step])
+    iq = Descriptor(Level.IQ, ItemType.C)
     pipe = compile_modem(
         modem,
         stage_registry(),
         sample_rate=2_048_000.0,
-        start=Descriptor(Level.IQ, ItemType.C),
+        start=iq,
         source_io={"path": str(src)},
         sink_io={"path": str(snk)},
     )
@@ -66,6 +62,10 @@ def test_ofdm_demod_symbol_major(tmp_path: Path) -> None:
     assert r.status == "ok", r
     out = np.fromfile(snk, np.complex64)
     assert out.size == 4 * NC
+    # the capture holds exactly one frame, so the cells that came out ARE the
+    # frame the compile-time pin promises downstream stages
+    pinned = stage_registry()["ofdm_demod"].out_descriptor(iq, step)
+    assert pinned.frame_len == out.size
     # ofdm_frame_sync normalizes each frame by std, so the recovered carriers equal
     # the planted cells up to one global (real) scale; compare up to that scale.
     carriers = out.reshape(4, NC)  # symbol-major (symbol, carrier)

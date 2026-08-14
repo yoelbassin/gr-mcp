@@ -24,6 +24,25 @@ from marconi.engine.types.perm import check_block_permutation
 from marconi.engine.types.step import Step
 
 
+def _codeword_frame_error(
+    in_desc: Descriptor, codeword: int, decodes: str
+) -> str | None:
+    """A framed stream carries as many codewords as fit: an OFDM frame's cells
+    decode to a whole burst of them (an off-air lane hands the tail 12384 LLRs
+    holding four 3096-LLR codewords). Alignment needs the codeword to TILE the
+    frame, not to equal it — equality was written when the only producer of a
+    frame pinned exactly one codeword, and it refuses every OFDM composition."""
+    frame = in_desc.frame_len
+    if frame is None or frame % codeword == 0:
+        return None
+    return (
+        f"{decodes} but the input is framed at {frame}, not a multiple of "
+        f"{codeword}; the codewords would straddle frame boundaries and every "
+        f"frame after the first would decode misaligned - align the upstream "
+        f"frame geometry (sync_align.frame_len, or the OFDM frame) with it"
+    )
+
+
 class DeinterleaveStep(Step):
     conv: Literal["deinterleave"] = "deinterleave"
     perm: list[int]
@@ -330,14 +349,13 @@ class Fec(Stage[CompileContext, FecStep]):
 
     def validate_input(self, in_desc: Descriptor, step: FecStep) -> str | None:
         need = (step.frame_bits + step.tail) // step.k * step.rate_inv
-        if in_desc.frame_len is not None and in_desc.frame_len != need:
-            return (
-                f"decodes frames of {need} soft bits ((frame_bits "
-                f"{step.frame_bits} + tail {step.tail}) / k {step.k} * rate_inv "
-                f"{step.rate_inv}) but the input is framed at {in_desc.frame_len}"
-                f"; align sync_align.frame_len with the fec frame geometry"
-            )
-        return None
+        return _codeword_frame_error(
+            in_desc,
+            need,
+            f"decodes codewords of {need} soft bits ((frame_bits "
+            f"{step.frame_bits} + tail {step.tail}) / k {step.k} * rate_inv "
+            f"{step.rate_inv})",
+        )
 
 
 class PolarStep(Step):
@@ -425,13 +443,11 @@ class Polar(Stage[CompileContext, PolarStep]):
         )
 
     def validate_input(self, in_desc: Descriptor, step: PolarStep) -> str | None:
-        if in_desc.frame_len is not None and in_desc.frame_len != step.block_size:
-            return (
-                f"decodes {step.block_size}-soft-bit polar frames but the input is "
-                f"framed at {in_desc.frame_len}; align the upstream frame geometry "
-                f"(sync_align.frame_len) with block_size"
-            )
-        return None
+        return _codeword_frame_error(
+            in_desc,
+            step.block_size,
+            f"decodes {step.block_size}-soft-bit polar codewords",
+        )
 
 
 class LdpcStep(Step):
@@ -510,13 +526,11 @@ class Ldpc(Stage[CompileContext, LdpcStep]):
         )
 
     def validate_input(self, in_desc: Descriptor, step: LdpcStep) -> str | None:
-        if in_desc.frame_len is not None and in_desc.frame_len != step.block_size:
-            return (
-                f"decodes {step.block_size}-soft-bit LDPC codewords but the input "
-                f"is framed at {in_desc.frame_len}; align the upstream frame "
-                f"geometry (sync_align.frame_len) with block_size"
-            )
-        return None
+        return _codeword_frame_error(
+            in_desc,
+            step.block_size,
+            f"decodes {step.block_size}-soft-bit LDPC codewords",
+        )
 
 
 CODING_STAGES: tuple[type[Stage[CompileContext, Any]], ...] = (

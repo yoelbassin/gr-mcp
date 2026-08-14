@@ -10,6 +10,22 @@ def test_qpsk_lock_unit_on_clean_qpsk() -> None:
     assert p.qpsk_lock(z) > 0.99
 
 
+def test_qpsk_lock_near_zero_on_structureless_phases() -> None:
+    """The negative half of the metric, which nothing pinned: a positive
+    control alone passes for a qpsk_lock that returns 1.0 on everything
+    (mean(|.|) instead of |mean(.)| — measured 1.0000 on both clean QPSK and
+    uniform phases), and the off-air OFDM gate that reads this number was
+    silently un-gated behind it.
+
+    Bar 0.1 with N=4000: under uniform phases the fourth-power mean is a
+    Rayleigh magnitude with E|.| ~ sqrt(pi/4N) ~ 0.014, and
+    P(|.| > 0.1) = exp(-N * 0.01) ~ 4e-18 — the gate cannot flake, and it
+    cannot be cleared by any metric that ignores phase structure."""
+    rng = np.random.default_rng(0)
+    z = np.exp(1j * rng.uniform(0.0, 2 * np.pi, 4000))
+    assert p.qpsk_lock(z) < 0.1
+
+
 def test_find_null_locates_low_energy_gap() -> None:
     rng = np.random.default_rng(1)
     sym_len, null_len, frame_len = 2552, 2656, 196608

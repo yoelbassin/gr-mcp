@@ -49,9 +49,6 @@ def test_bit_expanding_demaps_scale_the_frame() -> None:
         "qam_demap": ({"order": 16}, 4),
         "mfsk_soft_demap": ({"levels": [-3.0, -1.0, 1.0, 3.0]}, 2),
         "soft_demap": ({"scheme": "psk", "order": 4}, 2),
-        # DQPSK drops whole reference FRAMES, not items within a frame, so
-        # the per-frame geometry still scales by k alone
-        "dqpsk_soft_demap": ({"data_syms": 3, "n_carriers": 8}, 2),
         "css_demap": ({"sf": 7}, 7),
         "slice": ({}, 1),
     }
@@ -60,6 +57,16 @@ def test_bit_expanding_demaps_scale_the_frame() -> None:
         step = stage.step_model.model_validate({"conv": name, **spec})
         out = stage.out_descriptor(_in_desc(stage, 8), step)
         assert out.frame_len == 8 * k, (name, out.frame_len)
+    # dqpsk_soft_demap is not a per-item expander: it consumes one whole OFDM
+    # frame and drops the reference SYMBOL inside it, so its output frame is
+    # its own geometry (data_syms * n_carriers cells, k LLRs each), not the
+    # input frame scaled. tests/unit/engine/modulation/ofdm/
+    # test_ofdm_frame_geometry.py owns that seam.
+    stage = reg["dqpsk_soft_demap"]
+    step = stage.step_model.model_validate(
+        {"conv": "dqpsk_soft_demap", "data_syms": 3, "n_carriers": 8}
+    )
+    assert stage.out_descriptor(_in_desc(stage, 32), step).frame_len == 3 * 8 * 2
     # symbol_map emits data_bits per input symbol
     stage = reg["symbol_map"]
     step = stage.step_model.model_validate(

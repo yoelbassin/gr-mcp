@@ -60,6 +60,26 @@ def test_cell_select_pins_frame_len() -> None:
     assert out.level is Level.SYMBOLS and out.item_type == "c"
 
 
+def test_cell_select_frame_counts_every_block_the_frame_holds() -> None:
+    # 12-cell frame, gather span 3: four blocks per frame, so the gathered
+    # frame is 4 * keep — declaring `keep` alone under-counts it by 4x and the
+    # next fixed-geometry consumer is checked against a frame that never
+    # existed.
+    framed = Descriptor(Level.SYMBOLS, ItemType.C, Carrier.SOFT, frame_len=12)
+    out = stage_registry()["cell_select"].out_descriptor(
+        framed, CellSelectStep(select_perm=[1, 0, 2], keep=2)
+    )
+    assert out.frame_len == 8
+
+
+def test_cell_select_frame_is_the_gather_when_it_spans_whole_frames() -> None:
+    framed = Descriptor(Level.SYMBOLS, ItemType.C, Carrier.SOFT, frame_len=3)
+    out = stage_registry()["cell_select"].out_descriptor(
+        framed, CellSelectStep(select_perm=list(range(12)), keep=3)
+    )
+    assert out.frame_len == 3
+
+
 def test_cell_select_rejects_non_permutation() -> None:
     with pytest.raises(ValidationError, match="permutation"):
         CellSelectStep(select_perm=[0, 0, 2], keep=1)

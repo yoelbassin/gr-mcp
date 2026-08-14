@@ -193,6 +193,30 @@ _DOCUMENTED: dict[str, tuple[dict[str, Any], float]] = {
         },
         19200.0,
     ),
+    # ofdm_demod: "Pins the frame at (data_syms + 1) * n_carriers cells so the
+    # downstream demap's geometry is checked" / dqpsk_soft_demap:
+    # "data_syms/n_carriers ... the compiler checks them against the upstream
+    # OFDM frame"
+    "ofdm_demod_into_a_matched_dqpsk_demap": (
+        {
+            "symbol_rate": 1000.0,
+            "path": [
+                {
+                    "conv": "ofdm_demod",
+                    "fft_len": 8,
+                    "cp_len": 2,
+                    "sym_len": 10,
+                    "null_len": 4,
+                    "frame_len": 34,
+                    "data_syms": 2,
+                    "n_carriers": 2,
+                    "bin_perm": list(range(8)),
+                },
+                {"conv": "dqpsk_soft_demap", "data_syms": 2, "n_carriers": 2},
+            ],
+        },
+        1_000_000.0,
+    ),
     # fm_demod: "follow with analytic, then translate to the subcarrier"
     "fm_analytic_translate": (
         {
@@ -213,6 +237,19 @@ def test_a_documented_composition_compiles(name: str) -> None:
     spec, sample_rate = _DOCUMENTED[name]
     result = validate_modem(spec, sample_rate=sample_rate)
     assert result["valid"], f"{name}: {result.get('errors')}"
+
+
+def test_the_ofdm_demap_recipe_is_checked_against_the_frame_above_it() -> None:
+    """The other half of the OFDM entry's claim: the check the description
+    advertises has to REFUSE the mismatch, not merely pass the match. It did
+    not — the demod pinned no frame, so a demap cutting 42-cell frames behind
+    a 6-cell one compiled clean."""
+    spec, sample_rate = _DOCUMENTED["ofdm_demod_into_a_matched_dqpsk_demap"]
+    path = [dict(step) for step in spec["path"]]
+    path[1]["data_syms"] = 5
+    result = validate_modem({**spec, "path": path}, sample_rate=sample_rate)
+    assert not result["valid"]
+    assert "12" in str(result["errors"]) and "6" in str(result["errors"])
 
 
 def test_the_pi4_recipe_needs_its_out_order() -> None:

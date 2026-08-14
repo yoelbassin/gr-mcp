@@ -7,6 +7,8 @@ from marconi.engine.modulation.coding.stages import (
     DepunctureStep,
     FecStep,
     HardenStep,
+    LdpcStep,
+    PolarStep,
     SyncAlignStep,
 )
 from marconi.engine.stages.registry import stage_registry
@@ -65,6 +67,20 @@ def test_frame_fec_matched_compiles() -> None:
     _compile([_sync(160), _fec(frame_bits=80, rate_inv=2)])
 
 
+def test_a_frame_holding_whole_codewords_compiles() -> None:
+    # A frame carries as many codewords as fit: the OFDM lanes hand the coding
+    # tail one whole OFDM frame's worth of LLRs, several codewords at a time
+    # (measured off-air: a 12384-LLR frame holding four 3096-LLR codewords).
+    # Demanding frame == codeword refused every such composition.
+    _compile([_sync(320), _fec(frame_bits=80, rate_inv=2)])
+
+
+def test_codewords_that_straddle_the_frame_still_fail() -> None:
+    with pytest.raises(CompileError) as exc:
+        _compile([_sync(240), _fec(frame_bits=80, rate_inv=2)])
+    assert "160" in str(exc.value) and "240" in str(exc.value)
+
+
 def test_frame_fec_with_tail_matched_compiles() -> None:
     _compile([_sync(172), _fec(frame_bits=80, rate_inv=2, tail=6)])
 
@@ -94,6 +110,24 @@ def test_depuncture_nondivisible_kept_fails() -> None:
     with pytest.raises(CompileError) as exc:
         _compile([_sync(91), DepunctureStep(keep_mask=[1, 1, 0])])
     assert "91" in str(exc.value)
+
+
+@pytest.mark.parametrize(
+    "decoder",
+    [
+        PolarStep(
+            block_size=4, info_bits=2, frozen_positions=[0, 1], frozen_values=[0, 0]
+        ),
+        LdpcStep(block_size=4, check_nodes=[[0, 1]]),
+    ],
+    ids=["polar", "ldpc"],
+)
+def test_every_block_decoder_reads_the_frame_the_same_way(decoder: Step) -> None:
+    # one rule for all three decoders: codewords must TILE the frame
+    _compile([_sync(12), decoder])
+    with pytest.raises(CompileError) as exc:
+        _compile([_sync(10), decoder])
+    assert "4" in str(exc.value) and "10" in str(exc.value)
 
 
 def test_harden_preserves_frame_len() -> None:

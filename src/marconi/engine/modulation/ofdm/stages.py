@@ -137,6 +137,10 @@ class OfdmDemodStep(Step):
         return self
 
 
+def _demod_cells_per_frame(step: OfdmDemodStep) -> int:
+    return (step.data_syms + 1) * step.n_carriers
+
+
 class OfdmDemod(Stage[CompileContext, OfdmDemodStep]):
     """OFDM demod, IQ->SYMBOLS (RX-only). Custom null-sync + CP-strip, stock FFTW
     fft_vcc, stock carrier permute + select -> symbol-major active carriers. Generic
@@ -145,8 +149,10 @@ class OfdmDemod(Stage[CompileContext, OfdmDemodStep]):
     name = "ofdm_demod"
     description = (
         "Non-coherent OFDM demod: CP-correlation symbol sync, FFT, and bin_perm "
-        "carrier extraction to soft symbols. For pilot-based coherent "
-        "equalization use ofdm_coherent_sync."
+        "carrier extraction to soft symbols. Pins the frame at "
+        "(data_syms + 1) * n_carriers cells so the downstream demap's geometry "
+        "is checked. For pilot-based coherent equalization use "
+        "ofdm_coherent_sync."
     )
     from_level = Level.IQ
     to_level = Level.SYMBOLS
@@ -175,13 +181,17 @@ class OfdmDemod(Stage[CompileContext, OfdmDemodStep]):
         b.chain("keep_m_in_n_c", m=step.n_carriers, n=fft_len, offset=0)
 
     def out_descriptor(self, in_desc: Descriptor, step: OfdmDemodStep) -> Descriptor:
-        return Descriptor(Level.SYMBOLS, ItemType.C, Carrier.SOFT)
+        return Descriptor(
+            Level.SYMBOLS,
+            ItemType.C,
+            Carrier.SOFT,
+            frame_len=_demod_cells_per_frame(step),
+        )
 
     def output_item_rate(
         self, step: OfdmDemodStep, in_rate: float, symbol_rate: float
     ) -> float | None:
-        cells = (step.data_syms + 1) * step.n_carriers
-        return in_rate * cells / step.frame_len
+        return in_rate * _demod_cells_per_frame(step) / step.frame_len
 
 
 _NAMED_SCHEME_ORDERS: dict[str, frozenset[int]] = {
@@ -265,7 +275,9 @@ class DqpskSoftDemap(Stage[CompileContext, DqpskSoftDemapStep]):
     name = "dqpsk_soft_demap"
     description = (
         "Differential QPSK soft demap across OFDM symbols (reference symbol "
-        "dropped): equalizer-free DQPSK-OFDM to LLRs."
+        "dropped): equalizer-free DQPSK-OFDM to LLRs. data_syms/n_carriers are "
+        "the frame this stage cuts, and the compiler checks them against the "
+        "upstream OFDM frame."
     )
     from_level = Level.SYMBOLS
     to_level = Level.BITS
@@ -301,11 +313,28 @@ class DqpskSoftDemap(Stage[CompileContext, DqpskSoftDemapStep]):
     def out_descriptor(
         self, in_desc: Descriptor, step: DqpskSoftDemapStep
     ) -> Descriptor:
-        # the reference is a whole dropped FRAME, not items within one, so
-        # the per-frame geometry scales by bits-per-symbol alone
         k = step.alphabet().bit_length() - 1
-        frame = None if in_desc.frame_len is None else in_desc.frame_len * k
-        return Descriptor(Level.BITS, ItemType.F, Carrier.SOFT, frame_len=frame)
+        return Descriptor(
+            Level.BITS,
+            ItemType.F,
+            Carrier.SOFT,
+            frame_len=step.data_syms * step.n_carriers * k,
+        )
+
+    def validate_input(
+        self, in_desc: Descriptor, step: DqpskSoftDemapStep
+    ) -> str | None:
+        need = (step.data_syms + 1) * step.n_carriers
+        if in_desc.frame_len is not None and in_desc.frame_len != need:
+            return (
+                f"cuts frames of {need} cells (data_syms {step.data_syms} + the "
+                f"reference symbol, times n_carriers {step.n_carriers}) but the "
+                f"input is framed at {in_desc.frame_len}; its delay/keep line is "
+                f"the frame geometry itself, so a mismatch drops the wrong "
+                f"symbol of every frame - match data_syms/n_carriers to the "
+                f"upstream OFDM frame"
+            )
+        return None
 
     def required_input_order(self, step: DqpskSoftDemapStep) -> int | None:
         return step.alphabet()
@@ -411,7 +440,8 @@ class OfdmCoherentSync(Stage[CompileContext, OfdmCoherentSyncStep]):
     description = (
         "Coherent scattered-pilot OFDM front end: CP timing, fine CFO off the "
         "frequency pilots, 2-D channel estimate, equalized symbol-major carriers "
-        "out. Geometry and pilot lattice are all parameters."
+        "out, framed at n_frame_syms * n_carriers cells. Geometry and pilot "
+        "lattice are all parameters."
     )
     from_level = Level.IQ
     to_level = Level.SYMBOLS
@@ -449,7 +479,12 @@ class OfdmCoherentSync(Stage[CompileContext, OfdmCoherentSyncStep]):
     def out_descriptor(
         self, in_desc: Descriptor, step: OfdmCoherentSyncStep
     ) -> Descriptor:
-        return Descriptor(Level.SYMBOLS, ItemType.C, Carrier.SOFT)
+        return Descriptor(
+            Level.SYMBOLS,
+            ItemType.C,
+            Carrier.SOFT,
+            frame_len=step.n_frame_syms * step.n_carriers,
+        )
 
     def output_item_rate(
         self, step: OfdmCoherentSyncStep, in_rate: float, symbol_rate: float
@@ -569,7 +604,8 @@ class CellSelect(Stage[CompileContext, CellSelectStep]):
     block by a whole-block permutation (stock blockinterleaver_cc) with the
     wanted cells at the front, then keep that front (keep_m_in_n). Which
     cells matter is the caller's anatomy — the perm and keep count are
-    params. Pins frame_len=keep so downstream frame geometry is checked."""
+    params. Pins the gathered frame (keep, times the gather blocks one input
+    frame holds) so downstream frame geometry is checked."""
 
     name = "cell_select"
     description = (
@@ -592,7 +628,10 @@ class CellSelect(Stage[CompileContext, CellSelectStep]):
         b.chain("keep_m_in_n_c", m=int(step.keep), n=len(step.select_perm))
 
     def out_descriptor(self, in_desc: Descriptor, step: CellSelectStep) -> Descriptor:
-        return replace(in_desc, frame_len=int(step.keep))
+        span = len(step.select_perm)
+        frame = in_desc.frame_len
+        blocks = 1 if frame is None or frame % span else frame // span
+        return replace(in_desc, frame_len=int(step.keep) * blocks)
 
     def rate_factor(self, step: CellSelectStep) -> float:
         return step.keep / len(step.select_perm)
