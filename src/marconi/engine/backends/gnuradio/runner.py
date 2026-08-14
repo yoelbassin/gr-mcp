@@ -111,6 +111,20 @@ def _receive_payload(recv: Connection, timeout: float) -> str | None:
     return None
 
 
+def _force_reap(proc: Any) -> None:
+    """Mirrors the normal path's terminate/grace/kill sequence for the
+    exception path: a raise between start() and join() must not leave the
+    non-daemon flowgraph child running as an orphan (probed)."""
+    if proc.pid is None:
+        return
+    if proc.is_alive():
+        proc.terminate()
+        proc.join(_GRACE_SECONDS)
+    if proc.is_alive():
+        proc.kill()
+    proc.join()
+
+
 def _run_in_subprocess(
     payload_json: str,
     timeout: float,
@@ -124,9 +138,15 @@ def _run_in_subprocess(
             target=target, args=(payload_json, send, cap_path)
         )
         deadline = time.monotonic() + timeout
-        proc.start()
-        send.close()
-        payload = _receive_payload(recv, timeout)
+        try:
+            proc.start()
+            send.close()
+            payload = _receive_payload(recv, timeout)
+        except BaseException:
+            _force_reap(proc)
+            send.close()
+            recv.close()
+            raise
         # a delivered result caps the wait at teardown grace: a worker wedged
         # in GR destruction must not hold a finished run to the full deadline
         join_for = (

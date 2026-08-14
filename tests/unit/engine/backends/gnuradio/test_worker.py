@@ -1,8 +1,11 @@
+import multiprocessing
+import os
 import subprocess
 import sys
 import textwrap
 import threading
 import time
+from multiprocessing.connection import Connection
 from pathlib import Path
 from typing import Any
 
@@ -10,6 +13,7 @@ import numpy as np
 import pytest
 
 from marconi.engine.backends.base import Diagnostic, RunResult, find_diagnostic
+from marconi.engine.backends.gnuradio import runner as runner_mod
 from marconi.engine.backends.gnuradio import worker as worker_mod
 from marconi.engine.backends.gnuradio.runner import (
     GnuRadioBackend,
@@ -308,6 +312,52 @@ def test_delivered_result_is_not_held_to_the_full_deadline() -> None:
     elapsed = time.monotonic() - t0
     assert res.status == "ok"
     assert elapsed < 30.0, f"finished run held for {elapsed:.1f}s"
+
+
+def _slow_worker(payload_json: str, conn: Any, capture_path: str) -> None:
+    time.sleep(10.0)
+
+
+def test_exception_between_start_and_join_does_not_orphan_child(
+    monkeypatch: Any,
+) -> None:
+    """An exception escaping `_receive_payload` (KeyboardInterrupt, MemoryError -
+    anything not EOFError/OSError) used to skip the join/kill sequence entirely
+    and escape with the non-daemon flowgraph child still running (probed).
+    The exception path must reap the child before re-raising."""
+    ensure_worker_warm()
+    real_process_cls = runner_mod._CTX.Process  # type: ignore[attr-defined]
+    spawned: list[Any] = []
+
+    def _tracking_process(*args: Any, **kwargs: Any) -> Any:
+        proc = real_process_cls(*args, **kwargs)
+        spawned.append(proc)
+        return proc
+
+    monkeypatch.setattr(runner_mod._CTX, "Process", _tracking_process)
+
+    def _boom(recv: Connection, timeout: float) -> str | None:
+        raise RuntimeError("simulated async exception during recv.poll")
+
+    monkeypatch.setattr(runner_mod, "_receive_payload", _boom)
+
+    try:
+        with pytest.raises(RuntimeError, match="simulated async exception"):
+            runner_mod._run_in_subprocess("{}", timeout=30.0, target=_slow_worker)
+
+        assert spawned, "no child process was recorded"
+        proc = spawned[0]
+        assert proc.pid is not None
+        live_pids = {p.pid for p in multiprocessing.active_children()}
+        assert proc.pid not in live_pids, "child still tracked as active"
+        assert not proc.is_alive(), "child process still alive after the escape"
+        with pytest.raises(ProcessLookupError):
+            os.kill(proc.pid, 0)
+    finally:
+        for proc in spawned:
+            if proc.is_alive():
+                proc.kill()
+                proc.join()
 
 
 def test_result_pipe_outranks_timeout_kill() -> None:
