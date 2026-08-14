@@ -12,6 +12,7 @@ from marconi.engine.compile.compile_context import CompileContext
 from marconi.engine.compile.errors import CompileError
 from marconi.engine.stages.base import Stage
 from marconi.engine.types.bounds import (
+    MAX_AGC_HISTORY_SAMPLES,
     MAX_DECIM,
     MAX_FILTER_TAPS,
     MAX_FRAME_ITEMS,
@@ -310,10 +311,14 @@ def _iir_coeff(field: str, symbols: float, sps: float) -> float:
     return coeff
 
 
+def _feedforward_nsamples(window_symbols: float, sps: float) -> int:
+    return max(1, round(window_symbols * sps))
+
+
 def _agc_feedforward(b: CompileContext, p: AgcStep) -> None:
     b.chain(
         "feedforward_agc_cc",
-        nsamples=max(1, round(p.window_symbols * b.sps)),
+        nsamples=_feedforward_nsamples(p.window_symbols, b.sps),
         reference=p.reference,
     )
 
@@ -427,6 +432,22 @@ class Agc(Stage[CompileContext, AgcStep]):
             in_desc.item_type,
             in_desc.carrier,
             _AGC_MODES[step.mode].amplitude,
+        )
+
+    def validate_input_sps(self, step: AgcStep, sps: float) -> str | None:
+        if step.mode is not AgcMode.FEEDFORWARD:
+            return None
+        nsamples = _feedforward_nsamples(step.window_symbols, sps)
+        if nsamples <= MAX_AGC_HISTORY_SAMPLES:
+            return None
+        return (
+            f"window_symbols {step.window_symbols:g} at {sps:g} samples per "
+            f"symbol is a {nsamples}-sample feedforward history (budget "
+            f"{MAX_AGC_HISTORY_SAMPLES}); the block buffers all of it and "
+            f"rescans the whole window for every output sample. Lower "
+            f"window_symbols to at most "
+            f"{MAX_AGC_HISTORY_SAMPLES / sps:g}, or channelize/resample toward "
+            f"fewer samples per symbol first"
         )
 
 

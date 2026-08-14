@@ -96,7 +96,7 @@ def test_malformed_step_entries_name_the_index_and_shape() -> None:
 
     for bad in (None, 1, True, "agc"):
         with pytest.raises(StepSpecError, match=r"path\[0\].*object"):
-            steps_from_spec([bad], step_models())  # type: ignore[list-item]
+            steps_from_spec([bad], step_models())
 
 
 def test_gather_amplification_is_bounded() -> None:

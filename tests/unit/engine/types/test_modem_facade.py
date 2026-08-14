@@ -285,3 +285,39 @@ def test_a_missing_path_is_rejected_but_an_explicit_empty_one_is_not() -> None:
     assert (
         Modem.from_spec({"symbol_rate": 1000.0, "path": []}, step_models()).path == []
     )
+
+
+@pytest.mark.parametrize("bad", [None, "fsk", 42, True, 1.5, ["fsk"]])
+def test_a_malformed_path_entry_reaches_the_guard_written_for_it(bad: object) -> None:
+    """steps_from_spec's Mapping guard names the index and the shape a path
+    entry must have, and from_spec ran `dict(s)` over every entry BEFORE
+    calling it — so on the only route the MCP surface actually takes, the guard
+    was dead code. path=[null] surfaced as "'NoneType' object is not iterable",
+    which is not a ValueError and escaped validate_modem's own except clause;
+    path=["fsk"] surfaced as "dictionary update sequence element #0 has length
+    1; 2 is required", naming no index, no field and no expected shape."""
+    with pytest.raises(StepSpecError, match=r"path\[0\].*object"):
+        Modem.from_spec({"symbol_rate": 1000.0, "path": [bad]}, step_models())
+
+
+def test_a_malformed_entry_after_a_good_one_names_its_own_index() -> None:
+    with pytest.raises(StepSpecError) as exc:
+        Modem.from_spec(
+            {"symbol_rate": 1000.0, "path": [{"conv": "agc"}, None]}, step_models()
+        )
+    assert exc.value.index == 1
+
+
+@pytest.mark.parametrize("bad", [float("inf"), float("-inf"), float("nan")])
+def test_symbol_rate_must_be_finite_not_merely_greater_than_zero(bad: float) -> None:
+    """Field(gt=0) passes +inf (inf > 0 is True), and json.loads("1e999") is
+    how an agent types it. Downstream, sample_symbols' required_input_rate
+    returned inf and the compiler's own gate read `abs(rate - inf) <= tol*inf`
+    as `inf <= inf` — True — so the check that exists to catch a wrong rate
+    passed a spec that had no rate at all, and validate_modem answered valid.
+    Modem.symbol_rate is spec-level, so the Step base's finiteness sweep never
+    saw it."""
+    with pytest.raises(ValueError, match="symbol_rate"):
+        Modem(symbol_rate=bad, path=[])
+    with pytest.raises(ValueError, match="symbol_rate"):
+        Modem.from_spec({"symbol_rate": bad, "path": []}, step_models())

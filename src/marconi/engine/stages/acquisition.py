@@ -24,7 +24,19 @@ class PreambleSyncStep(Step):
     preamble_i: list[float]
     preamble_q: list[float]
     pad_symbols: StrictInt = Field(default=192, ge=0, le=MAX_FRAME_ITEMS)
-    threshold: float = 0.9
+    threshold: float = Field(
+        default=0.9,
+        gt=0,
+        le=1.0,
+        description=(
+            "Detection bar as a FRACTION of the ideal preamble's own "
+            "autocorrelation energy (corr_est runs THRESHOLD_ABSOLUTE), so a "
+            "perfect match reaches 1 and nothing can exceed it - hence the "
+            "(0, 1] domain. Detection is scale-sensitive: normalize upstream "
+            "(agc) so the preamble arrives near unit power. Already lossy AT "
+            "1 in noise; 0.9 is the default for that reason."
+        ),
+    )
     # True: the preamble is drawn from the payload constellation, so the
     # modulus/phase-grid typo check applies. False: a freeform training
     # sequence (CAZAC/Zadoff-Chu, mixed-amplitude) - correlation and phase
@@ -39,8 +51,6 @@ class PreambleSyncStep(Step):
             )
         if not self.preamble_i:
             raise PydanticCustomError("value_error", "preamble must be non-empty")
-        if self.threshold <= 0:
-            raise PydanticCustomError("value_error", "threshold must be > 0")
         return self
 
 

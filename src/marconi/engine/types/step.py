@@ -58,9 +58,13 @@ register_error(StepSpecError, "invalid_argument")
 
 
 def steps_from_spec(
-    items: Sequence[Mapping[str, object]],
+    items: Sequence[object],
     step_models: Mapping[str, type[Step]],
 ) -> list[Step]:
+    """Takes UNVALIDATED entries: the Mapping guard below is the only thing
+    standing between a raw JSON path and a TypeError from inside a dict()
+    call, so a caller that converts first defeats it (Modem.from_spec did,
+    which is how the guard came to be dead code on the production route)."""
     out: list[Step] = []
     for index, obj in enumerate(items):
         if not isinstance(obj, Mapping):

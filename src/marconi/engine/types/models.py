@@ -5,6 +5,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field, SerializeAsAny, model_validator
 
+from marconi.engine.types.bounds import check_sample_rate
 from marconi.engine.types.enums import ItemType
 from marconi.engine.types.levels import Level
 from marconi.engine.types.step import Step, steps_from_spec
@@ -91,6 +92,17 @@ class Modem(BaseModel):
     symbol_rate: float = Field(gt=0)
     path: list[SerializeAsAny[Step]]
 
+    @model_validator(mode="after")
+    def _symbol_rate_is_finite(self) -> "Modem":
+        """gt=0 admits +inf (inf > 0 is True), and json.loads("1e999") is how
+        an agent types it. The Step base's finiteness sweep cannot reach this
+        one — symbol_rate is spec-level, not a step field — and downstream the
+        compiler's required-rate gate read `abs(rate - inf) <= tol * inf` as
+        `inf <= inf` and passed, so the check that exists to catch a wrong rate
+        certified a spec with no rate at all."""
+        check_sample_rate(self.symbol_rate, field="symbol_rate")
+        return self
+
     def to_spec(self) -> dict[str, object]:
         return self.model_dump(mode="json")
 
@@ -115,7 +127,7 @@ class Modem(BaseModel):
         rate = data.get("symbol_rate")
         if not isinstance(rate, (int, float)) or isinstance(rate, bool):
             raise ValueError("modem spec requires a numeric 'symbol_rate'")
-        steps = steps_from_spec([dict(s) for s in raw], step_models)
+        steps = steps_from_spec(raw, step_models)
         return cls(
             name=str(data.get("name", "modem")),
             symbol_rate=float(rate),

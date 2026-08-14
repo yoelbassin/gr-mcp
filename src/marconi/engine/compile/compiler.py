@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -173,6 +174,14 @@ def _check_required_rate(s: _StepInput) -> str | None:
     required = s.stage.required_input_rate(s.step, s.symbol_rate)
     if required is None or required <= 0:
         return None
+    if not math.isfinite(required):
+        # the tolerance below is RELATIVE, so an unrepresentable requirement
+        # makes the gate certify the one spec it exists to refuse: inf <= inf
+        return (
+            f"stage '{s.step.conv}' oversamples symbol_rate {s.symbol_rate:g} "
+            f"past the largest representable sample rate, so the rate it needs "
+            f"cannot be computed or compared; lower symbol_rate"
+        )
     if abs(s.rate - required) <= _RATE_TOL * required:
         return None
     return (

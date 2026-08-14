@@ -90,6 +90,46 @@ def test_validate_modem_warnings_empty_on_clean_spec() -> None:
     assert out["warnings"] == []
 
 
+@pytest.mark.parametrize("bad", [None, "fsk", 42, ["fsk"]])
+def test_a_malformed_path_entry_is_a_failing_spec_not_a_raised_exception(
+    bad: object,
+) -> None:
+    """The docstring promises "a failing spec is a normal result here, not an
+    exception", and path=[null] broke that promise: from_spec's eager dict()
+    raised TypeError, which is outside this tool's
+    (CompileError, ValidationError, ValueError) net."""
+    out = validate_modem({"symbol_rate": 1000.0, "path": [bad]}, sample_rate=48000.0)
+    assert out["valid"] is False
+    errors = cast(list[dict[str, object]], out["errors"])
+    assert errors[0]["code"] == "invalid_argument"
+    assert "path[0]" in cast(str, errors[0]["message"])
+
+
+def test_a_non_finite_symbol_rate_is_a_failing_spec_not_a_valid_verdict() -> None:
+    """json.loads('1e999') is inf, and inf cleared Field(gt=0) AND the
+    compiler's required-rate gate (inf <= inf), so this spec came back
+    {"valid": true} with sample_symbols relabeling 48 kHz IQ as symbols."""
+    spec = {"symbol_rate": float("inf"), "path": [{"conv": "sample_symbols"}]}
+    out = validate_modem(spec, sample_rate=48000.0)
+    assert out["valid"] is False
+    errors = cast(list[dict[str, object]], out["errors"])
+    assert "symbol_rate" in cast(str, errors[0]["message"])
+
+
+def test_an_agc_history_bigger_than_the_worker_can_hold_is_a_failing_spec() -> None:
+    """2.048 Msps into 50 baud is sps 40960; the field's own ceiling then asked
+    feedforward_agc_cc for a 42,949,672,960-sample (343 GB) history, and this
+    tool answered {"valid": true, "warnings": []}."""
+    spec = {
+        "symbol_rate": 50.0,
+        "path": [{"conv": "agc", "mode": "feedforward", "window_symbols": 1 << 20}],
+    }
+    out = validate_modem(spec, sample_rate=2_048_000.0)
+    assert out["valid"] is False
+    errors = cast(list[dict[str, object]], out["errors"])
+    assert "window_symbols" in cast(str, errors[0]["message"])
+
+
 def test_describe_index_and_filters() -> None:
     idx = describe_stages()
     stages = cast(dict[str, list[dict[str, object]]], idx["stages"])

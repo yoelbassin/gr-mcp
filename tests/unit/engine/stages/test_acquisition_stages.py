@@ -87,3 +87,35 @@ def test_param_validation() -> None:
         PreambleSyncStep(preamble_i=[1.0, 0.0], preamble_q=[0.0])  # unequal length
     with pytest.raises(ValidationError):
         PreambleSyncStep(preamble_i=[], preamble_q=[])  # empty preamble
+
+
+@pytest.mark.parametrize("ok", [1e-6, 0.5, 0.9, 1.0])
+def test_a_detection_threshold_inside_the_energy_it_compares_against(ok: float) -> None:
+    assert PreambleSyncStep(
+        preamble_i=[1.0, -1.0], preamble_q=[0.0, 0.0], threshold=ok
+    ).threshold == pytest.approx(ok)
+
+
+@pytest.mark.parametrize("bad", [0.0, -0.5, 1.0000001, 1.5, 2.0, float(1 << 40)])
+def test_a_detection_threshold_outside_that_energy_is_refused(bad: float) -> None:
+    """corr_est_cc is pinned to THRESHOLD_ABSOLUTE: the bar is a FRACTION of
+    the ideal preamble's own autocorrelation energy, which a perfect match
+    reaches at 1 and can never exceed — so the usable domain ends there, and
+    the guard only checked `<= 0`.
+
+    Measured over 5 synthetic bursts (32-symbol unit-modulus QPSK preamble +
+    128 payload symbols, sps 1, AWGN sigma 0.08), corr_start tag counts by
+    threshold: 0.5 -> 5, 0.9 -> 5, 0.99 -> 4, 1.0 -> 3, 1.5 -> 0, 2.0 -> 0,
+    1e6 -> 0. Above 1 the spec validated, compiled, ran and fired nothing:
+    sym_strip forwarded nothing and the decode read back as a no-signal
+    capture, the one failure an operator cannot tell from a dead antenna."""
+    with pytest.raises(ValidationError, match="threshold"):
+        PreambleSyncStep(preamble_i=[1.0, -1.0], preamble_q=[0.0, 0.0], threshold=bad)
+
+
+def test_the_threshold_domain_reaches_the_agent_that_has_to_type_it() -> None:
+    """params_schema is what describe_stages publishes, so a bound the agent
+    cannot read is one it will keep guessing wrong."""
+    schema = PreambleSyncStep.model_json_schema()["properties"]["threshold"]
+    assert schema["exclusiveMinimum"] == 0 and schema["maximum"] == 1.0
+    assert "fraction" in schema["description"].lower()

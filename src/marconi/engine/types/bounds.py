@@ -154,6 +154,27 @@ MAX_FRAME_ITEMS = 1 << 20
 # Delay-line depth in items: delay_cc allocates the whole line up front.
 MAX_DELAY_ITEMS = 1 << 20
 
+# feedforward_agc_cc's history, in SAMPLES — the product window_symbols * sps,
+# which neither factor's ceiling bounds (2.048 Msps into 50 baud is sps 40960,
+# so MAX_WINDOW_SYMBOLS alone asked for a 42,949,672,960-sample history).
+# The block pays for it twice, both inside the GR worker where the run
+# deadline — a parent-process contextvar — cannot reach the cost:
+#   memory, measured as RSS across a started flowgraph, tracks 8 bytes per
+#   history sample exactly (2^24 -> +96 MB, 2^26 -> +384 MB, 2^28 -> +1536 MB,
+#   2^30 -> 8.6 GB requested); past 2^31 the pybind int32 signature raises a
+#   raw TypeError naming a GR block, not the field the caller typed.
+#   time, measured as output samples/s through a real flowgraph, because work()
+#   rescans the WHOLE window per output sample: 4.6e5/s at 1024, 8.0e3/s at
+#   16384, 5.9e2/s at 65536, 1.5e2/s at 131072, 38/s at 262144.
+# Like MAX_POLY_BITS this cannot sit orders of magnitude clear of real usage —
+# the cost is superlinear, so the only honest place is the edge of what real
+# windows need. Instrumented across tests/unit + tests/integration, the widest
+# of 61 compiled feedforward AGCs was 16384 samples (4096 symbols at sps 4, the
+# open-loop OOK path); this sits 4x above it and still delivers ~590 output
+# samples/s. Raising it buys a longer window at a linearly worse throughput and
+# a linearly larger worker allocation.
+MAX_AGC_HISTORY_SAMPLES = 1 << 16
+
 # RS parity width n-k: the reedsolo generator-polynomial build is O((n-k)^2)
 # pure Python with no poll inside the library - measured 0.65 s at 2000 and
 # 9.9 s at 8000 (clean 4x per doubling), and RsCodeStep(n=65535, k=1)

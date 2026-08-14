@@ -132,6 +132,13 @@ _BASE: dict[str, dict[str, object]] = {
 # threshold constant that the compiler's rate model or the block itself checks.
 # An entry here is a claim: "a huge value of this allocates nothing and
 # iterates nothing."
+#
+# Cost is necessary for an exemption, not sufficient. preamble_sync.threshold
+# sat here on exactly that reasoning and was still wrong: it is a fraction of
+# the preamble's own autocorrelation energy, so anything past 1 allocates
+# nothing, iterates nothing, and detects nothing — the run comes back looking
+# like a dead antenna. A field whose value has a DOMAIN belongs to its domain
+# even when it has no cost.
 _PHYSICAL: frozenset[str] = frozenset(
     {
         "agc.reference",
@@ -149,7 +156,6 @@ _PHYSICAL: frozenset[str] = frozenset(
         "ofdm_coherent_sync.lock_min_ratio",
         "ofdm_coherent_sync.lock_min_score",
         "ook_envelope.loop_bw",
-        "preamble_sync.threshold",
         "psk_demod.loop_bw",
         "qam_demod.loop_bw",
         "realign.bit_offset",
@@ -227,9 +233,10 @@ def test_a_cost_sizing_param_refuses_an_absurd_value(
         return
     assert key in _PHYSICAL, (
         f"{key} accepts 2**40. If it sizes an allocation, a filter, or an "
-        "iteration count, give it a ceiling from engine/types/bounds.py. If a "
-        "huge value genuinely costs nothing, add it to _PHYSICAL with that "
-        "claim in mind."
+        "iteration count, give it a ceiling from engine/types/bounds.py. If it "
+        "has a natural domain instead (a fraction, a probability, a fold of a "
+        "period), bound it with a Field constraint so the schema carries it. "
+        "Only add it to _PHYSICAL if a huge value is both free AND meaningful."
     )
 
 
