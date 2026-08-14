@@ -134,11 +134,21 @@ def test_ensure_cf32_failure_leaves_no_tmp_in_cache(
 
 
 def test_render_int64_sidecar_page(tmp_path: Path) -> None:
+    # ValuesPage declares `list[float | str] | list[int]`, so a mark offset
+    # staying an int is a pydantic smart-union RESOLUTION, not a typed
+    # guarantee - and a value assertion cannot see the difference, because
+    # 8192.0 == 8192, so a pydantic bump or a union reorder would ship
+    # floats past a green suite. Assert the element TYPE, at an offset past
+    # 2**53 where the sidecar's whole point - an EXACT int64 sample index -
+    # is the first thing a float loses.
     p = tmp_path / "windows.i64"
-    np.array([0, 8192, 1 << 40], np.int64).tofile(p)
+    past_float_exactness = (1 << 53) + 1
+    np.array([0, 8192, past_float_exactness], np.int64).tofile(p)
     page = render_page(p, offset=1, count=5, item_type=None)
     assert page["item_type"] == "l"
-    assert page["values"] == [8192, 1 << 40]
+    values = cast(list[object], page["values"])
+    assert values == [8192, past_float_exactness]
+    assert all(isinstance(v, int) for v in values), values
 
 
 def test_ensure_cf32_passthrough_and_unknown(tmp_path: Path) -> None:
