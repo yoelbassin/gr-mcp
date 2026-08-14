@@ -158,8 +158,13 @@ def test_lock_statistic_reaches_the_quality_verdict() -> None:
     rows = [
         Diagnostic(block="eq[0]", key=str(k), value=float(v))
         for k, v in blk.diagnostics.items()
-        if k in (DiagnosticKey.LOCK_RATIO_BEST, DiagnosticKey.LOCK_MIN)
+        if k in (DiagnosticKey.LOCK_SCORE_BEST, DiagnosticKey.LOCK_SCORE_MIN)
     ]
     assert len(rows) == 2, sorted(blk.diagnostics)
     evidence = lock_evidence(rows)
-    assert [e.assessment for e in evidence] == ["positive"]
+    assert [(e.metric, e.assessment) for e in evidence] == [
+        ("ofdm_pilot_score", "positive")
+    ]
+    # decode grade: the score is measured on the decoded lattice itself,
+    # unlike cp_symbol_sync's pre-decision timing peak
+    assert evidence[0].tier == "decode"

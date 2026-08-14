@@ -65,11 +65,10 @@ class CpSyncCore:
     def __init__(self, geom: CpSyncGeometry) -> None:
         self.geom = geom
         self.out = OutQueue(np.complex64)
-        self.diagnostics: Diagnostics = {
-            "locks": 0,
-            DiagnosticKey.LOCK_RATIO_BEST: 0.0,
-            DiagnosticKey.LOCK_MIN: float(geom.lock_min_ratio),
-        }
+        # LOCK_RATIO_BEST/LOCK_MIN appear only once a ratio is measured: an
+        # initialized 0.0 from a block that never saw a full acquisition
+        # window read as a lock reading of nothing
+        self.diagnostics: Diagnostics = {"locks": 0}
         self.tagq: list[int] = []  # absolute out offsets of sync_start
         self._best_ratio = 0.0
         self._buf = np.empty(0, dtype=np.complex64)
@@ -128,6 +127,7 @@ class CpSyncCore:
             ratio = float(strength[off] / (np.median(strength) + 1e-12))
             self._best_ratio = max(self._best_ratio, ratio)
             self.diagnostics[DiagnosticKey.LOCK_RATIO_BEST] = self._best_ratio
+            self.diagnostics[DiagnosticKey.LOCK_MIN] = float(g.lock_min_ratio)
             if ratio < g.lock_min_ratio:
                 self._pos += g.need - (g.fft_len + g.cp_len)
                 self._trim()
@@ -141,6 +141,14 @@ class CpSyncCore:
                 self._cp_metric(self._pos + m * g.sym_len)
                 for m in range(min(g.warmup_syms, n_grid))
             ]
+            if not refs:
+                # np.mean([]) is nan, and nan poisons the lock-loss watch
+                # (self._metric < 0.25*nan is never true, so the block never
+                # re-acquires); unreachable while warmup_syms >= 8, guarded
+                # so a bounds change cannot resurrect it silently
+                self._pos += g.need - (g.fft_len + g.cp_len)
+                self._trim()
+                continue
             self._metric_ref = float(np.mean(refs))
             self._metric = self._metric_ref
             self._low = 0

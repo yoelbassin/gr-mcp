@@ -158,11 +158,12 @@ class PilotLatticeCore:
     def __init__(self, geom: LatticeGeometry) -> None:
         self.geom = geom
         self.out = OutQueue(np.complex64)
+        # LOCK_SCORE_BEST/LOCK_SCORE_MIN appear only once a lock was actually
+        # attempted: an initialized 0.0 from an unfed equalizer read as a
+        # decode-grade negative measured on nothing
         self.diagnostics: Diagnostics = {
             "locks": 0,
             "relocks": 0,
-            DiagnosticKey.LOCK_RATIO_BEST: 0.0,
-            DiagnosticKey.LOCK_MIN: float(geom.lock_min_score),
             "frames_emitted": 0,
         }
         self._best_score = 0.0
@@ -231,7 +232,8 @@ class PilotLatticeCore:
         theta = float(np.angle(np.sum(pil[1:] * np.conj(pil[:-1]))))
         phi, score = self._estimate_phi(xp, delta)
         self._best_score = max(self._best_score, score)
-        self.diagnostics[DiagnosticKey.LOCK_RATIO_BEST] = self._best_score
+        self.diagnostics[DiagnosticKey.LOCK_SCORE_BEST] = self._best_score
+        self.diagnostics[DiagnosticKey.LOCK_SCORE_MIN] = float(g.lock_min_score)
         if score < g.lock_min_score:
             return
         self._delta, self._theta, self._phi = delta, theta, phi

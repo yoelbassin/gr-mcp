@@ -10,9 +10,14 @@ import numpy.typing as npt
 
 from marconi.levelfit import windowed_power
 
-# Lock threshold for cp_symbol_sync's CP-correlation ratio. Measured: noise
-# 1.3-1.6, real lock >= 2.0. Lives here because both the stage default and the
-# block's own fallback must move together.
+# Lock threshold for cp_symbol_sync's CP-correlation ratio. Measured AT
+# warmup_syms >= 8: noise 1.3-1.6 (p90 1.68-1.74 over 100 AWGN trials), real
+# lock >= 2.0. The geometry is part of the measurement - the ratio is a max
+# over sym_len offsets against the median of warmup_syms-1 lattice sums, and
+# its noise distribution rises as warmup shrinks (measured false-lock rates
+# at this bar: 93/100 at warmup 2, 16/100 at 4, 0/100 at 8), which is why
+# OfdmCoherentSyncStep floors warmup_syms at 8. Lives here because the stage
+# default and the block's own fallback must move together.
 LOCK_MIN_RATIO_DEFAULT = 2.0
 
 

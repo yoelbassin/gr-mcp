@@ -68,8 +68,14 @@ class DiagnosticKey(StrEnum):
     SYNC_TAGS = "sync_tags"
     SYNC_CHANCE = "sync_chance"
     SYNC_ITEMS_SCANNED = "sync_items_scanned"
+    # cp_symbol_sync's CP-correlation timing peak (detection grade)
     LOCK_RATIO_BEST = "lock_ratio_best"
     LOCK_MIN = "lock_min"
+    # pilot_lattice's consistency score on the decoded lattice (decode grade);
+    # a distinct pair because the two measurements share neither a scale nor
+    # a tier, and one metric name let a timing peak certify a decode
+    LOCK_SCORE_BEST = "lock_score_best"
+    LOCK_SCORE_MIN = "lock_score_min"
     DOMINANT_SYMBOLS = "dominant_symbols"
     SYMBOLS_TOTAL = "symbols_total"
     DOMINANCE_CHANCE = "dominance_chance"

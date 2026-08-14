@@ -43,6 +43,7 @@ class QualityMetric(StrEnum):
     WORD_VALIDITY = "word_validity"
     BURST_MARKS = "burst_marks"
     OFDM_LOCK_RATIO = "ofdm_lock_ratio"
+    OFDM_PILOT_SCORE = "ofdm_pilot_score"
     PEAK_DOMINANCE = "peak_dominance"
     SOFT_CONFIDENCE = "soft_confidence"
     SOFT_EYE = "soft_eye"
@@ -61,12 +62,17 @@ class Tier(StrEnum):
 _TIERS: dict[QualityMetric, Tier] = {
     QualityMetric.SYNC_MATCHES: Tier.DECODE,
     QualityMetric.WORD_VALIDITY: Tier.DECODE,
-    QualityMetric.OFDM_LOCK_RATIO: Tier.DECODE,
+    # the pilot-lattice score measures the equalizer's consistency on the
+    # decoded lattice itself; the CP-correlation ratio below is a peak found
+    # BEFORE any symbol decision - this file's own tier rule ("a detector
+    # firing says nothing about the symbols decoded after it")
+    QualityMetric.OFDM_PILOT_SCORE: Tier.DECODE,
     QualityMetric.PEAK_DOMINANCE: Tier.DECODE,
     QualityMetric.SOFT_CONFIDENCE: Tier.DECODE,
-    # a burst mark, and a bare demod's per-symbol soft eye
+    # a burst mark, a bare demod's per-symbol soft eye, and a CP-timing peak
     QualityMetric.BURST_MARKS: Tier.DETECTION,
     QualityMetric.SOFT_EYE: Tier.DETECTION,
+    QualityMetric.OFDM_LOCK_RATIO: Tier.DETECTION,
 }
 
 _untiered = sorted(m.value for m in QualityMetric if m not in _TIERS)
@@ -339,18 +345,35 @@ def marks_evidence(marks: Sequence[int]) -> list[QualityEvidence]:
 
 def lock_evidence(diagnostics: Sequence[Diagnostic]) -> list[QualityEvidence]:
     rows = DiagnosticRows(diagnostics)
-    floors = rows.values(DiagnosticKey.LOCK_MIN)
     out: list[QualityEvidence] = []
+    ratio_floors = rows.values(DiagnosticKey.LOCK_MIN)
     for block, best in rows.values(DiagnosticKey.LOCK_RATIO_BEST).items():
-        floor = floors.get(block)
+        floor = ratio_floors.get(block)
         if floor is None:
             # a best-ratio row without its block's configured floor is a
             # malformed pair: untestable, never judged against a default
+            continue
+        if best < floor:
+            # detection grade cannot assert absence: a non-OFDM transmission
+            # fails a CP search without being absent (the soft_eye rule)
             continue
         out.append(
             QualityEvidence(
                 source=block,
                 metric=QualityMetric.OFDM_LOCK_RATIO,
+                value=best,
+                assessment=Assessment.POSITIVE,
+            )
+        )
+    score_floors = rows.values(DiagnosticKey.LOCK_SCORE_MIN)
+    for block, best in rows.values(DiagnosticKey.LOCK_SCORE_BEST).items():
+        floor = score_floors.get(block)
+        if floor is None:
+            continue
+        out.append(
+            QualityEvidence(
+                source=block,
+                metric=QualityMetric.OFDM_PILOT_SCORE,
                 value=best,
                 assessment=(
                     Assessment.POSITIVE if best >= floor else Assessment.NEGATIVE

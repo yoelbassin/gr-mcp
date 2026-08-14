@@ -127,3 +127,30 @@ def test_memory_bounded_under_slow_consumer() -> None:
     bound = (need + 8 * _lattice.SYM_LEN) + (1 << 15) + _lattice.FFT_LEN
     assert peak <= bound, f"internal state peaked at {peak} > {bound}"
     assert drained > 100 * _lattice.FFT_LEN
+
+
+def test_unfed_sync_reports_no_lock_reading() -> None:
+    # LOCK_RATIO_BEST initialized at 0.0 meant a block that never measured
+    # anything shipped a decode-grade NEGATIVE (0.0 < floor) - asserting
+    # absence from zero measurements. The keys appear only once a ratio was
+    # actually computed.
+    from marconi.engine.backends.base import DiagnosticKey
+    from marconi.engine.backends.gnuradio.embedded.cp_sync import (
+        CpSyncCore,
+        CpSyncGeometry,
+    )
+
+    core = CpSyncCore(
+        CpSyncGeometry.build(
+            fft_len=_lattice.FFT_LEN,
+            cp_len=_lattice.CP_LEN,
+            warmup_syms=12,
+            lock_min_ratio=2.0,
+        )
+    )
+    assert DiagnosticKey.LOCK_RATIO_BEST not in core.diagnostics
+    assert DiagnosticKey.LOCK_MIN not in core.diagnostics
+    # a feed too short for a single acquisition window measures nothing either
+    core.accept(np.zeros(100, np.complex64))
+    core.pump()
+    assert DiagnosticKey.LOCK_RATIO_BEST not in core.diagnostics

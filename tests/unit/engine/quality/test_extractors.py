@@ -4,12 +4,14 @@ from typing import Any
 
 from marconi.engine.backends.base import BlockCensus, Diagnostic
 from marconi.engine.quality import (
+    Verdict,
     dominance_evidence,
     lock_evidence,
     marks_evidence,
     survival_evidence,
     sync_evidence,
     tag_sync_evidence,
+    verdict_from,
 )
 from marconi.engine.stages.registry import stage_registry
 
@@ -271,21 +273,53 @@ def test_marks_positive_only() -> None:
     assert marks_evidence([]) == []
 
 
-def test_lock_against_configured_floor() -> None:
-    locked = lock_evidence(
+def test_cp_lock_ratio_is_detection_grade_and_cannot_certify_alone() -> None:
+    # Tier's own docstring: "a chirp detector firing on real chirps says
+    # nothing about the symbols decoded after it. Only DECODE positives reach
+    # 'decoded'." A cyclic-prefix correlation peak is computed before any
+    # symbol decision - it is exactly that detector, and it rode DECODE.
+    ev = lock_evidence(
         [
-            Diagnostic(block="b4", key="lock_ratio_best", value=2.5),
-            Diagnostic(block="b4", key="lock_min", value=2.0),
+            Diagnostic(block="cp[0]", key="lock_ratio_best", value=4.5),
+            Diagnostic(block="cp[0]", key="lock_min", value=2.0),
         ]
     )
-    unlocked = lock_evidence(
+    assert [e.assessment for e in ev] == ["positive"]
+    verdict, _ = verdict_from(ev)
+    assert verdict is Verdict.UNCERTAIN
+
+
+def test_cp_lock_below_floor_is_not_evidence_of_absence() -> None:
+    # a non-OFDM transmission fails a CP search without being absent, and a
+    # detection-grade reading cannot assert absence (the soft_eye rule)
+    ev = lock_evidence(
         [
-            Diagnostic(block="b4", key="lock_ratio_best", value=1.5),
-            Diagnostic(block="b4", key="lock_min", value=2.0),
+            Diagnostic(block="cp[0]", key="lock_ratio_best", value=1.5),
+            Diagnostic(block="cp[0]", key="lock_min", value=2.0),
         ]
     )
-    assert [e.assessment for e in locked] == ["positive"]
-    assert [e.assessment for e in unlocked] == ["negative"]
+    assert ev == []
+
+
+def test_pilot_score_is_the_decode_grade_lock() -> None:
+    # the pilot-lattice score measures the equalizer's consistency on the
+    # decoded lattice itself, so it may certify AND refute
+    good = lock_evidence(
+        [
+            Diagnostic(block="pl[0]", key="lock_score_best", value=0.9),
+            Diagnostic(block="pl[0]", key="lock_score_min", value=0.35),
+        ]
+    )
+    assert [e.assessment for e in good] == ["positive"]
+    verdict, _ = verdict_from(good)
+    assert verdict is Verdict.DECODED
+    bad = lock_evidence(
+        [
+            Diagnostic(block="pl[0]", key="lock_score_best", value=0.1),
+            Diagnostic(block="pl[0]", key="lock_score_min", value=0.35),
+        ]
+    )
+    assert [e.assessment for e in bad] == ["negative"]
 
 
 def test_lock_without_configured_floor_is_untestable() -> None:

@@ -306,7 +306,10 @@ class OfdmCoherentSyncStep(Step):
     n_carriers: StrictInt
     kmin: StrictInt
     dc_search: StrictInt
-    warmup_syms: StrictInt = Field(le=MAX_FRAME_ITEMS)
+    # ge=8: LOCK_MIN_RATIO_DEFAULT's noise calibration only holds from 8
+    # warmup symbols up (see primitives.py) - below it the ratio's noise
+    # distribution rises over the bar and pure AWGN locks
+    warmup_syms: StrictInt = Field(ge=8, le=MAX_FRAME_ITEMS)
     pilot_lens: list[int]
     pilot_carriers: list[int]
     pilot_i: list[float]
@@ -314,8 +317,10 @@ class OfdmCoherentSyncStep(Step):
     fp_carriers: list[int]
     fp_i: list[float]
     fp_q: list[float]
-    lock_min_ratio: float = Field(default=LOCK_MIN_RATIO_DEFAULT, ge=0.0)
-    lock_min_score: float = Field(default=0.35, ge=0.0)
+    # gt=0.0: zero clears every significance bar (ratio < 0.0 is never true,
+    # so a zero-bar block locks unconditionally - on pure AWGN, on anything)
+    lock_min_ratio: float = Field(default=LOCK_MIN_RATIO_DEFAULT, gt=0.0)
+    lock_min_score: float = Field(default=0.35, gt=0.0)
 
     @model_validator(mode="after")
     def _geometry(self) -> "OfdmCoherentSyncStep":

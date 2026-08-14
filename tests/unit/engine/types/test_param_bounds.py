@@ -68,7 +68,7 @@ _BASE: dict[str, dict[str, object]] = {
         "n_carriers": 4,
         "kmin": -2,
         "dc_search": 0,
-        "warmup_syms": 3,
+        "warmup_syms": 8,
         "pilot_lens": [1, 1],
         "pilot_carriers": [0, 1],
         "pilot_i": [1.0, 1.0],
