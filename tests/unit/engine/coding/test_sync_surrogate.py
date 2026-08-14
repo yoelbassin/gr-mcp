@@ -87,3 +87,33 @@ def test_surrogate_tracks_a_degenerate_stream() -> None:
     assert ops_bits._surrogate_chance(stream, pat, 0) == len(
         ops_bits._correlate(stream, pat, 0)
     )
+
+
+def test_periodic_stuck_demod_is_not_decoded() -> None:
+    # A stuck demod emitting a short cycle: rotations of the pattern break at
+    # the roll seam (m mod p != 0 introduces a phase jump the stream never
+    # contains), so every period >= 7 measured surrogate 0 and fell back to
+    # the collapsed uniform null - the original incident, one lane over. A
+    # stream with only p distinct m-grams is a dictionary lookup, not a
+    # search, so its null is the full non-overlap capacity.
+    for period in (7, 11, 31):
+        rng = np.random.default_rng(period)
+        cycle = rng.integers(0, 2, period, dtype=np.uint8)
+        stream = np.resize(cycle, STREAM_BITS)
+        pat = "".join(str(b) for b in stream[70 : 70 + 32])
+        verdict, chance, found = _verdict(stream, bits=pat)
+        assert found > 0, period
+        assert verdict is Verdict.UNCERTAIN, (period, chance, found)
+
+
+def test_short_genuine_stream_keeps_its_positive() -> None:
+    # the degeneracy rule must scale with stream length: a short uniform
+    # stream offers few windows but nearly every one of them is distinct
+    rng = np.random.default_rng(0)
+    pat = "10110001111010110010010000101011"
+    bits = rng.integers(0, 2, 4000, dtype=np.uint8)
+    for start in (100, 1400, 2700):
+        bits[start : start + 32] = [int(c) for c in pat]
+    verdict, chance, found = _verdict(bits, bits=pat)
+    assert found >= 3
+    assert verdict is Verdict.DECODED

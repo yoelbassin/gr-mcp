@@ -7,9 +7,20 @@ import numpy as np
 from marconi.engine.backends.base import DiagnosticKey
 from marconi.engine.backends.gnuradio.embedded.lifecycle import Diagnostics, bump
 
+# Same rule and same floor as the coding lane's _SYNC_MIN_DISTINCT: a stream
+# with fewer distinct pattern-length windows than this is a dictionary lookup,
+# not a search, and its chance is the full non-overlap capacity. Tracking
+# stops the moment the floor is reached - only "reached it or not" is judged.
+_MIN_DISTINCT_MGRAMS = 128
+
 
 def make_tag_gate(
-    gr: Any, *, frame_len: int, tag_name: str, chance_per_item: float
+    gr: Any,
+    *,
+    frame_len: int,
+    tag_name: str,
+    chance_per_item: float,
+    pattern_bits: int,
 ) -> Any:
     """Keep exactly ``frame_len`` float items after each ``tag_name`` tag, drop
     everything between frames. The stock counterpart to sym_strip's skip: an
@@ -30,8 +41,14 @@ def make_tag_gate(
             "the tag count it reports is judged against this expectation and "
             "zero would certify a single chance-level hit"
         )
+    if pattern_bits < 1:
+        raise ValueError(
+            f"tag_gate needs the correlator's pattern length, got {pattern_bits!r}; "
+            "the degenerate-stream capacity null is sized by it"
+        )
 
     pmt = gr.pmt
+    k_gram = min(pattern_bits, 64)
 
     class _TagGate(gr.basic_block):
         def __init__(self) -> None:
@@ -43,6 +60,10 @@ def make_tag_gate(
             )
             self._end = 0  # absolute input offset where the active frame ends
             self._scanned = 0
+            # last k_gram-1 hard decisions, so windows spanning a work-call
+            # boundary are still counted; the set stops growing at the floor
+            self._gram_tail = np.zeros(0, np.uint64)
+            self._grams: set[int] | None = set()
             # truncated_frame_items post-run = items of the open frame the
             # stream ended short of; a truncated final frame is unrecoverable
             # but must be visible
@@ -55,6 +76,25 @@ def make_tag_gate(
 
         def forecast(self, noutput_items: int, ninputs: int) -> list[int]:
             return [noutput_items] * ninputs
+
+        def _track_grams(self, x: Any) -> None:
+            # tracking runs only while the set sits under the floor: a
+            # diverse stream clears it within its first work call and the
+            # cost stops; a degenerate stream's set stays tiny
+            if self._grams is None or not len(x):
+                return
+            bits = np.concatenate(
+                [self._gram_tail, (np.asarray(x) < 0).astype(np.uint64)]
+            )
+            if bits.size >= k_gram:
+                size = bits.size - k_gram + 1
+                v = np.zeros(size, np.uint64)
+                for j in range(k_gram):
+                    v |= bits[j : j + size] << np.uint64(j)
+                self._grams.update(np.unique(v).tolist())
+                if len(self._grams) >= _MIN_DISTINCT_MGRAMS:
+                    self._grams = None
+            self._gram_tail = bits[-(k_gram - 1) :] if k_gram > 1 else bits[:0]
 
         def general_work(self, input_items: Any, output_items: Any) -> int:
             x = input_items[0]
@@ -88,6 +128,7 @@ def make_tag_gate(
                 self._end = next_frame + frame_len
             self.consume(0, r)
             self._scanned += r
+            self._track_grams(x[:r])
             # only consumed-region tags: the unconsumed remainder reappears
             # in the next window and would double-count
             bump(
@@ -96,8 +137,19 @@ def make_tag_gate(
                 sum(1 for o in starts if o < base + r),
             )
             self.diagnostics[DiagnosticKey.SYNC_ITEMS_SCANNED] = self._scanned
-            self.diagnostics[DiagnosticKey.SYNC_CHANCE] = (
-                self._scanned * chance_per_item
+            windows = max(0, self._scanned - k_gram + 1)
+            chance = self._scanned * chance_per_item
+            if (
+                self._grams is not None
+                and windows
+                and len(self._grams) < min(_MIN_DISTINCT_MGRAMS, max(1, windows // 4))
+            ):
+                # degenerate stream: the search is a dictionary lookup, so
+                # its null is the full non-overlap capacity
+                chance = max(chance, windows / pattern_bits)
+            self.diagnostics[DiagnosticKey.SYNC_CHANCE] = chance
+            self.diagnostics["sync_distinct_mgrams"] = (
+                _MIN_DISTINCT_MGRAMS if self._grams is None else len(self._grams)
             )
             self.diagnostics["truncated_frame_items"] = max(0, self._end - (base + r))
             return int(w)

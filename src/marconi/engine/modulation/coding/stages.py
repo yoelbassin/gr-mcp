@@ -212,6 +212,7 @@ class SyncAlign(Stage[CompileContext, SyncAlignStep]):
             frame_len=step.frame_len,
             tag_name="frame_sync",
             chance_per_item=chance,
+            pattern_bits=m,
         )
         b.chain_llr_flip()
 

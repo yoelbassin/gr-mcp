@@ -252,12 +252,14 @@ def tag_sync_evidence(diagnostics: Sequence[Diagnostic]) -> list[QualityEvidence
     for block, tags in rows.counts(DiagnosticKey.SYNC_TAGS).items():
         chance = expected.get(block)
         items = scanned.get(block)
-        if not items or chance is None:
-            # the correlator never consumed anything, or reported tags without
-            # the chance expectation they must be judged against: untestable,
-            # not absent.
+        if chance is None:
+            # tags without the chance expectation they must be judged
+            # against: untestable, not absent.
             continue
-        assessment = _sync_assessment(tags, chance, items)
+        # the coding lane's rule holds here too: a POSITIVE needs no extent
+        # (the chance expectation already embeds what was scanned), while a
+        # zero-hit reading is judged on extent inside _sync_assessment
+        assessment = _sync_assessment(tags, chance, items or 0)
         if assessment is None:
             continue
         out.append(

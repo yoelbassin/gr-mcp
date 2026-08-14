@@ -16,6 +16,7 @@ def _gate(frame_len: int, chance_per_item: float = 2.0**-32) -> Any:
         frame_len=frame_len,
         tag_name="sync",
         chance_per_item=chance_per_item,
+        pattern_bits=32,
     )
 
 
@@ -105,3 +106,43 @@ def test_gate_truncation_zero_when_frames_complete() -> None:
     blk.in_tags = [FakeTag(o, "sync") for o in offsets]
     drive(blk, stream, chunk=1000, out_dtype=np.float32)
     assert blk.diagnostics["truncated_frame_items"] == 0
+
+
+def test_gate_reports_capacity_chance_on_a_degenerate_stream() -> None:
+    # A stuck demod emits a short cycle and the correlator (whose pattern
+    # happens to fit that cycle) tags everywhere: with only p distinct
+    # m-grams in the stream the search is a dictionary lookup, so the gate
+    # must report the full non-overlap capacity as the chance, not the
+    # uniform per-item expectation
+    cycle = np.array([0.5, -0.5, 0.5, 0.5, -0.5, -0.5, 0.5], np.float32)
+    stream = np.resize(cycle, 20_000)
+    blk = make_tag_gate(
+        FAKE_GR,
+        frame_len=8,
+        tag_name="sync",
+        chance_per_item=2.0**-32,
+        pattern_bits=32,
+    )
+    blk.in_tags = [FakeTag(o, "sync") for o in range(0, 19_000, 35)]
+    drive(blk, stream, chunk=4096, out_dtype=np.float32)
+    d = blk.diagnostics
+    assert d["sync_tags"] > 0
+    assert d["sync_chance"] >= d["sync_tags"]
+
+
+def test_gate_diverse_stream_keeps_the_uniform_chance() -> None:
+    rng = np.random.default_rng(0)
+    stream = (rng.choice([-2.0, 2.0], 20_000) + rng.normal(0, 0.3, 20_000)).astype(
+        np.float32
+    )
+    blk = make_tag_gate(
+        FAKE_GR,
+        frame_len=8,
+        tag_name="sync",
+        chance_per_item=2.0**-32,
+        pattern_bits=32,
+    )
+    blk.in_tags = [FakeTag(o, "sync") for o in (500, 9_000, 17_000)]
+    drive(blk, stream, chunk=4096, out_dtype=np.float32)
+    d = blk.diagnostics
+    assert d["sync_chance"] == pytest.approx(d["sync_items_scanned"] * 2.0**-32)

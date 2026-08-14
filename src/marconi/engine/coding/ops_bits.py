@@ -98,6 +98,42 @@ def _correlate(
 # measured against the other.
 _SURROGATE_SHIFTS = (2, 3)
 
+# A sync search needs the stream to offer real diversity before a hit count
+# means anything: a stream with only p distinct m-grams is a dictionary
+# lookup over p entries, not a search over 2^m. The rotation surrogate cannot
+# see this class - rolling a pattern whose length is not a multiple of the
+# stream's period introduces a phase seam the stream never contains, so every
+# period >= 7 stuck demod measured surrogate 0 and fell back to the collapsed
+# uniform null. 128 sits well above any stuck-demod cycle (measured periods
+# 7/11/31) and well below a genuine stream's diversity (windows themselves,
+# nearly all distinct); the windows//4 arm keeps short genuine streams, whose
+# window count is small but almost entirely distinct, out of the rule.
+_SYNC_MIN_DISTINCT = 128
+
+
+def _distinct_kgrams(stream: npt.NDArray[np.uint8], k: int, cap: int) -> int:
+    """Distinct k-bit windows, k <= 64, packed exactly into uint64 - no
+    hashing, so the count only ever errs by truncating m to 64 bits, which
+    UNDERSTATES diversity and suppresses conservatively. Chunked to hold the
+    bits-layer transient budget (test_perf pins ~8 bytes/bit), and stopped
+    the moment the count clears `cap`: only "reached it or not" is judged,
+    so a diverse stream pays for its first chunk alone."""
+    size = stream.size - k + 1
+    if size <= 0:
+        return 0
+    seen: set[int] = set()
+    chunk = 1 << 18
+    for lo in range(0, size, chunk):
+        check_deadline()
+        hi = min(lo + chunk, size)
+        v = np.zeros(hi - lo, np.uint64)
+        for j in range(k):
+            v |= stream[lo + j : hi + j].astype(np.uint64) << np.uint64(j)
+        seen.update(np.unique(v).tolist())
+        if len(seen) >= cap:
+            break
+    return len(seen)
+
 
 def _surrogate_chance(
     stream: npt.NDArray[np.uint8], pat: npt.NDArray[np.uint8], max_errors: int
@@ -138,6 +174,13 @@ def sync_word_rx(
     uniform = float(size) * _chance_valid_rate(m, m, max_errors, 2)
     hits = _correlate(stream, pat, max_errors)
     chance = max(uniform, _surrogate_chance(stream, pat, max_errors))
+    k = min(m, 64)
+    windows = stream.size - k + 1
+    floor = min(_SYNC_MIN_DISTINCT, max(1, windows // 4))
+    if _distinct_kgrams(stream, k, floor) < floor:
+        # a degenerate stream matches at up to its full non-overlap capacity,
+        # so that capacity IS the null
+        chance = max(chance, float(size) / m)
     return CodingCarrier(
         bits=stream,
         windows=[Window(start=i + m, cursor=i + m) for i in hits],

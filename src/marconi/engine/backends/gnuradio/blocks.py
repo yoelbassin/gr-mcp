@@ -476,6 +476,7 @@ GR_BLOCKS: dict[str, Callable[[_GrModules, BlockParams], Any]] = {
         frame_len=p.i("frame_len"),
         tag_name=p.s("tag_name"),
         chance_per_item=p.f("chance_per_item"),
+        pattern_bits=p.i("pattern_bits"),
     ),
     "chirp_sync": lambda c, p: make_chirp_sync(
         c.gr,

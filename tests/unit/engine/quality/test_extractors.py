@@ -389,3 +389,16 @@ def test_padding_heavy_real_decode_is_still_positive() -> None:
     ]
     ev = survival_evidence(rows, stage_registry())
     assert [e.assessment for e in ev] == ["positive"]
+
+
+def test_gr_tags_with_unreported_extent_still_certify() -> None:
+    # the coding lane's documented rule ("a POSITIVE needs no extent - the
+    # hits themselves are the evidence") applies to the GR lane too: the
+    # chance expectation already embeds the scanned extent, so hits above it
+    # certify whether or not the extent counter made it into diagnostics
+    rows = [
+        Diagnostic(block="gate[1]", key="sync_tags", count=40),
+        Diagnostic(block="gate[1]", key="sync_chance", value=1e-5),
+    ]
+    ev = tag_sync_evidence(rows)
+    assert [e.assessment for e in ev] == ["positive"]
