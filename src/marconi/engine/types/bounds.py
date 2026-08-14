@@ -159,13 +159,19 @@ MAX_DELAY_ITEMS = 1 << 20
 # so MAX_WINDOW_SYMBOLS alone asked for a 42,949,672,960-sample history).
 # The block pays for it twice, both inside the GR worker where the run
 # deadline — a parent-process contextvar — cannot reach the cost:
-#   memory, measured as RSS across a started flowgraph, tracks 8 bytes per
-#   history sample exactly (2^24 -> +96 MB, 2^26 -> +384 MB, 2^28 -> +1536 MB,
-#   2^30 -> 8.6 GB requested); past 2^31 the pybind int32 signature raises a
-#   raw TypeError naming a GR block, not the field the caller typed.
-#   time, measured as output samples/s through a real flowgraph, because work()
-#   rescans the WHOLE window per output sample: 4.6e5/s at 1024, 8.0e3/s at
-#   16384, 5.9e2/s at 65536, 1.5e2/s at 131072, 38/s at 262144.
+#   MEMORY. Peak RSS growth over a started flowgraph, ONE history size per
+#   process, is 8.00 bytes per history sample at every rung measured (2^22 ->
+#   33.6 MB, 2^24 -> 134.2 MB, 2^26 -> 536.9 MB, 2^28 -> 2147.4 MB), matching
+#   complex64 exactly. Past 2^31 the pybind int32 signature raises a raw
+#   TypeError naming a GR block, not the field the caller typed.
+#   Refuted, and the reason one process per rung is not optional: measuring the
+#   whole ladder IN one process reported a flat 6.00 bytes/sample and looked
+#   just as consistent. ru_maxrss is a HIGH-WATER MARK, so differencing
+#   consecutive rungs of a quadrupling ladder yields 8n - 8n/4 = 6n whatever
+#   the true rate is. The 6 was arithmetic, not memory.
+#   TIME. Output samples/s through a real flowgraph, because work() rescans the
+#   WHOLE window per output sample: 4.6e5/s at 1024, 8.0e3/s at 16384, 5.9e2/s
+#   at 65536, 1.5e2/s at 131072, 38/s at 262144.
 # Like MAX_POLY_BITS this cannot sit orders of magnitude clear of real usage —
 # the cost is superlinear, so the only honest place is the edge of what real
 # windows need. Instrumented across tests/unit + tests/integration, the widest

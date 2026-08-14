@@ -240,12 +240,15 @@ class ClockCorrect(Stage[CompileContext, ClockCorrectStep]):
         return 1.0 / (1.0 + float(step.ppm) * 1e-6)
 
 
+_DEFAULT_WINDOW_SYMBOLS = 16.0
+
+
 class AgcStep(Step):
     conv: Literal["agc"] = "agc"
     mode: AgcMode = AgcMode.FEEDFORWARD
     reference: float = 1.0
     window_symbols: float = Field(
-        default=16.0,
+        default=_DEFAULT_WINDOW_SYMBOLS,
         le=MAX_WINDOW_SYMBOLS,
         description=(
             "Feedforward/power normalization window, in symbols. For bursty "
@@ -253,7 +256,13 @@ class AgcStep(Step):
             "small windows normalize noise-only stretches to full scale, "
             "erasing the on/off contrast a downstream slicer needs (measured "
             "on a live impulsive-RFI capture: ones-fraction 0.335 vs 0.018). "
-            "For bursty/pulsed "
+            "In mode 'feedforward' the window is BUFFERED as window_symbols x "
+            f"sps samples and rescanned per output sample, so the product is "
+            f"capped at {MAX_AGC_HISTORY_SAMPLES}: a 1024-symbol window fits "
+            f"up to {MAX_AGC_HISTORY_SAMPLES // 1024} samples per symbol. "
+            "Past that use mode 'power', which reads this same field as an IIR "
+            "rate and buffers nothing, or resample to fewer samples per "
+            "symbol. For bursty/pulsed "
             "OOK specifically, prefer ook_envelope(loop_bw=0), which detects and "
             "normalizes each burst internally and needs no agc; the large-window "
             "guidance here applies when an agc IS used (continuous signals / "
@@ -440,14 +449,20 @@ class Agc(Stage[CompileContext, AgcStep]):
         nsamples = _feedforward_nsamples(step.window_symbols, sps)
         if nsamples <= MAX_AGC_HISTORY_SAMPLES:
             return None
+        widest = MAX_AGC_HISTORY_SAMPLES / sps
+        narrow = (
+            f"lower window_symbols to at most {widest:g}, "
+            if widest >= _DEFAULT_WINDOW_SYMBOLS
+            else ""
+        )
         return (
             f"window_symbols {step.window_symbols:g} at {sps:g} samples per "
             f"symbol is a {nsamples}-sample feedforward history (budget "
             f"{MAX_AGC_HISTORY_SAMPLES}); the block buffers all of it and "
-            f"rescans the whole window for every output sample. Lower "
-            f"window_symbols to at most "
-            f"{MAX_AGC_HISTORY_SAMPLES / sps:g}, or channelize/resample toward "
-            f"fewer samples per symbol first"
+            f"rescans the whole window for every output sample. "
+            f"{narrow}switch to mode 'power' (same window as an IIR rate, "
+            f"nothing buffered), or channelize/resample toward fewer samples "
+            f"per symbol"
         )
 
 

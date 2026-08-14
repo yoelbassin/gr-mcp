@@ -30,11 +30,14 @@ class PreambleSyncStep(Step):
         le=1.0,
         description=(
             "Detection bar as a FRACTION of the ideal preamble's own "
-            "autocorrelation energy (corr_est runs THRESHOLD_ABSOLUTE), so a "
-            "perfect match reaches 1 and nothing can exceed it - hence the "
-            "(0, 1] domain. Detection is scale-sensitive: normalize upstream "
-            "(agc) so the preamble arrives near unit power. Already lossy AT "
-            "1 in noise; 0.9 is the default for that reason."
+            "autocorrelation energy (corr_est runs THRESHOLD_ABSOLUTE). The "
+            "(0, 1] domain assumes the contract this stage requires: with the "
+            "stream normalized upstream (agc) so the preamble arrives near "
+            "unit power, a perfect match reaches 1 and cannot exceed it. "
+            "Un-normalized it is the GAIN that moves, not the useful "
+            "threshold - a 10x hot stream fires on noise at any bar in this "
+            "range, so raising the threshold is never the fix for that. "
+            "Already lossy AT 1 in noise; 0.9 is the default for that reason."
         ),
     )
     # True: the preamble is drawn from the payload constellation, so the

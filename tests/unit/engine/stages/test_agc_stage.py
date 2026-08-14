@@ -150,9 +150,10 @@ def test_a_feedforward_window_cannot_outgrow_the_history_it_makes_the_worker_hol
     """window_symbols x sps is a PRODUCT, and neither factor's own ceiling
     bounds it: 2.048 Msps into a 50 baud symbol_rate is sps 40960, so the
     field's own MAX_WINDOW_SYMBOLS asked feedforward_agc_cc for a
-    42,949,672,960-sample history — 343 GB — from a spec validate_modem
-    called valid, and the block raised a raw pybind TypeError naming a GR
-    block instead of the field the caller typed.
+    42,949,672,960-sample history — 343 GB of requested buffer at the measured
+    8.00 bytes per sample — from a spec validate_modem called valid, and the
+    block raised a raw pybind TypeError naming a GR block instead of the field
+    the caller typed.
 
     Two-sided on purpose: the bound is a ceiling, and one that also refuses
     the value AT it would break every working recipe below."""
@@ -202,6 +203,54 @@ def test_the_history_bound_reads_the_agc_s_own_boundary_not_the_source_rate() ->
     with pytest.raises(CompileError, match="window_symbols") as caught:
         _compile_path(too_wide, rate=2_048_000.0, symbol_rate=50.0)
     assert "2560" in str(caught.value), str(caught.value)
+
+
+def test_the_bursty_window_the_field_description_advertises_actually_compiles() -> None:
+    """window_symbols' description is agent-facing product: it tells the agent a
+    bursty signal needs a window past the burst-repetition scale, "e.g. 1024".
+    A cap that refuses the advertised number is CLAUDE.md's named failure - a
+    description advertising a path the compiler rejects - so the description
+    now carries the feedforward ceiling and the power-mode escape, and this
+    gate compiles every branch of that sentence."""
+    advertised = 1024.0
+    fits = MAX_AGC_HISTORY_SAMPLES / advertised
+    blocks = _compile_agc({"window_symbols": advertised}, rate=fits, symbol_rate=1.0)
+    history = next(b for b in blocks if b.kind == "feedforward_agc_cc")
+    assert history.params["nsamples"] == MAX_AGC_HISTORY_SAMPLES
+
+    # ...and past that sps the description sends the agent to power mode
+    beyond = fits * 2.0
+    with pytest.raises(CompileError, match="mode 'power'"):
+        _compile_agc({"window_symbols": advertised}, rate=beyond, symbol_rate=1.0)
+    escape = _compile_agc(
+        {"mode": "power", "window_symbols": advertised},
+        rate=beyond,
+        symbol_rate=1.0,
+    )
+    assert any(b.kind == "rms_cf" for b in escape)
+
+
+def test_the_description_states_the_sps_its_advertised_window_actually_fits() -> None:
+    schema = AgcStep.model_json_schema()["properties"]["window_symbols"]
+    assert f"up to {MAX_AGC_HISTORY_SAMPLES // 1024} samples per symbol" in (
+        schema["description"]
+    )
+    assert "'power'" in schema["description"]
+
+
+def test_a_window_too_wide_to_narrow_usefully_is_not_told_to_narrow() -> None:
+    """At sps 40960 the widest fitting window is 1.6 symbols - arithmetically
+    true and useless as an AGC window, since it no longer spans the statistic
+    the stage exists to estimate. Below the stage's own default the advice has
+    to be the mode switch or the resample, not a number."""
+    with pytest.raises(CompileError) as caught:
+        _compile_agc({"window_symbols": 2.0}, rate=2_048_000.0, symbol_rate=50.0)
+    assert "lower window_symbols" not in str(caught.value)
+    assert "mode 'power'" in str(caught.value)
+
+    with pytest.raises(CompileError) as roomy:
+        _compile_agc({"window_symbols": 4096.0}, rate=64.0, symbol_rate=1.0)
+    assert "lower window_symbols to at most 1024" in str(roomy.value)
 
 
 def test_the_widest_feedforward_window_in_the_tree_still_compiles() -> None:

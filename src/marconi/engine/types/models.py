@@ -96,10 +96,7 @@ class Modem(BaseModel):
     def _symbol_rate_is_finite(self) -> "Modem":
         """gt=0 admits +inf (inf > 0 is True), and json.loads("1e999") is how
         an agent types it. The Step base's finiteness sweep cannot reach this
-        one — symbol_rate is spec-level, not a step field — and downstream the
-        compiler's required-rate gate read `abs(rate - inf) <= tol * inf` as
-        `inf <= inf` and passed, so the check that exists to catch a wrong rate
-        certified a spec with no rate at all."""
+        one: symbol_rate is spec-level, not a step field."""
         check_sample_rate(self.symbol_rate, field="symbol_rate")
         return self
 

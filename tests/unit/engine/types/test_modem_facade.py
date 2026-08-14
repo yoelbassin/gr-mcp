@@ -311,12 +311,10 @@ def test_a_malformed_entry_after_a_good_one_names_its_own_index() -> None:
 @pytest.mark.parametrize("bad", [float("inf"), float("-inf"), float("nan")])
 def test_symbol_rate_must_be_finite_not_merely_greater_than_zero(bad: float) -> None:
     """Field(gt=0) passes +inf (inf > 0 is True), and json.loads("1e999") is
-    how an agent types it. Downstream, sample_symbols' required_input_rate
-    returned inf and the compiler's own gate read `abs(rate - inf) <= tol*inf`
-    as `inf <= inf` — True — so the check that exists to catch a wrong rate
-    passed a spec that had no rate at all, and validate_modem answered valid.
-    Modem.symbol_rate is spec-level, so the Step base's finiteness sweep never
-    saw it."""
+    how an agent types it. Modem.symbol_rate is spec-level, so the Step base's
+    finiteness sweep never saw it. What an inf rate then did to the compiler's
+    own rate gate is gated separately, in
+    tests/unit/engine/compile/test_required_rate_contract.py."""
     with pytest.raises(ValueError, match="symbol_rate"):
         Modem(symbol_rate=bad, path=[])
     with pytest.raises(ValueError, match="symbol_rate"):

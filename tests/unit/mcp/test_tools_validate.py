@@ -106,9 +106,9 @@ def test_a_malformed_path_entry_is_a_failing_spec_not_a_raised_exception(
 
 
 def test_a_non_finite_symbol_rate_is_a_failing_spec_not_a_valid_verdict() -> None:
-    """json.loads('1e999') is inf, and inf cleared Field(gt=0) AND the
-    compiler's required-rate gate (inf <= inf), so this spec came back
-    {"valid": true} with sample_symbols relabeling 48 kHz IQ as symbols."""
+    """json.loads('1e999') is inf, and it cleared every gate between the wire
+    and the verdict: this spec came back {"valid": true} with sample_symbols
+    relabeling 48 kHz IQ as symbols."""
     spec = {"symbol_rate": float("inf"), "path": [{"conv": "sample_symbols"}]}
     out = validate_modem(spec, sample_rate=48000.0)
     assert out["valid"] is False
@@ -118,7 +118,8 @@ def test_a_non_finite_symbol_rate_is_a_failing_spec_not_a_valid_verdict() -> Non
 
 def test_an_agc_history_bigger_than_the_worker_can_hold_is_a_failing_spec() -> None:
     """2.048 Msps into 50 baud is sps 40960; the field's own ceiling then asked
-    feedforward_agc_cc for a 42,949,672,960-sample (343 GB) history, and this
+    feedforward_agc_cc for a 42,949,672,960-sample history — 343 GB of
+    requested buffer at the measured 8.00 bytes per sample — and this
     tool answered {"valid": true, "warnings": []}."""
     spec = {
         "symbol_rate": 50.0,
