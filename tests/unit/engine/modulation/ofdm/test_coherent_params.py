@@ -1,14 +1,20 @@
 from __future__ import annotations
 
+import numpy as np
 import pytest
 from helpers import _lattice
+from helpers._fakegr import FAKE_GR, drive
 from pydantic import ValidationError
 
+from marconi.engine.backends.gnuradio.embedded.pilot_lattice import (
+    make_pilot_lattice_equalizer,
+)
 from marconi.engine.compile.compile_context import CompileContext
 from marconi.engine.modulation.ofdm.stages import (
     OfdmCoherentSync,
     OfdmCoherentSyncStep,
 )
+from marconi.engine.types.bounds import MAX_FRAME_ITEMS
 from marconi.engine.types.descriptor import Descriptor
 from marconi.engine.types.enums import ItemType
 from marconi.engine.types.levels import Level
@@ -117,15 +123,93 @@ def test_negative_dc_search_is_rejected() -> None:
         OfdmCoherentSyncStep.model_validate({**_good(), "dc_search": -8})
 
 
-def test_full_fft_carrier_span_is_legal() -> None:
-    # span treated kmin + n_carriers as an occupied bin; the last active
-    # carrier is kmin + n_carriers - 1, so a legal full-FFT geometry
-    # (carriers -32..31 in a 64-point FFT) was rejected by one bin
-    good = {
-        **_good(),
-        "kmin": -32,
-        "n_carriers": 64,
-        "dc_search": 0,
-        "pilot_carriers": [-24, -23, -22, -21],
-    }
-    assert OfdmCoherentSyncStep.model_validate(good).n_carriers == 64
+def test_a_carrier_span_wider_than_its_fft_is_rejected() -> None:
+    # This geometry was BLESSED here as "the legal full-FFT span". It is
+    # structurally impossible: the emit grid runs kmin..kmin+n_carriers with
+    # DC skipped, so 64 carriers from -32 need bin positions -32..+32 — 65 of
+    # them, in an FFT that has 64. The blessing test validated the spec and
+    # never ran the equalizer; driven, it locks at delta=0 and _equalize_frame
+    # raises "index 64 is out of bounds" on frame 1. The synthetic side cannot
+    # even build a spectrum for it.
+    with pytest.raises(ValidationError, match="FFT"):
+        OfdmCoherentSyncStep.model_validate(
+            {**_good(), "kmin": -32, "n_carriers": 64, "dc_search": 0}
+        )
+
+
+def test_the_top_emitted_carrier_is_inside_the_dc_search_reach() -> None:
+    # The bound used to stop at kmin + n_carriers - 1, one below the carrier
+    # the block actually emits. At dc_search=1 this geometry validated, built,
+    # locked on a genuinely +1-offset signal and then indexed bin 64 of a
+    # 64-bin FFT — a worker IndexError from a spec validate_modem called valid.
+    with pytest.raises(ValidationError, match="FFT"):
+        OfdmCoherentSyncStep.model_validate(
+            {**_good(), "kmin": -31, "n_carriers": 62, "dc_search": 1}
+        )
+
+
+_WIDEST = _lattice.Lattice(kmin=-32, n_carriers=63, dc_search=0)
+
+
+def test_the_widest_admissible_span_locks_and_equalizes() -> None:
+    # The replacement for the blessing above, and the other half of the same
+    # claim: what the validator admits, the block survives. 63 carriers from
+    # -32 occupy every bin of the 64-point FFT except DC — one more carrier or
+    # one bin of DC search and the geometry is refused.
+    step = OfdmCoherentSyncStep.model_validate(_WIDEST.sync_params())
+    assert step.n_carriers == 63
+    grid, spec = _WIDEST.make_spectra(60, theta=0.01, seed=3)
+    blk = make_pilot_lattice_equalizer(FAKE_GR, **_WIDEST.eq_params())
+    out = drive(blk, spec, chunk=5, out_dtype=np.complex64)
+    assert blk.diagnostics["locks"] == 1
+    eq = out.reshape(-1, step.n_carriers)
+    assert len(eq) > 0
+    err = np.mean(np.abs(eq - grid[: len(eq)]) ** 2) / np.mean(
+        np.abs(grid[: len(eq)]) ** 2
+    )
+    assert err < 0.05
+
+
+@pytest.mark.parametrize(
+    "patch, reason",
+    [
+        # asks fft_vcc for a window measured in hundreds of GiB, with sym_len
+        # co-varied so the equality check that used to answer for it passes
+        ({"fft_len": 1 << 36, "sym_len": (1 << 36) + 16}, "acquisition"),
+        # cp_symbol_sync's acquisition dies on a numpy broadcast mismatch
+        ({"cp_len": -16, "sym_len": 48}, r"(?s)cp_len.*greater than or equal to 0"),
+        # structurally dead block: the phase search loops over range(0), its
+        # score stays -1.0, no lock_min_score is ever cleared, and nothing is
+        # emitted at all under status ok
+        (
+            {
+                "n_frame_syms": 0,
+                "pilot_lens": [],
+                "pilot_carriers": [],
+                "pilot_i": [],
+                "pilot_q": [],
+            },
+            r"(?s)n_frame_syms.*greater than or equal to 1",
+        ),
+    ],
+)
+def test_a_geometry_the_worker_cannot_survive_is_refused_at_the_spec(
+    patch: dict[str, object], reason: str
+) -> None:
+    # Every one of these validated, compiled, and reached the GR worker, where
+    # the run deadline — a parent-process contextvar — cannot reap it. The
+    # sibling OfdmDemodStep refused all three at the spec.
+    with pytest.raises(ValidationError, match=reason):
+        OfdmCoherentSyncStep.model_validate({**_good(), **patch})
+
+
+def test_the_acquisition_buffer_is_bounded_by_the_frame_cap() -> None:
+    # cp_symbol_sync buffers warmup_syms * sym_len + fft_len + cp_len samples
+    # before it can even attempt a lock; no single field's ceiling expresses
+    # that product, and warmup_syms' own cap is far above what a large sym_len
+    # can afford.
+    sym = MAX_FRAME_ITEMS // 9
+    geom = {**_good(), "fft_len": sym - 16, "sym_len": sym}
+    assert OfdmCoherentSyncStep.model_validate({**geom, "warmup_syms": 8})
+    with pytest.raises(ValidationError, match="acquisition"):
+        OfdmCoherentSyncStep.model_validate({**geom, "warmup_syms": 9})

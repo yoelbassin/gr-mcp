@@ -14,6 +14,7 @@ from marconi.engine.backends.gnuradio.embedded.lifecycle import (
     bump,
     forecast_drain,
 )
+from marconi.engine.modulation.ofdm.primitives import carrier_bin_problem
 
 _LOCK_MIN_SCORE = 0.35  # calibrated: synthetic lattice locks ~0.9, noise ~0.1
 
@@ -118,20 +119,17 @@ class LatticeGeometry:
             # range(-dc_search, dc_search+1) is empty for a negative value:
             # the guard below inverts and _try_lock argmins an empty sequence
             raise ValueError(f"dc_search must be >= 0, got {dc_search}")
+        problem = carrier_bin_problem(
+            fft_len=fft_len,
+            n_carriers=n_carriers,
+            kmin=kmin,
+            dc_search=dc_search,
+            pilot_carriers=[k for s in lattice.pilot_sets for k in s],
+            fp_carriers=lattice.fp_carriers,
+        )
+        if problem is not None:
+            raise ValueError(problem)
         dc0 = fft_len // 2
-        pilots = [k for s in lattice.pilot_sets for k in s]
-        lo = min([kmin, *pilots, *lattice.fp_carriers])
-        # the last active carrier is kmin + n_carriers - 1 (same rule as the
-        # step validator, which rejected a legal full-FFT span by one bin)
-        hi = max([kmin + n_carriers - 1, *pilots, *lattice.fp_carriers])
-        if lo + dc0 - dc_search < 0 or hi + dc0 + dc_search >= fft_len:
-            raise ValueError(
-                "carrier bins must stay inside the FFT across the DC search: "
-                f"bins [{lo + dc0 - dc_search}, {hi + dc0 + dc_search}] vs "
-                f"fft_len {fft_len}. An out-of-FFT pilot bin starves its channel "
-                "node (the equalizer dies on its first frame) and a wrapped index "
-                "reads the opposite spectral edge into the CFO estimate"
-            )
         gap = _pilot_period(lattice.pilot_sets, n_frame_syms)
         union = np.array(sorted(set().union(*lattice.pilot_sets)), dtype=np.int64)
         keep_margin = n_frame_syms + gap

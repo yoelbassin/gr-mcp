@@ -8,7 +8,10 @@ from pydantic import Field, StrictInt, model_validator
 from pydantic_core import PydanticCustomError
 
 from marconi.engine.compile.compile_context import CompileContext
-from marconi.engine.modulation.ofdm.primitives import LOCK_MIN_RATIO_DEFAULT
+from marconi.engine.modulation.ofdm.primitives import (
+    LOCK_MIN_RATIO_DEFAULT,
+    carrier_bin_problem,
+)
 from marconi.engine.stages.base import Stage
 from marconi.engine.types.bounds import MAX_DELAY_ITEMS, MAX_FRAME_ITEMS
 from marconi.engine.types.descriptor import Carrier, Descriptor
@@ -317,11 +320,17 @@ class DqpskSoftDemap(Stage[CompileContext, DqpskSoftDemapStep]):
 
 class OfdmCoherentSyncStep(Step):
     conv: Literal["ofdm_coherent_sync"] = "ofdm_coherent_sync"
-    fft_len: StrictInt
-    cp_len: StrictInt
+    fft_len: StrictInt = Field(ge=1)
+    # ge=0: a negative cp_len sizes cp_symbol_sync's correlation window
+    # backwards, and its acquisition died on a numpy broadcast mismatch inside
+    # the worker rather than at the spec the caller could have retyped
+    cp_len: StrictInt = Field(ge=0)
     sym_len: StrictInt
-    n_frame_syms: StrictInt
-    n_carriers: StrictInt
+    # ge=1: at zero the equalizer is structurally dead, not merely wrong - the
+    # phase search loops over range(0) so its score stays -1.0, no
+    # lock_min_score can be cleared, and the block emits nothing under status ok
+    n_frame_syms: StrictInt = Field(ge=1)
+    n_carriers: StrictInt = Field(ge=1)
     kmin: StrictInt
     # ge=0: range(-dc_search, dc_search+1) is EMPTY for a negative value, so
     # the out-of-FFT guard inverted and _try_lock crashed on an empty argmin
@@ -345,19 +354,7 @@ class OfdmCoherentSyncStep(Step):
     @model_validator(mode="after")
     def _geometry(self) -> "OfdmCoherentSyncStep":
         n = sum(self.pilot_lens)
-        dc0 = self.fft_len // 2
-        # the last ACTIVE carrier is kmin + n_carriers - 1; treating the
-        # one-past-the-end index as occupied rejected a legal full-FFT
-        # geometry (carriers -32..31 in a 64-point FFT) by one bin
-        span = [self.kmin, self.kmin + self.n_carriers - 1]
-        lo = min(span + self.pilot_carriers + self.fp_carriers)
-        hi = max(span + self.pilot_carriers + self.fp_carriers)
         checks = {
-            "carrier bins must stay inside the FFT across the DC search "
-            "(an out-of-FFT pilot bin starves its channel node)": (
-                lo + dc0 - self.dc_search >= 0
-                and hi + dc0 + self.dc_search < self.fft_len
-            ),
             "sym_len must equal fft_len + cp_len": self.sym_len
             == self.fft_len + self.cp_len,
             "pilot_lens needs one entry per frame symbol": len(self.pilot_lens)
@@ -369,13 +366,29 @@ class OfdmCoherentSyncStep(Step):
             "fp arrays must be equal length": len(self.fp_carriers)
             == len(self.fp_i)
             == len(self.fp_q),
-            "n_carriers must be positive": self.n_carriers > 0,
             "carrier span must straddle DC (kmin <= 0 <= kmin + n_carriers)": self.kmin
             <= 0
             <= self.kmin + self.n_carriers,
             "warmup_syms must exceed one frame": self.warmup_syms > self.n_frame_syms,
+            "the acquisition buffer warmup_syms * sym_len + fft_len + cp_len "
+            f"must stay within {MAX_FRAME_ITEMS} items: cp_symbol_sync fills "
+            "it before it can attempt a lock, and no single field's ceiling "
+            "expresses the product": (
+                self.warmup_syms * self.sym_len + self.fft_len + self.cp_len
+                <= MAX_FRAME_ITEMS
+            ),
         }
         bad = [msg for msg, ok in checks.items() if not ok]
+        bins = carrier_bin_problem(
+            fft_len=self.fft_len,
+            n_carriers=self.n_carriers,
+            kmin=self.kmin,
+            dc_search=self.dc_search,
+            pilot_carriers=self.pilot_carriers,
+            fp_carriers=self.fp_carriers,
+        )
+        if bins is not None:
+            bad.append(bins)
         if bad:
             raise ValueError("; ".join(bad))
         return self

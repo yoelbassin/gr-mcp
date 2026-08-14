@@ -13,6 +13,8 @@ checks the ones that matter. Everything else must refuse 2**40.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import pytest
 from pydantic import ValidationError
 
@@ -270,6 +272,76 @@ def test_a_list_param_bounds_its_elements(
         "count or a fixed-width wire, give it a ceiling. If a huge element "
         "genuinely costs nothing, add it to _PHYSICAL_ELEMENTS."
     )
+
+
+@dataclass(frozen=True)
+class CoVaried:
+    """One extreme value probed with the constraint that LINKS it satisfied.
+
+    The sweep above moves exactly one field, which is why it could not see
+    ofdm_coherent_sync.fft_len: at 2**40 alone the spec fails `sym_len ==
+    fft_len + cp_len`, the sweep records a rejection, and the field is scored
+    bounded — for a reason with nothing to do with the hundreds of GiB of
+    fft_vcc window the value asks for. Move sym_len with it and the same spec
+    validated, compiled, and allocated inside the GR worker, where the run
+    deadline (a parent-process contextvar) cannot reap it.
+
+    `satisfied` names the linking constraint the patch deliberately clears. It
+    must NOT be the reason the spec is refused, or the probe is answering the
+    wrong question in the same way the one-field sweep did.
+    """
+
+    conv: str
+    field: str
+    patch: dict[str, object]
+    satisfied: str = "sym_len must equal fft_len + cp_len"
+
+
+_LINKED_GEOMETRY = ("fft_len", "cp_len", "sym_len")
+
+
+def _base_int(conv: str, name: str) -> int:
+    value = _BASE[conv][name]
+    assert isinstance(value, int)
+    return value
+
+
+_CO_VARIED: tuple[CoVaried, ...] = tuple(
+    CoVaried(conv, name, {name: _HUGE, "sym_len": _HUGE + _base_int(conv, partner)})
+    for conv in ("ofdm_coherent_sync", "ofdm_demod", "ofdm_frame_sync_probe")
+    for name, partner in (("fft_len", "cp_len"), ("cp_len", "fft_len"))
+)
+
+
+@pytest.mark.parametrize("probe", _CO_VARIED, ids=lambda p: f"{p.conv}.{p.field}")
+def test_a_co_varied_param_still_refuses_an_absurd_value(probe: CoVaried) -> None:
+    with pytest.raises(ValidationError) as caught:
+        step_models()[probe.conv].model_validate(
+            {"conv": probe.conv, **_BASE[probe.conv], **probe.patch}
+        )
+    assert probe.satisfied not in str(caught.value), (
+        f"{probe.conv}.{probe.field}=2**40 is refused because "
+        f"'{probe.satisfied}', which this probe satisfies on purpose. The "
+        "field's real cost is still unbounded — bound the product the block "
+        "actually allocates, not the field alone."
+    )
+
+
+def test_every_equality_linked_geometry_has_a_co_varied_probe() -> None:
+    """A field DERIVED from others (sym_len from fft_len + cp_len) hides every
+    field it is derived from behind its own equality check, so a stage that
+    carries one and has no probe here is invisible to both sweeps."""
+    linked = {
+        conv for conv, base in _BASE.items() if set(_LINKED_GEOMETRY) <= set(base)
+    }
+    probed = {(p.conv, p.field) for p in _CO_VARIED}
+    missing = {
+        (conv, name)
+        for conv in linked
+        for name in _LINKED_GEOMETRY
+        if name != "sym_len"
+    } - probed
+    assert not missing, f"equality-linked fields with no co-varied probe: {missing}"
 
 
 def test_a_convolutional_poly_cannot_outgrow_the_trellis_it_builds() -> None:

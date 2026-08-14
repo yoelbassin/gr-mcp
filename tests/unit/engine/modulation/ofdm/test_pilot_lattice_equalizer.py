@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 from helpers import _lattice
 from helpers._fakegr import FAKE_GR, FakeTag, drive
 
@@ -17,8 +18,6 @@ def _evm(eq: np.ndarray, truth: np.ndarray) -> float:
 def test_non_dc_straddling_span_rejected_at_construction() -> None:
     """The emit grid spans kmin..kmin+n_carriers minus exactly one DC skip;
     a span that misses DC would silently emit n_carriers+1 bins per symbol."""
-    import pytest
-
     with pytest.raises(ValueError, match="straddle DC"):
         make_pilot_lattice_equalizer(FAKE_GR, **{**_lattice.eq_params(), "kmin": 4})
 
@@ -28,12 +27,27 @@ def test_pilot_bins_beyond_fft_reach_rejected_at_construction() -> None:
     would starve that carrier's channel node forever (np.interp over an empty
     node kills the flowgraph on the first frame) and wrap negative indices to
     the opposite spectral edge inside the CFO estimate."""
-    import pytest
-
     with pytest.raises(ValueError, match="FFT"):
         make_pilot_lattice_equalizer(
             FAKE_GR, **{**_lattice.eq_params(), "dc_search": 10}
         )
+
+
+def test_the_carrier_past_the_widest_span_is_rejected_at_construction() -> None:
+    """The TOP emitted carrier is kmin+n_carriers — emit skips DC, it does not
+    stop short — and this seam's own copy of the bound stopped one bin below
+    it. One carrier past the widest span a 64-bin FFT holds, the block built,
+    locked, and then indexed bin 64 out of _equalize_frame. The stage
+    validator refuses this too; both now ask the same expression."""
+    # kmin=-31 puts the top carrier on an odd offset, which the pilot rule
+    # never lands on: the emitted carrier is then the ONLY term that reaches
+    # bin 64, so this fails the moment the bound stops one below it.
+    past = _lattice.Lattice(kmin=-31, n_carriers=63, dc_search=0)
+    with pytest.raises(ValueError, match="FFT"):
+        make_pilot_lattice_equalizer(FAKE_GR, **past.eq_params())
+    widest = _lattice.Lattice(kmin=-32, n_carriers=63, dc_search=0)
+    blk = make_pilot_lattice_equalizer(FAKE_GR, **widest.eq_params())
+    assert blk._core.geom.emit.size == 63
 
 
 def test_locks_and_equalizes_with_frame_phase_discovery() -> None:

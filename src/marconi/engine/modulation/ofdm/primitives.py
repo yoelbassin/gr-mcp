@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Sequence
 from typing import Any
 
 import numpy as np
@@ -19,6 +20,40 @@ from marconi.levelfit import windowed_power
 # OfdmCoherentSyncStep floors warmup_syms at 8. Lives here because the stage
 # default and the block's own fallback must move together.
 LOCK_MIN_RATIO_DEFAULT = 2.0
+
+
+def carrier_bin_problem(
+    *,
+    fft_len: int,
+    n_carriers: int,
+    kmin: int,
+    dc_search: int,
+    pilot_carriers: Sequence[int],
+    fp_carriers: Sequence[int],
+) -> str | None:
+    """What is wrong with a coherent-OFDM carrier plan's bin arithmetic, or
+    None. ONE home for the rule: OfdmCoherentSyncStep and the equalizer block's
+    own LatticeGeometry.build both have to answer it, and each spelled out its
+    own copy — differing by one bin, which is how a span whose top carrier
+    indexes fft_len passed both and raised IndexError on the first equalized
+    frame, inside the worker.
+
+    Every bin the block can read, two-sided: the emit carriers kmin..kmin +
+    n_carriers (the TOP one included — emit skips DC, it does not stop short),
+    every pilot bin, and the DC probe at dc0, each shifted by any settled delta
+    in [-dc_search, +dc_search]."""
+    dc0 = fft_len // 2
+    lo = min([kmin, 0, *pilot_carriers, *fp_carriers]) + dc0 - dc_search
+    hi = max([kmin + n_carriers, 0, *pilot_carriers, *fp_carriers]) + dc0 + dc_search
+    if lo < 0 or hi >= fft_len:
+        return (
+            "carrier bins must stay inside the FFT across the DC search: bins "
+            f"[{lo}, {hi}] vs fft_len {fft_len}. An out-of-FFT pilot bin "
+            "starves its channel node (the equalizer dies on its first frame) "
+            "and a wrapped index reads the opposite spectral edge into the "
+            "CFO estimate"
+        )
+    return None
 
 
 def step_boundary(
