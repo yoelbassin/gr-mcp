@@ -280,7 +280,26 @@ def test_soft_symbols_final_round_trips_float_values(tmp_path: Path) -> None:
     assert [r.kind for r in res.census] == ["sync_symbols"]
 
 
-def test_marks_split_acquisition_harvest_from_coding_state(tmp_path: Path) -> None:
+def test_reported_marks_are_the_coding_lanes_not_the_entry_carriers(
+    tmp_path: Path,
+) -> None:
+    """`marks` indexes the OUTPUT stream, so it is the coding lane's marks and
+    not the ones handed in at entry.
+
+    This used to report the entry marks and let the stream object beside it
+    carry the coding lane's — a split that contradicts what a mark IS
+    everywhere else. Two ways it went wrong, both measured:
+
+    sync_symbols REPLACES the marks with what it found, so a path ending there
+    shipped "marks": [] while the engine held its hits (18 of them on a probe
+    stream, including all three planted syncs).
+
+    A stage that changes the bit basis RESCALES them, and the entry values then
+    do not index the output at all: entry marks [8, 32] through a 2->1 codebook
+    become (4, 16) over a stream that shrank 64 -> 32, so the reported 32 sat
+    one past the end. That is the defect compiler.unscaled_probe_marks refuses
+    to ship in the GR lane ("wrong units are worse than absent"), reproduced in
+    the coding lane."""
     res = run_rx(
         _sync_symbols_modem(),
         stage_registry(),
@@ -290,9 +309,10 @@ def test_marks_split_acquisition_harvest_from_coding_state(tmp_path: Path) -> No
         input_stream=_soft_symbolstream(tmp_path, marks=[0]),
     )
     assert res.status == "ok"
-    assert res.marks == [0]
     assert res.symbolstream is not None
-    assert res.symbolstream.marks == [2]
+    # the entry mark [0] is gone: sync_symbols searched and found position 2
+    assert res.marks == [2]
+    assert res.symbolstream.marks == res.marks
 
 
 def test_iq_terminal_pipeline_returns_conditioned_iq(tmp_path: Path) -> None:

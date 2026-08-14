@@ -20,6 +20,10 @@ from marconi.engine.types.enums import DcMode, DecodeMode, ItemType
 from marconi.engine.types.levels import Level
 from marconi.engine.types.step import Step
 
+# The hard-symbol wire's range (ItemType.S is int16), so a stage that labels
+# symbols must label them with values the wire can carry.
+_INT16_MIN, _INT16_MAX = -(1 << 15), (1 << 15) - 1
+
 
 class SyncSymbolsStep(Step):
     conv: Literal["sync_symbols"] = "sync_symbols"
@@ -34,6 +38,13 @@ class SyncSymbolsStep(Step):
     max_errors: StrictInt = Field(default=0, ge=0)
     pre_symbols: StrictInt = Field(default=0, ge=0, le=MAX_FRAME_ITEMS)
 
+    @property
+    def compared_positions(self) -> int:
+        """Entries the correlator actually scores. Wildcards are skipped by
+        ops_symbols.sync_symbols_rx (`for j in np.flatnonzero(want)`), so they
+        are not positions an error budget may be spent against."""
+        return sum(1 for x in self.pattern if x)
+
     @model_validator(mode="after")
     def _sign_alphabet(self) -> "SyncSymbolsStep":
         if any(x not in (-1, 0, 1) for x in self.pattern):
@@ -47,12 +58,22 @@ class SyncSymbolsStep(Step):
                 "value_error",
                 "pattern needs at least one non-wildcard (+-1) entry",
             )
-        check_match_tolerance(self.max_errors, len(self.pattern), field="max_errors")
+        check_match_tolerance(
+            self.max_errors, self.compared_positions, field="max_errors"
+        )
         return self
 
 
 class SyncSymbols(CodingStage[SyncSymbolsStep]):
     name = "sync_symbols"
+    description = (
+        "Correlate a +-1 sign pattern against soft symbols and report each hit "
+        "as a MARK (run_rx's 'marks'), REPLACING any marks carried in. Marks, "
+        "not windows: follow with mark_frame to turn them into windows for "
+        "window-scoped coding stages. Unlike sync_word this contributes NO "
+        "quality evidence - it has no chance model, so a genuine hit earns the "
+        "path no credit and the verdict stays 'uncertain' on its own."
+    )
     from_level = Level.SYMBOLS
     to_level = Level.SYMBOLS
     family = "symbols"
@@ -106,6 +127,18 @@ class MSliceStep(Step):
         if any(b <= a for a, b in zip(self.thresholds, self.thresholds[1:])):
             raise PydanticCustomError(
                 "value_error", "thresholds must be strictly ascending"
+            )
+        # The symbol wire is int16 (ItemType.S). Unchecked, the cast in
+        # ops_symbols.m_slice_rx raised numpy's own "Python integer 40000 out
+        # of bounds for int16" from inside the coding lane — naming neither the
+        # stage nor the field — on a spec validate_modem had called valid.
+        bad = [v for v in self.levels if not _INT16_MIN <= v <= _INT16_MAX]
+        if bad:
+            raise PydanticCustomError(
+                "value_error",
+                "levels ride the int16 symbol wire and must lie in "
+                "[{lo}, {hi}]; got {bad}",
+                {"lo": _INT16_MIN, "hi": _INT16_MAX, "bad": bad[:5]},
             )
         return self
 

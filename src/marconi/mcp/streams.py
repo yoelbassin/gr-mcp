@@ -140,6 +140,12 @@ class StatsHeader(Payload):
     total_items: int
     sampled_items: int
     sampled: bool
+    # Sampled items dropped as NaN/inf, ABSENT when none were. Every statistic
+    # below is computed over the survivors, and dropping them in silence let a
+    # stream the pipeline itself had poisoned (a zero-power span through the
+    # power agc) report a clean mean over the half that survived, with nothing
+    # in the response to say the other half existed.
+    non_finite_items: int | None = None
 
 
 class BitsStats(StatsHeader):
@@ -523,7 +529,10 @@ def stream_stats_payload(
     return _real_stats(header, sample, clusters, bins)
 
 
-def _finite(sample: npt.NDArray[Any], dtype: type[Any]) -> npt.NDArray[Any]:
+def _finite(
+    header: dict[str, object], sample: npt.NDArray[Any], dtype: type[Any]
+) -> npt.NDArray[Any]:
+    """The finite items, RECORDING how many were dropped into `header`."""
     x = sample.astype(dtype)
     x = x[np.isfinite(x)]
     if x.size == 0:
@@ -531,13 +540,16 @@ def _finite(sample: npt.NDArray[Any], dtype: type[Any]) -> npt.NDArray[Any]:
             "every sampled item is NaN or infinite — nothing to summarize; "
             "the stream is corrupt rather than empty"
         )
+    dropped = int(sample.size) - int(x.size)
+    if dropped:
+        header["non_finite_items"] = dropped
     return x
 
 
 def _real_stats(
     header: dict[str, object], sample: npt.NDArray[Any], clusters: int, bins: int
 ) -> RealStats:
-    x = _finite(sample, np.float64)
+    x = _finite(header, sample, np.float64)
     stats = RealStats.model_validate(
         {
             **header,
@@ -567,7 +579,7 @@ def _real_stats(
 def _constellation_stats(
     header: dict[str, object], sample: npt.NDArray[Any], clusters: int, bins: int
 ) -> ConstellationStats:
-    z = _finite(sample, np.complex128)
+    z = _finite(header, sample, np.complex128)
     mag = np.abs(z)
     mean_mag = float(mag.mean())
     stats = ConstellationStats.build(

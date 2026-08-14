@@ -108,3 +108,26 @@ def test_over_requested_clusters_drops_phantoms(tmp_path: Path) -> None:
     assert isinstance(counts, list)
     assert all(c > 0 for c in counts)
     assert sum(counts) == out["sampled_items"]
+
+
+def test_non_finite_items_are_counted_not_silently_dropped(tmp_path: Path) -> None:
+    """Every statistic is computed over the survivors. Dropping the rest in
+    silence let a stream the pipeline itself had poisoned (a zero-power span
+    through the power agc) report a clean mean over the half that survived,
+    with nothing in the response to say the other half existed."""
+    x = np.concatenate(
+        [np.full(500, np.nan, np.float32), np.full(1500, 2.0, np.float32)]
+    )
+    out = stream_stats(_f32(tmp_path, x), item_type=None, clusters=0, bins=8)
+    assert out["total_items"] == 2000
+    assert out["sampled_items"] == 1500
+    assert out["non_finite_items"] == 500
+    assert out["mean"] == 2.0
+
+
+def test_a_clean_stream_carries_no_non_finite_key(tmp_path: Path) -> None:
+    # absent, not zero: the omission rule means a reader never pays for a
+    # measurement that had nothing to report
+    x = np.full(1000, 1.5, np.float32)
+    out = stream_stats(_f32(tmp_path, x), item_type=None, clusters=0, bins=8)
+    assert "non_finite_items" not in out

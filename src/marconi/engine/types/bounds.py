@@ -41,26 +41,49 @@ def check_sample_rate(rate: float, field: str = "sample_rate") -> None:
         raise ValueError(problem)
 
 
-def check_match_tolerance(max_errors: int, pattern_bits: int, *, field: str) -> None:
-    """A correlator's error tolerance cannot exceed the pattern it matches: a
-    Hamming distance over an m-bit word lives in [0, m]. Unbounded, the value
-    reached _chance_valid_rate, whose sphere-volume sum iterates range(t+1) —
-    at 2^40 that is a pure-Python loop with no deadline check in it, and the
-    first term past the pattern length raises out of math.lgamma, so the agent
-    got "expected a noninteger or positive integer, got 0.0" from inside the
-    coding lane instead of a word about its own spec."""
-    if max_errors >= pattern_bits:
+def check_match_tolerance(max_errors: int, compared: int, *, field: str) -> None:
+    """A correlator's error tolerance cannot reach the number of positions it
+    actually COMPARES: a Hamming distance over m compared positions lives in
+    [0, m].
+
+    `compared` is not always the pattern's length. sync_symbols' 0 entries are
+    wildcards its correlator never compares, and passing the whole length here
+    let a 20-long pattern with two +-1 entries take max_errors=3 — the score bar
+    became `agree >= -1`, so every offset matched (measured 4981 hits in 4981
+    positions of pure noise, versus 1251 at max_errors=0). Callers pass the
+    compared count, never len(pattern).
+
+    Unbounded, the value also reached _chance_valid_rate, whose sphere-volume
+    sum iterates range(t+1) — at 2^40 that is a pure-Python loop with no
+    deadline check in it, and the first term past the pattern length raises out
+    of math.lgamma, so the agent got "expected a noninteger or positive integer,
+    got 0.0" from inside the coding lane instead of a word about its own spec."""
+    if max_errors >= compared:
         raise PydanticCustomError(
             "value_error",
-            "{field}={max_errors} is not below the {pattern_bits}-bit pattern "
-            "it tolerates errors in; a match within that many flips is every "
-            "position in the stream",
+            "{field}={max_errors} is not below the {compared} pattern "
+            "position(s) it is compared against; a match within that many "
+            "flips is every position in the stream",
             {
                 "field": field,
                 "max_errors": max_errors,
-                "pattern_bits": pattern_bits,
+                "compared": compared,
             },
         )
+
+
+def nyquist_problem(center_hz: float, rate: float) -> str | None:
+    """What is wrong with a caller's mixer offset, or None. ONE home for the
+    rule: `translate` (a rotator) and `channelize` (a freq_xlating filter) both
+    tune by mixing, so both wrap mod the sample rate, and each spelled this
+    check out with its own byte-identical copy of the message."""
+    if abs(center_hz) > 0.5 * rate:
+        return (
+            f"center_hz {center_hz:g} lies outside the +-{0.5 * rate:g} Hz "
+            f"Nyquist span of the {rate:g} Hz input; a mixer wraps mod the "
+            f"sample rate and would silently tune an aliased sub-band"
+        )
+    return None
 
 
 def channelization_problem(
@@ -75,12 +98,9 @@ def channelization_problem(
     the agent both describe that channel alone."""
     if not 1 <= decim <= MAX_DECIM:
         return f"decim must be in [1, {MAX_DECIM}], got {decim}"
-    if abs(center_hz) > 0.5 * rate:
-        return (
-            f"center_hz {center_hz:g} lies outside the +-{0.5 * rate:g} Hz "
-            f"Nyquist span of the {rate:g} Hz input; a mixer wraps mod the "
-            f"sample rate and would silently tune an aliased sub-band"
-        )
+    off_band = nyquist_problem(center_hz, rate)
+    if off_band is not None:
+        return off_band
     if bandwidth_hz <= 0:
         return f"bandwidth_hz must be > 0, got {bandwidth_hz:g}"
     if bandwidth_hz < MIN_TRANSITION_FRAC * rate:
@@ -136,6 +156,28 @@ MAX_DELAY_ITEMS = 1 << 20
 
 # Iterative decoders: time scales linearly and the loop lives in the worker.
 MAX_DECODER_ITERATIONS = 1000
+
+# A convolutional generator polynomial's BIT LENGTH, not its value, is the cost:
+# gnuradio.trellis.fsm builds a 2**(K-1)-state table from the widest poly, so
+# one extra bit doubles the states and roughly quadruples the build. MEASURED
+# through trellis.fsm(1, 2, [p, p|1]):
+#   K=11    1024 states   0.04 s     62 MB
+#   K=13    4096 states   1.5  s    543 MB
+#   K=14    8192 states   6.9  s   2083 MB
+#   K=15   16384 states  32    s   6197 MB
+#   K=16   32768 states  163   s  11053 MB      (K=18 was OS-killed)
+# The cap sits at 15 because that is the widest DEPLOYED convolutional code
+# (the K=15 deep-space codes); everything else in use is K<=9. It cannot sit
+# "orders of magnitude" clear of real usage the way the caps above do — the
+# cost is exponential, so the only honest place for it is the edge of what
+# real codes need. Note the top of the range is already expensive: K=15 spends
+# 32 s and 6 GB before a single symbol is decoded.
+#
+# This one has to be caught at the spec boundary, not by the run deadline: the
+# allocation happens inside the GR worker, and check_deadline() reads a
+# contextvar that belongs to the parent process, so the parent can only reap a
+# worker that has already taken the machine's memory.
+MAX_POLY_BITS = 15
 
 # Successive-cancellation list width: the decoder holds `list_size` full paths.
 MAX_LIST_SIZE = 32

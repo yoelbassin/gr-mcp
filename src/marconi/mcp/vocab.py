@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from typing import Any
 
@@ -52,6 +53,7 @@ class SpecEnvelope(Payload):
     name: str
     symbol_rate: str
     path: str
+    unknown_params: str
 
 
 class Envelope(Payload):
@@ -68,10 +70,48 @@ ENVELOPE = Envelope(
         name="optional str",
         symbol_rate="float > 0 (symbols/second at the demod boundary)",
         path="list of steps, each {'conv': <stage name>, ...stage params}",
+        # stated once here rather than as an additionalProperties:false line in
+        # every per-stage schema, where it was identical and pure repetition
+        unknown_params="rejected: every stage takes only the params in its schema",
     ),
     levels={lv.value: gloss for lv, gloss in _LEVEL_GLOSS.items()},
     item_types={t.value: gloss for t, gloss in _ITEM_GLOSS.items()},
 )
+
+
+# Every other agent-facing surface prices itself: read_stream has
+# _MAX_PAGE_BYTES, a run's offset lists have _MAX_INLINE_LIST, the survey PSD
+# has _SPECTRUM_BINS. The vocabulary detail call had nothing, and it is the
+# largest single response the surface can produce — one family call returned
+# 13 KB (~3.3k tokens), more than all eight tool docstrings put together, and
+# it grows with the family. Serialized JSON bytes, because that is what the
+# agent pays for; test_vocab pins the budget against the measured cost, so a
+# retune is measured rather than guessed.
+MAX_DETAIL_BYTES = 12 * 1024
+
+
+def _publishable_schema(model: type[Any]) -> dict[str, Any]:
+    """A step's JSON Schema with the parts the agent cannot use removed.
+
+    `title` is pydantic restating the field name in Title Case ("Code Bits"
+    for code_bits) on every field of every stage — derivable, and 13% of the
+    call. `additionalProperties: false` is identical for all of them (Step
+    forbids extras universally), so the envelope states it once instead of
+    every row carrying its own copy."""
+    slimmed: dict[str, Any] = _without_titles(model.model_json_schema())
+    return slimmed
+
+
+def _without_titles(node: Any) -> Any:
+    if isinstance(node, dict):
+        return {
+            k: _without_titles(v)
+            for k, v in node.items()
+            if k not in ("title", "additionalProperties")
+        }
+    if isinstance(node, list):
+        return [_without_titles(v) for v in node]
+    return node
 
 
 class StageEntry(Payload):
@@ -147,7 +187,7 @@ def _detail_entry(stage: Stage[Any, Any]) -> StageEntry:
         ),
         min_input_sps=None if conditional_sps else stage.min_input_sps,
         seeds_windows=stage.seeds_windows,
-        params_schema=stage.step_model.model_json_schema(),
+        params_schema=_publishable_schema(stage.step_model),
     )
     # omitted, not null, when nothing is step-conditional: the key's presence
     # IS the signal that a contract above was withheld
@@ -156,12 +196,28 @@ def _detail_entry(stage: Stage[Any, Any]) -> StageEntry:
     )
 
 
-def stage_details(names: list[str]) -> list[StageEntry]:
+def stage_details(
+    names: list[str], budget: int = MAX_DETAIL_BYTES
+) -> tuple[list[StageEntry], list[str]]:
+    """(rows, omitted). Rows are added until the next one would take the
+    response past `budget`, so a large family costs a bounded call and names
+    what it left out; the agent fetches those by stage= one at a time. One
+    row is always returned, however big it is — a stage the caller asked for
+    by name must not come back empty."""
     registry = stage_registry()
     unknown = [n for n in names if n not in registry]
     if unknown:
         raise ValueError(f"unknown stage(s) {unknown}; known: {sorted(registry)}")
-    return [_detail_entry(registry[n]) for n in names]
+    rows: list[StageEntry] = []
+    spent = 0
+    for i, name in enumerate(names):
+        entry = _detail_entry(registry[name])
+        cost = len(json.dumps(entry.as_payload()))
+        if rows and spent + cost > budget:
+            return rows, names[i:]
+        rows.append(entry)
+        spent += cost
+    return rows, []
 
 
 def _overrides(stage: Stage[Any, Any], base_hook: Callable[..., Any]) -> bool:

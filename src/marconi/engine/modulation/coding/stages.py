@@ -15,6 +15,7 @@ from marconi.engine.types.bounds import (
     MAX_FRAME_ITEMS,
     MAX_LIST_SIZE,
     MAX_OVERSAMPLE,
+    MAX_POLY_BITS,
 )
 from marconi.engine.types.descriptor import Carrier, Descriptor
 from marconi.engine.types.enums import ItemType
@@ -73,6 +74,15 @@ class DepunctureStep(Step):
             raise ValueError(
                 "keep_mask must keep at least one position: an all-erasure "
                 "mask consumes no input and the flowgraph never terminates"
+            )
+        # A mask, so only 0 and 1 mean anything. Read for truthiness alone, any
+        # other value was silently "keep" — a spec that looks like it says
+        # something the emitter never read.
+        if any(m not in (0, 1) for m in self.keep_mask):
+            raise PydanticCustomError(
+                "value_error",
+                "keep_mask entries are 1 (keep) or 0 (erasure); got {bad}",
+                {"bad": [m for m in self.keep_mask if m not in (0, 1)][:5]},
             )
         return self
 
@@ -235,6 +245,26 @@ class FecStep(Step):
         if self.frame_bits % self.k or self.tail % self.k:
             raise PydanticCustomError(
                 "value_error", "frame_bits and tail must be multiples of k"
+            )
+        widest = max(int(p).bit_length() for p in self.polys)
+        if widest > MAX_POLY_BITS:
+            raise PydanticCustomError(
+                "value_error",
+                "the widest poly is {widest} bits, so the decoder's trellis "
+                "has 2**{states_exp} states; {max} bits is the ceiling "
+                "(the K=15 deep-space codes are the widest deployed, and "
+                "everything else in use is K<=9)",
+                {
+                    "widest": widest,
+                    "states_exp": widest - 1,
+                    "max": MAX_POLY_BITS,
+                },
+            )
+        if any(int(p) <= 0 for p in self.polys):
+            raise PydanticCustomError(
+                "value_error",
+                "every poly must be > 0; a zero generator emits a constant "
+                "branch the Viterbi metric cannot distinguish",
             )
         return self
 

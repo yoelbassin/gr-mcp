@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import numpy as np
 import pytest
 
+from marconi.engine.run import TraceStage
 from marconi.engine.types.enums import RunStatus
 from marconi.engine.types.levels import Level
+from marconi.mcp.payload import _trace_row
 from marconi.mcp.tools import run_rx_tool
 
 
@@ -88,3 +90,93 @@ def test_capture_slice_params_reject_input_path_mode(
             input_item_type="b",
             capture_offset=5,
         )
+
+
+@pytest.mark.parametrize(
+    "content, expect",
+    [
+        (np.full(4096, np.nan, np.float32), "EmptyStreamError"),
+        (np.zeros(0, np.float32), None),
+    ],
+)
+def test_an_unreadable_trace_tap_costs_one_row_not_the_whole_call(
+    tmp_path: Path, content: "np.ndarray[Any, Any]", expect: str | None
+) -> None:
+    """trace=True is what the run_rx docstring offers for finding WHERE a path
+    breaks, so it must survive a broken path. EmptyStreamError is deliberately
+    NOT a ValueError (it classifies failed_precondition), so an all-non-finite
+    tap escaped _trace_stats' guard, propagated out of pipeline_payload, and
+    took the whole run_rx call with it — census, quality, stream and hints —
+    on exactly the run trace exists for. A tap can still hold non-finites the
+    engine did not make: a CMA equalizer that diverges, or a caller's own soft
+    stream. One bad tap must cost one row."""
+    tap = tmp_path / "tap.f32"
+    content.tofile(tap)
+    st = TraceStage(
+        after="fsk[0]",
+        level="symbols",
+        item_type="f",
+        sample_rate=1.0,
+        path=str(tap),
+        items=int(content.size),
+    )
+    row = _trace_row(st)
+    assert row.after == "fsk[0]"
+    if expect is None:
+        assert row.stats is None and row.stats_error is None
+    else:
+        assert row.stats is None
+        assert expect in str(row.stats_error)
+
+
+def test_soft_stream_path_is_the_file_the_run_actually_wrote(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An all-GR path renames its sink to the item-type suffix, so the bare
+    seam name is stale afterwards. soft_stream.path went on carrying it, and
+    read_stream answered [not_found] with the hint require_file reserves for a
+    run whose directory was deleted — sending the operator to re-run a spec
+    whose output was never called that."""
+    monkeypatch.setenv("MARCONI_WORKSPACE", str(tmp_path))
+    cap = tmp_path / "in.cf32"
+    np.zeros(300, np.complex64).tofile(cap)
+    out = run_rx_tool(
+        {"symbol_rate": 10.0, "path": [{"conv": "fsk", "deviation": 5.0}]},
+        sample_rate=48000.0,
+        capture_path=str(cap),
+    )
+    assert out["status"] == RunStatus.EMPTY
+    soft = cast("dict[str, object]", out["soft_stream"])
+    assert Path(str(soft["path"])).is_file(), soft["path"]
+
+
+def test_a_coding_lane_search_reports_what_it_found(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """sync_symbols' only product is marks. The wire reported the ENTRY marks
+    instead, so a path ending there shipped "marks": [] while the engine held
+    its hits — the stage was write-only unless a mark_frame consumed them
+    inside the same coding program."""
+    monkeypatch.setenv("MARCONI_WORKSPACE", str(tmp_path))
+    src = tmp_path / "syms.f32"
+    rng = np.random.default_rng(11)
+    s = rng.standard_normal(4000).astype(np.float32)
+    pattern = [1, -1, -1, 1, 1, -1, 1, -1]
+    planted = (100, 900, 2500)
+    for off in planted:
+        s[off : off + len(pattern)] = np.array(pattern, np.float32) * 3.0
+    s.tofile(src)
+    out = run_rx_tool(
+        {
+            "symbol_rate": 1.0,
+            "path": [{"conv": "sync_symbols", "pattern": pattern, "max_errors": 0}],
+        },
+        sample_rate=1.0,
+        input_path=str(src),
+        input_item_type="f",
+        input_level="symbols",
+    )
+    assert out["status"] == RunStatus.OK
+    marks = cast("list[int]", out["marks"])
+    assert marks, "a search that found something must report it"
+    assert set(planted) <= set(marks)

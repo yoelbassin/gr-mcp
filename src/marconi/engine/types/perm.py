@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pydantic_core import PydanticCustomError
 
+from marconi.engine.types.bounds import MAX_FRAME_ITEMS
+
 # Index lists are the one spec shape whose validity a length check cannot
 # express, and every stage that takes one used to spell (or forget) its own
 # rule: deinterleave and ofdm_demod validated nothing at all, so an
@@ -49,4 +51,19 @@ def check_gather_indices(perm: list[int], *, field: str) -> None:
             "{field} indices must be >= 0; a negative index would wrap and "
             "understate the input stride",
             {"field": field},
+        )
+    # max(perm)+1 IS the input stride ops_bits._perm_span reshapes by, so the
+    # largest index sizes a per-block buffer. The list's own length is bounded
+    # by the caller having to type it; a single index is not.
+    if max(perm) >= MAX_FRAME_ITEMS:
+        raise PydanticCustomError(
+            "value_error",
+            "{field} index {worst} sets a {stride}-item input stride "
+            "(max(perm)+1); {max} is the ceiling",
+            {
+                "field": field,
+                "worst": max(perm),
+                "stride": max(perm) + 1,
+                "max": MAX_FRAME_ITEMS,
+            },
         )

@@ -14,6 +14,7 @@ from marconi.engine.types.enums import ItemType, RunStatus
 from marconi.engine.types.levels import Level
 from marconi.engine.types.models import SOFT_LEVELS, Modem
 from marconi.engine.types.step import stage_label
+from marconi.mcp.streams import EmptyStreamError
 from marconi.mcp.streams import stream_stats_payload as _stats_model
 from marconi.survey import SurveyResult
 from marconi.wire import Payload, Ramp
@@ -288,7 +289,12 @@ def _trace_stats(st: TraceStage) -> tuple[TraceStats | None, str | None]:
         return None, None
     try:
         full = _stats_model(Path(st.path), item_type=st.item_type, clusters=0)
-    except (ValueError, FileNotFoundError) as exc:
+    # EmptyStreamError is NOT a ValueError (it is deliberately its own type so
+    # it can classify failed_precondition), so an all-non-finite tap escaped
+    # this guard and took the whole run_rx call with it — census, quality,
+    # stream and hints — on exactly the run trace=True is turned on for. The
+    # stats_error field below exists so one unreadable tap costs one row.
+    except (ValueError, FileNotFoundError, EmptyStreamError) as exc:
         return None, f"{type(exc).__name__}: {exc}"
     measured = {k: getattr(full, k) for k in keys if getattr(full, k) is not None}
     return (TraceStats.model_validate(measured) if measured else None), None

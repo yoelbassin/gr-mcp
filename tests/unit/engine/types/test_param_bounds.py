@@ -17,6 +17,7 @@ import pytest
 from pydantic import ValidationError
 
 from marconi.engine.stages.registry import step_models
+from marconi.engine.types.bounds import MAX_POLY_BITS
 
 # A minimal valid spec per stage, so exactly one field varies at a time.
 _BASE: dict[str, dict[str, object]] = {
@@ -176,6 +177,30 @@ def _numeric_fields() -> list[tuple[str, str, bool]]:
     return out
 
 
+def _list_fields() -> list[tuple[str, str, bool]]:
+    """The sweep above skips every list-annotated field, so for years no gate
+    looked at what a list ELEMENT was allowed to be. That is not a smaller
+    version of the same class, it is the worse one: fec.polys sizes a
+    2**(K-1)-state trellis from the widest polynomial's BIT LENGTH, so a
+    16-bit value validated clean and then spent 163 s and 11 GB inside the GR
+    worker, where the run deadline (a parent-process contextvar) cannot reach
+    it. m_slice.levels reached a raw int16 cast and surfaced numpy's own
+    "Python integer 40000 out of bounds for int16" from inside the coding
+    lane, naming neither the stage nor the field."""
+    out: list[tuple[str, str, bool]] = []
+    for conv, model in sorted(step_models().items()):
+        base = _BASE.get(conv, {})
+        for name, info in model.model_fields.items():
+            ann = str(info.annotation)
+            if name == "conv" or "list" not in ann:
+                continue
+            cur = base.get(name)
+            if not isinstance(cur, list) or not cur:
+                continue
+            out.append((conv, name, "float" in ann))
+    return out
+
+
 def test_every_registered_stage_has_a_base_spec() -> None:
     """A stage missing from _BASE would silently drop out of the sweep."""
     missing = sorted(set(step_models()) - set(_BASE))
@@ -207,6 +232,75 @@ def test_a_cost_sizing_param_refuses_an_absurd_value(
     )
 
 
+# List fields whose ELEMENTS are physical quantities, on the same terms as
+# _PHYSICAL above: a constellation point, a discriminator level or a slicing
+# threshold is a coordinate, and a wrong one is cheap.
+_PHYSICAL_ELEMENTS: frozenset[str] = frozenset(
+    {
+        "m_slice.thresholds",
+        "mfsk_soft_demap.levels",
+        "ofdm_coherent_sync.fp_i",
+        "ofdm_coherent_sync.fp_q",
+        "ofdm_coherent_sync.pilot_i",
+        "ofdm_coherent_sync.pilot_q",
+        "preamble_sync.preamble_i",
+        "preamble_sync.preamble_q",
+    }
+)
+
+
+@pytest.mark.parametrize("conv, field, is_float", _list_fields(), ids=lambda v: str(v))
+def test_a_list_param_bounds_its_elements(
+    conv: str, field: str, is_float: bool
+) -> None:
+    base = _BASE[conv]
+    probe = list(base[field])  # type: ignore[call-overload]
+    probe[-1] = float(_HUGE) if is_float else _HUGE
+    key = f"{conv}.{field}"
+    try:
+        step_models()[conv].model_validate({"conv": conv, **base, field: probe})
+    except ValidationError:
+        assert key not in _PHYSICAL_ELEMENTS, (
+            f"{key} is listed as carrying physical quantities but now refuses "
+            "a large element; drop it from _PHYSICAL_ELEMENTS"
+        )
+        return
+    assert key in _PHYSICAL_ELEMENTS, (
+        f"{key} accepts a 2**40 element. A list is not exempt from the rule "
+        "above: if an element sizes an allocation, a filter, an iteration "
+        "count or a fixed-width wire, give it a ceiling. If a huge element "
+        "genuinely costs nothing, add it to _PHYSICAL_ELEMENTS."
+    )
+
+
+def test_a_convolutional_poly_cannot_outgrow_the_trellis_it_builds() -> None:
+    """trellis.fsm sizes a 2**(K-1)-state table from the WIDEST poly, and it
+    builds inside the GR worker where the run deadline — a parent-process
+    contextvar — cannot reach it. Measured: a 16-bit poly took 163 s and
+    11 GB before decoding a symbol; an 18-bit one was killed by the OS."""
+    models = step_models()
+    ok = {"conv": "fec", "scheme": "cc", "rate_inv": 2, "frame_bits": 8}
+    models["fec"].model_validate({**ok, "polys": [0o133, 0o171]})  # K=7, real
+    widest = (1 << (MAX_POLY_BITS - 1)) | 1
+    models["fec"].model_validate({**ok, "polys": [widest, widest - 1]})
+    with pytest.raises(ValidationError, match="states"):
+        models["fec"].model_validate({**ok, "polys": [widest << 1, widest]})
+
+
+def test_a_symbol_label_fits_the_wire_that_carries_it() -> None:
+    """m_slice.levels ride ItemType.S (int16). Unbounded, the cast raised
+    numpy's own out-of-bounds message from inside the coding lane, on a spec
+    validate_modem had already called valid."""
+    models = step_models()
+    models["m_slice"].model_validate(
+        {"conv": "m_slice", "thresholds": [0.0], "levels": [-32768, 32767]}
+    )
+    with pytest.raises(ValidationError, match="int16"):
+        models["m_slice"].model_validate(
+            {"conv": "m_slice", "thresholds": [0.0], "levels": [0, 32768]}
+        )
+
+
 def test_a_correlator_tolerance_cannot_exceed_its_pattern() -> None:
     """Unbounded, this reached _chance_valid_rate's range(t+1) sphere-volume
     sum — a pure-Python loop with no deadline check — and the first term past
@@ -215,7 +309,7 @@ def test_a_correlator_tolerance_cannot_exceed_its_pattern() -> None:
     coding lane instead of a word about its own spec."""
     models = step_models()
     models["sync_word"].model_validate({"conv": "sync_word", "sync": "9162"})
-    with pytest.raises(ValidationError, match="16-bit pattern"):
+    with pytest.raises(ValidationError, match="16 pattern position"):
         models["sync_word"].model_validate(
             {"conv": "sync_word", "sync": "9162", "max_errors": 16}
         )
@@ -223,6 +317,24 @@ def test_a_correlator_tolerance_cannot_exceed_its_pattern() -> None:
         models["sync_symbols"].model_validate(
             {"conv": "sync_symbols", "pattern": [1, -1], "max_errors": 2}
         )
+
+
+def test_a_wildcard_is_not_a_position_an_error_budget_can_be_spent_on() -> None:
+    """The bound above is measured against the positions the correlator
+    COMPARES, and sync_symbols never compares its 0 entries. Charged against
+    len(pattern) instead, a 20-long pattern with two +-1 entries accepted
+    max_errors=3, the score bar became `agree >= -1`, and every offset in the
+    stream matched — 4981 hits in 4981 positions of pure noise.
+
+    This is why the case has a test of its own: the all-care patterns above
+    cannot see it, because for them the two counts are the same number."""
+    models = step_models()
+    sparse = {"conv": "sync_symbols", "pattern": [1, -1] + [0] * 18}
+    models["sync_symbols"].model_validate({**sparse, "max_errors": 1})
+    with pytest.raises(ValidationError, match="2 pattern position"):
+        models["sync_symbols"].model_validate({**sparse, "max_errors": 2})
+    with pytest.raises(ValidationError, match="2 pattern position"):
+        models["sync_symbols"].model_validate({**sparse, "max_errors": 3})
 
 
 def test_the_dechirp_fft_is_bounded_by_its_product_not_its_fields() -> None:

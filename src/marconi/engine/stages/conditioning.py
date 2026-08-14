@@ -17,6 +17,7 @@ from marconi.engine.types.bounds import (
     MAX_RESAMPLE_FACTOR,
     MAX_WINDOW_SYMBOLS,
     channelization_problem,
+    nyquist_problem,
 )
 from marconi.engine.types.descriptor import Amplitude, Descriptor
 from marconi.engine.types.enums import AgcMode, ItemType
@@ -73,16 +74,6 @@ def _transition_hz(bandwidth_hz: float, rate: float) -> float:
     return max(bandwidth_hz / 2.0, rate / _MAX_TRANSITION_TAPS)
 
 
-def _nyquist_problem(center_hz: float, rate: float) -> str | None:
-    if abs(center_hz) > 0.5 * rate:
-        return (
-            f"center_hz {center_hz:g} lies outside the +-{0.5 * rate:g} Hz "
-            f"Nyquist span of the {rate:g} Hz input; a mixer wraps mod the "
-            f"sample rate and would silently tune an aliased sub-band"
-        )
-    return None
-
-
 class Channelize(Stage[CompileContext, ChannelizeStep]):
     name = "channelize"
     description = (
@@ -136,7 +127,7 @@ class Translate(Stage[CompileContext, TranslateStep]):
         b.chain("rotator_cc", phase_inc=-2.0 * math.pi * step.center_hz / b.rate)
 
     def validate_input_rate(self, step: TranslateStep, rate: float) -> str | None:
-        return _nyquist_problem(step.center_hz, rate)
+        return nyquist_problem(step.center_hz, rate)
 
 
 class Invert(Stage[CompileContext, InvertStep]):
@@ -288,6 +279,19 @@ def _agc_feedback(b: CompileContext, p: AgcStep) -> None:
     )
 
 
+# Divisor floor for the power AGC. rms_cf's IIR estimate is EXACTLY zero over a
+# span of exactly-zero input — a dead capture, a zero-padded lead, a squelched
+# gap — and 0/0 is NaN, not a large gain. Measured before this floor: a capture
+# whose first half was zeros came back 50% non-finite under status "ok", survey
+# on that stream then told the operator their own capture was corrupt, and
+# stream_stats summarized the surviving half without saying so. Sized far below
+# any real amplitude so it cannot bias a live signal (an rms of 1e-12 is still
+# within 1e-8 of unaffected) while turning the dead span into an honest 0.0.
+# This is not an exotic mode: it is the only one delivering rms_unity, so it is
+# what the compiler tells the agent to insert for qam_demod and squelch.
+_RMS_FLOOR = 1e-20
+
+
 def _agc_power(b: CompileContext, p: AgcStep) -> None:
     src = b.require_tail()
     alpha = 1.0 / (p.window_symbols * b.sps)
@@ -295,12 +299,14 @@ def _agc_power(b: CompileContext, p: AgcStep) -> None:
     rms = b.add("rms_cf", alpha=alpha)
     b.connect(src, c2f)
     b.connect(src, rms)
+    floored = b.add("add_const_ff", value=_RMS_FLOOR)
+    b.connect(rms, floored)
     dre = b.add("divide_ff")
     b.connect(c2f, dre, src_port=0, dst_port=0)
-    b.connect(rms, dre, src_port=0, dst_port=1)
+    b.connect(floored, dre, src_port=0, dst_port=1)
     dim = b.add("divide_ff")
     b.connect(c2f, dim, src_port=1, dst_port=0)
-    b.connect(rms, dim, src_port=0, dst_port=1)
+    b.connect(floored, dim, src_port=0, dst_port=1)
     f2c = b.add("float_to_complex")
     b.connect(dre, f2c, src_port=0, dst_port=0)
     b.connect(dim, f2c, src_port=0, dst_port=1)

@@ -112,6 +112,9 @@ def test_power_mode_emits_the_rms_normalization_dag() -> None:
         "iq_file_source",
         "complex_to_float",
         "rms_cf",
+        # the divisor floor: rms_cf reads EXACTLY zero over a zero-power span
+        # and 0/0 is NaN, not a large gain (see conditioning._RMS_FLOOR)
+        "add_const_ff",
         "divide_ff",
         "divide_ff",
         "float_to_complex",
@@ -157,6 +160,9 @@ def test_power_mode_accepts_window_symbols_only() -> None:
         "iq_file_source",
         "complex_to_float",
         "rms_cf",
+        # the divisor floor: rms_cf reads EXACTLY zero over a zero-power span
+        # and 0/0 is NaN, not a large gain (see conditioning._RMS_FLOOR)
+        "add_const_ff",
         "divide_ff",
         "divide_ff",
         "float_to_complex",
@@ -184,3 +190,42 @@ def test_agc_runs_and_normalizes_a_scaled_stream(mode: str, tmp_path: Path) -> N
     assert GnuRadioBackend().run_pipeline(pipe, timeout=180.0).status == "ok"
     tail = np.abs(np.fromfile(snk, dtype=np.complex64)[n // 2 :])
     assert 0.5 < float(tail.mean()) < 2.0, float(tail.mean())
+
+
+@pytest.mark.parametrize("mode", ["feedforward", "feedback", "power"])
+def test_agc_never_manufactures_non_finite_samples(mode: str, tmp_path: Path) -> None:
+    """A dead lead is an ordinary capture shape — a disconnected antenna, a
+    zero-padded slice, a squelched gap — and rms_cf's IIR estimate over an
+    exactly-zero span is EXACTLY zero, so the power mode's divide was 0/0.
+
+    Measured before the divisor floor: a capture whose first half was zeros
+    came back 50% non-finite under status "ok"; survey on that stream then told
+    the operator their own capture was corrupt, and stream_stats summarized the
+    surviving half without saying so. The power mode is not an exotic choice —
+    it is the only one that delivers rms_unity, so it is what the compiler
+    tells the agent to insert for qam_demod and squelch."""
+    ensure_worker_warm()
+    src, snk = tmp_path / "in.cf32", tmp_path / "out.cf32"
+    n = 40_000
+    x = np.zeros(n, np.complex64)
+    x[n // 2 :] = (0.01 * np.exp(2j * np.pi * np.arange(n // 2) / 9.0)).astype(
+        np.complex64
+    )
+    x.tofile(src)
+    params: dict[str, Any] = {"mode": mode}
+    if mode == "feedback":
+        params.update({"attack_symbols": 1.0, "decay_symbols": 4.0})
+    pipe = compile_modem(
+        Modem(symbol_rate=1.0, path=[AgcStep(**params)]),
+        stage_registry(),
+        sample_rate=8.0,
+        start=Descriptor(Level.IQ, ItemType.C),
+        source_io={"path": str(src)},
+        sink_io={"path": str(snk)},
+    )
+    assert GnuRadioBackend().run_pipeline(pipe, timeout=180.0).status == "ok"
+    out = np.fromfile(snk, dtype=np.complex64)
+    bad = int(np.count_nonzero(~np.isfinite(out)))
+    assert bad == 0, f"{mode}: {bad} of {out.size} samples are NaN/inf"
+    # the dead span stays dead rather than becoming a full-scale gain
+    assert float(np.abs(out[: n // 4]).max()) < 1.0

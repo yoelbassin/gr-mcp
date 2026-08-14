@@ -45,6 +45,9 @@ _SYNC_OUT_SPS = 1
 _SYNC_N_FILTERS = 128
 _SYNC_TAPS: list[float] = []
 # Gardner is non-data-aided: it times off the signal itself and needs no slicer.
+# Both symbol_sync_* variants take it; the _ff one used to be handed a real
+# constellation_bpsk, which the TED never consulted — a comment and its code
+# disagreeing about the same fact.
 _NO_SLICER = None
 
 
@@ -363,7 +366,7 @@ GR_BLOCKS: dict[str, Callable[[_GrModules, BlockParams], Any]] = {
         _TED_GAIN,
         _TED_MAX_DEVIATION,
         _SYNC_OUT_SPS,
-        c.digital.constellation_bpsk().base(),
+        _NO_SLICER,
         c.digital.IR_MMSE_8TAP,
         _SYNC_N_FILTERS,
         _SYNC_TAPS,

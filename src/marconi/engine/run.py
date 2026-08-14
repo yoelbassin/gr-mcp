@@ -557,7 +557,9 @@ def run_rx(
         check_deadline()
         result = _run_coding_tail(cp, seg, seam, entry_path, workdir, marks)
         check_deadline()
-        return _attach_report(modem, cp, registry, result, seg, seam, input_stream)
+        return _attach_report(
+            modem, cp, registry, result, seg, gr_output_path(cp, seam), input_stream
+        )
 
 
 @dataclass(frozen=True)
@@ -622,6 +624,17 @@ def _run_gr_segment(
     )
 
 
+def gr_output_path(cp: CompiledPipeline, seam: Path) -> Path:
+    """Where the GR segment's output actually ends up. An all-GR path renames
+    the sink to its item-type suffix below, so the bare `seam` name is stale
+    from that point on — _soft_tap went on handing it to the wire, and
+    read_stream answered [not_found] on soft_stream.path with the one hint
+    require_file reserves for a run whose directory was deleted."""
+    if cp.coding is not None:
+        return seam
+    return seam.with_suffix(cp.final.item_type.suffix)
+
+
 def _run_coding_tail(
     cp: CompiledPipeline,
     seg: GrSegment,
@@ -631,7 +644,7 @@ def _run_coding_tail(
     marks: list[int],
 ) -> PipelineResult:
     if cp.coding is None:
-        path = seam.with_suffix(cp.final.item_type.suffix)
+        path = gr_output_path(cp, seam)
         if path != seam:
             seam.replace(path)
         # marks recorded upstream of a stage that changed the item units do not
@@ -641,10 +654,16 @@ def _run_coding_tail(
     else:
         carrier = _entry_carrier(cp.boundary, entry_path, marks)
         out = run_coding(cp.coding, carrier, seg.census)
+        # the carrier's marks, NOT the ones handed in: the coding lane rescales
+        # them onto each new bit basis (_decode_scoped) and sync_symbols
+        # replaces them with what it found. Reporting the ENTRY marks meant the
+        # wire disagreed with the stream object beside it (_coded_stream already
+        # carried out.marks), and sync_symbols — whose only product IS marks —
+        # shipped "marks": [] while the engine held 18 of them.
         result = _ok(
             _coded_stream(cp.final, out, workdir),
             seg,
-            marks,
+            list(out.marks),
             [w.start for w in out.windows or []],
         )
     result = _flag_empty_stream(

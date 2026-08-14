@@ -68,10 +68,14 @@ _STREAM_ENTRY_TYPES: tuple[ItemType, ...] = (ItemType.B, ItemType.S, ItemType.F)
 class StageVocabulary(Payload):
     """describe_stages' wire shape: the stage rows, plus the spec envelope and
     level/item-type primer on the index call only. An index call groups the
-    rows by family, a detail call returns them flat."""
+    rows by family, a detail call returns them flat.
+
+    `omitted` names the stages a detail call dropped to stay inside its byte
+    budget — absent when it returned everything asked for."""
 
     stages: dict[str, list[StageEntry]] | list[StageEntry]
     envelope: Envelope | None = None
+    omitted: list[str] | None = None
 
 
 class ValidateModemPayload(Payload):
@@ -153,7 +157,8 @@ def describe_stages(
     reported as null and listed in "step_conditional" — the stage's
     description states the rule (e.g. symbol_sync needs 4 samples per symbol
     open-loop and has no floor closed-loop), and the compiler enforces the
-    value for the step you actually write.
+    value for the step you actually write. A detail call is capped for size:
+    "omitted" names any stages it dropped, which you fetch with stage=<name>.
 
     Compose a modem spec as {"symbol_rate": <float>, "path":
     [{"conv": <stage name>, ...params}]}; check it with validate_modem
@@ -164,11 +169,11 @@ def describe_stages(
             "family= names a group of them"
         )
     if stage is not None:
-        return StageVocabulary.build(stages=stage_details([stage])).as_payload()
+        rows, omitted = stage_details([stage])
+        return StageVocabulary.build(stages=rows, omitted=omitted or None).as_payload()
     if family is not None:
-        return StageVocabulary.build(
-            stages=stage_details(family_names(family))
-        ).as_payload()
+        rows, omitted = stage_details(family_names(family))
+        return StageVocabulary.build(stages=rows, omitted=omitted or None).as_payload()
     return StageVocabulary.build(stages=stage_index(), envelope=ENVELOPE).as_payload()
 
 
@@ -368,6 +373,9 @@ def stream_stats(
 
     Returns total_items, the sampled count (streams over 65536 items are
     read as evenly-strided chunks spanning the file), min/max/mean/std, and
+    — only when some were found — non_finite_items, the NaN/inf samples
+    EXCLUDED from every statistic below it; a non-zero count means the
+    numbers describe a subset, so check the run that wrote the stream, and
     a "histogram" {start, step, counts} over the 0.5..99.5 percentile range
     — bin i's center is start + i*step. clusters=K (1..16) also fits up to K
     levels: sorted "centers" with matching "cluster_counts". "centers" is the
