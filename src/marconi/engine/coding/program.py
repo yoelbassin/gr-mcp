@@ -46,6 +46,7 @@ def _row(step: CodingStep, before: CodingCarrier, after: CodingCarrier) -> Block
         chance_windows=stats.chance_windows if stats else None,
         words_valid=stats.words_valid if stats else None,
         words_total=stats.words_total if stats else None,
+        words_constant=stats.words_constant if stats else None,
         chance_word_rate=stats.chance_word_rate if stats else None,
     )
 

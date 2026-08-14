@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Callable, Iterable, Iterator
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from typing import Any, Literal
 
 import numpy as np
@@ -357,7 +357,7 @@ def _block_decode(
     parity_masks: list[int],
     t: int,
     emit: EmitMode,
-) -> tuple[npt.NDArray[np.uint8], tuple[int, int]]:
+) -> tuple[npt.NDArray[np.uint8], _WordTally]:
     # Codeword basis is LSB-first: stream bit j of a stride is codeword bit j,
     # so parity_masks and the emitted data bits are LSB-first too. A caller
     # assembling codewords MSB-first must reconcile the basis (supply masks
@@ -373,8 +373,15 @@ def _block_decode(
             ok |= _correct_words(
                 words, syn, flip_table(parity_masks, code_bits, data_bits, t)
             )
+    # _correct_words flipped in place, so `words` holds corrected codewords
+    valid_rows = words[ok]
+    constant = (
+        int((valid_rows.min(axis=1) == valid_rows.max(axis=1)).sum())
+        if valid_rows.size
+        else 0
+    )
     out = words if emit is EmitMode.CODEWORD else words[:, :data_bits]
-    return out.reshape(-1), (int(ok.sum()), n_words)
+    return out.reshape(-1), _WordTally(int(ok.sum()), n_words, constant)
 
 
 def block_code_rx(
@@ -396,14 +403,27 @@ def block_code_rx(
     )
 
 
+@dataclass(frozen=True)
+class _WordTally:
+    valid: int
+    total: int
+    # Valid words whose corrected codeword is one repeated symbol. The
+    # all-zero word is a codeword of every linear code, so a dead demod
+    # satisfies the code with probability 1 - quality judges validity against
+    # the uniform-word chance, and a constant word must not be counted toward
+    # that comparison.
+    constant: int = 0
+
+
 def _word_stats(
-    tallies: list[tuple[int, int]], chance_word_rate: float | None
+    tallies: list[_WordTally], chance_word_rate: float | None
 ) -> StepStats | None:
     if not tallies:
         return None
     return StepStats(
-        words_valid=sum(v for v, _ in tallies),
-        words_total=sum(n for _, n in tallies),
+        words_valid=sum(t.valid for t in tallies),
+        words_total=sum(t.total for t in tallies),
+        words_constant=sum(t.constant for t in tallies),
         chance_word_rate=chance_word_rate,
     )
 
@@ -435,7 +455,7 @@ def _decode_scoped(
     c: CodingCarrier,
     decode: Callable[
         [npt.NDArray[np.uint8]],
-        tuple[npt.NDArray[np.uint8], tuple[int, int] | None],
+        tuple[npt.NDArray[np.uint8], _WordTally | None],
     ],
     *,
     chance_word_rate: float | None = None,
@@ -445,7 +465,7 @@ def _decode_scoped(
     reads `if not c.marks: return c` and became a no-op with nothing in the
     census to say so, and a `mark_frame` after any bits-level coding stage
     seeded zero windows."""
-    tallies: list[tuple[int, int]] = []
+    tallies: list[_WordTally] = []
     if c.windows is None:
         src = np.asarray(c.bits, np.uint8)
         out, tally = decode(src)
@@ -486,11 +506,12 @@ def _rs_decode_words(
     n: int,
     k: int,
     emit: EmitMode,
-) -> tuple[npt.NDArray[np.uint8], tuple[int, int]]:
+) -> tuple[npt.NDArray[np.uint8], _WordTally]:
     syms = _unpack_symbols(bits, symbol_bits)
     out: list[int] = []
     total = syms.size // n
     valid = 0
+    constant = 0
     for w in range(total):
         if w & 0xFF == 0:
             check_deadline()
@@ -499,11 +520,18 @@ def _rs_decode_words(
             data, full, _ = codec.decode(word)
             out.extend(full if emit is EmitMode.CODEWORD else data)
             valid += 1
+            # the corrector drags a near-silent word ONTO the zero codeword
+            # and calls that a repair, so the free-word check must see the
+            # corrected word, not the received one
+            if len(set(full)) <= 1:
+                constant += 1
         except _rs.ReedSolomonError:
             # uncorrectable is detectable, never repaired by guessing: emit the
             # received word unchanged so downstream framing keeps its alignment
             out.extend(word if emit is EmitMode.CODEWORD else word[:k])
-    return _pack_symbols(np.asarray(out, np.int64), symbol_bits), (valid, total)
+    return _pack_symbols(np.asarray(out, np.int64), symbol_bits), _WordTally(
+        valid, total, constant
+    )
 
 
 def rs_code_rx(

@@ -157,11 +157,20 @@ _WORD_CHANCE_MAX = 0.125
 # two failed words say nothing.
 _WORD_EXCESS_MIN_LOG_ODDS = 15.0
 _WORD_NEGATIVE_MIN_WORDS = 8
+# The Chernoff bar is cleared by a SINGLE word once chance is small enough
+# (measured: 255 bytes of silence through RS(255,223) was 1/1 valid at chance
+# 2.6e-14 and the run read "decoded"), so a positive needs mass the same way
+# a negative does.
+_WORD_POSITIVE_MIN_WORDS = 8
 
 
 def _word_excess_significant(valid: int, total: int, chance: float) -> bool:
+    """Callers guarantee 0 < chance: a non-positive chance is the absence of a
+    null, not a strict one, and flooring it here (an old max(chance, 1e-300))
+    manufactured exactly the null that makes any observation look infinitely
+    significant."""
     q = valid / total
-    p = max(chance, 1e-300)
+    p = chance
     if q <= p:
         return False
     if q >= 1.0:
@@ -273,16 +282,31 @@ def survival_evidence(
         if not row.words_total or row.words_valid is None:
             continue
         chance = row.chance_word_rate
-        if chance is None or chance > _WORD_CHANCE_MAX:
+        # 0.0 is reachable, not malformed: _chance_valid_rate underflows to
+        # exactly 0.0 past ~1075 redundancy bits, and both bars below divide
+        # or multiply by it — the sync lane's _sync_assessment carries the
+        # same guard for the same generator.
+        if chance is None or not 0.0 < chance <= _WORD_CHANCE_MAX:
             continue
-        ratio = row.words_valid / row.words_total
-        if ratio >= _WORD_VALIDITY_POSITIVE and _word_excess_significant(
-            row.words_valid, row.words_total, chance
+        # A constant corrected codeword is free — the all-zero word satisfies
+        # every linear code — so it is excluded from both arms: a dead demod's
+        # 400/400 becomes 0/0 (untestable), a padded real decode keeps its
+        # positive from the varied words that remain.
+        constant = row.words_constant or 0
+        valid = row.words_valid - constant
+        total = row.words_total - constant
+        if total <= 0:
+            continue
+        ratio = valid / total
+        if (
+            ratio >= _WORD_VALIDITY_POSITIVE
+            and valid >= _WORD_POSITIVE_MIN_WORDS
+            and _word_excess_significant(valid, total, chance)
         ):
             assessment = Assessment.POSITIVE
         elif (
             ratio <= max(_WORD_VALIDITY_NEGATIVE, 2.0 * chance)
-            and row.words_total >= _WORD_NEGATIVE_MIN_WORDS
+            and total >= _WORD_NEGATIVE_MIN_WORDS
         ):
             assessment = Assessment.NEGATIVE
         else:

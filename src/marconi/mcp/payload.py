@@ -114,6 +114,7 @@ class CensusRow(Payload):
     chance_windows: float | None = None
     words_valid: int | None = None
     words_total: int | None = None
+    words_constant: int | None = None
     chance_word_rate: float | None = None
 
 
@@ -129,6 +130,7 @@ def census_rows(rows: Sequence[BlockCensus]) -> list[CensusRow]:
             chance_windows=c.chance_windows,
             words_valid=c.words_valid,
             words_total=c.words_total,
+            words_constant=c.words_constant,
             chance_word_rate=c.chance_word_rate,
         )
         for c in rows

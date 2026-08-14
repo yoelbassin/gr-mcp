@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from enum import StrEnum
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from marconi.engine.compile.ir import GrPipeline
 from marconi.engine.types.enums import RunStatus
@@ -33,7 +33,12 @@ class BlockCensus(BaseModel):
     words_* fields are set only by steps that measure them: chance_windows is
     how many windows pure chance would seed on this input, words_valid/total
     count codewords that passed validation, chance_word_rate is the
-    probability a random word passes."""
+    probability a random word passes. words_constant counts the valid words
+    whose corrected codeword is a single repeated symbol: the all-zero word is
+    a codeword of every linear code, so a dead demod satisfies the code with
+    probability 1 and its validity is judged against nothing."""
+
+    model_config = ConfigDict(extra="forbid")
 
     block: str
     kind: str
@@ -44,6 +49,7 @@ class BlockCensus(BaseModel):
     chance_windows: float | None = None
     words_valid: int | None = None
     words_total: int | None = None
+    words_constant: int | None = None
     chance_word_rate: float | None = None
 
 

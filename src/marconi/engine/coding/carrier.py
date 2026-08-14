@@ -33,6 +33,7 @@ class StepStats:
     chance_windows: float | None = None
     words_valid: int | None = None
     words_total: int | None = None
+    words_constant: int | None = None
     chance_word_rate: float | None = None
 
 

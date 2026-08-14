@@ -320,3 +320,72 @@ def test_a_handful_of_tags_over_a_chance_of_one_proves_nothing() -> None:
         Diagnostic(block="gate[1]", key="sync_chance", value=1.0),
     ]
     assert tag_sync_evidence(rows) == []
+
+
+def test_zero_chance_word_rate_is_untestable_not_positive() -> None:
+    # _chance_valid_rate underflows to exactly 0.0 past ~1075 redundancy bits
+    # (block_code(2048, 512) is a legal spec). A zero null is the ABSENCE of a
+    # null - both positive bars multiply it - so a dead all-zero demod scored
+    # 300/300 "valid" words and the run read "decoded". The sync lane's
+    # _sync_assessment already refuses a non-positive expectation; this is its
+    # word-lane twin.
+    rows = [_row("block_code", words_valid=300, words_total=300, chance_word_rate=0.0)]
+    assert survival_evidence(rows, stage_registry()) == []
+
+
+def test_one_perfect_word_does_not_certify() -> None:
+    # 255 bytes of silence through RS(255,223) is 1/1 valid at chance 2.6e-14:
+    # the Chernoff bar is cleared by a single word once the chance is small
+    # enough, and the negative arm's min-words floor had no positive twin.
+    rows = [_row("rs_code", words_valid=1, words_total=1, chance_word_rate=2.6e-14)]
+    assert survival_evidence(rows, stage_registry()) == []
+
+
+def test_constant_codewords_earn_no_positive() -> None:
+    # The all-zero word is a codeword of every linear code, so a dead demod
+    # satisfies the code with probability 1, not chance_word_rate: validity of
+    # a constant word is free and must not be judged against the uniform null.
+    rows = [
+        _row(
+            "rs_code",
+            words_valid=400,
+            words_total=400,
+            words_constant=400,
+            chance_word_rate=2.6e-14,
+        )
+    ]
+    assert survival_evidence(rows, stage_registry()) == []
+
+
+def test_mostly_constant_valid_words_read_negative() -> None:
+    # RS drags near-silence onto the zero codeword and tallies it as a repair:
+    # 247 free words plus 153 outright failures is garbage. With the free
+    # words excluded, the remaining 0/153 is decisively negative.
+    rows = [
+        _row(
+            "rs_code",
+            words_valid=247,
+            words_total=400,
+            words_constant=247,
+            chance_word_rate=2.6e-14,
+        )
+    ]
+    ev = survival_evidence(rows, stage_registry())
+    assert [e.assessment for e in ev] == ["negative"]
+
+
+def test_padding_heavy_real_decode_is_still_positive() -> None:
+    # Constant words are excluded, never fatal: a genuine frame train whose
+    # payload contains zero-padding words keeps its positive from the varied
+    # words that remain.
+    rows = [
+        _row(
+            "block_code",
+            words_valid=400,
+            words_total=400,
+            words_constant=100,
+            chance_word_rate=1e-6,
+        )
+    ]
+    ev = survival_evidence(rows, stage_registry())
+    assert [e.assessment for e in ev] == ["positive"]
