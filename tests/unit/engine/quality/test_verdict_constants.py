@@ -113,7 +113,13 @@ def test_soft_multilevel_separation_is_load_bearing(
     fit = fit_levels(x)
     assert (fit.separation >= _SOFT_MULTILEVEL_SEPARATION) is above
     ev = soft_evidence(_llrs(tmp_path, x))
-    assert bool(ev and ev[0].assessment is Assessment.POSITIVE) is above
+    if above:
+        assert [e.assessment for e in ev] == [Assessment.POSITIVE]
+    else:
+        # explicitly NO evidence: the old combined form (`bool(ev and
+        # positive) is False`) was also satisfied by a NEGATIVE, so it could
+        # not catch a below-bar M-ary eye being read as no_signal
+        assert ev == []
 
 
 def test_soft_negative_bar_is_load_bearing(tmp_path: Path) -> None:

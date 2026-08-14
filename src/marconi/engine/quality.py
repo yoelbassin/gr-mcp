@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 from typing import Any
@@ -19,7 +20,7 @@ from marconi.engine.backends.base import (
 )
 from marconi.engine.stages.base import Stage
 from marconi.engine.types.enums import ItemType
-from marconi.levelfit import fit_levels, windowed_power
+from marconi.levelfit import LevelFit, fit_levels, windowed_power
 
 
 class Assessment(StrEnum):
@@ -454,6 +455,22 @@ _SOFT_VALUE_CAP = 1e6
 # of an experiment nothing re-ran.
 _SOFT_MULTILEVEL_SEPARATION = 4.0
 
+# Fit separation looked like the arbiter for "is this low-ratio stream M-ary
+# or unimodal noise" and is not: Gray 4-PAM max-log LLRs at BER 0.057 (a
+# decode worth keeping) fit separation 2.95-3.04, while unimodal noise under
+# the same negative arm reaches 3.13 (Gaussian/oversampled, 300 seeds, n
+# 2000-65536). What unimodal noise cannot fake is a density DIP between the
+# two heaviest adjacent fitted levels — its mode sits inside that gap, so the
+# midpoint band can only thin by sampling luck, which the z in _dip_z prices
+# from the bands' own counts. Measured z: 8 unimodal families (Gaussian,
+# Laplace, t3, x2/x4-repeated, DC-shifted, variance-mixed, uniform) x 300
+# seeds x n in {2k,4k,8k,65k} max +2.58; a dead 4-PAM demod's LLR-transformed
+# noise maxes -0.81 (the max-log formula imprints kinks, not dips); the
+# BER-0.057 stream sits at +5.0 (16k items) to +13 (65k). Lower and sampling
+# flukes in noise read uncertain forever; higher and the decodable M-ary
+# stream reads no_signal — the inversion this bar exists to prevent.
+_SOFT_DIP_MIN_Z = 4.0
+
 # |x| mean/std bars on a demodulated stream. The ratio alone cannot reject a
 # wrong-rate decode, so a positive also demands whitened decisions via
 # sign correlation over lags 1..4. Two limits worth knowing, each pinned
@@ -519,6 +536,20 @@ _SOFT_ACTIVE_HI_PCTILE = 90.0
 # active-set ratio under _SOFT_POSITIVE.
 _SOFT_ACTIVE_FRACTION = 0.35
 
+# The active mask's threshold is a fraction of the SAME stream's p90, so a
+# strong interferer above ~10% duty owns the bar and the mask discards the
+# decode it was meant to find (measured: 58k decodable rail LLRs + 7k items
+# of N(0,30) kept 7010/65000 — the interference — and read no_signal). A
+# decode-grade NEGATIVE therefore needs corroboration: if the discarded
+# complement reads positive under the full positive bars, the negative is
+# withheld and this caveat travels instead.
+_SOFT_INTERFERER_CAVEAT = (
+    "soft negative withheld: the activity gate kept the high-power "
+    "{kept_pct:.0f}% of the stream, which reads as noise, while the "
+    "discarded lower-power span carries confident decisions — a strong "
+    "interferer can own a power gate; excise or filter it and rerun"
+)
+
 
 def _sample_soft(path: Path) -> npt.NDArray[np.float32]:
     """The highest-power contiguous window of the demod stream, never a
@@ -562,6 +593,103 @@ def _active_mask(x: npt.NDArray[np.float32]) -> npt.NDArray[np.bool_]:
         np.percentile(power, _SOFT_ACTIVE_HI_PCTILE)
     )
     return power > threshold
+
+
+@dataclass(frozen=True)
+class _SoftLane:
+    size: int
+    distinct: int
+    mag_mean: float
+    mag_spread: float
+    ratio: float
+    both_polarities: bool
+    whitened: bool
+    fit: LevelFit
+    dip_z: float
+
+
+def _dip_z(xl: npt.NDArray[np.float32], fit: LevelFit, k_ess: float) -> float:
+    """Significance of the density dip between the two heaviest adjacent
+    fitted levels: z = log(n_flank/n_mid) / sqrt(k_ess*(1/n_mid + 1/n_flank)),
+    bands a quarter-gap wide, n_flank the smaller flanking-center band. One
+    designated gap, so there is no pick-the-deepest selection bias; k_ess
+    scales the Poisson variance for repeated (oversampled) items, which
+    inflate it by exactly 1 + 2*sum(positive lag correlations) — x4-repeated
+    noise measured z +4.6 unscaled and +2.4 scaled."""
+    if fit.order <= 2 or fit.centers.size < 2:
+        return float("-inf")
+    pair = int(np.argmax(fit.counts[:-1] + fit.counts[1:]))
+    lo = float(fit.centers[pair])
+    hi = float(fit.centers[pair + 1])
+    w = 0.25 * (hi - lo)
+    mid = 0.5 * (lo + hi)
+    n_mid = max(int(np.count_nonzero(np.abs(xl - mid) <= w)), 1)
+    n_flank = max(
+        min(
+            int(np.count_nonzero(np.abs(xl - lo) <= w)),
+            int(np.count_nonzero(np.abs(xl - hi) <= w)),
+        ),
+        1,
+    )
+    return math.log(n_flank / n_mid) / math.sqrt(k_ess * (1.0 / n_mid + 1.0 / n_flank))
+
+
+def _lane_stats(x: npt.NDArray[np.float32], mask: npt.NDArray[np.bool_]) -> _SoftLane:
+    xl = x[mask]
+    mag = np.abs(xl)
+    mag_mean = float(mag.mean())
+    mag_spread = float(mag.std())
+    signs = np.sign(x)
+    worst_corr = 0.0
+    k_ess = 1.0
+    for lag in range(1, _SOFT_WHITENESS_LAGS + 1):
+        pair = mask[lag:] & mask[:-lag]
+        if pair.any():
+            corr = float(np.mean((signs[lag:] * signs[:-lag])[pair]))
+            worst_corr = max(worst_corr, abs(corr))
+            k_ess += 2.0 * max(corr, 0.0)
+    fit = fit_levels(xl)
+    return _SoftLane(
+        size=int(xl.size),
+        distinct=int(np.unique(xl).size),
+        mag_mean=mag_mean,
+        mag_spread=mag_spread,
+        ratio=mag_mean / mag_spread if mag_spread > 0.0 else float("inf"),
+        both_polarities=(
+            min(float((xl > 0).mean()), float((xl < 0).mean()))
+            >= _SOFT_MIN_POLARITY_FRACTION
+        ),
+        whitened=worst_corr <= _SOFT_MAX_SIGN_CORR,
+        fit=fit,
+        dip_z=_dip_z(xl, fit, k_ess),
+    )
+
+
+# The multilevel arm runs before the ratio arm because a clean M-ary eye's
+# magnitude ratio sits BELOW the binary negative bar (measured 0.998 on clean
+# CPFSK) — but it earns no exemption from the polarity and whiteness gates,
+# which is exactly how an all-positive ladder and a stuck alternator read
+# "decoded" through it.
+def _positive_value(lane: _SoftLane) -> float | None:
+    if not (lane.both_polarities and lane.whitened):
+        return None
+    if lane.fit.order > 2 and lane.fit.separation >= _SOFT_MULTILEVEL_SEPARATION:
+        return lane.fit.separation
+    if lane.ratio >= _SOFT_POSITIVE:
+        return lane.ratio
+    return None
+
+
+def _rescues_negative(lane: _SoftLane) -> bool:
+    """The discarded complement rebuts a negative only as a full positive
+    would read: enough items, genuinely continuous confidences, and past the
+    positive bars — a slicer's decisions or a saturated span cannot."""
+    return (
+        lane.size >= _SOFT_MIN_ITEMS
+        and lane.distinct >= _SOFT_MIN_DISTINCT
+        and lane.mag_spread > _SOFT_MIN_DISPERSION * lane.mag_mean
+        and _positive_value(lane) is not None
+    )
 
 
 def _emit_soft(
@@ -632,74 +760,63 @@ def _soft_reading(
     active = _active_mask(x)
     if not active.any():
         return _emit_soft(0.0, Assessment.NEGATIVE, decode_grade), None, 0.0
-    xa = x[active]
-    if xa.size < _SOFT_MIN_ITEMS:
+    if int(active.sum()) < _SOFT_MIN_ITEMS:
         return [], None, None
-    distinct = int(np.unique(xa).size)
-    if distinct < _SOFT_MIN_DISTINCT:
-        return [], _SOFT_DISCRETE_CAVEAT.format(n=distinct), None
-    mag = np.abs(xa)
-    spread = float(mag.std())
-    mean = float(mag.mean())
-    if spread <= _SOFT_MIN_DISPERSION * mean:
+    # The polarity gate inside _positive_value is why a constant or one-sided
+    # LLR stream (a CW carrier) cannot score an arbitrarily high magnitude
+    # ratio into a positive: both polarities must show up in real proportion.
+    lane = _lane_stats(x, active)
+    if lane.distinct < _SOFT_MIN_DISTINCT:
+        return [], _SOFT_DISCRETE_CAVEAT.format(n=lane.distinct), None
+    if lane.mag_spread <= _SOFT_MIN_DISPERSION * lane.mag_mean:
         return (
             [],
-            _SOFT_SATURATED_CAVEAT.format(rel=spread / mean if mean else 0.0),
+            _SOFT_SATURATED_CAVEAT.format(
+                rel=lane.mag_spread / lane.mag_mean if lane.mag_mean else 0.0
+            ),
             None,
         )
-    # A constant or one-sided LLR stream (a CW carrier) can score an
-    # arbitrarily high magnitude ratio without carrying any modulation; both
-    # polarities must show up in real proportion before that ratio counts.
-    both_polarities = (
-        min(float((xa > 0).mean()), float((xa < 0).mean()))
-        >= _SOFT_MIN_POLARITY_FRACTION
-    )
-    signs = np.sign(x)
-    corrs = []
-    for lag in range(1, _SOFT_WHITENESS_LAGS + 1):
-        pair = active[lag:] & active[:-lag]
-        if pair.any():
-            corrs.append(abs(float(np.mean((signs[lag:] * signs[:-lag])[pair]))))
-    whitened = max(corrs, default=0.0) <= _SOFT_MAX_SIGN_CORR
-    fit = fit_levels(xa)
-    # The multilevel branch exists because a clean M-ary eye's magnitude ratio
-    # sits BELOW the binary negative bar (measured 0.998 on clean CPFSK), so
-    # it must run before the ratio arms — but it earns no exemption from the
-    # polarity and whiteness gates, which is exactly how an all-positive
-    # ladder and a stuck alternator read "decoded" through it.
-    ratio = mean / spread
-    # separation joins the margin only once it clears the bar: a FORCED
-    # k-fit on unimodal noise still measures ~3.5, which outranked a genuine
-    # noisy binary decode and inverted the ordering margin exists for
+    # measurably multimodal: the binary noise null cannot judge this shape
+    structured = lane.fit.order > 2 and lane.dip_z >= _SOFT_DIP_MIN_Z
+    # separation joins the margin only once the levels are past the positive
+    # bar or the dip is significant: a FORCED k-fit on unimodal noise still
+    # measures separation up to 3.1 (3.5 uniform-shaped) with no dip
+    # anywhere, which outranked a genuine noisy binary decode and inverted
+    # the ordering margin exists for
     sep = (
-        fit.separation
-        if fit.order > 2 and fit.separation >= _SOFT_MULTILEVEL_SEPARATION
+        lane.fit.separation
+        if lane.fit.order > 2
+        and (structured or lane.fit.separation >= _SOFT_MULTILEVEL_SEPARATION)
         else 0.0
     )
-    margin = float(min(max(ratio, sep), _SOFT_VALUE_CAP))
-    if (
-        fit.order > 2
-        and fit.separation >= _SOFT_MULTILEVEL_SEPARATION
-        and both_polarities
-        and whitened
-    ):
+    margin = float(min(max(lane.ratio, sep), _SOFT_VALUE_CAP))
+    value = _positive_value(lane)
+    if value is not None:
         return (
             _emit_soft(
-                float(min(fit.separation, _SOFT_VALUE_CAP)),
-                Assessment.POSITIVE,
-                decode_grade,
+                float(min(value, _SOFT_VALUE_CAP)), Assessment.POSITIVE, decode_grade
             ),
             None,
             margin,
         )
-    if ratio >= _SOFT_POSITIVE and both_polarities and whitened:
-        assessment = Assessment.POSITIVE
-    elif ratio <= _SOFT_NEGATIVE:
-        assessment = Assessment.NEGATIVE
-    else:
+    if lane.ratio > _SOFT_NEGATIVE:
         return [], None, margin
+    if structured:
+        # a low magnitude ratio on a stream with significant multi-level
+        # structure is the M-ary shape, not absence (a clean M-ary eye's
+        # ratio sits below the binary bar): no evidence, margin still ranks
+        return [], None, margin
+    rest = ~active
+    if int(rest.sum()) >= _SOFT_MIN_ITEMS and _rescues_negative(_lane_stats(x, rest)):
+        return (
+            [],
+            _SOFT_INTERFERER_CAVEAT.format(kept_pct=100.0 * lane.size / x.size),
+            margin,
+        )
     return (
-        _emit_soft(float(min(ratio, _SOFT_VALUE_CAP)), assessment, decode_grade),
+        _emit_soft(
+            float(min(lane.ratio, _SOFT_VALUE_CAP)), Assessment.NEGATIVE, decode_grade
+        ),
         None,
         margin,
     )
