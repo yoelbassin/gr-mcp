@@ -83,6 +83,16 @@ _STAGGER_TOL_BINS = 6.0
 # Off the analyzed band's centre by a meaningful fraction of the occupied
 # bandwidth: the default demod (carrier at DC) will miss, so surface it.
 _OFF_CENTER_FRAC = 0.15
+# Occupied span reaching past this fraction of the rate means the band wraps
+# +-fs/2: every coarse anchor is meaningless there, so the offset is flagged
+# ambiguous instead of dealiased confidently wrong (measured: +499 kHz
+# reported as -999.9 Hz with every confidence flag clear).
+_BAND_EDGE_FRAC = 0.45
+# Default-band exclusion of the burst-repetition comb: the comb's measured
+# fundamental and its first few harmonics outrank a real symbol line, so the
+# default floor clears 4 cadence harmonics. 4 keeps a genuine symbol rate as
+# low as 4x the frame rate searchable, which no framed protocol sits under.
+_CADENCE_FLOOR_HARMONICS = 4.0
 # Cap the record length for carrier M-th-power FFT analysis.
 _CARRIER_MAX_SAMPLES = 1 << 20
 
@@ -133,10 +143,19 @@ def _spectrum(x: npt.NDArray[np.complex64], sample_rate: float) -> SpectrumStats
     )
     order = np.argsort(f)
     f, pxx = f[order], pxx[order]
-    total = float(pxx.sum()) or 1.0
-    centroid = float((f * pxx).sum() / total)
+    # Moments over the FLOOR-SUBTRACTED PSD: raw moments include the noise
+    # floor, which dominates whenever the signal is narrow relative to the
+    # capture - measured on a QPSK occupying 6.7% of the band, the centroid
+    # drifted from 200 kHz (true) to 80 kHz as SNR fell to 10 dB and
+    # occupied_bw inflated from 59 kHz to 983 kHz (pure noise reads 990),
+    # which both vetoed the correct mpsk offset AND suppressed off_center.
+    # The median of a mostly-noise PSD IS the floor; for a band-filling
+    # signal the subtraction costs a constant that cancels in the ratio.
+    excess = np.maximum(pxx - float(np.median(pxx)), 0.0)
+    total = float(excess.sum()) or 1.0
+    centroid = float((f * excess).sum() / total)
     peak = float(f[int(np.argmax(pxx))])
-    cum = np.cumsum(pxx) / total
+    cum = np.cumsum(excess) / total
     lo = float(f[min(int(np.searchsorted(cum, 0.005)), f.size - 1)])
     hi = float(f[min(int(np.searchsorted(cum, 0.995)), f.size - 1)])
     fd = _downsample(f, _SPECTRUM_BINS)
@@ -173,22 +192,22 @@ def _mpsk_line(
     return score, _interp_peak_hz(p, peak, sample_rate)
 
 
-def _carrier(
-    x: npt.NDArray[np.complex64],
+def _fold(
+    variant: npt.NDArray[np.complexfloating[Any, Any]],
+    active: npt.NDArray[np.bool_],
     sample_rate: float,
-    occupied_bw_hz: float,
-    centroid_hz: float,
-) -> CarrierStats:
-    xb = _bounded(x)
-    active = _burst_power_gate(xb, _SURVEY_ACTIVE_FRACTION, _SURVEY_BURST_WINDOW)
-    dof = int(active.sum()) or xb.size
-    xd = xb - _active_mean(xb, active)
-    z = (xd / np.maximum(np.abs(xd), 1e-12)) * active
+    dof: int,
+) -> tuple[dict[int, float], dict[int, float]]:
+    z = (variant / np.maximum(np.abs(variant), 1e-12)) * active
     scores: dict[int, float] = {}
     lines: dict[int, float] = {}
     for m in _MPSK_ORDERS:
         scores[m], lines[m] = _mpsk_line(z, sample_rate, m, dof)
-    order = next(
+    return scores, lines
+
+
+def _claimed_order(scores: dict[int, float]) -> int | None:
+    return next(
         (
             m
             for m in (4, 8)
@@ -197,18 +216,52 @@ def _carrier(
         ),
         None,
     )
+
+
+def _carrier(
+    x: npt.NDArray[np.complex64],
+    sample_rate: float,
+    occupied_bw_hz: float,
+    anchor_hz: float,
+    band_edge_wrap: bool = False,
+) -> CarrierStats:
+    xb = _bounded(x)
+    active = _burst_power_gate(xb, _SURVEY_ACTIVE_FRACTION, _SURVEY_BURST_WINDOW)
+    dof = int(active.sum()) or xb.size
+    # Two fold hypotheses, decided coherently PER VARIANT (mixing per-order
+    # maxima broke the jump rule: an unsubtracted DC spike inflates order 2
+    # and vetoes a genuine order-4 claim). The DC-subtracted variant decides
+    # first - the spur case (LO leakage, universal on RTL-SDR) - and the raw
+    # variant only speaks when the subtracted one claims nothing, which is
+    # the carrier-tuned-to-EXACTLY-0-Hz case the subtraction annihilated
+    # (measured: phase_concentration 1.0 at 0 Hz offset, 75,000 without the
+    # subtraction, identical at 100 Hz). Reported concentrations are the
+    # per-order max so signal-at-DC stays visible either way.
+    xd = xb - _active_mean(xb, active)
+    scores, lines = _fold(xd, active, sample_rate, dof)
+    order = _claimed_order(scores)
+    raw_scores, raw_lines = _fold(xb, active, sample_rate, dof)
+    if order is None:
+        raw_order = _claimed_order(raw_scores)
+        if raw_order is not None:
+            order, lines = raw_order, raw_lines
+            scores = dict(raw_scores)
+    scores = {m: max(scores[m], raw_scores[m]) for m in _MPSK_ORDERS}
     if order == 4 and scores[8] >= _MPSK_CONC_THRESH:
-        off4 = _dealias_offset(lines[4], 4, sample_rate, centroid_hz)
-        off8 = _dealias_offset(lines[8], 8, sample_rate, centroid_hz)
+        off4 = _dealias_offset(lines[4], 4, sample_rate, anchor_hz)
+        off8 = _dealias_offset(lines[8], 8, sample_rate, anchor_hz)
         if abs(off8 - off4) > _STAGGER_TOL_BINS * sample_rate / xb.size:
             order = 8
-    ambiguous = False
-    if order is not None:
-        offset = _dealias_offset(lines[order], order, sample_rate, centroid_hz)
-        if abs(centroid_hz - offset) / (sample_rate / order) > _DEALIAS_AMBIGUOUS_FRAC:
-            offset, ambiguous = centroid_hz, True
+    # a signal whose occupied band wraps +-fs/2 has no trustworthy coarse
+    # anchor at all: dealiasing against one reported +499 kHz as -999.9 Hz
+    # with every confidence flag clear
+    ambiguous = band_edge_wrap
+    if order is not None and not ambiguous:
+        offset = _dealias_offset(lines[order], order, sample_rate, anchor_hz)
+        if abs(anchor_hz - offset) / (sample_rate / order) > _DEALIAS_AMBIGUOUS_FRAC:
+            offset, ambiguous = anchor_hz, True
     else:
-        offset = centroid_hz
+        offset = anchor_hz
     method: Literal["mpsk", "spectral_centroid"] = (
         "mpsk" if order is not None and not ambiguous else "spectral_centroid"
     )
@@ -462,7 +515,12 @@ def _symbol_rate(
     yf_full = np.abs(np.diff(dphi))
 
     active_pairs = _magnitude_gate_pairs(x, _SURVEY_ACTIVE_FRACTION)
-    yf = _gate(yf_full, active_pairs[1:] & active_pairs[:-1])
+    # ZEROED, never deleted: _gate compresses the record, and _clock_spectrum
+    # then measured the compressed array against the UNCOMPRESSED sample rate
+    # - a periodicity of P samples reported at f/rho (measured +4.5..9.3%
+    # high, 20-104 clock bins off a docstring that promises one). Zeros keep
+    # the time base; the per-chunk mean subtraction absorbs their DC.
+    yf = np.where(active_pairs[1:] & active_pairs[:-1], yf_full, 0.0)
 
     fa, ma = _clock_spectrum(ya, sample_rate, _SURVEY_CLOCK_CHUNKS)
     fg, mg = _clock_spectrum(yf, sample_rate, _SURVEY_CLOCK_CHUNKS)
@@ -504,13 +562,12 @@ def _symbol_rate(
         eye_confirmed=_eye_cleared([c.eye for c in ranked]),
         search_lo_hz=round(lo, 1),
         search_hi_hz=round(hi, 1),
-        # the COARSER of the two branches. candidates_hz merges peaks from
-        # both, and the phase branch is gated (idle removed) so its record is
-        # shorter and its bin wider — measured 98.3 Hz against the amplitude
-        # branch's 80.0 on a 20%-duty capture. Reporting dfa alone understated
-        # the quantization of every candidate the phase branch contributed,
-        # under a docstring that tells the caller a hypothesis within one bin
-        # is a match.
+        # the COARSER of the two branches, kept as max() even though the
+        # phase branch now zero-fills its idle (equal record lengths, so the
+        # two bins normally agree): a future branch that shortens its record
+        # again must coarsen this number, not silently understate the
+        # quantization under a docstring that tells the caller a hypothesis
+        # within one bin is a match.
         clock_resolution_hz=round(max(float(dfa), float(dfg)), 1),
     )
 
@@ -649,11 +706,9 @@ class BurstStats(Payload):
             duty_cycle=self.duty_cycle,
             dominant_period_samples=self.dominant_period_samples,
             segments=list(self.segments[:_MAX_INLINE_SEGMENTS]),
-            segments_total=(
-                len(self.segments)
-                if len(self.segments) > _MAX_INLINE_SEGMENTS
-                else None
-            ),
+            # the retained list is itself capped now, so truncation is
+            # count vs shipped, never the length of what was held in memory
+            segments_total=(self.count if self.count > len(self.segments) else None),
             capture_scale=CaptureScale(offset_samples=offset_samples, decim=decim),
         )
 
@@ -679,7 +734,15 @@ def _burst_threshold(path: Path, offset: int, length: int) -> float:
         float(np.percentile(_smooth_power(block), _SURVEY_BURST_FLOOR_PCTL))
         for block in iter_probes(path, offset, length)
     ]
-    floor = float(np.median(lows)) if lows else 0.0
+    # a LOW percentile across probes, never the median: a continuous emitter
+    # contaminates every probe it is on in, and at duty >= 50% the median of
+    # per-probe floors WAS the emitter - a +200 kHz carrier 20 dB over noise
+    # raised the bar 100x and deleted all 57 weak bursts elsewhere in the
+    # band ("the band is dead"). The 10th percentile keeps the reference on
+    # the cleanest probes up to ~90% emitter duty; a truly 100%-duty emitter
+    # masks weaker TOTAL-power activity physically, and no time-domain bar
+    # can recover that.
+    floor = float(np.percentile(lows, 10.0)) if lows else 0.0
     return _SURVEY_BURST_RATIO * floor
 
 
@@ -690,9 +753,20 @@ def _smooth_power(block: npt.NDArray[np.complex64]) -> npt.NDArray[np.float64]:
 def _bursts(path: Path, offset: int, length: int) -> BurstStats:
     thr = _burst_threshold(path, offset, length)
     segs: list[tuple[int, int]] = []
+    count = 0
     active_total = 0
     pos = 0
     pending: list[int] | None = None
+
+    def commit(seg: list[int]) -> None:
+        # count everything, KEEP only what ships: 47,259 segments were held
+        # to ship 512 - ~4.9 GB of tuples on a 300 s capture at 20 Msps. The
+        # 512 retained starts are ample for the median period estimate.
+        nonlocal count
+        count += 1
+        if len(segs) < _MAX_INLINE_SEGMENTS:
+            segs.append((seg[0], seg[1] - seg[0]))
+
     for block in iter_iq(path, offset, length):
         mask = _smooth_power(block) > thr
         active_total += int(mask.sum())
@@ -702,16 +776,16 @@ def _bursts(path: Path, offset: int, length: int) -> BurstStats:
                 pending[1] = ge
             else:
                 if pending is not None:
-                    segs.append((pending[0], pending[1] - pending[0]))
+                    commit(pending)
                 pending = [gs, ge]
         pos += int(block.size)
     if pending is not None:
-        segs.append((pending[0], pending[1] - pending[0]))
+        commit(pending)
     starts = [s for s, _ in segs]
     deltas = np.diff(starts)
     dom = int(np.median(deltas)) if deltas.size else None
     return BurstStats(
-        count=len(segs),
+        count=count,
         duty_cycle=_sig(active_total / pos) if pos else 0.0,
         dominant_period_samples=dom,
         segments=segs,
@@ -767,11 +841,21 @@ def survey_iq(
     check_sample_rate(sample_rate)
     window = sample_iq(path, offset, length)
     x = window.samples
+    bursts = _bursts(path, offset, length)
     hi = max_symbol_rate if max_symbol_rate is not None else sample_rate / 2
     if min_symbol_rate is not None:
         lo = min_symbol_rate
     else:
         lo = min(_default_rate_floor(x.size, sample_rate), hi / 2)
+        if bursts.dominant_period_samples:
+            # a bursty capture puts its burst-repetition comb inside the
+            # default band, and the comb outranked the symbol line: measured
+            # candidates [74.9 .. 861.2] Hz for a 125 kBd signal, across six
+            # burst periods, with the truth NEVER in the list. The measured
+            # cadence and its low harmonics are excluded from the default
+            # band; an explicit min_symbol_rate still searches anywhere.
+            cadence = sample_rate / bursts.dominant_period_samples
+            lo = min(max(lo, _CADENCE_FLOOR_HARMONICS * cadence), hi / 2)
     if not 0 < lo < hi:
         raise ValueError(
             f"symbol-rate search band is empty: lo={lo:g} hi={hi:g}; require "
@@ -780,6 +864,8 @@ def survey_iq(
         )
     check_deadline()
     spectrum = _spectrum(x, sample_rate)
+    edge = _BAND_EDGE_FRAC * sample_rate
+    band_edge_wrap = spectrum.occupied_hi_hz > edge or spectrum.occupied_lo_hz < -edge
     return SurveyResult(
         sample_rate=sample_rate,
         span_samples=window.span,
@@ -787,10 +873,14 @@ def survey_iq(
         analyzed_start=window.start,
         spectrum=spectrum,
         carrier=_carrier(
-            x, sample_rate, spectrum.occupied_bw_hz, spectrum.center_offset_hz
+            x,
+            sample_rate,
+            spectrum.occupied_bw_hz,
+            spectrum.center_offset_hz,
+            band_edge_wrap,
         ),
         envelope=_envelope(x),
         symbol_rate=_symbol_rate(x, sample_rate, lo, hi),
         inst_freq=_inst_freq(x, sample_rate),
-        bursts=_bursts(path, offset, length),
+        bursts=bursts,
     )

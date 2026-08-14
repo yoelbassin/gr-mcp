@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from pathlib import Path
 from typing import Protocol
 
@@ -8,6 +9,7 @@ from pydantic import BaseModel
 
 from marconi.engine.backends.gnuradio.runner import GnuRadioBackend
 from marconi.engine.compile.ir import GrBlock, GrConnection, GrPipeline
+from marconi.engine.types.bounds import check_sample_rate
 from marconi.engine.types.enums import CaptureDtype, RunStatus
 from marconi.engine.types.params import ParamValue
 from marconi.errors import register_error
@@ -246,8 +248,15 @@ def capture_iq(
     ppm: float = 0.0,
     device: str = "",
 ) -> CaptureResult:
-    if sample_rate <= 0:
-        raise ValueError("sample_rate must be > 0")
+    # finiteness first: `nan <= 0` is False, so NaN cleared the old sign
+    # check and reached the device as setSampleRate(nan) - and bounds.py
+    # exists for exactly this ("non-finite is the one that bit")
+    check_sample_rate(sample_rate)
+    for name, value in (("center_hz", center_hz), ("ppm", ppm)):
+        if not math.isfinite(value):
+            raise ValueError(f"{name} must be finite, got {value!r}")
+    if gain_db is not None and not math.isfinite(gain_db):
+        raise ValueError(f"gain_db must be finite, got {gain_db!r}")
     if not 0 < duration_s <= _MAX_DURATION_S:
         raise ValueError(f"duration_s must be in (0, {_MAX_DURATION_S:g}]")
     probe = _probe_device(device, sample_rate, center_hz, ppm)

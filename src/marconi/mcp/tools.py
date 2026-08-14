@@ -483,7 +483,11 @@ def survey(
             offset=capture_offset,
             samples=capture_samples,
         )
-        if center_hz != 0.0 or decim > 1:
+        # bandwidth_hz alone must also route through the channelizer: on the
+        # default path it was silently ignored (byte-identical payload with
+        # and without it - even bandwidth_hz=1e-6, which the decim>1 path
+        # rejects as too narrow)
+        if center_hz != 0.0 or decim > 1 or bandwidth_hz is not None:
             run_dir = new_run_dir("survey")
             try:
                 channel = run_dir / "channel.cf32"

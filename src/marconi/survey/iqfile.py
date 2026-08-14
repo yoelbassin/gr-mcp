@@ -22,7 +22,22 @@ _SURVEY_MIN_ITEMS = 1 << 10
 _SURVEY_PROBE_COUNT = 64  # span-wide statistics read this many small blocks
 _SURVEY_PROBE_ITEMS = 1 << 14  # ... of this size, instead of a full extra pass
 _ITEMSIZE = np.dtype(np.complex64).itemsize
-_CHANNELIZE_TAPS_PER_PHASE = 8
+# 32, not 8: numtaps = taps_per_phase*decim + 1 fixes the NORMALIZED
+# transition width, and at 8 the cutoff sat inside its own transition band -
+# measured 6 dB of droop across the passband and only 10.7 dB rejection of
+# energy that folds in after decimation (an out-of-channel tone became the
+# PEAK of the channelized spectrum). 32 puts the fold-in region in real
+# stopband; the cost is a 4x longer FIR on a streaming one-shot conversion.
+_CHANNELIZE_TAPS_PER_PHASE = 32
+
+# Container signatures that are definitely not raw IQ. A .wav read as cf32
+# surveyed "confidently": peak at the Nyquist bin, occupied_bw 0.0, and a
+# NaN carrier offset that is not even valid JSON on the wire.
+_CONTAINER_MAGICS: dict[bytes, str] = {
+    b"RIFF": "a RIFF/WAV container",
+    b"fLaC": "a FLAC container",
+    b"OggS": "an Ogg container",
+}
 
 
 class CaptureTooShort(Exception):
@@ -33,8 +48,26 @@ class CaptureNotFinite(Exception):
     pass
 
 
+class CaptureNotRaw(Exception):
+    pass
+
+
 register_error(CaptureTooShort, "invalid_argument")
 register_error(CaptureNotFinite, "invalid_argument")
+register_error(CaptureNotRaw, "invalid_argument")
+
+
+def reject_container(path: Path) -> None:
+    with path.open("rb") as f:
+        magic = f.read(4)
+    kind = _CONTAINER_MAGICS.get(magic)
+    if kind is not None:
+        raise CaptureNotRaw(
+            f"{path.name} is {kind}, not raw IQ samples: surveying the header "
+            "as cf32 produces confident nonsense. Convert to a headerless "
+            "raw capture first (e.g. sox/ffmpeg to raw f32 interleaved I/Q, "
+            "or re-record as .cf32), then pass that file."
+        )
 
 
 def slice_len(path: Path, offset: int, length: int) -> int:
@@ -89,6 +122,7 @@ class IqWindow:
 def sample_iq(
     path: Path, offset: int = 0, length: int = 0, budget: int = _SURVEY_SAMPLE_ITEMS
 ) -> IqWindow:
+    reject_container(path)
     span = slice_len(path, offset, length)
     if span < _SURVEY_MIN_ITEMS:
         raise CaptureTooShort(
@@ -125,7 +159,11 @@ def iter_probes(
     span = slice_len(path, offset, length)
     if span <= 0:
         return
-    step = max(span // max(probes, 1), items)
+    # +4093 (prime): a stride locked to the capture's own power-of-two burst
+    # cadence sampled every probe at the same burst phase - 64 real bursts at
+    # period 32768 in a 2^21 slice read as ZERO, the identical signal at
+    # period 37117 read 57/57. A prime offset breaks the lock-step.
+    step = max(span // max(probes, 1), items) + 4093
     with path.open("rb") as f:
         for start in range(0, span, step):
             check_deadline()
@@ -155,6 +193,7 @@ def channelize_to_file(
     history across blocks (overlap-save), so the result is independent of the read
     chunking. ``bandwidth_hz`` is the filter passband width (cutoff = bandwidth_hz/2,
     matching the channelize stage); default passes most of the decimated band."""
+    reject_container(src)
     if abs(center_hz) > 0.5 * sample_rate:
         looks_absolute = abs(center_hz) > 1.0e6 and abs(center_hz) > 10.0 * sample_rate
         if looks_absolute:
@@ -187,6 +226,11 @@ def channelize_to_file(
         # decim=1 translate-only: firwin needs 0 < normalized < 1; the band
         # passes whole either way
         cutoff = 0.499 * sample_rate
+    # decim=1 with no requested passband is a pure translate: the FIR buys
+    # nothing there and its short default fabricated 4.7 dB of spectral tilt
+    # across a flat band ("the documented way to re-centre" distorted the
+    # very spectrum the caller was about to re-survey)
+    filter_needed = decim > 1 or bandwidth_hz is not None
     taps_per_phase = _CHANNELIZE_TAPS_PER_PHASE
     numtaps = taps_per_phase * decim + 1  # numtaps-1 is a whole number of phases
     h = firwin(numtaps, cutoff / (0.5 * sample_rate))
@@ -200,12 +244,17 @@ def channelize_to_file(
             frac = (center_hz / sample_rate) * idx
             frac -= np.round(frac)  # keep phase precise across a long capture
             mixed = block.astype(np.complex128) * np.exp(-2j * np.pi * frac)
-            seg = np.concatenate([hist, mixed])
-            z = upfirdn(h, seg, up=1, down=decim)
-            take = block.size // decim
-            z[taps_per_phase : taps_per_phase + take].astype(np.complex64).tofile(out)
+            if filter_needed:
+                seg = np.concatenate([hist, mixed])
+                z = upfirdn(h, seg, up=1, down=decim)
+                take = block.size // decim
+                out_block = z[taps_per_phase : taps_per_phase + take]
+                hist = seg[-(numtaps - 1) :]
+            else:
+                out_block = mixed
+                take = block.size
+            out_block.astype(np.complex64).tofile(out)
             written += take
-            hist = seg[-(numtaps - 1) :]
             g += int(block.size)
     return written, out_rate
 
