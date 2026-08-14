@@ -52,9 +52,10 @@ def test_high_duty_bursts_are_not_read_as_a_dead_band(
     tmp_path: Path, duty: float
 ) -> None:
     # once within-probe duty passed 0.75, the p25 of smoothed power was the
-    # SIGNAL level in every probe, the aggregate floor rode it, and the 4x bar
-    # sat above the signal itself: measured cliff — duty 0.74 -> count 128,
-    # duty 0.737; duty 0.76 -> count 0, duty 0.0 ("the band is dead")
+    # SIGNAL level in every probe (tone 26 dB over the noise here), the
+    # aggregate floor rode it, and the 4x bar sat above the signal itself:
+    # measured cliff — duty 0.74 -> count 128, duty 0.737; duty 0.76 ->
+    # count 0, duty 0.0 ("the band is dead")
     rng = np.random.default_rng(int(duty * 100))
     n = 1 << 19
     noise = 0.05 * (rng.standard_normal(n) + 1j * rng.standard_normal(n)) / np.sqrt(2)
@@ -67,17 +68,61 @@ def test_high_duty_bursts_are_not_read_as_a_dead_band(
     assert res.bursts.dominant_period_samples is not None
 
 
-def test_continuous_carrier_reports_duty_near_one(tmp_path: Path) -> None:
+@pytest.mark.parametrize("snr_db", [26.0, 8.0])
+def test_continuous_carrier_reports_duty_near_one(
+    tmp_path: Path, snr_db: float
+) -> None:
     # an emitter that never turns off leaves no observable noise floor, and
     # the bar built from its own level read it as a DEAD band: duty 0.0.
     # genuinely continuous means count may be 0 — but duty must say "always
-    # on", not "never on".
+    # on", not "never on". 8 dB gates the fallback's measured ~6 dB coverage
+    # floor with margin (raw-shape 0.44 vs the 0.3 bar); an earlier bar
+    # mismeasured against mislabeled SNR flipped to "dead" below exactly
+    # 10 dB.
     rng = np.random.default_rng(11)
     n = 1 << 19
-    noise = 0.05 * (rng.standard_normal(n) + 1j * rng.standard_normal(n)) / np.sqrt(2)
+    npw = 10 ** (-snr_db / 10)
+    noise = np.sqrt(npw / 2) * (rng.standard_normal(n) + 1j * rng.standard_normal(n))
     x = (_tone(n, 100_000.0, _FS) + noise).astype(np.complex64)
     res = survey_iq(_write(tmp_path, x), _FS)
-    assert res.bursts.duty_cycle >= 0.9, res.bursts.duty_cycle
+    assert res.bursts.duty_cycle >= 0.9, (snr_db, res.bursts.duty_cycle)
+
+
+def test_always_on_ook_reads_duty_zero_the_documented_blind_spot(
+    tmp_path: Path,
+) -> None:
+    # pins the explain("survey.bursts") claim: an always-on amplitude-
+    # modulated emitter reads duty 0.0. Its raw-envelope shape (50%-ones OOK
+    # measured 0.003-0.043; 16QAM 0.188) sits under the carrier bar because
+    # nothing separates it honestly from exponential noise's 0.152 — the
+    # envelope minima ARE sample-scale quiet.
+    rng = np.random.default_rng(13)
+    n = 1 << 19
+    bits = rng.integers(0, 2, n // 8 + 1).astype(np.float64)
+    env = np.repeat(bits, 8)[:n]
+    noise = np.sqrt(0.01 / 2) * (rng.standard_normal(n) + 1j * rng.standard_normal(n))
+    x = (env * _tone(n, 100_000.0, _FS) + noise).astype(np.complex64)
+    res = survey_iq(_write(tmp_path, x), _FS)
+    assert res.bursts.duty_cycle < 0.1, res.bursts.duty_cycle
+
+
+def test_zero_noise_quiet_side_does_not_zero_the_bar(tmp_path: Path) -> None:
+    # a squelched recorder writes EXACT zeros between bursts; those probes'
+    # quiet-side p5 is 0.0 and a floor built from it collapses the activity
+    # bar to zero, turning every noise sample in the unsquelched half
+    # "active": measured with the zero guard deleted — count 1, duty 1.0
+    # against a truth of ~0.4.
+    half = (1 << 19) // 2
+    mask = (np.arange(half) % 4096) < int(0.8 * 4096)
+    squelched = _tone(half, 110_000.0, _FS) * mask
+    rng = np.random.default_rng(9)
+    noise = np.sqrt(0.0025 / 2) * (
+        rng.standard_normal(half) + 1j * rng.standard_normal(half)
+    )
+    x = np.concatenate([squelched, noise]).astype(np.complex64)
+    res = survey_iq(_write(tmp_path, x), _FS)
+    assert res.bursts.count >= 50, res.bursts.count
+    assert abs(res.bursts.duty_cycle - 0.4) <= 0.1, res.bursts.duty_cycle
 
 
 def test_dead_noise_band_still_reads_duty_zero(tmp_path: Path) -> None:

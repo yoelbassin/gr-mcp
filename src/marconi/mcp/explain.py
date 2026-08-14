@@ -205,7 +205,10 @@ not hide weaker transmissions elsewhere in the capture. An emitter that never
 turns off masks weaker total-power activity physically: the bar then rides its
 level, and when the raw envelope says constant carrier rather than noise, the
 result reports duty_cycle near 1.0 with count 0 (always on, genuinely
-continuous). An always-on amplitude-modulated emitter (QAM/OOK envelope) can
+continuous) — measured reliable for a constant-envelope carrier >= ~6 dB over
+the noise floor; a weaker always-on carrier still reads duty 0.0, so treat a
+low-SNR "dead" verdict with the spectrum block in hand. An always-on
+amplitude-modulated emitter (QAM/OOK envelope) can
 still read duty 0.0 — its envelope minima are indistinguishable from a quiet
 band at sample scale — so read duty with the spectrum block, not alone.
 

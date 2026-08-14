@@ -533,7 +533,9 @@ def _rerank_by_eye(
     """Ranked candidates plus the eye_confirmed flag, one decision: True means
     the head of the list was promoted by its eye AND its strength — when False,
     candidates_hz is strength-ranked only and untrustworthy for
-    constant-envelope or pulse-shaped (e.g. GMSK) signals."""
+    constant-envelope or pulse-shaped (e.g. GMSK) signals. The tail keeps
+    strength-eligible lines ahead of ineligible ones, so [1:] is ranked by the
+    same rule as [0]."""
     if not candidates:
         return candidates, False
     strength_bar = _EYE_STRENGTH_FRAC * max(c.strength for c in candidates)
@@ -544,7 +546,9 @@ def _rerank_by_eye(
     strong = [c for c in eligible if c.eye >= thresh]
     primary = min(strong, key=lambda c: c.rate_hz)
     rest = sorted(
-        (c for c in candidates if c is not primary), key=lambda c: c.eye, reverse=True
+        (c for c in candidates if c is not primary),
+        key=lambda c: (c.strength >= strength_bar, c.eye),
+        reverse=True,
     )
     return [primary, *rest], True
 
@@ -719,9 +723,10 @@ _SURVEY_BURST_RATIO = 4.0  # activity bar above that floor; matches the rise
 # p5 rather than burst.py's p40: past duty 0.6 the p40 sits ON the signal, and
 # the review's cliff (duty 0.74 -> 128 bursts, 0.76 -> 0) needs the quiet side
 # found at duties where only the lowest few percent are quiet. Measured
-# ceiling at burst period 4096: the p5 still reads the true noise floor
-# (0.83-1.08x) through within-probe duty 0.92 and loses it at 0.94, where the
-# off-run minus the smoothing window no longer spans 5% of the probe.
+# ceiling at burst period 4096 with a tone 26 dB over the noise: the p5 still
+# reads the true noise floor (0.83-1.08x) through within-probe duty 0.92 and
+# loses it at 0.94, where the off-run minus the smoothing window no longer
+# spans 5% of the probe.
 _QUIET_SIDE_PCTL = 5.0
 _QUIET_SIDE_FRAC = 1.0 / 8.0
 # Floor for an exactly-zero quiet side (digital silence smooths to true 0 and
@@ -732,13 +737,20 @@ _ZERO_QUIET_GUARD = 1.0 / 64.0
 # An always-on emitter leaves NO quiet reference anywhere in the slice, and
 # probe-scale smoothed power cannot tell it from dead noise (both unimodal:
 # noise reads p5/med ~0.8 smoothed). The raw per-sample envelope can: complex
-# noise power is exponential, p10/p50 = ln(10/9)/ln2 = 0.152 measured exactly,
-# while a constant-envelope carrier reads 0.912 at 20 dB and 0.738 at 10 dB.
-# 0.5 splits them with ~3x margin against noise. Amplitude-modulated always-on
-# emitters sit BELOW it (16QAM 0.193, 50%-ones OOK 0.043) — their envelope
+# noise power is exponential, p10/p50 = ln(10/9)/ln2 = 0.152 (measured
+# 0.151-0.153 over 10 seeds), while tone+AWGN reads, by TRUE SNR, 0.31 at
+# 5 dB, 0.35 at 6, 0.39 at 7, 0.44 at 8, 0.53 at 10. (An earlier anchor of
+# "0.912 at 20 dB" came from a probe whose noise sat 6 dB under its label —
+# REFUTED by re-measurement; a 0.5 bar built on it made the fallback a knife
+# edge at exactly 10 dB.) 0.3 doubles the worst noise reading and sets the
+# fallback's coverage floor at ~6 dB: a continuous constant-envelope carrier
+# >= 6 dB over the noise reads duty ~1.0 end-to-end, 5 dB (0.306) is the
+# knife edge, weaker reads duty 0.0. Amplitude-modulated always-on emitters
+# sit BELOW the bar of necessity (16QAM 0.188 is inseparable from noise's
+# 0.152 by any honest bar; 50%-ones OOK reads 0.003-0.043) — their envelope
 # minima are sample-scale indistinguishable from a quiet band, so they keep
 # reading duty 0.0; that limitation is documented at the explain surface.
-_CARRIER_SHAPE_MIN = 0.5
+_CARRIER_SHAPE_MIN = 0.3
 
 
 _MAX_INLINE_SEGMENTS = 512
