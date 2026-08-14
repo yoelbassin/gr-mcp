@@ -300,6 +300,14 @@ Each producer is measured against its own chance model, and a producer with no
 model stays silent rather than guessing. A zero-hit sync search over a stream
 too short to have contained a hit reads untestable, not absent.
 
+quality.margin is the parameter search's OBJECTIVE FUNCTION: the soft
+stream's raw decision-margin statistic, reported even when it earns no
+evidence, so two runs whose verdicts are both "uncertain" are still
+rankable — sweep a parameter and keep the run with the higher margin.
+Higher = cleaner decisions. It is NOT a verdict: a wrong rate that aliases
+into clean decisions ranks high (no stream statistic can see that), and it
+is null when the stream carries decisions rather than confidences.
+
 A hard-decision demod that measures its own decision dominance (dechirp's
 argmax over the dechirped spectrum) feeds quality like a soft stream, so a bare
 css path can earn "decoded" — and reads no_signal when the spec's chirp

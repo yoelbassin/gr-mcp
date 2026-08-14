@@ -386,3 +386,28 @@ def test_erasures_do_not_cost_a_genuine_decode_its_positive(tmp_path: Path) -> N
     holed[0::2] = rng.choice([-2.0, 2.0], size=8000) + rng.normal(0, 0.3, 8000)
     ev = soft_evidence(_llr_file(tmp_path, holed))
     assert [e.assessment for e in ev] == ["positive"]
+
+
+def test_margin_ranks_runs_the_verdict_cannot_separate(tmp_path: Path) -> None:
+    # the dogfood's central failure: a BER-0.0000 run and a BER-0.45 run both
+    # returned "uncertain" with empty evidence, byte-identical, so no
+    # sequence of runs could converge. margin is the rankable number.
+    rng = np.random.default_rng(0)
+
+    def margin_of(x: np.ndarray, name: str) -> float:
+        p = tmp_path / f"{name}.f32"
+        write_llrs(p, x.astype(np.float32))
+        _, _, margin = quality._soft_reading(p)
+        assert margin is not None
+        return margin
+
+    signs = rng.choice([-2.0, 2.0], size=8000)
+    clean = margin_of(signs + rng.normal(0, 0.3, 8000), "clean")
+    noisy = margin_of(signs + rng.normal(0, 1.4, 8000), "noisy")
+    noise = margin_of(rng.normal(0, 1.0, 8000), "noise")
+    assert clean > noisy > noise, (clean, noisy, noise)
+    # and the discrete/saturated refusals stay unrankable, not zero
+    p = tmp_path / "discrete.f32"
+    write_llrs(p, rng.choice([-1.0, 1.0], 4000).astype(np.float32))
+    _, _, margin = quality._soft_reading(p)
+    assert margin is None

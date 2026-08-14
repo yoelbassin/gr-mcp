@@ -95,6 +95,16 @@ class QualityReport(BaseModel):
     verdict: Verdict
     evidence: list[QualityEvidence] = []
     rationale: str
+    # The soft stream's raw decision-margin statistic, reported whether or
+    # not it earned evidence: max of the binary mean|x|/std|x| ratio and the
+    # multilevel separation. This is the OBJECTIVE FUNCTION a parameter
+    # search was missing - measured in the dogfood, a BER-0.0000 run and a
+    # BER-0.45 run both returned verdict "uncertain" with empty evidence,
+    # byte-identical, so no sequence of runs could converge. margin ranks
+    # runs of the same path family; it is NOT a verdict (aliased decisions
+    # rank high - see the subharmonic pin) and is None when the stream is
+    # untestable (discrete/saturated/absent).
+    margin: float | None = None
 
 
 def verdict_from(evidence: Sequence[QualityEvidence]) -> tuple[Verdict, str]:
@@ -590,17 +600,24 @@ def soft_evidence(
 
 def _soft_reading(
     path: Path | None, *, decode_grade: bool = True
-) -> tuple[list[QualityEvidence], str | None]:
-    """The soft evidence, and a caveat naming what had to be discarded to get
-    it. Sampled once: the caveat cannot be a second pass over the file."""
+) -> tuple[list[QualityEvidence], str | None, float | None]:
+    """The soft evidence, a caveat naming what had to be discarded to get
+    it, and the raw decision MARGIN (QualityReport.margin) - reported even
+    when it earns no evidence, because two runs whose responses are
+    otherwise identical must still be rankable. Sampled once: the caveat
+    cannot be a second pass over the file."""
     if path is None or not path.is_file():
-        return [], None
+        return [], None, None
     x = _sample_soft(path)
     finite = np.isfinite(x)
     n_bad = int(x.size - int(finite.sum()))
     if n_bad:
-        return [], _NON_FINITE_CAVEAT.format(
-            bad=n_bad, total=int(x.size), pct=100.0 * n_bad / max(x.size, 1)
+        return (
+            [],
+            _NON_FINITE_CAVEAT.format(
+                bad=n_bad, total=int(x.size), pct=100.0 * n_bad / max(x.size, 1)
+            ),
+            None,
         )
     x = x[finite]
     # An exact 0.0 is an erasure, not a measurement: depuncture scatters them
@@ -611,21 +628,25 @@ def _soft_reading(
     # magnitude ratio under the negative bar ("no_signal").
     x = x[x != 0.0]
     if x.size < _SOFT_MIN_ITEMS:
-        return [], None
+        return [], None, None
     active = _active_mask(x)
     if not active.any():
-        return _emit_soft(0.0, Assessment.NEGATIVE, decode_grade), None
+        return _emit_soft(0.0, Assessment.NEGATIVE, decode_grade), None, 0.0
     xa = x[active]
     if xa.size < _SOFT_MIN_ITEMS:
-        return [], None
+        return [], None, None
     distinct = int(np.unique(xa).size)
     if distinct < _SOFT_MIN_DISTINCT:
-        return [], _SOFT_DISCRETE_CAVEAT.format(n=distinct)
+        return [], _SOFT_DISCRETE_CAVEAT.format(n=distinct), None
     mag = np.abs(xa)
     spread = float(mag.std())
     mean = float(mag.mean())
     if spread <= _SOFT_MIN_DISPERSION * mean:
-        return [], _SOFT_SATURATED_CAVEAT.format(rel=spread / mean if mean else 0.0)
+        return (
+            [],
+            _SOFT_SATURATED_CAVEAT.format(rel=spread / mean if mean else 0.0),
+            None,
+        )
     # A constant or one-sided LLR stream (a CW carrier) can score an
     # arbitrarily high magnitude ratio without carrying any modulation; both
     # polarities must show up in real proportion before that ratio counts.
@@ -646,6 +667,16 @@ def _soft_reading(
     # it must run before the ratio arms — but it earns no exemption from the
     # polarity and whiteness gates, which is exactly how an all-positive
     # ladder and a stuck alternator read "decoded" through it.
+    ratio = mean / spread
+    # separation joins the margin only once it clears the bar: a FORCED
+    # k-fit on unimodal noise still measures ~3.5, which outranked a genuine
+    # noisy binary decode and inverted the ordering margin exists for
+    sep = (
+        fit.separation
+        if fit.order > 2 and fit.separation >= _SOFT_MULTILEVEL_SEPARATION
+        else 0.0
+    )
+    margin = float(min(max(ratio, sep), _SOFT_VALUE_CAP))
     if (
         fit.order > 2
         and fit.separation >= _SOFT_MULTILEVEL_SEPARATION
@@ -659,17 +690,18 @@ def _soft_reading(
                 decode_grade,
             ),
             None,
+            margin,
         )
-    ratio = mean / spread
     if ratio >= _SOFT_POSITIVE and both_polarities and whitened:
         assessment = Assessment.POSITIVE
     elif ratio <= _SOFT_NEGATIVE:
         assessment = Assessment.NEGATIVE
     else:
-        return [], None
+        return [], None, margin
     return (
         _emit_soft(float(min(ratio, _SOFT_VALUE_CAP)), assessment, decode_grade),
         None,
+        margin,
     )
 
 
@@ -682,7 +714,7 @@ def assess_quality(
     soft_stream: Path | None,
     soft_decode_grade: bool = True,
 ) -> QualityReport:
-    soft, caveat = _soft_reading(soft_stream, decode_grade=soft_decode_grade)
+    soft, caveat, margin = _soft_reading(soft_stream, decode_grade=soft_decode_grade)
     # A mark-replacing search stage (sync_symbols) makes the run's marks its
     # own pattern hits: judged with no chance model they are not evidence of
     # anything, and marks_evidence is the one extractor without a null - an
@@ -711,4 +743,6 @@ def assess_quality(
         # text, which says "no soft stream" — there is one, and saying both
         # sends the reader looking for a stream the next sentence describes.
         rationale = f"{rationale}. {caveat}" if evidence else caveat
-    return QualityReport(verdict=verdict, evidence=evidence, rationale=rationale)
+    return QualityReport(
+        verdict=verdict, evidence=evidence, rationale=rationale, margin=margin
+    )

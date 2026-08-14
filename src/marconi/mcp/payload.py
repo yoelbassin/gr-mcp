@@ -262,10 +262,11 @@ def _rounded_quality(quality: QualityReport | None) -> QualityReport | None:
     engine's report passed through verbatim, and quality.evidence[].value was
     the ONE full-precision float64 on the whole surface (17 characters where
     its neighbors ship 9)."""
-    if quality is None or not quality.evidence:
+    if quality is None:
         return quality
     return wire_replace(
         quality,
+        margin=None if quality.margin is None else round(quality.margin, 4),
         evidence=[wire_replace(e, value=round(e.value, 6)) for e in quality.evidence],
     )
 

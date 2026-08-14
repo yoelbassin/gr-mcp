@@ -10,7 +10,7 @@ from marconi.engine.compile.compiler import (
 )
 from marconi.engine.compile.errors import CompileError
 from marconi.engine.modulation.coding.stages import HardenStep
-from marconi.engine.modulation.fsk.stages import FskStep
+from marconi.engine.modulation.fsk.stages import FskStep, MfskSoftDemapStep
 from marconi.engine.stages.conditioning import AgcStep, ChannelizeStep
 from marconi.engine.stages.general import SliceStep
 from marconi.engine.stages.registry import stage_registry
@@ -119,13 +119,13 @@ def test_unknown_stage_is_a_compile_error() -> None:
 
 def test_missing_required_field_raises_at_construction() -> None:
     # Step construction validates eagerly now (the compiler never sees an
-    # incomplete step): fsk requires `deviation`, so building one without it
-    # raises while constructing the step, naming the field, not a later
-    # aggregated CompileError (mirrors test_validate_before_compile.py's
+    # incomplete step): mfsk_soft_demap requires `levels`, so building one
+    # without it raises while constructing the step, naming the field, not a
+    # later aggregated CompileError (mirrors test_validate_before_compile.py's
     # test_missing_param_names_the_field).
     with pytest.raises(ValidationError) as e:
-        FskStep()  # type: ignore[call-arg]
-    assert "deviation" in str(e.value)
+        MfskSoftDemapStep()  # type: ignore[call-arg]
+    assert "levels" in str(e.value)
 
 
 def test_empty_rx_path_builds_passthrough_gr_pipeline() -> None:

@@ -406,10 +406,14 @@ def stream_stats(
     genuinely locked signal, while constant_modulus_ratio — blind to
     phase/rotation — does not move). K is a request, not a measurement:
     over-asking splits real lobes into extra low-EVM sub-clusters, so a
-    K-length "clusters" list alone is not confirmation of order K — compare
-    EVM across a few K values (it drops sharply at the true order and
-    plateaus past it) together with cluster balance. item_type b/s/f/l/c
-    overrides suffix inference."""
+    K-length "clusters" list alone is not confirmation of order K — and EVM
+    across K values is NOT the discriminator (measured: textbook BPSK at
+    25 dB reads EVM 0.146 at K=4 vs 0.657 at K=2, 4.5x BETTER at the wrong
+    order — a free K-point fit always lands on a lower-K cloud). The order
+    test is CLUSTER BALANCE: the true order is the largest K whose clusters
+    all carry comparable "count" mass; an over-asked fit starves or empties
+    the surplus clusters. item_type b/s/f/l/c overrides suffix
+    inference."""
     return _compute_stats(Path(path), item_type=item_type, clusters=clusters, bins=bins)
 
 

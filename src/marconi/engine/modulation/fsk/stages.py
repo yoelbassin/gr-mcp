@@ -17,7 +17,17 @@ from marconi.engine.types.step import Step
 
 class FskStep(Step):
     conv: Literal["fsk"] = "fsk"
-    deviation: float = Field(gt=0)
+    deviation: float | None = Field(
+        default=None,
+        gt=0,
+        description=(
+            "Output SCALING only - the discriminator's detection is "
+            "unaffected by it (measured: separation/std flat at 1.603 "
+            "across a 19:1 deviation sweep). Defaults to symbol_rate/2 "
+            "(MSK-shaped h=1); set it only when a downstream stage needs a "
+            "specific soft-value scale."
+        ),
+    )
     loop_bw: float = Field(
         default=0.045,
         ge=0,
@@ -65,7 +75,10 @@ class Fsk(Stage[CompileContext, FskStep]):
     step_model = FskStep
 
     def emit_rx(self, b: CompileContext, step: FskStep) -> None:
-        gain = b.rate / (2.0 * math.pi * step.deviation)
+        # deviation is a pure output scale (see the field's description);
+        # b.symbol_rate is a compile fact, so the default lands here
+        deviation = step.deviation if step.deviation is not None else b.symbol_rate / 2
+        gain = b.rate / (2.0 * math.pi * deviation)
         b.chain("quadrature_demod", gain=gain)
         b.chain("symbol_sync_ff", sps=b.sps, loop_bw=step.loop_bw)
 

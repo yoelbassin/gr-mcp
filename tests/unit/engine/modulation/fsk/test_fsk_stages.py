@@ -99,7 +99,7 @@ def test_fsk_and_ook_accept_open_loop_reject_negative() -> None:
         OokEnvelopeStep(loop_bw=-0.01)
 
 
-def test_fsk_deviation_must_be_positive() -> None:
+def test_fsk_deviation_must_be_positive_when_given() -> None:
     # deviation=0 divides the discriminator gain by zero (an [internal_error]
     # at runtime today), and a negative deviation silently complements every
     # output bit — both are spec errors, not signals
@@ -109,3 +109,21 @@ def test_fsk_deviation_must_be_positive() -> None:
         FskStep(deviation=0.0)
     with pytest.raises(ValidationError):
         FskStep(deviation=-2400.0)
+
+
+def test_fsk_deviation_defaults_to_half_symbol_rate() -> None:
+    # deviation only scales the discriminator output (detection is
+    # unaffected), so an agent surveying an unknown FSK signal should not
+    # have to invent one; omitted means symbol_rate/2
+    modem = Modem(symbol_rate=2.0, path=[FskStep(), SliceStep()])
+    rx = compile_modem(
+        modem,
+        stage_registry(),
+        sample_rate=8.0,
+        start=IQ,
+        source_io={"path": "in.iq"},
+        sink_io={"path": "out.bits"},
+    )
+    qd = next(b for b in rx.blocks if b.kind == "quadrature_demod")
+    expected_gain = 8.0 / (2 * math.pi * (2.0 / 2))  # b.rate / (2*pi*sym/2)
+    assert abs(qd.params["gain"] - expected_gain) < 1e-9  # type: ignore[operator]
