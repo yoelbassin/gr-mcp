@@ -554,14 +554,15 @@ def run_rx(
             entry_path = input_stream.path
             if isinstance(input_stream, Symbolstream):
                 marks = list(input_stream.marks)
-        check_deadline()
+        decoded: PipelineResult | None = None
         try:
-            result = _run_coding_tail(cp, seg, seam, entry_path, workdir, marks)
+            check_deadline()
+            decoded = _run_coding_tail(cp, seg, seam, entry_path, workdir, marks)
             return _attach_report(
                 modem,
                 cp,
                 registry,
-                result,
+                decoded,
                 seg,
                 gr_output_path(cp, seam),
                 input_stream,
@@ -570,16 +571,24 @@ def run_rx(
             # The GR lane answers the same wall-clock event with
             # PipelineResult(status=TIMEOUT, census=..., stalled_at=...);
             # raising here instead DISCARDED the census gradient, the marks
-            # and any stream already on disk - exactly the runs an operator
-            # needs to retune from. Scoring past the deadline is skipped for
-            # the same reason a partial decode is kept: partial evidence
-            # beats none.
-            return PipelineResult(
+            # and any stream already decoded - exactly the runs an operator
+            # needs to retune from. The check above sits INSIDE the try for
+            # that reason: the runner reports ok for a worker whose payload
+            # landed before its teardown outran the clock, so an expired
+            # deadline over a FINISHED decode is reachable, and above the try
+            # it escaped raw. Scoring past the deadline is skipped for the
+            # same reason a partial decode is kept: partial evidence beats none.
+            partial = (
+                decoded
+                if decoded is not None
+                else PipelineResult(status=RunStatus.TIMEOUT, marks=marks)
+            )
+            return replace(
+                partial,
                 status=RunStatus.TIMEOUT,
                 census=seg.census,
                 diagnostics=seg.diagnostics,
                 trace=seg.trace,
-                marks=marks,
                 error=str(exc),
             )
 

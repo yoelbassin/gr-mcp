@@ -5,7 +5,11 @@ from typing import Any, cast
 
 import numpy as np
 import pytest
+from helpers import _synth as synth
 
+from marconi.deadline import check_deadline, set_deadline
+from marconi.engine import run as run_module
+from marconi.engine.quality import QualityReport
 from marconi.engine.run import TraceStage
 from marconi.engine.types.enums import RunStatus
 from marconi.engine.types.levels import Level
@@ -148,6 +152,42 @@ def test_soft_stream_path_is_the_file_the_run_actually_wrote(
     assert out["status"] == RunStatus.EMPTY
     soft = cast("dict[str, object]", out["soft_stream"])
     assert Path(str(soft["path"])).is_file(), soft["path"]
+
+
+def test_a_deadline_after_the_gr_run_is_reported_with_what_it_decoded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The gate on the run_rx docstring's timeout paragraph: once the GR
+    pipeline has started, a deadline is REPORTED — status "timeout" carrying
+    the census and the stream already decoded — not raised. Scoring is the
+    branch after the segment delivered; the mid-run branch is gated in
+    tests/integration/engine/test_run_timeout.py."""
+
+    def _scoring_whose_clock_expired(**kwargs: object) -> QualityReport:
+        with set_deadline(0.0):
+            check_deadline()
+        raise AssertionError("check_deadline let an expired deadline by")
+
+    monkeypatch.setenv("MARCONI_WORKSPACE", str(tmp_path))
+    monkeypatch.setattr(run_module, "assess_quality", _scoring_whose_clock_expired)
+    rate, sym_rate = 48_000.0, 4800.0
+    bits = np.random.default_rng(3).integers(0, 2, 400).astype(np.uint8)
+    cap = synth.write(
+        tmp_path / "fsk.cf32",
+        synth.cpfsk(
+            bits, sps=int(rate // sym_rate), deviation=1200.0, sample_rate=rate
+        ),
+    )
+    out = run_rx_tool(
+        {"symbol_rate": sym_rate, "path": [{"conv": "fsk", "deviation": 1200.0}]},
+        sample_rate=rate,
+        capture_path=str(cap),
+    )
+    assert out["status"] == RunStatus.TIMEOUT
+    stream = cast("dict[str, object]", out["stream"])
+    assert stream is not None and int(cast(int, stream["items"])) > 0
+    assert Path(str(stream["path"])).is_file()
+    assert cast("list[object]", out["census"])
 
 
 def test_a_coding_lane_search_reports_what_it_found(

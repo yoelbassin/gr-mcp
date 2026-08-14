@@ -278,11 +278,13 @@ def run_rx_tool(
     timeout is a hard wall-clock cap on the entire call — conversion, pre-scan,
     decode, coding and quality-scoring all count against it — so an oversized
     decode raises [deadline_exceeded] instead of running unbounded; window a
-    large capture rather than only raising timeout. Exception: a deadline
-    landing while the GR pipeline is mid-run returns status="timeout" normally,
-    not a raised error. Output streams live under ./marconi-runs/ and are not
-    auto-cleaned; page with read_stream (or summarize with stream_stats) until
-    you remove them."""
+    large capture rather than only raising timeout. Exception: once the GR
+    pipeline has started the deadline is reported, not raised — landing mid-run
+    OR in the coding/quality tail after it delivered, the call returns
+    status="timeout" with the evidence the run already had: census, diagnostics
+    and any stream it finished decoding. Output streams live under
+    ./marconi-runs/ and are not auto-cleaned; page with read_stream (or
+    summarize with stream_stats) until you remove them."""
     if (capture_path is None) == (input_path is None):
         raise ValueError("pass exactly one of capture_path or input_path")
     if capture_offset < 0 or capture_samples < 0:
