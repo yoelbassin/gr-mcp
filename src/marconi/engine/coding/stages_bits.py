@@ -11,6 +11,7 @@ from marconi.engine.coding.primitives import effective_t, syndrome_table
 from marconi.engine.stages.base import CodingStage, Stage
 from marconi.engine.types.bounds import (
     MAX_FRAME_ITEMS,
+    MAX_RS_PARITY_SYMBOLS,
     MAX_SYNC_PATTERN_BITS,
     check_match_tolerance,
 )
@@ -534,6 +535,17 @@ class RsCodeStep(Step):
     def _shaped(self) -> "RsCodeStep":
         if self.k >= self.n:
             raise PydanticCustomError("value_error", "k must be < n")
+        if self.n - self.k > MAX_RS_PARITY_SYMBOLS:
+            # the generator polynomial build is O((n-k)^2) pure Python with
+            # no deadline poll inside the library: n=65535,k=1 validated in
+            # 0.0 s and then ran 752.8 s past a 2.0 s deadline on EMPTY input
+            raise PydanticCustomError(
+                "value_error",
+                "n - k = {nsym} parity symbols; {cap} is the ceiling (the "
+                "widest standardized RS codes carry ~64, and the decoder's "
+                "setup cost is quadratic in it)",
+                {"nsym": self.n - self.k, "cap": MAX_RS_PARITY_SYMBOLS},
+            )
         if self.n > (1 << self.symbol_bits) - 1:
             raise PydanticCustomError("value_error", "n must be <= 2^symbol_bits - 1")
         if self.prim_poly.bit_length() != self.symbol_bits + 1:

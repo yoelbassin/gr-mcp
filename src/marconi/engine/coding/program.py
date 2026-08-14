@@ -61,7 +61,18 @@ def run_coding(
         # stats describe the step that computed them; ops built on replace()
         # would otherwise carry the previous step's stats into their own row
         src = replace(carrier, stats=None) if carrier.stats is not None else carrier
-        after = step.call(src)
+        try:
+            after = step.call(src)
+        except (ValueError, RuntimeError) as exc:
+            # ops raise bare errors with no block id, and the partially built
+            # census died with the exception - the GR lane goes to real
+            # trouble to name its stalling block (_flag_empty_stream), so a
+            # coding failure names its stage too. Exact classes only:
+            # subclasses (RunTimeout, CarrierInvariantError) carry their own
+            # constructors and error-code registrations and pass unmodified.
+            if type(exc) in (ValueError, RuntimeError):
+                raise type(exc)(f"{step.name}: {exc}") from exc
+            raise
         if census is not None:
             census.append(_row(step, src, after))
         carrier = after

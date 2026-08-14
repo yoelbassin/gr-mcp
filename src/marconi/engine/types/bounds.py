@@ -154,6 +154,14 @@ MAX_FRAME_ITEMS = 1 << 20
 # Delay-line depth in items: delay_cc allocates the whole line up front.
 MAX_DELAY_ITEMS = 1 << 20
 
+# RS parity width n-k: the reedsolo generator-polynomial build is O((n-k)^2)
+# pure Python with no poll inside the library - measured 0.65 s at 2000 and
+# 9.9 s at 8000 (clean 4x per doubling), and RsCodeStep(n=65535, k=1)
+# validated instantly then ran 12.5 MINUTES past a 2 s deadline on empty
+# input. The widest standardized RS codes carry ~64 parity symbols; 256
+# builds in ~12 ms and leaves generous margin.
+MAX_RS_PARITY_SYMBOLS = 256
+
 # A sync correlation costs one full stream pass PER PATTERN BIT (and the
 # diversity null costs up to another 64): measured 14.7 s for a 65,536-bit
 # pattern over a 200k-bit stream, from a spec validate_modem called valid.

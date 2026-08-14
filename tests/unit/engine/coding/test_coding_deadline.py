@@ -129,3 +129,55 @@ def test_a_coding_run_returns_within_the_timeout_it_was_given() -> None:
     assert (
         elapsed < asked * 3.0
     ), f"overran its {asked}s deadline by {elapsed / asked:.1f}x"
+
+
+def test_rs_parity_width_is_bounded_at_the_spec() -> None:
+    # the generator polynomial build is O((n-k)^2) pure Python with no poll
+    # inside the library: n=65535,k=1 validated in 0.0 s and ran 752.8 s
+    # past a 2.0 s deadline on EMPTY input
+    import pytest
+    from pydantic import ValidationError
+
+    from marconi.engine.coding.stages_bits import RsCodeStep
+
+    with pytest.raises(ValidationError, match="parity symbols"):
+        RsCodeStep(conv="rs_code", symbol_bits=16, n=65535, k=1, prim_poly=0x1100B)
+    ok = RsCodeStep(conv="rs_code", symbol_bits=8, n=255, k=223, prim_poly=0x11D)
+    assert ok.n - ok.k == 32
+
+
+def test_syndrome_loop_polls_the_deadline() -> None:
+    # O(n_parity x data_bits) numpy passes with no poll: a legal (4096, 2048)
+    # spec measured 3.85 s for ONE codeword under a 0.5 s deadline
+    import numpy as np
+    import pytest
+
+    from marconi.deadline import RunTimeout, set_deadline
+    from marconi.engine.coding.ops_bits import _syndrome_bits
+
+    words = np.zeros((4, 4096), np.uint8)
+    masks = [(1 << 2048) - 1] * 2048
+    with pytest.raises(RunTimeout):
+        with set_deadline(0.05):
+            _syndrome_bits(words, masks, 2048)
+
+
+def test_codebook_exact_reports_the_out_of_table_fraction() -> None:
+    # an out-of-table codeword silently decodes to data value 0 (uniform
+    # noise through a Manchester book emitted a plausible P(1)=0.25 stream
+    # with stats=None); the in-table fraction is census-only honesty -
+    # Codebook.validates_words stays False so it never touches the verdict
+    import numpy as np
+
+    from marconi.engine.coding.carrier import CodingCarrier
+    from marconi.engine.coding.ops_bits import codebook_rx
+    from marconi.engine.stages.registry import stage_registry
+
+    # Manchester-shaped 2-entry book; chips 00 and 11 are out-of-table
+    chips = np.array([0, 1, 1, 0, 0, 0, 1, 1, 0, 1], np.uint8)
+    out = codebook_rx(CodingCarrier(bits=chips), code_bits=2, data_bits=1, table=[1, 2])
+    assert out.stats is not None
+    assert out.stats.words_total == 5
+    assert out.stats.words_valid == 3  # 01, 10, 01 in-table; 00, 11 not
+    assert out.stats.chance_word_rate is None  # census-only, no chance model
+    assert stage_registry()["codebook"].validates_words is False

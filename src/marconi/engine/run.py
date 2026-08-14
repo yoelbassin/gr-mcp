@@ -9,7 +9,7 @@ import numpy as np
 import numpy.typing as npt
 from pydantic import BaseModel
 
-from marconi.deadline import check_deadline, remaining, set_deadline
+from marconi.deadline import RunTimeout, check_deadline, remaining, set_deadline
 from marconi.engine.backends.base import (
     Backend,
     BlockCensus,
@@ -555,11 +555,33 @@ def run_rx(
             if isinstance(input_stream, Symbolstream):
                 marks = list(input_stream.marks)
         check_deadline()
-        result = _run_coding_tail(cp, seg, seam, entry_path, workdir, marks)
-        check_deadline()
-        return _attach_report(
-            modem, cp, registry, result, seg, gr_output_path(cp, seam), input_stream
-        )
+        try:
+            result = _run_coding_tail(cp, seg, seam, entry_path, workdir, marks)
+            return _attach_report(
+                modem,
+                cp,
+                registry,
+                result,
+                seg,
+                gr_output_path(cp, seam),
+                input_stream,
+            )
+        except RunTimeout as exc:
+            # The GR lane answers the same wall-clock event with
+            # PipelineResult(status=TIMEOUT, census=..., stalled_at=...);
+            # raising here instead DISCARDED the census gradient, the marks
+            # and any stream already on disk - exactly the runs an operator
+            # needs to retune from. Scoring past the deadline is skipped for
+            # the same reason a partial decode is kept: partial evidence
+            # beats none.
+            return PipelineResult(
+                status=RunStatus.TIMEOUT,
+                census=seg.census,
+                diagnostics=seg.diagnostics,
+                trace=seg.trace,
+                marks=marks,
+                error=str(exc),
+            )
 
 
 @dataclass(frozen=True)

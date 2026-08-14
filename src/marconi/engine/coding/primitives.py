@@ -124,19 +124,31 @@ def flip_table(
     """syndrome key -> codeword-position flip mask, for t=1 (each column's own
     signature) and t>=2 (every pattern up to weight t). One table for both, so
     a correction path cannot exist for one t and not the other. A duplicate
-    single-error signature resolves to the LOWEST column index."""
+    single-error signature resolves to the LOWEST column index.
+
+    Memoized via _flip_table_cached: only syndrome_table (the t>=2 half) was
+    cached, so the windowed decode rebuilt this once PER WINDOW - measured
+    4.4 ms per rebuild (~100% of a Golay window's cost, 16.8 s over 4000
+    windows) and 0.787 s per SYNC HIT at the syndrome-pattern cap."""
+    return dict(_flip_table_cached(tuple(parity_masks), code_bits, data_bits, t))
+
+
+@_lru_cache(maxsize=16)
+def _flip_table_cached(
+    parity_masks: tuple[int, ...], code_bits: int, data_bits: int, t: int
+) -> dict[bytes, int]:
     n_parity = code_bits - data_bits
     if t >= 2:
         return {
             syndrome_key(syn, n_parity): flip
             for syn, flip in syndrome_table(
-                parity_masks, code_bits, data_bits, t
+                list(parity_masks), code_bits, data_bits, t
             ).items()
         }
     table: dict[bytes, int] = {}
     if t == 1:
         for column, sig in enumerate(
-            _column_signatures(parity_masks, code_bits, data_bits)
+            _column_signatures(list(parity_masks), code_bits, data_bits)
         ):
             if sig:
                 table.setdefault(syndrome_key(sig, n_parity), 1 << column)

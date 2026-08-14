@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass, replace
+from functools import lru_cache
 from typing import Any, Literal
 
 import numpy as np
@@ -299,6 +300,7 @@ def codebook_rx(
     symbol_input: bool = False,
     decode: DecodeMode = DecodeMode.EXACT,
 ) -> CodingCarrier:
+    tally: Callable[[npt.NDArray[np.signedinteger[Any]]], _WordTally | None]
     if DecodeMode(decode) is DecodeMode.NEAREST:
 
         def _values(
@@ -307,14 +309,27 @@ def codebook_rx(
             rows = _pack_symbols(syms, code_bits).reshape(-1, code_bits)
             return _nearest_values(rows, table, code_bits)
 
+        def tally(syms: npt.NDArray[np.signedinteger[Any]]) -> _WordTally | None:
+            return None  # nearest maps every word by design: nothing to count
+
     else:
         _, inv = _codebook_maps(code_bits, data_bits, table)
+        known = np.zeros(1 << code_bits, dtype=bool)
+        known[np.asarray(table, np.int64)] = True
 
         def _values(
             syms: npt.NDArray[np.signedinteger[Any]],
         ) -> npt.NDArray[np.int64]:
             picked: npt.NDArray[np.int64] = inv[syms]
             return picked
+
+        def tally(syms: npt.NDArray[np.signedinteger[Any]]) -> _WordTally | None:
+            # an out-of-table codeword silently decodes to data value 0
+            # (uniform noise through a 2-entry Manchester book emits a
+            # plausible-looking P(1)=0.25 stream); the in-table fraction is
+            # the free honesty signal - census-only, no chance model, so it
+            # never touches the verdict (Codebook.validates_words is False)
+            return _WordTally(int(known[syms].sum()), int(syms.size))
 
     if symbol_input:
         if c.symbols is None:
@@ -333,12 +348,20 @@ def codebook_rx(
             else np.zeros(0, np.uint8)
         )
         marks = tuple(int(m) * data_bits for m in c.marks)
-        return CodingCarrier(bits=bits, marks=marks)
+        t = tally(syms)
+        return CodingCarrier(
+            bits=bits,
+            marks=marks,
+            stats=_word_stats([t], None) if t is not None else None,
+        )
 
-    def _decode(bits: npt.NDArray[np.uint8]) -> npt.NDArray[np.uint8]:
-        return _pack_symbols(_values(_unpack_symbols(bits, code_bits)), data_bits)
+    def _decode(
+        bits: npt.NDArray[np.uint8],
+    ) -> tuple[npt.NDArray[np.uint8], _WordTally | None]:
+        syms = _unpack_symbols(bits, code_bits)
+        return _pack_symbols(_values(syms), data_bits), tally(syms)
 
-    return _decode_scoped(c, lambda bits: (_decode(bits), None))
+    return _decode_scoped(c, _decode)
 
 
 def _syndrome_bits(
@@ -351,6 +374,12 @@ def _syndrome_bits(
     A syndrome is as wide as the code says it is, so it is never a register."""
     syn = np.empty((words.shape[0], len(parity_masks)), np.uint8)
     for p, mask in enumerate(parity_masks):
+        # polled per equation: the double loop is O(n_parity x data_bits)
+        # numpy passes - a legal (4096, 2048) spec is 4.2M passes per batch,
+        # measured 3.85 s for ONE codeword with no poll anywhere inside
+        # (test_deadline_coverage only gates I/O loops, so CPU loops carry
+        # their own)
+        check_deadline()
         col = words[:, data_bits + p].astype(np.uint8)
         for c in range(data_bits):
             if (mask >> c) & 1:
@@ -577,6 +606,19 @@ def _rs_decode_words(
     )
 
 
+@lru_cache(maxsize=8)
+def _rs_codec(
+    nsym: int, nsize: int, fcr: int, prim: int, generator: int, c_exp: int
+) -> Any:
+    """Memoized: the constructor builds the generator polynomial in
+    O(nsym^2) pure Python (measured 12 ms at the 256-symbol cap), and the
+    re-run loop iterates specs against one capture - paying it once per
+    CALL rather than once per code was pure waste."""
+    return _rs.RSCodec(
+        nsym=nsym, nsize=nsize, fcr=fcr, prim=prim, generator=generator, c_exp=c_exp
+    )
+
+
 def rs_code_rx(
     c: CodingCarrier,
     *,
@@ -589,14 +631,7 @@ def rs_code_rx(
     emit: EmitMode = EmitMode.DATA,
 ) -> CodingCarrier:
     emit = EmitMode(emit)
-    codec = _rs.RSCodec(
-        nsym=n - k,
-        nsize=n,
-        fcr=fcr,
-        prim=prim_poly,
-        generator=generator,
-        c_exp=symbol_bits,
-    )
+    codec = _rs_codec(n - k, n, fcr, prim_poly, generator, symbol_bits)
     return _decode_scoped(
         c,
         lambda bits: _rs_decode_words(bits, codec, symbol_bits, n, k, emit),
