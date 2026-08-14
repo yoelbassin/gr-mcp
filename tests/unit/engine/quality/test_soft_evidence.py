@@ -111,9 +111,13 @@ def test_gaussian_noise_llrs_are_negative(tmp_path: Path) -> None:
     assert [e.assessment for e in ev] == ["negative"]
 
 
-def test_all_zero_stream_is_negative(tmp_path: Path) -> None:
+def test_all_zero_stream_is_erasures_not_a_measurement(tmp_path: Path) -> None:
+    # exact zeros are erasures (depuncture null_source, hard gates), so a
+    # stream of nothing else was never measured at all: untestable, not
+    # negative. A genuinely dead path emits small NOISE, which the ratio arm
+    # still reads as negative (see test_gaussian_noise_llrs_are_negative).
     ev = soft_evidence(_llr_file(tmp_path, np.zeros(4000)))
-    assert [e.assessment for e in ev] == ["negative"]
+    assert ev == []
 
 
 def test_too_few_items_yield_nothing(tmp_path: Path) -> None:
@@ -235,7 +239,10 @@ def _poisoned(tmp_path: Path, nan_fraction: float, name: str) -> Path:
     not depend on any one producer still being able to make one."""
     rng = np.random.default_rng(0)
     n_bad = int(_SOFT_SAMPLE_ITEMS * nan_fraction)
-    clean = np.sign(rng.standard_normal(_SOFT_SAMPLE_ITEMS - n_bad)) * 2.0
+    n_ok = _SOFT_SAMPLE_ITEMS - n_bad
+    # noise on the rails: a bare sign ladder is the degenerate decision
+    # stream the distinct-values gate refuses to score
+    clean = np.sign(rng.standard_normal(n_ok)) * 2.0 + rng.normal(0, 0.3, n_ok)
     values = np.concatenate([np.full(n_bad, np.nan), clean])
     p = tmp_path / f"{name}.f32"
     write_llrs(p, values.astype(np.float32))
@@ -307,3 +314,70 @@ def test_a_poisoned_stream_does_not_erase_independent_evidence(
     assert report.verdict is quality.Verdict.DECODED
     assert [e.metric for e in report.evidence] == ["sync_matches"]
     assert "non-finite" in report.rationale
+
+
+def test_saturated_coinflip_decisions_are_not_confidences(tmp_path: Path) -> None:
+    # A demod saturating on noise emits constant-magnitude +-1 decisions:
+    # spread == 0 made the ratio infinite, so MAXIMUM confidence was the
+    # signature of the failure mode, and the whiteness guard cannot object
+    # because random signs are white at every lag. Decisions carry no
+    # per-item confidence; the reading is untestable, not certifiable.
+    rng = np.random.default_rng(0)
+    ev = soft_evidence(_llr_file(tmp_path, rng.choice([-1.0, 1.0], size=4000)))
+    assert ev == []
+
+
+def test_near_constant_magnitude_is_saturation_not_confidence(tmp_path: Path) -> None:
+    # the continuous twin: a limiter's output jitters at float precision, so
+    # an exact-zero-spread check alone would miss it
+    rng = np.random.default_rng(7)
+    signs = rng.choice([-1.0, 1.0], size=4000)
+    x = signs * (1.0 + rng.normal(0, 1e-6, 4000))
+    assert soft_evidence(_llr_file(tmp_path, x)) == []
+
+
+def test_even_period_repeats_are_not_whitened(tmp_path: Path) -> None:
+    # ++-- has lag-1 sign correlation exactly 0.0: a whiteness guard that
+    # looks one lag deep certifies every even-period repeat
+    rng = np.random.default_rng(3)
+    x = np.tile([2.0, 2.0, -2.0, -2.0], 1000) + rng.normal(0, 0.2, 4000)
+    assert soft_evidence(_llr_file(tmp_path, x)) == []
+
+
+def test_three_level_zero_heavy_noise_is_not_positive(tmp_path: Path) -> None:
+    # random {-1, 0, +1}: with the erasure zeros dropped this is a coinflip
+    # decision stream, and the multilevel fit must not see the zero spike as
+    # a third level
+    rng = np.random.default_rng(5)
+    ev = soft_evidence(_llr_file(tmp_path, rng.choice([-1.0, 0.0, 1.0], size=6000)))
+    assert ev == []
+
+
+def test_one_sided_multilevel_ladder_is_not_positive(tmp_path: Path) -> None:
+    # an all-positive 4-level ladder has no polarity at all: the multilevel
+    # branch must pass the same polarity gate the binary branch always had
+    rng = np.random.default_rng(6)
+    x = rng.choice([1.0, 2.0, 3.0, 4.0], size=6000) + rng.normal(0, 0.05, 6000)
+    assert soft_evidence(_llr_file(tmp_path, x)) == []
+
+
+def test_erasure_zeros_do_not_tighten_a_noise_fit(tmp_path: Path) -> None:
+    # depuncture scatters exact-0.0 LLRs from its null_source; scoring them as
+    # measurements let the erasure spike tighten a k=8 fit on pure noise past
+    # the separation bar (measured: 7/8 pure-noise captures read "decoded"
+    # at keep_mask=[1,0], while the same capture at 10 dB read "no_signal")
+    rng = np.random.default_rng(8)
+    holed = np.zeros(16000)
+    holed[0::2] = rng.normal(0, 1.0, 8000)
+    ev = soft_evidence(_llr_file(tmp_path, holed))
+    assert not any(e.assessment == "positive" for e in ev)
+
+
+def test_erasures_do_not_cost_a_genuine_decode_its_positive(tmp_path: Path) -> None:
+    # the control for the erasure drop: a real punctured decode keeps its
+    # positive from the items that were actually measured
+    rng = np.random.default_rng(9)
+    holed = np.zeros(16000)
+    holed[0::2] = rng.choice([-2.0, 2.0], size=8000) + rng.normal(0, 0.3, 8000)
+    ev = soft_evidence(_llr_file(tmp_path, holed))
+    assert [e.assessment for e in ev] == ["positive"]

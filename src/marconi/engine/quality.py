@@ -430,6 +430,33 @@ _SOFT_POSITIVE = 2.0
 _SOFT_NEGATIVE = 1.45
 _SOFT_MIN_POLARITY_FRACTION = 0.02
 _SOFT_MAX_SIGN_CORR = 0.15
+# Whiteness is judged on the worst sign correlation across lags 1..4, not lag
+# 1 alone: ++-- repeats have lag-1 correlation exactly 0.0, so a one-lag guard
+# certified every even-period repeat up to the same bar it was built to hold.
+_SOFT_WHITENESS_LAGS = 4
+
+# A stream of decisions is not a stream of confidences. A demod saturating on
+# noise emits constant-magnitude items, which scored mean|x|/std|x| = inf —
+# MAXIMUM confidence as the signature of the failure mode — and random signs
+# are white at every lag, so no downstream guard could object. Two gates, one
+# per flavor of degeneracy: a handful of distinct values is a slicer/limiter
+# output (a genuine float32 LLR stream is ~all-distinct), and a magnitude
+# spread below 1e-3 of the mean is saturation (measured healthy decodes sit at
+# 6e-2 relative spread — 40 dB FSK scored ratio 15.8 — a 60x margin, while a
+# limiter's jitter sits at float precision, ~1e-7).
+_SOFT_MIN_DISTINCT = 64
+_SOFT_MIN_DISPERSION = 1e-3
+
+_SOFT_DISCRETE_CAVEAT = (
+    "soft stream carries only {n} distinct values: these are decisions, not "
+    "per-item confidences, so they can neither certify nor reject the decode "
+    "— tap a soft (LLR) stage output instead of a slicer/limiter"
+)
+_SOFT_SATURATED_CAVEAT = (
+    "soft stream magnitudes are constant to {rel:.1e} relative spread: a "
+    "saturated or hard-limited stream carries no confidence information — "
+    "remove the limiter or reduce gain ahead of the demod"
+)
 
 # A soft stream carrying non-finite items is not the stream it claims to be, so
 # it scores nothing at all rather than scoring the survivors. run_rx rejects a
@@ -547,6 +574,13 @@ def _soft_reading(
             bad=n_bad, total=int(x.size), pct=100.0 * n_bad / max(x.size, 1)
         )
     x = x[finite]
+    # An exact 0.0 is an erasure, not a measurement: depuncture scatters them
+    # from its null_source and a hard gate emits them over silence. Scoring
+    # them INVERTED the verdict on punctured paths — the erasure spike at 0
+    # tightened a k=8 levelfit on pure noise past the separation bar
+    # ("decoded"), while the same zeros dragged a genuine 10 dB decode's
+    # magnitude ratio under the negative bar ("no_signal").
+    x = x[x != 0.0]
     if x.size < _SOFT_MIN_ITEMS:
         return [], None
     active = _active_mask(x)
@@ -555,23 +589,14 @@ def _soft_reading(
     xa = x[active]
     if xa.size < _SOFT_MIN_ITEMS:
         return [], None
-    fit = fit_levels(xa)
-    if fit.order > 2 and fit.separation >= _SOFT_MULTILEVEL_SEPARATION:
-        return (
-            _emit_soft(
-                float(min(fit.separation, _SOFT_VALUE_CAP)),
-                Assessment.POSITIVE,
-                decode_grade,
-            ),
-            None,
-        )
+    distinct = int(np.unique(xa).size)
+    if distinct < _SOFT_MIN_DISTINCT:
+        return [], _SOFT_DISCRETE_CAVEAT.format(n=distinct)
     mag = np.abs(xa)
     spread = float(mag.std())
     mean = float(mag.mean())
-    if spread == 0.0:
-        ratio = np.inf if mean > 0.0 else 0.0
-    else:
-        ratio = mean / spread
+    if spread <= _SOFT_MIN_DISPERSION * mean:
+        return [], _SOFT_SATURATED_CAVEAT.format(rel=spread / mean if mean else 0.0)
     # A constant or one-sided LLR stream (a CW carrier) can score an
     # arbitrarily high magnitude ratio without carrying any modulation; both
     # polarities must show up in real proportion before that ratio counts.
@@ -580,9 +605,33 @@ def _soft_reading(
         >= _SOFT_MIN_POLARITY_FRACTION
     )
     signs = np.sign(x)
-    pair = active[1:] & active[:-1]
-    sign_corr = float(np.mean((signs[1:] * signs[:-1])[pair])) if pair.any() else 0.0
-    whitened = abs(sign_corr) <= _SOFT_MAX_SIGN_CORR
+    corrs = []
+    for lag in range(1, _SOFT_WHITENESS_LAGS + 1):
+        pair = active[lag:] & active[:-lag]
+        if pair.any():
+            corrs.append(abs(float(np.mean((signs[lag:] * signs[:-lag])[pair]))))
+    whitened = max(corrs, default=0.0) <= _SOFT_MAX_SIGN_CORR
+    fit = fit_levels(xa)
+    # The multilevel branch exists because a clean M-ary eye's magnitude ratio
+    # sits BELOW the binary negative bar (measured 0.998 on clean CPFSK), so
+    # it must run before the ratio arms — but it earns no exemption from the
+    # polarity and whiteness gates, which is exactly how an all-positive
+    # ladder and a stuck alternator read "decoded" through it.
+    if (
+        fit.order > 2
+        and fit.separation >= _SOFT_MULTILEVEL_SEPARATION
+        and both_polarities
+        and whitened
+    ):
+        return (
+            _emit_soft(
+                float(min(fit.separation, _SOFT_VALUE_CAP)),
+                Assessment.POSITIVE,
+                decode_grade,
+            ),
+            None,
+        )
+    ratio = mean / spread
     if ratio >= _SOFT_POSITIVE and both_polarities and whitened:
         assessment = Assessment.POSITIVE
     elif ratio <= _SOFT_NEGATIVE:
