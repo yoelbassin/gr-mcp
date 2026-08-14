@@ -84,3 +84,45 @@ def test_stream_stats_on_an_empty_run_output_does_not_blame_the_call(
 def test_describe_stages_refuses_two_selectors_instead_of_dropping_one() -> None:
     with pytest.raises(ValueError, match="not both"):
         describe_stages(stage="agc", family="psk")
+
+
+def test_malformed_step_entries_name_the_index_and_shape() -> None:
+    # path=[null] raised TypeError past the boundary's net and surfaced as
+    # "'NoneType' object is not iterable" - no index, no parameter, no shape
+    import pytest
+
+    from marconi.engine.stages.registry import step_models
+    from marconi.engine.types.step import StepSpecError, steps_from_spec
+
+    for bad in (None, 1, True, "agc"):
+        with pytest.raises(StepSpecError, match=r"path\[0\].*object"):
+            steps_from_spec([bad], step_models())  # type: ignore[list-item]
+
+
+def test_gather_amplification_is_bounded() -> None:
+    # perm=[0]*16384 validated and wrote 819 MB in 2.5 s (~57 GB at the
+    # default timeout): the output stride needs a bound of its own, because
+    # "the caller has to type it" stopped being true when the caller became
+    # an LLM emitting JSON
+    import pytest
+    from pydantic import ValidationError
+
+    from marconi.engine.coding.stages_bits import PermuteStep
+
+    with pytest.raises(ValidationError, match="amplification"):
+        PermuteStep(conv="permute", perm=[0] * 16384)
+    # repetition-style depuncturing stays legal
+    assert PermuteStep(conv="permute", perm=[0, 0, 1, 1]).perm == [0, 0, 1, 1]
+
+
+def test_sync_pattern_length_is_bounded() -> None:
+    # a 65,536-bit pattern validated and ran 14.7 s (one full stream pass
+    # per pattern bit); the bounds sweep had no str arm to catch it
+    import pytest
+    from pydantic import ValidationError
+
+    from marconi.engine.coding.stages_bits import SyncWordStep
+
+    with pytest.raises(ValidationError, match="ceiling"):
+        SyncWordStep(conv="sync_word", bits="01" * 40_000)
+    assert SyncWordStep(conv="sync_word", bits="0110" * 16)

@@ -349,15 +349,17 @@ def read_stream(
     "real"/"imag" lists. item_type b/s/f/l/c overrides suffix inference
     (required for suffix-less paths). count defaults per item type to keep a
     page a few KB (b 4096, s 2048, f/l 1024, c 256) and is capped per type
-    (b 16384, s 8192, f 4096, l 2048, c 2048) — the ceilings differ because an
-    item's JSON cost does: a bit is ~2 bytes, an int64 mark ~20, so a full
-    page of any type lands near 48 KB rather than a fixed item count. A larger
-    count is clamped and the page
-    reports capped_at, so a short page is truncation, not end of stream; use
-    offset to walk longer streams — total_items reports the full length.
-    Stream files live under ./marconi-runs/ (or $MARCONI_WORKSPACE) until
-    externally removed; a missing path returns a [not_found] error asking
-    you to re-run the spec."""
+    (b 16384, s 6144, f 3840, l 2048, c 1792) — the ceilings differ because
+    an item's WORST JSON cost does: a bit is 1 byte, an int16 up to 7, a
+    float up to ~12, an int64 up to 21, a complex pair up to ~26, so a full
+    page of any type stays under 48 KB even at extreme values. A count past
+    the cap is clamped and the page reports capped_at ONLY when items were
+    actually withheld — a page short of your count with no capped_at is the
+    end of the stream; use offset to walk longer streams — total_items
+    reports the full length. Stream files live under $MARCONI_WORKSPACE
+    (default ~/.cache/marconi) in marconi-runs/ until externally removed; a
+    missing path returns a [not_found] error asking you to re-run the
+    spec."""
     return render_page(Path(path), offset=offset, count=count, item_type=item_type)
 
 
@@ -379,10 +381,11 @@ def stream_stats(
     a "histogram" {start, step, counts} over the 0.5..99.5 percentile range
     — bin i's center is start + i*step. clusters=K (1..16) also fits up to K
     levels: sorted "centers" with matching "cluster_counts". "centers" is the
-    paste-ready level list for mfsk_soft_demap (ask for a power-of-two K to
-    feed it). Levels with no support are dropped — a short list means fewer
-    real modes than you asked for; read the histogram to judge modality.
-    Bits (.u8) report only ones_fraction.
+    paste-ready level list for mfsk_soft_demap: when fewer real modes exist
+    than you asked for, the fit re-runs at the largest supported power of
+    two so the count stays one mfsk_soft_demap accepts. A single center
+    means no multilevel structure to demap at all — read the histogram to
+    judge modality. Bits (.u8) report only ones_fraction.
 
     item_type "c" (complex constellation symbols, e.g. a path ending at a
     bare demod stage) returns mean_magnitude, std_magnitude,

@@ -4,6 +4,10 @@ from pydantic_core import PydanticCustomError
 
 from marconi.engine.types.bounds import MAX_FRAME_ITEMS
 
+# The widest legitimate repetition-style gather anyone has needed is a few
+# copies per input bit (rate-1/n repetition depuncturing); 8 leaves margin.
+_MAX_GATHER_AMPLIFICATION = 8
+
 # Index lists are the one spec shape whose validity a length check cannot
 # express, and every stage that takes one used to spell (or forget) its own
 # rule: deinterleave and ofdm_demod validated nothing at all, so an
@@ -53,8 +57,7 @@ def check_gather_indices(perm: list[int], *, field: str) -> None:
             {"field": field},
         )
     # max(perm)+1 IS the input stride ops_bits._perm_span reshapes by, so the
-    # largest index sizes a per-block buffer. The list's own length is bounded
-    # by the caller having to type it; a single index is not.
+    # largest index sizes a per-block buffer.
     if max(perm) >= MAX_FRAME_ITEMS:
         raise PydanticCustomError(
             "value_error",
@@ -65,5 +68,25 @@ def check_gather_indices(perm: list[int], *, field: str) -> None:
                 "worst": max(perm),
                 "stride": max(perm) + 1,
                 "max": MAX_FRAME_ITEMS,
+            },
+        )
+    # The OUTPUT stride needs its own bound: len(perm)/(max+1) is a stream
+    # amplifier, and "the list's own length is bounded by the caller having
+    # to type it" stopped being true when the caller became an LLM emitting
+    # JSON - perm=[0]*16384 validated, amplified 16384x, and wrote 819 MB in
+    # 2.5 s (~57 GB at the default timeout) into the workspace.
+    if len(perm) > _MAX_GATHER_AMPLIFICATION * (max(perm) + 1):
+        raise PydanticCustomError(
+            "value_error",
+            "{field} emits {out} items per {stride}-item input block - a "
+            "{ratio}x stream amplification; {cap}x is the ceiling (a "
+            "depuncturing gather repeats indices, it does not multiply the "
+            "stream)",
+            {
+                "field": field,
+                "out": len(perm),
+                "stride": max(perm) + 1,
+                "ratio": len(perm) // (max(perm) + 1),
+                "cap": _MAX_GATHER_AMPLIFICATION,
             },
         )

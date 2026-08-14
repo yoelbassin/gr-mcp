@@ -154,6 +154,14 @@ MAX_FRAME_ITEMS = 1 << 20
 # Delay-line depth in items: delay_cc allocates the whole line up front.
 MAX_DELAY_ITEMS = 1 << 20
 
+# A sync correlation costs one full stream pass PER PATTERN BIT (and the
+# diversity null costs up to another 64): measured 14.7 s for a 65,536-bit
+# pattern over a 200k-bit stream, from a spec validate_modem called valid.
+# The longest real-world sync words are a few hundred bits; 1024 is generous.
+# This was invisible to the bounds sweep because its arms covered int/float
+# and list fields only - a str-typed cost-sizing param had no arm at all.
+MAX_SYNC_PATTERN_BITS = 1 << 10
+
 # Iterative decoders: time scales linearly and the loop lives in the worker.
 MAX_DECODER_ITERATIONS = 1000
 

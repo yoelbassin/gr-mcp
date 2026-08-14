@@ -18,6 +18,7 @@ from marconi.mcp.streams import EmptyStreamError
 from marconi.mcp.streams import stream_stats_payload as _stats_model
 from marconi.survey import SurveyResult
 from marconi.wire import Payload, Ramp
+from marconi.wire import replace as wire_replace
 
 _MAX_INLINE_LIST = 512
 _RAMP_MIN_LEN = 64
@@ -256,6 +257,19 @@ class TraceRow(Payload):
     stats_error: str | None = None
 
 
+def _rounded_quality(quality: QualityReport | None) -> QualityReport | None:
+    """Evidence values round like every other float this module owns: the
+    engine's report passed through verbatim, and quality.evidence[].value was
+    the ONE full-precision float64 on the whole surface (17 characters where
+    its neighbors ship 9)."""
+    if quality is None or not quality.evidence:
+        return quality
+    return wire_replace(
+        quality,
+        evidence=[wire_replace(e, value=round(e.value, 6)) for e in quality.evidence],
+    )
+
+
 def stream_summary(result: PipelineResult) -> StreamSummary | None:
     if result.bitstream is not None:
         return StreamSummary(
@@ -356,7 +370,7 @@ def pipeline_payload(result: PipelineResult, run_dir: Path) -> dict[str, object]
         soft_stream=soft_summary(result),
         stalled_at=result.stalled_at,
         error=result.error,
-        quality=result.quality,
+        quality=_rounded_quality(result.quality),
         trace=[_trace_row(st) for st in result.trace] or None,
         **capped_int_list("windows", result.windows, run_dir / "windows.i64"),
         **capped_int_list("marks", result.marks, run_dir / "marks.i64"),

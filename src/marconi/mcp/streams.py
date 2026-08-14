@@ -28,6 +28,7 @@ from marconi.mcp.workspace import (
     conversion_cache_dir,
     evict_conversion_cache,
     touch_cache_entry,
+    workspace_root,
 )
 from marconi.wire import Histogram, Payload, replace
 
@@ -42,13 +43,15 @@ class EmptyStreamError(Exception):
 register_error(EmptyStreamError, "failed_precondition")
 
 _MAX_INLINE_BITS = 1_048_576
-# Per-type ceilings chosen from what an item COSTS as JSON, not from a round
-# item count: a bit is ~2 bytes, an int64 mark ~11, a complex pair ~21. A flat
-# count therefore priced pages between 82 and 184 KB (21k-47k tokens) — one
-# read_stream call could take a quarter of an agent's context, and the worst
-# of them was the int64 sidecar run_rx explicitly tells the agent to page.
-# Every type lands under _MAX_PAGE_BYTES; test_streams pins that budget
-# directly, so a future retune is measured against the cost, not the number.
+# Per-type ceilings chosen from what an item COSTS as JSON at its WORST
+# legal rendering, not a typical one: a bit is 1 byte, an int16 at -32768 is
+# 7, a float at 4 decimals up to ~12, a complex pair ~26, an int64 up to 21.
+# The previous caps were priced against benign samples (half-range ints,
+# unit-scale floats) and three of five types blew the budget at values the
+# product itself validates - m_slice(levels=[-32768, 32767]) paged 57,434
+# bytes against the 49,152 budget. test_streams pins the budget against
+# extreme legal values, so a future retune is measured against the worst
+# cost, not a friendly one.
 _MAX_PAGE_BYTES = 48 * 1024
 _CHUNK_ITEMS = 1 << 20
 
@@ -252,8 +255,13 @@ def require_file(path: Path, what: str = "stream output") -> None:
 
 
 def _under_workspace(path: Path) -> bool:
+    # a PURE membership test: conversion_cache_dir() is a getter with a
+    # mkdir inside, so a FAILED read of a missing path used to create
+    # ./marconi-runs/conversions in whatever directory the server was
+    # launched from - as a plugin, the user's own project
     try:
-        return conversion_cache_dir().parent in path.resolve().parents
+        runs = workspace_root() / "marconi-runs"
+        return runs in path.resolve().parents
     except OSError:
         return False
 
@@ -286,13 +294,13 @@ _PAGE_SPECS: dict[PageType, PageSpec] = {
         ItemType.B.np_dtype, ".u8", 4096, 16384, _render_bits, BitsPage
     ),
     PageType.S: PageSpec(
-        ItemType.S.np_dtype, ".i16", 2048, 8192, _render_ints("symbols"), SymbolsPage
+        ItemType.S.np_dtype, ".i16", 2048, 6144, _render_ints("symbols"), SymbolsPage
     ),
     PageType.F: PageSpec(
-        ItemType.F.np_dtype, ".f32", 1024, 4096, _render_floats, ValuesPage
+        ItemType.F.np_dtype, ".f32", 1024, 3840, _render_floats, ValuesPage
     ),
     PageType.C: PageSpec(
-        ItemType.C.np_dtype, ".cf32", 256, 2048, _render_complex, ComplexPage
+        ItemType.C.np_dtype, ".cf32", 256, 1792, _render_complex, ComplexPage
     ),
     PageType.L: PageSpec(
         np.dtype(np.int64), ".i64", 1024, 2048, _render_ints("values"), ValuesPage
@@ -365,7 +373,15 @@ def render_page(
         offset=offset,
         count=int(items.size),
         total_items=int(total),
-        capped_at=spec.max_items if requested > spec.max_items else None,
+        # only when the cap actually BIT: keyed on the request alone, a
+        # count=2**40 read of a 4,096-item stream reported capped_at=16384,
+        # and the docstring's "a short page is truncation, not end of
+        # stream" taught the agent the opposite of the truth
+        capped_at=(
+            spec.max_items
+            if requested > spec.max_items and total - offset > spec.max_items
+            else None
+        ),
         **spec.render(items),
     ).as_payload()
 
@@ -394,8 +410,12 @@ def ensure_cf32(
         return SourceSlice(path=dest)
     raw_size = np.dtype(_RAW_FORMATS[kind].np_dtype).itemsize
     # make room BEFORE writing, for the entry about to be written as well as
-    # what is already there — so the budget bounds the peak, and the new entry
-    # is never itself an eviction candidate
+    # what is already there, and the new entry is never itself an eviction
+    # candidate. One deliberate exception to "the budget bounds the peak": a
+    # SINGLE slice larger than the whole budget is still written (measured
+    # 32 MB against a 4 MB test budget) - it IS the working set, and
+    # refusing it would make any capture bigger than the budget undecodable;
+    # the cache runs over budget until that entry goes cold and is evicted.
     evict_conversion_cache(
         incoming=_converted_bytes(st.st_size, offset, samples, raw_size)
     )
@@ -567,6 +587,21 @@ def _real_stats(
     labels = nearest_labels(x, centers)
     counts = np.array([int((labels == j).sum()) for j in range(centers.size)])
     keep = counts > 0
+    kept = int(keep.sum())
+    # mfsk_soft_demap requires a power-of-two level count, and dropping
+    # unsupported clusters handed the agent a list the compiler REJECTS in
+    # exactly the case the docstring warns about (8 requested on a 3-modal
+    # stream -> 6 centers -> "levels needs a power-of-two count, got 6").
+    # Re-fit at the largest supported power of two so "paste-ready" is true;
+    # a single-mode stream still ships its one center - there is no
+    # multilevel structure to demap, and fabricating a second level would be
+    # worse than saying so.
+    target = 1 << max(kept.bit_length() - 1, 0)
+    if kept >= 2 and target != kept:
+        centers = kmeans_1d(x, target)
+        labels = nearest_labels(x, centers)
+        counts = np.array([int((labels == j).sum()) for j in range(centers.size)])
+        keep = counts > 0
     # "centers" was also shipped verbatim as "levels": two names, one array,
     # twice the tokens. centers IS the paste-ready list.
     return replace(

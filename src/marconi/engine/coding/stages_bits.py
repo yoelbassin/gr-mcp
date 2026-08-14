@@ -9,7 +9,11 @@ from marconi.engine.coding import ops_bits
 from marconi.engine.coding.builder import CodingBuilder
 from marconi.engine.coding.primitives import effective_t, syndrome_table
 from marconi.engine.stages.base import CodingStage, Stage
-from marconi.engine.types.bounds import MAX_FRAME_ITEMS, check_match_tolerance
+from marconi.engine.types.bounds import (
+    MAX_FRAME_ITEMS,
+    MAX_SYNC_PATTERN_BITS,
+    check_match_tolerance,
+)
 from marconi.engine.types.descriptor import Carrier
 from marconi.engine.types.enums import DecodeMode, EmitMode, ItemType
 from marconi.engine.types.levels import Level
@@ -71,6 +75,15 @@ class SyncWordStep(Step):
                 "value_error", "bits must contain only '0' and '1'"
             )
         pattern_bits = 4 * len(self.sync) if self.sync else len(self.bits)
+        if pattern_bits > MAX_SYNC_PATTERN_BITS:
+            raise PydanticCustomError(
+                "value_error",
+                "sync pattern is {got} bits; {cap} is the ceiling - the "
+                "correlation costs one full stream pass per pattern bit "
+                "(measured 14.7 s for a 65,536-bit pattern over 200k bits), "
+                "and no real sync word approaches this length",
+                {"got": pattern_bits, "cap": MAX_SYNC_PATTERN_BITS},
+            )
         check_match_tolerance(self.max_errors, pattern_bits, field="max_errors")
         return self
 

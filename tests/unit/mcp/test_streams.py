@@ -179,20 +179,23 @@ def test_page_reports_the_ceiling_that_clamped_it(tmp_path: Path) -> None:
 def test_a_full_page_of_every_type_fits_the_context_budget(
     tmp_path: Path, suffix: str, dtype: Any
 ) -> None:
-    # The requirement is a SIZE, so the test measures size. Asserting the
-    # clamp equals the spec ceiling (both sides imported from the source) let
-    # any retune through: raising the ceilings 256x would have stayed green
-    # while a single call returned ~100 MB of JSON.
+    # The requirement is a SIZE, so the test measures size - at the WORST
+    # legal values, not a friendly sample. Asserting the clamp equals the
+    # spec ceiling (both sides imported from the source) let any retune
+    # through, and sampling half-range ints / unit-scale floats pinned the
+    # budget against a benign page: the i16 cap validated -32768 (m_slice's
+    # own bounds test permits it) yet a full page of them measured 57,434
+    # bytes against the 49,152 budget.
     p = tmp_path / f"page{suffix}"
-    rng = np.random.default_rng(2)
     n = max(s.max_items for s in _PAGE_SPECS.values()) + 32
     if np.issubdtype(dtype, np.complexfloating):
-        raw = (rng.standard_normal(n) + 1j * rng.standard_normal(n)).astype(dtype)
+        worst = -1234.567891 - 1234.567891j
+        raw = np.full(n, worst).astype(dtype)
     elif np.issubdtype(dtype, np.floating):
-        raw = rng.standard_normal(n).astype(dtype)
+        raw = np.full(n, -12345.6789).astype(dtype)
     else:
         info = np.iinfo(dtype)
-        raw = rng.integers(info.min // 2, info.max // 2, n).astype(dtype)
+        raw = np.full(n, info.min).astype(dtype)
     raw.tofile(p)
     page = render_page(p, offset=0, count=n, item_type=None)
     size = len(json.dumps(page, separators=(",", ":")))
@@ -206,3 +209,34 @@ def test_read_stream_docstring_states_every_page_bound() -> None:
     for kind, spec in _PAGE_SPECS.items():
         for bound in (spec.default_items, spec.max_items):
             assert str(bound) in doc, f"{kind}={bound} missing from read_stream doc"
+
+
+def test_failed_read_does_not_touch_the_filesystem(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # the workspace membership check called a getter with a mkdir inside, so
+    # a FAILED read of a missing path created ./marconi-runs/conversions in
+    # whatever directory the server was launched from - as a plugin, the
+    # user's own project
+    ws = tmp_path / "ws"
+    monkeypatch.setenv("MARCONI_WORKSPACE", str(ws))
+    with pytest.raises(Exception, match="not found|re-run"):
+        render_page(
+            tmp_path / "definitely-not-here.u8", offset=0, count=None, item_type=None
+        )
+    assert not ws.exists(), list(ws.rglob("*"))
+
+
+def test_capped_at_reports_truncation_not_the_request(tmp_path: Path) -> None:
+    # count=2**40 over a 4,096-item stream reported capped_at=16384 while
+    # the docstring says "a short page is truncation, not end of stream" -
+    # teaching the agent the opposite of the truth
+    p = tmp_path / "s.u8"
+    np.zeros(4096, np.uint8).tofile(p)
+    page = render_page(p, offset=0, count=1 << 40, item_type=None)
+    assert page["count"] == 4096
+    assert "capped_at" not in page  # nothing was withheld: that IS the stream
+    big = tmp_path / "big.u8"
+    np.zeros(20_000, np.uint8).tofile(big)
+    capped = render_page(big, offset=0, count=1 << 40, item_type=None)
+    assert capped["capped_at"] == 16384  # here items genuinely were withheld

@@ -38,6 +38,17 @@ def steps_from_spec(
 ) -> list[Step]:
     out: list[Step] = []
     for index, obj in enumerate(items):
+        if not isinstance(obj, Mapping):
+            # dict(s) on a non-mapping raised TypeError past the tool's
+            # (CompileError, ValidationError, ValueError) net, so path=[null]
+            # surfaced as "'NoneType' object is not iterable" - naming no
+            # index, no parameter and no expected shape
+            raise StepSpecError(
+                index,
+                None,
+                f"each path entry must be an object like "
+                f'{{"conv": "<stage>", ...}}, got {type(obj).__name__}',
+            )
         conv = obj.get("conv")
         if not isinstance(conv, str) or conv not in step_models:
             raise StepSpecError(
