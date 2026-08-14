@@ -320,7 +320,9 @@ class PskDemap(Stage[CompileContext, PskDemapStep]):
         b.chain("unpack_k_bits_bb", k=int(math.log2(order)))
 
     def out_descriptor(self, in_desc: Descriptor, step: PskDemapStep) -> Descriptor:
-        return Descriptor(Level.BITS, ItemType.B, Carrier.HARD)
+        k = int(step.order).bit_length() - 1
+        frame = None if in_desc.frame_len is None else in_desc.frame_len * k
+        return Descriptor(Level.BITS, ItemType.B, Carrier.HARD, frame_len=frame)
 
     def required_input_order(self, step: PskDemapStep) -> int | None:
         return int(step.order)
@@ -361,7 +363,9 @@ class PskSoftDemap(Stage[CompileContext, PskSoftDemapStep]):
         b.chain_llr_flip()
 
     def out_descriptor(self, in_desc: Descriptor, step: PskSoftDemapStep) -> Descriptor:
-        return Descriptor(Level.BITS, ItemType.F, Carrier.SOFT)
+        k = int(step.order).bit_length() - 1
+        frame = None if in_desc.frame_len is None else in_desc.frame_len * k
+        return Descriptor(Level.BITS, ItemType.F, Carrier.SOFT, frame_len=frame)
 
     def required_input_order(self, step: PskSoftDemapStep) -> int | None:
         return int(step.order)

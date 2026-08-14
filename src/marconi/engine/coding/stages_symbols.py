@@ -79,6 +79,7 @@ class SyncSymbols(CodingStage[SyncSymbolsStep]):
     family = "symbols"
     step_model = SyncSymbolsStep
     accepts_item_type = ItemType.F
+    marks_are_search_hits = True
 
     def emit_rx(self, b: CodingBuilder, step: SyncSymbolsStep) -> None:
         b.add(
@@ -195,8 +196,21 @@ class SymbolMap(CodingStage[SymbolMapStep]):
     def emit_rx(self, b: CodingBuilder, step: SymbolMapStep) -> None:
         b.add(ops_bits.codebook_rx, **_codebook_kw(step), symbol_input=True)
 
+    def required_input_order(self, step: SymbolMapStep) -> int | None:
+        # the one SYMBOLS->BITS demap that declared no alphabet: validate_modem
+        # blessed m_slice(levels=[0..3]) -> symbol_map(code_bits=1) and the
+        # worker threw "symbol values must lie in [0, 2)" at run time
+        return 1 << int(step.code_bits)
+
     def out_descriptor(self, in_desc: Descriptor, step: SymbolMapStep) -> Descriptor:
-        return Descriptor(Level.BITS, ItemType.B, Carrier.HARD, Amplitude.UNKNOWN)
+        frame = (
+            None
+            if in_desc.frame_len is None
+            else in_desc.frame_len * int(step.data_bits)
+        )
+        return Descriptor(
+            Level.BITS, ItemType.B, Carrier.HARD, Amplitude.UNKNOWN, frame_len=frame
+        )
 
 
 CODING_SYMBOL_STAGES: tuple[type[Stage[CodingBuilder, Any]], ...] = (

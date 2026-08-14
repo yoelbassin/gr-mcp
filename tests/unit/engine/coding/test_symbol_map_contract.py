@@ -59,3 +59,17 @@ def test_table_rejects_oversized_entries(step_cls: type) -> None:
 def test_table_rejects_duplicate_entries(step_cls: type) -> None:
     with pytest.raises(ValidationError, match="unique"):
         step_cls(code_bits=2, data_bits=1, table=[3, 3])
+
+
+def test_symbol_map_declares_its_input_alphabet() -> None:
+    # the one SYMBOLS->BITS demap with no required_input_order: validate_modem
+    # blessed m_slice(levels=[0..3]) -> symbol_map(code_bits=1), and the worker
+    # then threw "symbol values must lie in [0, 2)" from inside the coding
+    # lane - the sibling psk_demod(8)->psk_demap(4) mismatch fails at compile
+    from marconi.engine.stages.registry import stage_registry
+
+    stage = stage_registry()["symbol_map"]
+    step = stage.step_model.model_validate(
+        {"conv": "symbol_map", "code_bits": 2, "data_bits": 1, "table": [1, 2]}
+    )
+    assert stage.required_input_order(step) == 4

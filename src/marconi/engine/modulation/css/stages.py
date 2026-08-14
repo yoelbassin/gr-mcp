@@ -235,7 +235,8 @@ class CssDemap(Stage[CompileContext, CssDemapStep]):
         b.chain("css_demap", sf=int(step.sf))
 
     def out_descriptor(self, in_desc: Descriptor, step: CssDemapStep) -> Descriptor:
-        return Descriptor(Level.BITS, ItemType.B, Carrier.HARD)
+        frame = None if in_desc.frame_len is None else in_desc.frame_len * int(step.sf)
+        return Descriptor(Level.BITS, ItemType.B, Carrier.HARD, frame_len=frame)
 
     def required_input_order(self, step: CssDemapStep) -> int | None:
         return 1 << int(step.sf)

@@ -26,9 +26,21 @@ def sync_symbols_rx(
     for j in np.flatnonzero(want):
         check_deadline()
         agree += signs[j : j + size] == pat[j]
-    hits = np.flatnonzero(agree >= n_care - max_errors)
-    marks = tuple(int(h) - pre_symbols for h in hits if int(h) - pre_symbols >= 0)
-    return replace(c, marks=marks)
+    # non-overlapping, the bits-lane rule (_correlate's `reach`): an
+    # alternating stream matched an alternating pattern at EVERY offset -
+    # 3985 hits where the twin reports 250 - and each hit seeds a frame
+    # downstream, so overlapping hits are overlapping frames
+    marks: list[int] = []
+    reach = 0
+    for i in np.flatnonzero(agree >= n_care - max_errors):
+        h = int(i)
+        if h < reach:
+            continue
+        start = h - pre_symbols
+        if start >= 0:
+            marks.append(start)
+        reach = h + int(pat.size)
+    return replace(c, marks=tuple(marks))
 
 
 def m_slice_rx(
@@ -37,9 +49,20 @@ def m_slice_rx(
     sym = c.symbols
     if sym is None:
         return c
-    regions = np.searchsorted(
-        np.asarray(thresholds, np.float32), np.asarray(sym, np.float32)
-    )
+    x = np.asarray(sym, np.float32)
+    bad = int((~np.isfinite(x)).sum())
+    if bad:
+        # searchsorted files NaN and +inf into the TOP region, emitting
+        # confident symbols from poison with nothing on the wire saying so.
+        # run_rx refuses a non-finite capture, so these were manufactured by
+        # the path itself - the same rule the soft-quality reading enforces.
+        raise ValueError(
+            f"m_slice input carries {bad} non-finite symbols of {x.size}; "
+            "run_rx refuses a non-finite capture, so the path produced them "
+            "- check for an agc over a zero-power span or a diverging "
+            "equalizer upstream"
+        )
+    regions = np.searchsorted(np.asarray(thresholds, np.float32), x)
     mapped = np.asarray(levels, np.int16)[regions]
     return replace(c, symbols=mapped.astype(np.int16))
 

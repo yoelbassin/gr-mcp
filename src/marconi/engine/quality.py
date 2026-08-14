@@ -679,11 +679,20 @@ def assess_quality(
     soft_decode_grade: bool = True,
 ) -> QualityReport:
     soft, caveat = _soft_reading(soft_stream, decode_grade=soft_decode_grade)
+    # A mark-replacing search stage (sync_symbols) makes the run's marks its
+    # own pattern hits: judged with no chance model they are not evidence of
+    # anything, and marks_evidence is the one extractor without a null - an
+    # alternating pattern on an alternating stream read "burst_marks
+    # positive" while the stage's description promises it earns no credit.
+    searched = any(
+        getattr(registry.get(row.kind), "marks_are_search_hits", False)
+        for row in census
+    )
     evidence = (
         sync_evidence(census, registry)
         + tag_sync_evidence(diagnostics)
         + survival_evidence(census, registry)
-        + marks_evidence(marks)
+        + ([] if searched else marks_evidence(marks))
         + lock_evidence(diagnostics)
         + dominance_evidence(diagnostics)
         + soft

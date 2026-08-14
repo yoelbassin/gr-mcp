@@ -281,3 +281,47 @@ def test_m_slice_params_non_ascending_thresholds_raises() -> None:
         MSliceStep.model_validate(
             {"thresholds": [0.0, 0.0, 1.0], "levels": [3, 2, 0, 1]}
         )
+
+
+def test_sync_symbols_hits_are_non_overlapping() -> None:
+    # an alternating stream matched an alternating pattern at EVERY offset:
+    # 3985 marks where the bits-lane twin reports 250 (stride = pattern
+    # length). Overlapping marks also seed overlapping frames downstream.
+    import numpy as np
+
+    from marconi.engine.coding.carrier import CodingCarrier
+    from marconi.engine.coding.ops_symbols import sync_symbols_rx
+
+    sym = np.tile([1.0, -1.0], 2000).astype(np.float32)
+    pat = [1, -1] * 8
+    out = sync_symbols_rx(
+        CodingCarrier(bits=np.zeros(0, np.uint8), symbols=sym),
+        pattern=pat,
+        max_errors=0,
+        pre_symbols=0,
+    )
+    starts = list(out.marks)
+    assert starts, "the pattern genuinely matches this stream"
+    assert all(b - a >= len(pat) for a, b in zip(starts, starts[1:])), (
+        "overlapping hits",
+        starts[:5],
+    )
+
+
+def test_m_slice_refuses_non_finite_symbols() -> None:
+    # searchsorted files NaN and +inf into the TOP region, emitting confident
+    # symbols from poison with nothing on the wire saying so - the exact
+    # failure _NON_FINITE_CAVEAT was written for one layer up
+    import numpy as np
+    import pytest
+
+    from marconi.engine.coding.carrier import CodingCarrier
+    from marconi.engine.coding.ops_symbols import m_slice_rx
+
+    sym = np.array([-3.0, np.nan, np.inf, 1.0], np.float32)
+    with pytest.raises(ValueError, match="non-finite"):
+        m_slice_rx(
+            CodingCarrier(bits=np.zeros(0, np.uint8), symbols=sym),
+            thresholds=[-2.0, 0.0, 2.0],
+            levels=[0, 1, 2, 3],
+        )

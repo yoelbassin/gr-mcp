@@ -34,3 +34,22 @@ def test_order_rejected_off_symbols() -> None:
 def test_order_lower_bound() -> None:
     with pytest.raises(ValueError):
         Descriptor(Level.SYMBOLS, ItemType.C, carrier=Carrier.SOFT, order=1)
+
+
+def test_iq_level_is_complex_by_construction() -> None:
+    # 0 of 23 IQ stages declared accepts_item_type, so validate_modem blessed
+    # input_item_type='f'/'b' on complex-only chains and 23/23 died in the
+    # worker on a raw GR itemsize mismatch. IQ means complex baseband; a real
+    # (float) stream is AUDIO-level until `analytic` lifts it.
+    import pytest
+
+    from marconi.engine.types.descriptor import Descriptor
+    from marconi.engine.types.enums import ItemType
+    from marconi.engine.types.levels import Level
+
+    with pytest.raises(ValueError, match="analytic"):
+        Descriptor(Level.IQ, ItemType.F)
+    with pytest.raises(ValueError, match="complex"):
+        Descriptor(Level.IQ, ItemType.B)
+    assert Descriptor(Level.IQ, ItemType.C).item_type is ItemType.C
+    assert Descriptor(Level.AUDIO, ItemType.F).item_type is ItemType.F

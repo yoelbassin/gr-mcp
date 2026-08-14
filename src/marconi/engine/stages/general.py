@@ -29,7 +29,9 @@ class Slice(Stage[CompileContext, SliceStep]):
         b.chain("binary_slicer")
 
     def out_descriptor(self, in_desc: Descriptor, step: SliceStep) -> Descriptor:
-        return Descriptor(Level.BITS, ItemType.B, Carrier.HARD)
+        return Descriptor(
+            Level.BITS, ItemType.B, Carrier.HARD, frame_len=in_desc.frame_len
+        )
 
 
 GENERAL_STAGES: tuple[type[Stage[CompileContext, Any]], ...] = (Slice,)

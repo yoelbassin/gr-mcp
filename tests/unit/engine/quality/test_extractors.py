@@ -436,3 +436,35 @@ def test_gr_tags_with_unreported_extent_still_certify() -> None:
     ]
     ev = tag_sync_evidence(rows)
     assert [e.assessment for e in ev] == ["positive"]
+
+
+def test_search_hit_marks_are_not_burst_evidence() -> None:
+    # sync_symbols REPLACES the carried burst marks with its pattern hits, and
+    # marks_evidence is the one extractor with no null at all: 9997 hits of an
+    # alternating pattern on an alternating stream read "burst_marks positive"
+    # while the stage's own description promises it contributes NO evidence.
+    from marconi.engine.quality import assess_quality
+
+    report = assess_quality(
+        registry=stage_registry(),
+        census=[_row("sync_symbols", items_in=4000, items_out=4000)],
+        diagnostics=[],
+        marks=[10, 400, 3999],
+        soft_stream=None,
+    )
+    assert all(e.metric != "burst_marks" for e in report.evidence)
+
+
+def test_detector_marks_without_a_search_stage_still_count() -> None:
+    # the control: marks from a burst DETECTOR (no mark-replacing search ran)
+    # keep their detection-grade positive
+    from marconi.engine.quality import assess_quality
+
+    report = assess_quality(
+        registry=stage_registry(),
+        census=[_row("fsk", items_in=4000, items_out=400)],
+        diagnostics=[],
+        marks=[10, 400],
+        soft_stream=None,
+    )
+    assert [e.metric for e in report.evidence] == ["burst_marks"]

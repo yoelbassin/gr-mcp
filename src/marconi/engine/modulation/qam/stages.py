@@ -95,7 +95,9 @@ class QamDemap(Stage[CompileContext, QamDemapStep]):
         b.chain("unpack_k_bits_bb", k=int(math.log2(int(step.order))))
 
     def out_descriptor(self, in_desc: Descriptor, step: QamDemapStep) -> Descriptor:
-        return Descriptor(Level.BITS, ItemType.B, Carrier.HARD)
+        k = int(step.order).bit_length() - 1
+        frame = None if in_desc.frame_len is None else in_desc.frame_len * k
+        return Descriptor(Level.BITS, ItemType.B, Carrier.HARD, frame_len=frame)
 
     def required_input_order(self, step: QamDemapStep) -> int | None:
         return int(step.order)

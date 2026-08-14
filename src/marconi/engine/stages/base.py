@@ -56,6 +56,12 @@ class Stage(ABC, Generic[B, S]):
     # unconditionally by geometry): its found-window count is signal evidence.
     sync_search: bool = False
 
+    # A stage that REPLACES the run's marks with its own pattern-search hits.
+    # Burst marks are a detector's physical reading and earn detection-grade
+    # evidence; search hits judged with no chance model are not evidence of
+    # anything, so quality skips marks_evidence when such a stage ran.
+    marks_are_search_hits: bool = False
+
     # A decoder that checks every codeword against its code structure and
     # tallies how many passed (words_valid/words_total in its census row): the
     # valid fraction measured against chance is signal evidence. Output is

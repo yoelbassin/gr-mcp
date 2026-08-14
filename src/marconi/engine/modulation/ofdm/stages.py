@@ -284,7 +284,11 @@ class DqpskSoftDemap(Stage[CompileContext, DqpskSoftDemapStep]):
     def out_descriptor(
         self, in_desc: Descriptor, step: DqpskSoftDemapStep
     ) -> Descriptor:
-        return Descriptor(Level.BITS, ItemType.F, Carrier.SOFT)
+        # the reference is a whole dropped FRAME, not items within one, so
+        # the per-frame geometry scales by bits-per-symbol alone
+        k = step.alphabet().bit_length() - 1
+        frame = None if in_desc.frame_len is None else in_desc.frame_len * k
+        return Descriptor(Level.BITS, ItemType.F, Carrier.SOFT, frame_len=frame)
 
     def required_input_order(self, step: DqpskSoftDemapStep) -> int | None:
         return step.alphabet()

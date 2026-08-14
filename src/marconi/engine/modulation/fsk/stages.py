@@ -176,7 +176,9 @@ class MfskSoftDemap(Stage[CompileContext, MfskSoftDemapStep]):
     def out_descriptor(
         self, in_desc: Descriptor, step: MfskSoftDemapStep
     ) -> Descriptor:
-        return Descriptor(Level.BITS, ItemType.F, Carrier.SOFT)
+        k = len(step.levels).bit_length() - 1
+        frame = None if in_desc.frame_len is None else in_desc.frame_len * k
+        return Descriptor(Level.BITS, ItemType.F, Carrier.SOFT, frame_len=frame)
 
     def required_input_order(self, step: MfskSoftDemapStep) -> int | None:
         return len(step.levels)

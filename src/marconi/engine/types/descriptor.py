@@ -43,6 +43,17 @@ class Descriptor:
     frame_len: int | None = None
 
     def __post_init__(self) -> None:
+        if self.level is Level.IQ and self.item_type is not ItemType.C:
+            # IQ means complex baseband. 0 of 23 IQ stages declared an input
+            # item type, so an f/b-typed IQ entry compiled clean and 23/23
+            # died in the worker on a raw GR itemsize mismatch; making the
+            # combination unrepresentable moves every one to a spec error.
+            raise ValueError(
+                f"item_type '{self.item_type.value}' at level iq: IQ is "
+                "complex baseband ('c'). A real-sampled stream is "
+                "audio-level - lift it with the analytic stage - and a "
+                "bit/symbol stream enters at bits/symbols via input_level"
+            )
         if self.frame_len is not None and self.frame_len < 1:
             raise ValueError(f"frame_len must be >= 1, got {self.frame_len}")
         if self.order is None:
