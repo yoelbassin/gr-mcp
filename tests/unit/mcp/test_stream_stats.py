@@ -89,6 +89,71 @@ def test_tiny_stream_clamps_clusters_without_crash(tmp_path: Path) -> None:
     assert "levels" not in out, "centers must not ship twice"
 
 
+def test_exact_match_keeps_the_earned_fit(tmp_path: Path) -> None:
+    # five genuine equal-mass modes queried at clusters=5: kept == requested,
+    # so the fit the data earned must ship untouched even though 5 is not a
+    # power of two. The unfixed code re-fits anyway (5 is not a power of
+    # two), discarding the correct 5-center fit for a fabricated 4-center one
+    # whose centers do not sit on the true modes.
+    rng = np.random.default_rng(5)
+    modes = np.array([-4.0, -2.0, 0.0, 2.0, 4.0])
+    data = rng.choice(modes, size=10000) + rng.normal(0, 0.02, 10000)
+    out = stream_stats(
+        _f32(tmp_path, data),
+        item_type=None,
+        clusters=5,
+        bins=41,
+    )
+    centers = out["centers"]
+    assert isinstance(centers, list) and len(centers) == 5
+    for true_mode, center in zip(modes, sorted(centers)):
+        assert abs(center - true_mode) < 0.1
+    counts = out["cluster_counts"]
+    assert isinstance(counts, list) and len(counts) == 5
+    expected = cast(int, out["sampled_items"]) / 5
+    for c in counts:
+        assert abs(c - expected) < 0.2 * expected
+
+
+def test_trimodal_exact_request_matches_modes(tmp_path: Path) -> None:
+    # three genuine modes queried at clusters=3: kept == requested, 3 is not
+    # a power of two either, and the fit must still be reported as-is.
+    rng = np.random.default_rng(6)
+    modes = np.array([-2.0, 0.0, 2.0])
+    data = rng.choice(modes, size=6000) + rng.normal(0, 0.02, 6000)
+    out = stream_stats(
+        _f32(tmp_path, data),
+        item_type=None,
+        clusters=3,
+        bins=41,
+    )
+    centers = out["centers"]
+    assert isinstance(centers, list) and len(centers) == 3
+    for true_mode, center in zip(modes, sorted(centers)):
+        assert abs(center - true_mode) < 0.1
+
+
+def test_over_requested_clusters_still_snap_to_power_of_two(tmp_path: Path) -> None:
+    # three real modes queried at clusters=8: the seeded fit naturally lands
+    # on 6 non-empty centers (2 per true mode - the scenario the docstring's
+    # power-of-two contract exists for), kept(6) < requested(8), non-pow2,
+    # so the trigger fires and the fit snaps down to the largest power of
+    # two the data supports (4).
+    rng = np.random.default_rng(0)
+    modes = [-2.0, 0.0, 2.0]
+    data = np.concatenate([m + rng.normal(0, 0.02, 3000) for m in modes])
+    out = stream_stats(
+        _f32(tmp_path, data),
+        item_type=None,
+        clusters=8,
+        bins=41,
+    )
+    centers = out["centers"]
+    assert isinstance(centers, list)
+    assert len(centers) & (len(centers) - 1) == 0, "count must be a power of two"
+    assert len(centers) == 4
+
+
 def test_over_requested_clusters_drops_phantoms(tmp_path: Path) -> None:
     # two well-separated clusters queried at clusters=3 must return two real
     # centers, not three with phantom zero-count centers in the empty gap.

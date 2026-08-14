@@ -592,16 +592,21 @@ def _real_stats(
     # unsupported clusters handed the agent a list the compiler REJECTS in
     # exactly the case the docstring warns about (8 requested on a 3-modal
     # stream -> 6 centers -> "levels needs a power-of-two count, got 6").
-    # Re-fit at the largest supported power of two so "paste-ready" is true;
-    # a single-mode stream still ships its one center - there is no
-    # multilevel structure to demap, and fabricating a second level would be
-    # worse than saying so.
-    target = 1 << max(kept.bit_length() - 1, 0)
-    if kept >= 2 and target != kept:
-        centers = kmeans_1d(x, target)
-        labels = nearest_labels(x, centers)
-        counts = np.array([int((labels == j).sum()) for j in range(centers.size)])
-        keep = counts > 0
+    # Re-fit at the largest supported power of two so "paste-ready" is true -
+    # but ONLY when the data could not support the request (kept < clusters):
+    # kept == clusters means every requested center found real mass, and that
+    # earned fit must ship as-is even when clusters itself is not a power of
+    # two (5 asked, 5 genuine modes found, must ship 5) - re-fitting anyway
+    # discarded a correct fit for a fabricated one. A single-mode stream
+    # still ships its one center - there is no multilevel structure to
+    # demap, and fabricating a second level would be worse than saying so.
+    if kept < clusters:
+        target = 1 << max(kept.bit_length() - 1, 0)
+        if kept >= 2 and target != kept:
+            centers = kmeans_1d(x, target)
+            labels = nearest_labels(x, centers)
+            counts = np.array([int((labels == j).sum()) for j in range(centers.size)])
+            keep = counts > 0
     # "centers" was also shipped verbatim as "levels": two names, one array,
     # twice the tokens. centers IS the paste-ready list.
     return replace(
