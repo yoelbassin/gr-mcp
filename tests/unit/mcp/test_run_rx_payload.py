@@ -157,11 +157,12 @@ def test_soft_stream_path_is_the_file_the_run_actually_wrote(
 def test_a_deadline_after_the_gr_run_is_reported_with_what_it_decoded(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The gate on the run_rx docstring's timeout paragraph: once the GR
-    pipeline has started, a deadline is REPORTED — status "timeout" carrying
-    the census and the stream already decoded — not raised. Scoring is the
-    branch after the segment delivered; the mid-run branch is gated in
-    tests/integration/engine/test_run_timeout.py."""
+    """The gate on the run_rx docstring's timeout paragraph, on the wire: once
+    the GR pipeline has started, a deadline is REPORTED — status "timeout"
+    carrying the census and the stream already decoded — not raised. This is
+    the tail branch (the segment delivered, scoring ran out of clock); the
+    mid-run branch is gated by test_run_timeout.py's
+    test_a_worker_that_timed_out_mid_run_reports_where_it_died."""
 
     def _scoring_whose_clock_expired(**kwargs: object) -> QualityReport:
         with set_deadline(0.0):

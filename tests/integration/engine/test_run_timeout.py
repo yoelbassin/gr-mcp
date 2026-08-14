@@ -116,9 +116,28 @@ def _slice_modem() -> Modem:
     return Modem(symbol_rate=1.0, path=[SliceStep()])
 
 
-def _run_with(
-    tmp_path: Path, backend: _LateWorkerBackend
-) -> "run_module.PipelineResult":
+class _TimedOutWorkerBackend(Backend):
+    """The other wall-clock branch: the worker itself ran out of time and the
+    runner answered with a TIMEOUT RunResult, naming where the signal died."""
+
+    @property
+    def name(self) -> str:
+        return "timed-out-worker"
+
+    def instantiate(self, pipeline: GrPipeline) -> object:
+        raise NotImplementedError
+
+    def run_pipeline(self, pipeline: GrPipeline, timeout: float = 30.0) -> RunResult:
+        return RunResult(
+            status=RunStatus.TIMEOUT,
+            error="worker exceeded its wall-clock budget",
+            stalled_at="b1",
+            census=list(_LATE_CENSUS),
+            diagnostics=[Diagnostic(block="b1", key="bursts", marks=list(_LATE_MARKS))],
+        )
+
+
+def _run_with(tmp_path: Path, backend: Backend) -> "run_module.PipelineResult":
     return run_rx(
         _slice_modem(),
         stage_registry(),
@@ -137,7 +156,10 @@ def test_a_worker_that_delivered_late_is_reported_not_discarded(
     """A run whose GR segment answered 'ok' after the deadline passed met a
     check_deadline() sitting OUTSIDE the try that converts a timeout into a
     result: the census gradient, the marks and the diagnostics were thrown away
-    with a raw RunTimeout, on exactly the run an operator has to retune from."""
+    with a raw RunTimeout, on exactly the run an operator has to retune from.
+    The sink is COMPLETE on such a run, and an all-GR tail only renames it and
+    reads its size, so the decode is reported too — a deadline honored one
+    statement earlier left a finished stream on disk with no wire reference."""
     result = _run_with(
         tmp_path, _LateWorkerBackend(np.ones(_LATE_BITS, np.uint8), oversleep=True)
     )
@@ -145,6 +167,24 @@ def test_a_worker_that_delivered_late_is_reported_not_discarded(
     assert result.census == _LATE_CENSUS
     assert result.marks == _LATE_MARKS
     assert result.diagnostics and result.diagnostics[0].key == "bursts"
+    assert result.bitstream is not None
+    assert result.bitstream.num_bits == _LATE_BITS
+    assert int(read_bits(result.bitstream.path).sum()) == _LATE_BITS
+
+
+def test_a_worker_that_timed_out_mid_run_reports_where_it_died(
+    tmp_path: Path,
+) -> None:
+    """The other branch the run_rx docstring's timeout paragraph promises: a
+    deadline landing while the GR pipeline is mid-run is REPORTED — status
+    timeout with the census and diagnostics the worker did produce, and the
+    block it stalled at — never raised at the caller."""
+    result = _run_with(tmp_path, _TimedOutWorkerBackend())
+    assert result.status == RunStatus.TIMEOUT
+    assert result.census == _LATE_CENSUS
+    assert result.diagnostics and result.diagnostics[0].key == "bursts"
+    assert result.stalled_at == "b1"
+    assert "wall-clock" in (result.error or "")
 
 
 def test_a_timeout_while_scoring_keeps_the_stream_already_decoded(

@@ -556,8 +556,17 @@ def run_rx(
                 marks = list(input_stream.marks)
         decoded: PipelineResult | None = None
         try:
-            check_deadline()
+            # An expired clock must not START the coding tail - run_coding is
+            # real per-step work. The all-GR tail is a rename and a size read
+            # over a sink the worker already finished, so it runs regardless:
+            # honoring the deadline one statement earlier left a COMPLETE
+            # decode on disk under the pre-rename seam name with nothing on the
+            # wire pointing at it. The check after it is what stops the run
+            # before scoring, where the missing budget would actually be spent.
+            if cp.coding is not None:
+                check_deadline()
             decoded = _run_coding_tail(cp, seg, seam, entry_path, workdir, marks)
+            check_deadline()
             return _attach_report(
                 modem,
                 cp,
@@ -572,12 +581,13 @@ def run_rx(
             # PipelineResult(status=TIMEOUT, census=..., stalled_at=...);
             # raising here instead DISCARDED the census gradient, the marks
             # and any stream already decoded - exactly the runs an operator
-            # needs to retune from. The check above sits INSIDE the try for
-            # that reason: the runner reports ok for a worker whose payload
-            # landed before its teardown outran the clock, so an expired
-            # deadline over a FINISHED decode is reachable, and above the try
-            # it escaped raw. Scoring past the deadline is skipped for the
-            # same reason a partial decode is kept: partial evidence beats none.
+            # needs to retune from. Every deadline check past the GR segment
+            # lives INSIDE this try for that reason: the runner reports ok for
+            # a worker whose payload landed before its teardown outran the
+            # clock, so an expired deadline over a FINISHED decode is
+            # reachable, and above the try it escaped raw. Scoring past the
+            # deadline is skipped for the same reason the decode is kept:
+            # partial evidence beats none.
             partial = (
                 decoded
                 if decoded is not None
