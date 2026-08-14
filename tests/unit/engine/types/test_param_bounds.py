@@ -289,8 +289,36 @@ def _float_scalar_fields() -> list[tuple[str, str]]:
     return [(conv, field) for conv, field, is_int in _numeric_fields() if not is_int]
 
 
+# soft_demap/dqpsk_soft_demap's _BASE entries pick a NAMED scheme (psk) so the
+# `order` field keeps its own ceiling coverage above (order is bounded to a
+# small enumerated set independent of any size concern - not the sym_len trap
+# CoVaried guards against). That leaves points_i/points_q, which exist only
+# under scheme="explicit", with no non-empty list in _BASE for _list_fields()
+# to find - exactly the walker's blind spot the review caught: the huge-value
+# sweep above never saw these 4 fields either, and neither did the NaN/inf
+# sweep. A second, explicit-scheme-only base reaches them without touching
+# _BASE (which the order-field ceiling test above still depends on).
+_EXPLICIT_POINTS_BASE: dict[str, dict[str, object]] = {
+    "soft_demap": {
+        "scheme": "explicit",
+        "points_i": [1.0, -1.0],
+        "points_q": [0.0, 0.0],
+    },
+    "dqpsk_soft_demap": {
+        "data_syms": 2,
+        "n_carriers": 2,
+        "scheme": "explicit",
+        "points_i": [1.0, -1.0],
+        "points_q": [0.0, 0.0],
+    },
+}
+
+
 def _float_list_fields() -> list[tuple[str, str]]:
-    return [(conv, field) for conv, field, is_float in _list_fields() if is_float]
+    out = [(conv, field) for conv, field, is_float in _list_fields() if is_float]
+    out += [(conv, "points_i") for conv in _EXPLICIT_POINTS_BASE]
+    out += [(conv, "points_q") for conv in _EXPLICIT_POINTS_BASE]
+    return out
 
 
 @pytest.mark.parametrize(
@@ -313,7 +341,7 @@ def test_a_float_field_refuses_a_non_finite_value(
 def test_a_float_list_element_refuses_a_non_finite_value(
     conv: str, field: str, probe: float
 ) -> None:
-    base = _BASE[conv]
+    base = _EXPLICIT_POINTS_BASE.get(conv, _BASE[conv])
     values = list(base[field])  # type: ignore[call-overload]
     values[-1] = probe
     with pytest.raises(ValidationError):

@@ -15,13 +15,14 @@ def stage_label(index: int, conv: str) -> str:
     return f"{conv}[{index}]"
 
 
-def _non_finite_problem(name: str, value: object) -> str | None:
+def _non_finite_problem(label: str, value: object) -> str | None:
     if isinstance(value, float) and not math.isfinite(value):
-        return f"{name} must be a finite number, got {value!r}"
+        return f"{label} must be a finite number, got {value!r}"
     if isinstance(value, list):
         for index, item in enumerate(value):
-            if isinstance(item, float) and not math.isfinite(item):
-                return f"{name}[{index}] must be a finite number, got {item!r}"
+            problem = _non_finite_problem(f"{label}[{index}]", item)
+            if problem is not None:
+                return problem
     return None
 
 
