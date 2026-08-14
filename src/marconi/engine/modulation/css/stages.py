@@ -138,6 +138,11 @@ class ChirpSync(Stage[CompileContext, ChirpSyncStep]):
     preamble_sync."""
 
     name = "chirp_sync"
+    description = (
+        "CSS acquisition: detect the up-chirp preamble (and optional SFD), align, "
+        "derotate CFO, strip to payload. The CSS analog of preamble_sync; follow "
+        "with dechirp."
+    )
     from_level = Level.IQ
     to_level = Level.IQ
     family = "css"
@@ -157,12 +162,18 @@ class ChirpSync(Stage[CompileContext, ChirpSyncStep]):
 
 
 class Dechirp(Stage[CompileContext, DechirpStep]):
-    """CSS demod, IQ<->SYMBOLS. RX dechirps each symbol window (FFT, fold, argmax)
+    """CSS demod, IQ->SYMBOLS (RX-only). Dechirps each symbol window (FFT, fold, argmax)
     to a hard symbol index (int16) -- decision-directed, so HARD at the seam (the
     hard@SYMBOLS rule, enforced by accepts_carrier). Dechirps symbol windows to
     chirps."""
 
     name = "dechirp"
+    description = (
+        "CSS (chirp spread spectrum) symbol demod: dechirp + FFT + argmax to "
+        "hard symbol "
+        "indices, measuring its own peak dominance as quality evidence. Run "
+        "chirp_sync first to align and derotate."
+    )
     from_level = Level.IQ
     to_level = Level.SYMBOLS
     family = "css"
@@ -224,6 +235,10 @@ class CssDemap(Stage[CompileContext, CssDemapStep]):
     unpacks sf bits (MSB-first)."""
 
     name = "css_demap"
+    description = (
+        "CSS symbol indices to bits: sf bits per symbol, Gray-coded, matching "
+        "dechirp's alphabet."
+    )
     from_level = Level.SYMBOLS
     to_level = Level.BITS
     family = "css"

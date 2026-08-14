@@ -304,10 +304,11 @@ class Segment(CodingStage[SegmentStep]):
     name = "segment"
     description = (
         "Re-tile the stream into fixed frame_body_len windows from position 0, "
-        "DISCARDING any windows a prior stage seeded. Correct after a gating "
-        "stage (sync_align); after a marking stage (sync_word) it destroys the "
-        "marks - let window-scoped coding stages consume sync_word's windows "
-        "directly instead."
+        "DISCARDING any WINDOWS a prior stage seeded (marks pass through "
+        "unchanged). Correct after a gating stage (sync_align); after "
+        "sync_word it throws away the found-window scoping - let "
+        "window-scoped coding stages consume sync_word's windows directly "
+        "instead."
     )
     from_level = Level.BITS
     to_level = Level.BITS
@@ -493,6 +494,12 @@ class DifferentialStep(Step):
 
 class Differential(CodingStage[DifferentialStep]):
     name = "differential"
+    description = (
+        "Differential bit decode (out = in XOR previous): the pair of a "
+        "differentially-encoded protocol, and the standard follow-on after "
+        "msk/slice or any polarity-ambiguous demod - it cancels a global "
+        "inversion."
+    )
     from_level = Level.BITS
     to_level = Level.BITS
     family = "coding"
@@ -510,6 +517,10 @@ class NibbleSwapStep(Step):
 
 class NibbleSwap(CodingStage[NibbleSwapStep]):
     name = "nibble_swap"
+    description = (
+        "Swap the two 4-bit halves of every byte-aligned octet - a common on-air "
+        "vs documentation byte-order mismatch."
+    )
     from_level = Level.BITS
     to_level = Level.BITS
     family = "coding"
@@ -572,6 +583,11 @@ class RsCodeStep(Step):
 
 class RsCode(CodingStage[RsCodeStep]):
     name = "rs_code"
+    description = (
+        "Reed-Solomon decode over GF(2^symbol_bits): n/k/prim_poly/fcr/generator "
+        "are caller data from the datasheet. Corrected words count as quality "
+        "evidence (words_valid)."
+    )
     from_level = Level.BITS
     to_level = Level.BITS
     family = "coding"
@@ -595,6 +611,11 @@ class RsCode(CodingStage[RsCodeStep]):
 
 class Descramble(CodingStage[DescrambleStep]):
     name = "descramble"
+    description = (
+        "XOR an explicit whitening sequence over the bits (restarting per window) "
+        "- additive descrambling with the sequence you supply. For LFSR self- "
+        "synchronizing scramblers, supply the expanded sequence."
+    )
     from_level = Level.BITS
     to_level = Level.BITS
     family = "coding"

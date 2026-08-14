@@ -54,7 +54,7 @@ OOK_AGC_REMOVE_HINT = (
 class OokEnvelope(Stage[CompileContext, OokEnvelopeStep]):
     name = "ook_envelope"
     description = (
-        "Non-coherent OOK/PPM envelope demod, IQ<->SYMBOLS, whose amplitude "
+        "Non-coherent OOK/PPM envelope demod, IQ->SYMBOLS (RX-only), whose amplitude "
         "contract is conditional on loop_bw. Closed-loop (loop_bw>0) needs "
         "peak_unity or rms_unity input - pair it with an agc. Open-loop "
         "(loop_bw=0) is amplitude-agnostic and must run WITHOUT an agc stage: "

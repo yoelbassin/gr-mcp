@@ -167,6 +167,11 @@ class SampleSymbols(Stage[CompileContext, SampleSymbolsStep]):
     recovered or differentially absorbed carrier can reach the symbol seam."""
 
     name = "sample_symbols"
+    description = (
+        "Sample the (already timing-aligned) stream at one sample per symbol with "
+        "no loop at all - for captures already at or resampled to the symbol "
+        "rate. The zero-assumption entry to PSK-style decisions."
+    )
     from_level = Level.IQ
     to_level = Level.SYMBOLS
     family = "psk"
@@ -221,6 +226,11 @@ class DifferentialDemod(Stage[CompileContext, DifferentialDemodStep]):
     {rotate: -0.7853981633974483, out_order: 4} -> an order-4 demap."""
 
     name = "differential_demod"
+    description = (
+        "Differential phase demod: each symbol is the phase CHANGE from its "
+        "predecessor (DBPSK/DQPSK without carrier recovery). Immune to carrier "
+        "phase ambiguity; rotate= adjusts the decision grid."
+    )
     from_level = Level.SYMBOLS
     to_level = Level.SYMBOLS
     family = "psk"
@@ -284,12 +294,17 @@ class PskDemodStep(Step):
 
 
 class PskDemod(Stage[CompileContext, PskDemodStep]):
-    """Coherent linear demod, IQ<->SYMBOLS. RX: RRC matched filter + Gardner
+    """Coherent linear demod, IQ->SYMBOLS (RX-only): RRC matched filter + Gardner
     symbol timing + costas carrier recovery -> soft complex symbols. RRC
     pulse-shape/upsample. rate_factor stays 1.0 (symbol decimation is internal
-    via ctx.sps; the modulator reads the IQ-domain rate)."""
+    via ctx.sps, so the rate model stays in the IQ domain)."""
 
     name = "psk_demod"
+    description = (
+        "Coherent PSK demod (RRC + Gardner + costas) to soft complex symbols. "
+        "Constant-modulus only - use qam_demod for multi-radius. Follow with "
+        "psk_demap (hard) or psk_soft_demap (LLR evidence)."
+    )
     from_level = Level.IQ
     to_level = Level.SYMBOLS
     family = "psk"
@@ -338,6 +353,10 @@ class PskDemap(Stage[CompileContext, PskDemapStep]):
     bits. Hard bits at the seam (mirrors the general Slice)."""
 
     name = "psk_demap"
+    description = (
+        "Hard PSK decision: soft complex symbols to bits via the Gray map. No "
+        "per-bit confidence; psk_soft_demap is the evidence-bearing twin."
+    )
     from_level = Level.SYMBOLS
     to_level = Level.BITS
     family = "psk"
@@ -382,6 +401,10 @@ class PskSoftDemap(Stage[CompileContext, PskSoftDemapStep]):
     noise on NOISELESS symbols (measured match 0.508); with it, BER 0."""
 
     name = "psk_soft_demap"
+    description = (
+        "Soft PSK demap: complex symbols to per-bit LLRs (bit 1 negative), "
+        "feeding FEC stages and soft quality evidence."
+    )
     from_level = Level.SYMBOLS
     to_level = Level.BITS
     family = "psk"

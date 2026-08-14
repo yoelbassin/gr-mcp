@@ -159,3 +159,16 @@ def test_soft_sign_correlation_bar_is_load_bearing(tmp_path: Path) -> None:
     correlated = stream(0.5)
     assert abs(sign_corr(correlated)) > _SOFT_MAX_SIGN_CORR
     assert soft_evidence(_llrs(tmp_path, correlated)) == []
+
+
+def test_dominance_negative_is_load_bearing() -> None:
+    # the straddle this file's own header promises: _DOMINANCE_NEGATIVE was
+    # claimed "straddled by test_verdict_constants" while appearing in no
+    # test anywhere in the tree
+    from marconi.engine.quality import _DOMINANCE_NEGATIVE
+
+    assert _DOMINANCE_NEGATIVE == 0.05
+    below = dominance_evidence(_dominance_rows(4, 100, 0.01))
+    above = dominance_evidence(_dominance_rows(6, 100, 0.01))
+    assert [e.assessment for e in below] == [Assessment.NEGATIVE]
+    assert above == []  # past the bar: midband, not negative

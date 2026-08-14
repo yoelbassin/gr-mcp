@@ -18,6 +18,11 @@ class Slice(Stage[CompileContext, SliceStep]):
     """Binary symbol -> bit decision: hard-slice soft floats to bits."""
 
     name = "slice"
+    description = (
+        "Hard binary slicer at zero: soft symbols to bits. Fast and universal, "
+        "but hard bits carry no per-bit confidence, so a slice path earns no soft "
+        "quality evidence - prefer a soft demap when the verdict matters."
+    )
     from_level = Level.SYMBOLS
     to_level = Level.BITS
     family = "general"

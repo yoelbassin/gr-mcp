@@ -254,13 +254,16 @@ def make_msk_demod(
 ) -> Any:
     """Coherent MSK demod: rail de-rotation to OQPSK, matched integration over
     2T, alternating I/Q rail decisions with decision-directed carrier tracking.
-    Measured ~2-3 dB more sensitive at operational BER than the best stock
-    composition (matched filter + delay-and-multiply differential detection),
-    and within ~1-2 dB of the coherent-BPSK bound; stock GR 3.10 has no coherent
-    MSK/OQPSK receiver, so this custom block is the only path to that gain
-    (guarded by
-    tests/integration/engine/modulation/test_msk_snr_margin.py). One soft float
-    per symbol, sign = bit."""
+    Measured ~2-3 dB more sensitive at operational BER than the stock
+    composition the suite actually races it against - the fsk path's
+    quadrature demod + Gardner TED (that comparison is what
+    tests/integration/engine/modulation/test_msk_snr_margin.py guards, at
+    sps 20, i.e. the vectorized medium). A delay-and-multiply differential
+    detector was the design-time reference but is NOT under test - an
+    earlier version of this note claimed it was. Within ~1-2 dB of the
+    coherent-BPSK bound; stock GR 3.10 has no coherent MSK/OQPSK receiver,
+    so this custom block is the only path to that gain. One soft float per
+    symbol, sign = bit."""
 
     geom = MskGeometry.build(
         sps=sps, loop_bw=loop_bw, loop_pole=loop_pole, mf_oversample=mf_oversample

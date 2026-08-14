@@ -43,9 +43,16 @@ class Fsk(Stage[CompileContext, FskStep]):
     """Binary FSK carrier stage. RX: FM discriminator + Gardner symbol timing ->
     one soft float per symbol. The symbol-rate
     decimation is internal (driven by ctx.sps); rate_factor stays 1.0 so the
-    modulator reads the IQ-domain sample rate (rate-model invariant)."""
+    rate model stays in the IQ domain (rate-model invariant)."""
 
     name = "fsk"
+    description = (
+        "Quadrature-discriminator FSK/GFSK demod to soft frequency symbols. "
+        "deviation only scales the output values (it does not tune detection); "
+        "loop_bw=0 freezes the Gardner loop for bursty captures. Follow with "
+        "slice (hard bits, no quality evidence) or mfsk_soft_demap (soft LLRs "
+        "that CAN earn evidence; levels from stream_stats centers)."
+    )
     from_level = Level.IQ
     to_level = Level.SYMBOLS
     family = "fsk"
@@ -94,6 +101,12 @@ class Msk(Stage[CompileContext, MskStep]):
     tests/integration/engine/modulation/test_msk_snr_margin.py."""
 
     name = "msk"
+    description = (
+        "Coherent MSK/GMSK demod (soft float per symbol, sign=bit). Carrier phase "
+        "is recovered only up to 180 deg, so polarity may be flipped - and many "
+        "MSK protocols are differentially encoded: slice then differential is the "
+        "composition that decodes them polarity-free."
+    )
     from_level = Level.IQ
     to_level = Level.SYMBOLS
     family = "fsk"
@@ -160,6 +173,12 @@ class MfskSoftDemap(Stage[CompileContext, MfskSoftDemapStep]):
     constellation's unit-RMS by construction."""
 
     name = "mfsk_soft_demap"
+    description = (
+        "Soft M-ary FSK demap: fsk's frequency symbols to per-bit LLRs against an "
+        "explicit level ladder (levels= the fitted centers from stream_stats, "
+        "power-of-two count). The evidence-bearing alternative to slice for FSK "
+        "paths."
+    )
     from_level = Level.SYMBOLS
     to_level = Level.BITS
     family = "fsk"

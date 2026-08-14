@@ -75,6 +75,11 @@ class OfdmFrameSyncProbe(Stage[CompileContext, OfdmFrameSyncProbeStep]):
     """IQ->IQ: null-sync + CP-strip only (test/diagnostic isolation of the block)."""
 
     name = "ofdm_frame_sync_probe"
+    description = (
+        "Observability probe: reports OFDM frame-sync candidates (null/CP "
+        "correlation) without demodulating - for measuring geometry before "
+        "committing to a demod spec."
+    )
     from_level = Level.IQ
     to_level = Level.IQ
     family = "ofdm"
@@ -135,6 +140,11 @@ class OfdmDemod(Stage[CompileContext, OfdmDemodStep]):
     over OFDM frames; the carrier permutation is a parameter."""
 
     name = "ofdm_demod"
+    description = (
+        "Non-coherent OFDM demod: CP-correlation symbol sync, FFT, and bin_perm "
+        "carrier extraction to soft symbols. For pilot-based coherent "
+        "equalization use ofdm_coherent_sync."
+    )
     from_level = Level.IQ
     to_level = Level.SYMBOLS
     family = "ofdm"
@@ -250,6 +260,10 @@ class DqpskSoftDemap(Stage[CompileContext, DqpskSoftDemapStep]):
     framed carriers."""
 
     name = "dqpsk_soft_demap"
+    description = (
+        "Differential QPSK soft demap across OFDM symbols (reference symbol "
+        "dropped): equalizer-free DQPSK-OFDM to LLRs."
+    )
     from_level = Level.SYMBOLS
     to_level = Level.BITS
     family = "ofdm"
@@ -377,6 +391,11 @@ class OfdmCoherentSync(Stage[CompileContext, OfdmCoherentSyncStep]):
     parameters."""
 
     name = "ofdm_coherent_sync"
+    description = (
+        "Coherent scattered-pilot OFDM front end: CP timing, fine CFO off the "
+        "frequency pilots, 2-D channel estimate, equalized symbol-major carriers "
+        "out. Geometry and pilot lattice are all parameters."
+    )
     from_level = Level.IQ
     to_level = Level.SYMBOLS
     family = "ofdm"
@@ -472,6 +491,10 @@ class SoftDemap(Stage[CompileContext, SoftDemapStep]):
     soft coding lane (deinterleave/depuncture/fec)."""
 
     name = "soft_demap"
+    description = (
+        "Constellation soft demap: equalized complex cells to per-bit LLRs (named "
+        "scheme+order, or explicit points). Input must be unit-RMS."
+    )
     from_level = Level.SYMBOLS
     to_level = Level.BITS
     family = "ofdm"
@@ -532,6 +555,10 @@ class CellSelect(Stage[CompileContext, CellSelectStep]):
     params. Pins frame_len=keep so downstream frame geometry is checked."""
 
     name = "cell_select"
+    description = (
+        "Keep a subset of equalized OFDM cells per symbol (keep= carrier indices) "
+        "and pin the frame geometry for downstream FEC."
+    )
     from_level = Level.SYMBOLS
     to_level = Level.SYMBOLS
     family = "ofdm"

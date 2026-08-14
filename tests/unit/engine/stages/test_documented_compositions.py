@@ -110,6 +110,101 @@ _DOCUMENTED: dict[str, tuple[dict[str, Any], float]] = {
         },
         192000.0,
     ),
+    # msk: "slice then differential is the composition that decodes
+    # differentially-encoded MSK polarity-free"
+    "msk_slice_differential": (
+        {
+            "symbol_rate": 4800.0,
+            "path": [
+                {"conv": "msk"},
+                {"conv": "slice"},
+                {"conv": "differential"},
+            ],
+        },
+        19200.0 * 5,
+    ),
+    # fsk: "follow with slice ... or mfsk_soft_demap (levels from
+    # stream_stats centers)"
+    "fsk_mfsk_soft_demap": (
+        {
+            "symbol_rate": 4800.0,
+            "path": [
+                {"conv": "fsk", "deviation": 2400.0},
+                {"conv": "mfsk_soft_demap", "levels": [-1.0, 1.0]},
+            ],
+        },
+        19200.0,
+    ),
+    # m_slice: "the 4-FSK/multi-level entry to symbol_map"; sync_symbols:
+    # "marks survive the symbols->bits stage, and mark_frame then turns them
+    # into windows THERE, at bits level"
+    "sync_symbols_mslice_symbol_map_mark_frame": (
+        {
+            "symbol_rate": 4800.0,
+            "path": [
+                {"conv": "fsk", "deviation": 2400.0},
+                {"conv": "sync_symbols", "pattern": [1, -1, 1, 1, -1, -1, 1, -1]},
+                {
+                    "conv": "m_slice",
+                    "thresholds": [-1.0, 0.0, 1.0],
+                    "levels": [0, 1, 2, 3],
+                },
+                {
+                    "conv": "symbol_map",
+                    "code_bits": 2,
+                    "data_bits": 2,
+                    "table": [0, 1, 2, 3],
+                },
+                {"conv": "mark_frame", "offset_bits": 0},
+            ],
+        },
+        19200.0,
+    ),
+    # chirp_sync: "follow with dechirp"; dechirp: "run chirp_sync first";
+    # css_demap: "matching dechirp's alphabet"
+    "chirp_sync_dechirp_css_demap": (
+        {
+            "symbol_rate": 100.0,
+            "path": [
+                {
+                    "conv": "chirp_sync",
+                    "sf": 7,
+                    "oversample": 2,
+                    "zero_pad": 4,
+                    "preamble_len": 8,
+                    "sfd_symbols": 2.25,
+                    "sync_symbols": 2,
+                },
+                {"conv": "dechirp", "sf": 7, "oversample": 2, "zero_pad": 4},
+                {"conv": "css_demap", "sf": 7},
+            ],
+        },
+        2 * (1 << 7) * 100.0,
+    ),
+    # qam_demod: "pair with agc mode='power'" -> qam_demap
+    "agc_power_qam": (
+        {
+            "symbol_rate": 4800.0,
+            "path": [
+                {"conv": "agc", "mode": "power"},
+                {"conv": "qam_demod", "order": 16},
+                {"conv": "qam_demap", "order": 16},
+            ],
+        },
+        19200.0,
+    ),
+    # fm_demod: "follow with analytic, then translate to the subcarrier"
+    "fm_analytic_translate": (
+        {
+            "symbol_rate": 1187.5,
+            "path": [
+                {"conv": "fm_demod", "deviation": 75000.0},
+                {"conv": "analytic"},
+                {"conv": "translate", "center_hz": 57000.0},
+            ],
+        },
+        192000.0,
+    ),
 }
 
 

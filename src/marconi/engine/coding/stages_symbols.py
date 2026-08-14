@@ -67,12 +67,14 @@ class SyncSymbolsStep(Step):
 class SyncSymbols(CodingStage[SyncSymbolsStep]):
     name = "sync_symbols"
     description = (
-        "Correlate a +-1 sign pattern against soft symbols and report each hit "
-        "as a MARK (run_rx's 'marks'), REPLACING any marks carried in. Marks, "
-        "not windows: follow with mark_frame to turn them into windows for "
-        "window-scoped coding stages. Unlike sync_word this contributes NO "
-        "quality evidence - it has no chance model, so a genuine hit earns the "
-        "path no credit and the verdict stays 'uncertain' on its own."
+        "Correlate a +-1 sign pattern against soft symbols and report each "
+        "hit as a MARK (run_rx's 'marks'), REPLACING any marks carried in. "
+        "Marks survive the symbols->bits stage (m_slice+symbol_map, or "
+        "slice), and mark_frame then turns them into windows THERE, at bits "
+        "level - mark_frame directly after this stage does not compile "
+        "(levels differ). Unlike sync_word this contributes NO quality "
+        "evidence: it has no chance model, so its hits earn the path no "
+        "credit and the verdict stays 'uncertain' on its own."
     )
     from_level = Level.SYMBOLS
     to_level = Level.SYMBOLS
@@ -99,6 +101,11 @@ class NormalizeStep(Step):
 
 class Normalize(CodingStage[NormalizeStep]):
     name = "normalize"
+    description = (
+        "Per-window DC removal and gain normalization of soft symbols, scoped by "
+        "marks (from sync_symbols or burst detection) - flattens per-burst "
+        "offset/gain before m_slice thresholds."
+    )
     from_level = Level.SYMBOLS
     to_level = Level.SYMBOLS
     family = "symbols"
@@ -146,6 +153,12 @@ class MSliceStep(Step):
 
 class MSlice(CodingStage[MSliceStep]):
     name = "m_slice"
+    description = (
+        "Threshold soft symbols into M hard levels: thresholds= the decision "
+        "boundaries, levels= the emitted symbol VALUES (label them "
+        "0..2^code_bits-1 for symbol_map). The 4-FSK/multi-level entry to "
+        "symbol_map."
+    )
     from_level = Level.SYMBOLS
     to_level = Level.SYMBOLS
     family = "symbols"
@@ -186,6 +199,10 @@ class SymbolMapStep(Step):
 
 class SymbolMap(CodingStage[SymbolMapStep]):
     name = "symbol_map"
+    description = (
+        "Hard M-ary symbols to bits via a codeword table (table[d] = codeword for "
+        "data value d): the dibit/tribit mapping stage after m_slice."
+    )
     from_level = Level.SYMBOLS
     to_level = Level.BITS
     family = "coding"

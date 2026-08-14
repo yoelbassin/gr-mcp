@@ -412,9 +412,9 @@ def compile_pipeline(
     if problem is not None:
         raise CompileError(problem)
     steps = modem.path
-    # _validate FIRST: it is the aggregating reporter, and _split_index raises a
-    # single CompileError on a coded-tx path, which suppressed the addressable
-    # issue list the MCP surface returns.
+    # _validate FIRST: it is the aggregating reporter, and _split_index raises
+    # a single CompileError on a GR re-entry after the coding segment, which
+    # would suppress the addressable issue list the MCP surface returns.
     _validate(modem, registry, start)
     k = _split_index(steps, registry)
     boundaries, rates = _forward_pass(steps, registry, start, sample_rate)

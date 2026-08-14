@@ -27,7 +27,7 @@ class QamDemodStep(Step):
 
 
 class QamDemod(Stage[CompileContext, QamDemodStep]):
-    """QAM demod, IQ<->SYMBOLS. QAM's multi-radius constellation defeats a
+    """QAM demod, IQ->SYMBOLS (RX-only). QAM's multi-radius constellation defeats a
     phase-only costas loop, so carrier recovery uses the constellation-aware,
     decision-directed `constellation_receiver_cb` ("costas for an arbitrary
     constellation"). Because it is decision-directed, its output IS the hard
@@ -36,10 +36,15 @@ class QamDemod(Stage[CompileContext, QamDemodStep]):
     QAM is deferred to the soft-seam (bits) design. RX: RRC matched filter +
     Gardner timing + constellation_receiver_cb -> hard symbol indices. Map
     indices to constellation points + RRC pulse-shape. rate_factor stays 1.0
-    (symbol decimation is internal via ctx.sps; the modulator reads the IQ rate).
+    (symbol decimation is internal via ctx.sps; the rate model stays in the IQ domain).
     """
 
     name = "qam_demod"
+    description = (
+        "Decision-directed QAM demod (constellation_receiver) to HARD symbol "
+        "indices - QAM's multi-radius grid defeats a plain costas. Needs rms- "
+        "normalized input: pair with agc mode='power'."
+    )
     from_level = Level.IQ
     to_level = Level.SYMBOLS
     family = "qam"
@@ -88,6 +93,10 @@ class QamDemap(Stage[CompileContext, QamDemapStep]):
     (mirrors the general Slice)."""
 
     name = "qam_demap"
+    description = (
+        "Unpack qam_demod's hard symbol indices to bits (the Gray map already "
+        "lives in the demod)."
+    )
     from_level = Level.SYMBOLS
     to_level = Level.BITS
     family = "qam"

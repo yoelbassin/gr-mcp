@@ -19,6 +19,10 @@ class BurstProbe(Stage[CompileContext, BurstProbeStep]):
     consumer, since stream tags don't survive a file sink."""
 
     name = "burst_probe"
+    description = (
+        "Observability probe: burst boundaries on the current stream as marks, "
+        "without changing the data - for checking burst structure mid-chain."
+    )
     from_level = Level.SYMBOLS
     to_level = Level.SYMBOLS
     family = "probe"

@@ -24,8 +24,9 @@ input_len // stride with no per-burst slack. Only two things vary per burst -
 the sampling PHASE (which sub-sample within each chip window is taken,
 variance-max acquired) and the NORMALIZATION scale; the chip index stays
 global, which is what stops a burst boundary from inserting a chip and
-slipping the downstream chip-pair grid mid-frame. The block withholds an
-unfinished burst tail at EOF (suite convention: sims pad). Every emitted chip
+slipping the downstream chip-pair grid mid-frame. At true EOF the block
+COMMITS a burst the capture truncated mid-transmission (finish(), counted in
+bursts_truncated_at_eof) so it surfaces instead of vanishing. Every emitted chip
 is normalized (a burst's chips against their own 95th-percentile grid level,
 an idle chip against the tracked floor) before it leaves the block, so
 downstream fixed-threshold slicing is independent of whatever gain an upstream

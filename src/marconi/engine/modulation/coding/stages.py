@@ -39,6 +39,12 @@ class Deinterleave(Stage[CompileContext, DeinterleaveStep]):
     blockinterleaver_ff: out[t]=in[perm[t]] per block of len(perm)."""
 
     name = "deinterleave"
+    description = (
+        "Block de-interleave on the soft LLR stream: output item i takes "
+        "input perm[i] within each len(perm) block, and perm must be a "
+        "strict permutation (every index exactly once). For a gather that "
+        "may drop or repeat positions, use permute in the hard-bits lane."
+    )
     from_level = Level.BITS
     to_level = Level.BITS
     family = "coding"
@@ -94,6 +100,11 @@ class Depuncture(Stage[CompileContext, DepunctureStep]):
     Protocol puncture tables are params."""
 
     name = "depuncture"
+    description = (
+        "Re-insert erased positions (0.0 LLR, keep_mask=) ahead of a "
+        "convolutional/LDPC decoder, restoring the mother-code rate. Soft quality "
+        "scoring ignores the inserted erasures."
+    )
     from_level = Level.BITS
     to_level = Level.BITS
     family = "coding"
@@ -140,6 +151,10 @@ class Harden(Stage[CompileContext, HardenStep]):
     front (sync_align) feed a hard coding tail (permute/block_code)."""
 
     name = "harden"
+    description = (
+        "Soft LLRs to hard bits (bit 1 = negative LLR) - when the downstream "
+        "stage needs hard bits and no soft decoder is in the path."
+    )
     from_level = Level.BITS
     to_level = Level.BITS
     family = "coding"
@@ -293,6 +308,11 @@ class Fec(Stage[CompileContext, FecStep]):
     is here."""
 
     name = "fec"
+    description = (
+        "Convolutional (Viterbi) decode of soft LLRs: scheme='cc' with "
+        "polys/rate_inv/k from the protocol datasheet; frame_bits per window. "
+        "Depuncture first when the code is punctured."
+    )
     from_level = Level.BITS
     to_level = Level.BITS
     family = "coding"
@@ -377,6 +397,10 @@ class Polar(Stage[CompileContext, PolarStep]):
     _demap do their sign corrections)."""
 
     name = "polar"
+    description = (
+        "Polar SC decode of soft LLRs: frozen_positions and codeword size from "
+        "the datasheet."
+    )
     from_level = Level.BITS
     to_level = Level.BITS
     family = "coding"
@@ -459,6 +483,10 @@ class Ldpc(Stage[CompileContext, LdpcStep]):
     list; the backend rebuilds and serializes it to the alist gr-fec reads."""
 
     name = "ldpc"
+    description = (
+        "LDPC belief-propagation decode of soft LLRs against caller-supplied "
+        "check nodes. Stock-GR limits apply (systematic-last, no puncturing)."
+    )
     from_level = Level.BITS
     to_level = Level.BITS
     family = "coding"

@@ -418,12 +418,18 @@ GR_BLOCKS: dict[str, Callable[[_GrModules, BlockParams], Any]] = {
         p.f("rate"),
     ),
     "rotator_cc": lambda c, p: c.blocks.rotator_cc(p.f("phase_inc")),
-    # Polyphase arbitrary resampler (rate=interp/decim). Kept over
-    # rational_resampler_ccf because the same block also serves clock_correct's
-    # irrational 1/(1+ppm) ratio, so one kind covers both.
+    # Polyphase arbitrary resampler (any real ratio): clock_correct's
+    # irrational 1/(1+ppm) has no rational realization, so this kind exists
+    # alongside rational_resampler_ccf - the split commit says "one resampler
+    # kind NO LONGER covers both", and an earlier version of this comment
+    # claimed the opposite.
     "pfb_arb_resampler_ccf": lambda c, p: c.pfb.arb_resampler_ccf(p.f("rate")),
-    # Integer-ratio resampler (auto-designed anti-imaging taps). Spectrally clean
-    # and bit-perfect on this build; see the note above pfb_arb_resampler_ccf.
+    # Integer-ratio resampler (auto-designed anti-imaging taps). REFUTED
+    # HYPOTHESIS, do not re-open: an apparent "BER 0.46 through
+    # rational_resampler" was an aligned_ber artifact - the block's ~2-sample
+    # group-delay lead made a forward-only alignment search score a
+    # bit-perfect decode as random; the two-sided search fixed the metric and
+    # the block measured spectrally clean and bit-perfect on this build.
     "rational_resampler_ccf": lambda c, p: c.gr_filter.rational_resampler_ccf(
         interpolation=p.i("interpolation"), decimation=p.i("decimation")
     ),

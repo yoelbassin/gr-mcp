@@ -388,8 +388,9 @@ def lock_evidence(diagnostics: Sequence[Diagnostic]) -> list[QualityEvidence]:
 # each one was made. The deciding block owns the calibrated tallies and the
 # chance ceiling (decision.py); here only the run's fractions are judged,
 # word_validity-style. Like soft_confidence it attests decision quality, not
-# symbol identity. Bars straddled by test_verdict_constants; the honest limits
-# are pinned in the css quality tests.
+# symbol identity. Both bars straddled by test_verdict_constants (the
+# negative's straddle was claimed by an earlier version of this note and
+# existed nowhere); the honest limits are pinned in the css quality tests.
 _DOMINANCE_POSITIVE = 0.5
 _DOMINANCE_NEGATIVE = 0.05
 
@@ -445,12 +446,15 @@ _SOFT_MULTILEVEL_SEPARATION = 4.0
 
 # |x| mean/std bars on a demodulated stream. The ratio alone cannot reject a
 # wrong-rate decode, so a positive also demands whitened decisions via
-# consecutive-sign correlation. Two limits worth knowing, both pinned in
-# test_verdict_constants: structured unscrambled data suppresses the positive
-# (conservative — the stream reads uncertain and sync/validity evidence still
-# applies), and undersampling emits genuinely clean decisions of aliased bits,
-# which no stream statistic can see. Soft confidence attests decision quality,
-# never bit identity.
+# sign correlation over lags 1..4. Two limits worth knowing, each pinned
+# where named — an earlier version of this note pointed both at
+# test_verdict_constants, which contained neither: structured unscrambled
+# data suppresses the positive (test_soft_evidence's run-length-8 pin;
+# conservative — the stream reads uncertain and sync/validity evidence still
+# applies), and undersampling emits genuinely clean decisions of aliased
+# bits, which no stream statistic can see (pinned end-to-end by
+# test_garbage_gates' subharmonic-lock test). Soft confidence attests
+# decision quality, never bit identity.
 _SOFT_POSITIVE = 2.0
 _SOFT_NEGATIVE = 1.45
 _SOFT_MIN_POLARITY_FRACTION = 0.02

@@ -129,6 +129,11 @@ class Translate(Stage[CompileContext, TranslateStep]):
     before an IQ demod. RX-only, IQ->IQ, rate unchanged."""
 
     name = "translate"
+    description = (
+        "Pure frequency shift: move center_hz (from survey carrier.offset_hz) to "
+        "DC with no filtering and no rate change. Use channelize when adjacent "
+        "signals must also be rejected."
+    )
     from_level = Level.IQ
     to_level = Level.IQ
     family = "conditioning"
@@ -143,6 +148,11 @@ class Translate(Stage[CompileContext, TranslateStep]):
 
 class Invert(Stage[CompileContext, InvertStep]):
     name = "invert"
+    description = (
+        "Spectral inversion (conjugate): fixes a mirrored capture (some SDR front "
+        "ends and .wav IQ exports swap I/Q). If an FSK/MSK decode reads inverted- "
+        "looking garbage, try this first."
+    )
     from_level = Level.IQ
     to_level = Level.IQ
     family = "conditioning"
@@ -167,6 +177,11 @@ class Resample(Stage[CompileContext, ResampleStep]):
     target (CSS needs oversample*bandwidth). RX-only conditioning."""
 
     name = "resample"
+    description = (
+        "Integer-ratio rate change (interpolation/decimation) with clean anti- "
+        "imaging taps - the way to reach a demod's samples-per-symbol floor or a "
+        "required stage input rate."
+    )
     from_level = Level.IQ
     to_level = Level.IQ
     family = "conditioning"
@@ -207,6 +222,10 @@ class ClockCorrect(Stage[CompileContext, ClockCorrectStep]):
     matters on long (multi-second) frames."""
 
     name = "clock_correct"
+    description = (
+        "Fractional resample by 1/(1+ppm): repair a known sample-clock error "
+        "(e.g. a +77 ppm dongle) before rate-sensitive stages."
+    )
     from_level = Level.IQ
     to_level = Level.IQ
     family = "conditioning"
@@ -388,6 +407,12 @@ class Agc(Stage[CompileContext, AgcStep]):
     feedforward -> peak_unity, feedback -> mean_mag_unity, power -> rms_unity."""
 
     name = "agc"
+    description = (
+        "Normalize amplitude to a declared statistic - mode picks it: "
+        "feedforward=peak, feedback=mean-magnitude, power=rms (what qam_demod and "
+        "squelch require). Bursty OOK/PPM should use ook_envelope(loop_bw=0) "
+        "instead, which normalizes per burst."
+    )
     from_level = Level.IQ
     to_level = Level.IQ
     family = "conditioning"
@@ -462,6 +487,11 @@ class Squelch(Stage[CompileContext, SquelchStep]):
     (otherwise it lifts the noise floor between bursts to meet the threshold)."""
 
     name = "squelch"
+    description = (
+        "Zero the stream below a power threshold (needs rms-normalized input: "
+        "pair with agc mode='power'). Gates idle noise between bursts so it "
+        "cannot masquerade as data downstream."
+    )
     from_level = Level.IQ
     to_level = Level.IQ
     family = "conditioning"
@@ -525,6 +555,11 @@ class Equalizer(Stage[CompileContext, EqualizerStep]):
     output amplitude is left UNKNOWN because CMA's steady state is approximate."""
 
     name = "equalizer"
+    description = (
+        "Blind CMA equalizer for constant-modulus signals through multipath. "
+        "Converges only on genuinely constant-modulus modulations; leave out "
+        "unless the constellation is visibly smeared."
+    )
     from_level = Level.IQ
     to_level = Level.IQ
     family = "conditioning"
@@ -547,6 +582,10 @@ class AmStep(Step):
 
 class Am(Stage[CompileContext, AmStep]):
     name = "am"
+    description = (
+        "AM envelope detector, IQ to real audio (audio level). For AM-carried "
+        "data riding an AM carrier, follow with analytic to return to IQ."
+    )
     from_level = Level.IQ
     to_level = Level.AUDIO
     family = "conditioning"
@@ -568,6 +607,11 @@ class FmDemodStep(Step):
 
 class FmDemod(Stage[CompileContext, FmDemodStep]):
     name = "fm_demod"
+    description = (
+        "Wideband FM discriminator, IQ to real audio - the road to subcarriers "
+        "(broadcast data rides here): follow with analytic, then translate to the "
+        "subcarrier and demod at its chip rate."
+    )
     from_level = Level.IQ
     to_level = Level.AUDIO
     family = "conditioning"
@@ -594,6 +638,10 @@ class AnalyticStep(Step):
 
 class Analytic(Stage[CompileContext, AnalyticStep]):
     name = "analytic"
+    description = (
+        "Real audio back to analytic IQ (Hilbert) so IQ-level stages can run on a "
+        "demodulated subcarrier band."
+    )
     from_level = Level.AUDIO
     to_level = Level.IQ
     family = "conditioning"

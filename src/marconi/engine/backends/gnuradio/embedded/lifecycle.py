@@ -14,7 +14,7 @@ GR-scheduler contract these blocks live by:
   demanding multiples (the failure class that motivated OutQueue).
 
 Two block classes intentionally stay outside this module: fixed small-ratio
-converters (css_map/css_demap — bounded demands, no pending state) and pure
+converters (css_demap — bounded demands, no pending state) and pure
 streaming pass-throughs (sym_strip — emits within each granted window).
 """
 

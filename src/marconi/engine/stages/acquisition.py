@@ -53,6 +53,12 @@ class PreambleSync(Stage[CompileContext, PreambleSyncStep]):
     rate 1.0 (stripping changes symbol count, not rate)."""
 
     name = "preamble_sync"
+    description = (
+        "Correlate a known complex preamble (corr_est) and strip pad+preamble, "
+        "derotating each burst by the estimated phase. Detection compares against "
+        "the preamble's ABSOLUTE energy: normalize first (agc) so the threshold "
+        "means what it says."
+    )
     from_level = Level.SYMBOLS
     to_level = Level.SYMBOLS
     family = "acquisition"
@@ -135,6 +141,11 @@ class Fll(Stage[CompileContext, FllStep]):
     whatever amplitude statistic it was handed."""
 
     name = "fll"
+    description = (
+        "Band-edge frequency-locked loop: pulls a residual carrier offset to ~0 "
+        "before a demod whose own loop cannot span it. For offsets beyond a few "
+        "percent of the symbol rate, translate first instead."
+    )
     from_level = Level.IQ
     to_level = Level.IQ
     family = "acquisition"
