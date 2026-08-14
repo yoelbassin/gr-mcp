@@ -27,7 +27,7 @@ def test_pilot_bins_beyond_fft_reach_rejected_at_construction() -> None:
     would starve that carrier's channel node forever (np.interp over an empty
     node kills the flowgraph on the first frame) and wrap negative indices to
     the opposite spectral edge inside the CFO estimate."""
-    with pytest.raises(ValueError, match="FFT"):
+    with pytest.raises(ValueError, match=r"bins \[-2, 66\] vs fft_len 64"):
         make_pilot_lattice_equalizer(
             FAKE_GR, **{**_lattice.eq_params(), "dc_search": 10}
         )
@@ -43,11 +43,13 @@ def test_the_carrier_past_the_widest_span_is_rejected_at_construction() -> None:
     # never lands on: the emitted carrier is then the ONLY term that reaches
     # bin 64, so this fails the moment the bound stops one below it.
     past = _lattice.Lattice(kmin=-31, n_carriers=63, dc_search=0)
-    with pytest.raises(ValueError, match="FFT"):
+    with pytest.raises(ValueError, match=r"bins \[1, 64\] vs fft_len 64"):
         make_pilot_lattice_equalizer(FAKE_GR, **past.eq_params())
     widest = _lattice.Lattice(kmin=-32, n_carriers=63, dc_search=0)
     blk = make_pilot_lattice_equalizer(FAKE_GR, **widest.eq_params())
-    assert blk._core.geom.emit.size == 63
+    _, spec = widest.make_spectra(40, seed=3)
+    out = drive(blk, spec, chunk=5, out_dtype=np.complex64)
+    assert out.size and out.size % widest.n_carriers == 0
 
 
 def test_locks_and_equalizes_with_frame_phase_discovery() -> None:

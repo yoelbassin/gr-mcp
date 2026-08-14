@@ -321,10 +321,14 @@ class DqpskSoftDemap(Stage[CompileContext, DqpskSoftDemapStep]):
 class OfdmCoherentSyncStep(Step):
     conv: Literal["ofdm_coherent_sync"] = "ofdm_coherent_sync"
     fft_len: StrictInt = Field(ge=1)
-    # ge=0: a negative cp_len sizes cp_symbol_sync's correlation window
-    # backwards, and its acquisition died on a numpy broadcast mismatch inside
-    # the worker rather than at the spec the caller could have retyped
-    cp_len: StrictInt = Field(ge=0)
+    # ge=1, NOT the sibling's ge=0: this step compiles to cp_symbol_sync, whose
+    # acquisition correlates over np.ones(cp_len), and numpy refuses an empty
+    # kernel ("v cannot be empty") - so a zero CP validated here and then killed
+    # the worker, and a negative one died a line earlier on a broadcast
+    # mismatch. A CP-correlation synchronizer with no CP is meaningless, not
+    # merely degenerate. The sibling's floor does not transfer: ofdm_frame_sync
+    # uses cp_len as a slice offset and tol=max(1, cp_len // 2), and survives 0.
+    cp_len: StrictInt = Field(ge=1)
     sym_len: StrictInt
     # ge=1: at zero the equalizer is structurally dead, not merely wrong - the
     # phase search loops over range(0) so its score stays -1.0, no

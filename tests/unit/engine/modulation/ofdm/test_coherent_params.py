@@ -53,7 +53,7 @@ def test_edge_pilot_within_dc_search_reach_rejected() -> None:
         "n_carriers": 56,
         "pilot_carriers": [-32, -23, -22, -21],
     }
-    with pytest.raises(ValidationError, match="FFT"):
+    with pytest.raises(ValidationError, match=r"bins \[-2, 58\] vs fft_len 64"):
         OfdmCoherentSyncStep.model_validate(bad)
 
 
@@ -131,7 +131,7 @@ def test_a_carrier_span_wider_than_its_fft_is_rejected() -> None:
     # never ran the equalizer; driven, it locks at delta=0 and _equalize_frame
     # raises "index 64 is out of bounds" on frame 1. The synthetic side cannot
     # even build a spectrum for it.
-    with pytest.raises(ValidationError, match="FFT"):
+    with pytest.raises(ValidationError, match=r"bins \[0, 64\] vs fft_len 64"):
         OfdmCoherentSyncStep.model_validate(
             {**_good(), "kmin": -32, "n_carriers": 64, "dc_search": 0}
         )
@@ -142,7 +142,7 @@ def test_the_top_emitted_carrier_is_inside_the_dc_search_reach() -> None:
     # the block actually emits. At dc_search=1 this geometry validated, built,
     # locked on a genuinely +1-offset signal and then indexed bin 64 of a
     # 64-bin FFT — a worker IndexError from a spec validate_modem called valid.
-    with pytest.raises(ValidationError, match="FFT"):
+    with pytest.raises(ValidationError, match=r"bins \[0, 64\] vs fft_len 64"):
         OfdmCoherentSyncStep.model_validate(
             {**_good(), "kmin": -31, "n_carriers": 62, "dc_search": 1}
         )
@@ -177,7 +177,7 @@ def test_the_widest_admissible_span_locks_and_equalizes() -> None:
         # co-varied so the equality check that used to answer for it passes
         ({"fft_len": 1 << 36, "sym_len": (1 << 36) + 16}, "acquisition"),
         # cp_symbol_sync's acquisition dies on a numpy broadcast mismatch
-        ({"cp_len": -16, "sym_len": 48}, r"(?s)cp_len.*greater than or equal to 0"),
+        ({"cp_len": -16, "sym_len": 48}, r"(?s)cp_len.*greater than or equal to 1"),
         # structurally dead block: the phase search loops over range(0), its
         # score stays -1.0, no lock_min_score is ever cleared, and nothing is
         # emitted at all under status ok
@@ -201,6 +201,25 @@ def test_a_geometry_the_worker_cannot_survive_is_refused_at_the_spec(
     # sibling OfdmDemodStep refused all three at the spec.
     with pytest.raises(ValidationError, match=reason):
         OfdmCoherentSyncStep.model_validate({**_good(), **patch})
+
+
+def test_a_cp_correlation_sync_needs_a_cyclic_prefix_to_correlate() -> None:
+    # The exact lower edge: cp_len=0 validated, then killed the worker with
+    # numpy's "v cannot be empty" out of np.convolve(prod, np.ones(cp_len)) —
+    # cp_symbol_sync correlates the prefix against its copy, so a zero-length
+    # CP is not a degenerate case of the measurement, it is the absence of the
+    # thing measured. The sibling ofdm_frame_sync survives 0 (slice offset and
+    # tol=max(1, cp_len // 2) only), which is why its floor stays where it is.
+    with pytest.raises(
+        ValidationError, match=r"(?s)cp_len.*greater than or equal to 1"
+    ):
+        OfdmCoherentSyncStep.model_validate({**_good(), "cp_len": 0, "sym_len": 64})
+    assert (
+        OfdmCoherentSyncStep.model_validate(
+            {**_good(), "cp_len": 1, "sym_len": 65}
+        ).cp_len
+        == 1
+    )
 
 
 def test_the_acquisition_buffer_is_bounded_by_the_frame_cap() -> None:
