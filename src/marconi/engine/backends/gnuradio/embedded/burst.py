@@ -67,6 +67,24 @@ _BLOCK_WINDOW_MARGIN = 2  # ... and holds that many of the widest window, so
 # extension mode="nearest" supplies when the window spans the whole block
 _FLOOR_UP = 1.0 / 64.0  # EMA rate when the floor estimate rises
 _FLOOR_DOWN = 1.0 / 4.0  # faster fall: never let a burst inflate the floor
+# The floor reference and _RISE_RATIO are a calibrated PAIR: the median of a
+# half-normal noise block sits at 0.67 sigma, so the 4x bar rejects noise -
+# a bare low percentile (p10 = 0.125 sigma) floods idle with false rises.
+# But any block >= 50% "on" (continuous OOK, Manchester chips, a capture
+# trimmed to the burst) makes the median THE SIGNAL LEVEL, the bar then sits
+# 4x above an envelope that never exceeds it, and 12/16 clean captures
+# decoded to all zeros with status ok. The discriminator asks whether
+# NEARLY HALF the block sits 16x under the median (p40 < median/16): true
+# for any >= 50%-duty on/off block (the off-chips), false for noise (half-
+# normal p40 = 0.52 sigma vs median/16 = 0.042 sigma) AND false for a noise
+# block containing a few exact zeros - a med/p10 ratio test misfired there,
+# because p10 alone collapses on a handful of zeros. When bimodal, the
+# reference is the off-chip level, floored at median/16 (a clean burst's
+# off-chips can be EXACTLY zero), keeping the detection bar at most
+# median/4, which a continuous signal still clears 4x over.
+_FLOOR_LOW_PCTL = 10.0
+_FLOOR_MODE_PCTL = 40.0
+_FLOOR_MEDIAN_FRAC = 1.0 / 16.0
 _RISE_RATIO = 4.0  # burst starts above 4x floor ...
 _RISE_CHIPS = 1  # ... sustained this many chips (rejects single-sample spikes)
 _FALL_RATIO = 2.0  # and ends below 2x floor ...
@@ -157,11 +175,18 @@ class BurstSamplerCore:
 
     def process_block(self, block: npt.NDArray[np.float32]) -> None:
         g = self.geom
-        med = float(np.median(block))
+        med, p40, p10 = (
+            float(x)
+            for x in np.percentile(block, [50.0, _FLOOR_MODE_PCTL, _FLOOR_LOW_PCTL])
+        )
+        if p40 < med * _FLOOR_MEDIAN_FRAC:
+            ref = max(p10, med * _FLOOR_MEDIAN_FRAC)
+        else:
+            ref = med
         if self._floor == 0.0:
-            self._floor = med if med > 0.0 else 1e-9
-        rate = _FLOOR_UP if med > self._floor else _FLOOR_DOWN
-        self._floor += rate * (med - self._floor)
+            self._floor = ref if ref > 0.0 else 1e-9
+        rate = _FLOOR_UP if ref > self._floor else _FLOOR_DOWN
+        self._floor += rate * (ref - self._floor)
         active = block > _RISE_RATIO * self._floor
         calm = trailing_mean(block, g.fall_smooth) < _FALL_RATIO * self._floor
         base = self._abs

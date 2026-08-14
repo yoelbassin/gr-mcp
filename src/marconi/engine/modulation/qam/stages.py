@@ -6,6 +6,7 @@ from typing import Any, Literal
 from pydantic import Field, StrictInt
 
 from marconi.engine.compile.compile_context import CompileContext
+from marconi.engine.modulation.psk.stages import _matched_filter_taps_problem
 from marconi.engine.stages.base import Stage
 from marconi.engine.types.bounds import MAX_FILTER_TAPS
 from marconi.engine.types.descriptor import Amplitude, Carrier, Descriptor
@@ -60,6 +61,9 @@ class QamDemod(Stage[CompileContext, QamDemodStep]):
         )
         b.chain("symbol_sync_cc", sps=b.sps, loop_bw=step.loop_bw)
         b.chain("constellation_receiver_cb", scheme="qam", order=int(step.order))
+
+    def validate_input_sps(self, step: QamDemodStep, sps: float) -> str | None:
+        return _matched_filter_taps_problem(step.span, sps)
 
     def out_descriptor(self, in_desc: Descriptor, step: QamDemodStep) -> Descriptor:
         return Descriptor(

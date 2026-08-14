@@ -3,10 +3,12 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
+import pytest
 from integration.engine.quality._capture import make_clean_capture
 
 from marconi.engine.backends.gnuradio.runner import ensure_worker_warm
 from marconi.engine.coding.stages_bits import BlockCodeStep, SyncWordStep
+from marconi.engine.compile.errors import CompileError
 from marconi.engine.io.bitfile import write_bits
 from marconi.engine.io.source import SourceSlice
 from marconi.engine.modulation.css.stages import ChirpSyncStep, DechirpStep
@@ -79,10 +81,28 @@ def test_noise_only_capture_is_not_called_decoded(tmp_path: Path) -> None:
     assert _not_trusted(res), res.quality
 
 
-def test_wrong_symbol_rate_is_not_called_decoded(tmp_path: Path) -> None:
+def test_wrong_symbol_rate_is_refused_at_compile(tmp_path: Path) -> None:
+    # the squeeze this gate was built on (1.6x rate = 2.5 delivered sps) is
+    # now refused BEFORE the run: Gardner on the rectangular discriminator
+    # output decodes at chance below 4 sps (measured BER 0.480 at 2-3 sps
+    # with status ok), so the floor is the earlier and better refusal
     iq = make_clean_capture(tmp_path)
-    res = _run(_soft_rx(1.6), iq, tmp_path / "rx")
-    assert _not_trusted(res), res.quality
+    with pytest.raises(CompileError, match="samples per symbol"):
+        _run(_soft_rx(1.6), iq, tmp_path / "rx")
+
+
+def test_subharmonic_rate_lock_is_a_documented_blind_spot(tmp_path: Path) -> None:
+    # measured landscape with the sps>=4 floor in place: a mildly-wrong
+    # nominal (0.65..0.8x true) is PULLED TO THE TRUE RATE by the timing
+    # loop (deviation 1.5 samples), so "decoded" there is honest; a 2x-wrong
+    # nominal locks the subharmonic and emits genuinely clean decisions of
+    # every-other-symbol - aliased bits no stream statistic can see (the
+    # quality layer's own documented limit). Pinned so a future guard or
+    # decision-margin change gets a signal, not because this is desirable.
+    iq = make_clean_capture(tmp_path)
+    res = _run(_soft_rx(0.5), iq, tmp_path / "rx")
+    assert res.quality is not None
+    assert res.quality.verdict == "decoded"
 
 
 def test_clean_control_is_decoded(tmp_path: Path) -> None:

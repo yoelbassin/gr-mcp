@@ -207,6 +207,11 @@ def _check_stage_input_rate(s: _StepInput) -> str | None:
     return None if problem is None else f"stage '{s.step.conv}': {problem}"
 
 
+def _check_stage_input_sps(s: _StepInput) -> str | None:
+    problem = s.stage.validate_input_sps(s.step, s.rate / s.symbol_rate)
+    return None if problem is None else f"stage '{s.step.conv}': {problem}"
+
+
 # Every contract a stage's input must satisfy, each independently answerable
 # from a _StepInput. Order is the order a reader meets them: what the stream is,
 # then how it is scaled, then what the stage says for itself.
@@ -219,6 +224,7 @@ _INPUT_CHECKS: tuple[Callable[[_StepInput], str | None], ...] = (
     _check_min_sps,
     _check_stage_input,
     _check_stage_input_rate,
+    _check_stage_input_sps,
 )
 
 

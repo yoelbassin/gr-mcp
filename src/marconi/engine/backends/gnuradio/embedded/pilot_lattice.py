@@ -114,10 +114,16 @@ class LatticeGeometry:
                 "carrier span must straddle DC (kmin <= 0 <= kmin + n_carriers): "
                 f"kmin={kmin}, n_carriers={n_carriers}"
             )
+        if dc_search < 0:
+            # range(-dc_search, dc_search+1) is empty for a negative value:
+            # the guard below inverts and _try_lock argmins an empty sequence
+            raise ValueError(f"dc_search must be >= 0, got {dc_search}")
         dc0 = fft_len // 2
         pilots = [k for s in lattice.pilot_sets for k in s]
         lo = min([kmin, *pilots, *lattice.fp_carriers])
-        hi = max([kmin + n_carriers, *pilots, *lattice.fp_carriers])
+        # the last active carrier is kmin + n_carriers - 1 (same rule as the
+        # step validator, which rejected a legal full-FFT span by one bin)
+        hi = max([kmin + n_carriers - 1, *pilots, *lattice.fp_carriers])
         if lo + dc0 - dc_search < 0 or hi + dc0 + dc_search >= fft_len:
             raise ValueError(
                 "carrier bins must stay inside the FFT across the DC search: "

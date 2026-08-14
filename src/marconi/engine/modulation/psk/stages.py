@@ -53,6 +53,17 @@ class SymbolSyncStep(Step):
 
     @model_validator(mode="after")
     def _ok(self) -> "SymbolSyncStep":
+        ntaps = round(int(self.sps) * self.span) + 1
+        if ntaps > MAX_FILTER_TAPS:
+            # the bound is the PRODUCT: capping span alone validated
+            # sps=4096 x span=8192 into a 33,554,433-tap design
+            raise PydanticCustomError(
+                "value_error",
+                "the RRC is round(sps*span)+1 = {ntaps} taps, over the "
+                "{cap}-tap budget; reduce span or resample toward fewer "
+                "samples per symbol",
+                {"ntaps": ntaps, "cap": MAX_FILTER_TAPS},
+            )
         if not 0.0 < self.alpha <= 1.0:
             raise PydanticCustomError("value_error", "alpha must be in (0, 1]")
         if self.loop_bw == 0.0 and self.alpha < 0.1:
@@ -62,6 +73,23 @@ class SymbolSyncStep(Step):
                 "which vanishes without excess bandwidth: alpha must be >= 0.1",
             )
         return self
+
+
+def _matched_filter_taps_problem(span: int, sps: float) -> str | None:
+    """psk_demod/qam_demod have no sps field - sps is rate/symbol_rate, a
+    free caller choice with only a floor checked - so a 2.048 Msps capture
+    of a 50 baud signal asked for a 450,561-tap RRC and died 12.6 s later on
+    a raw GR scheduler message naming a block id, from a spec validate_modem
+    had called valid."""
+    ntaps = round(sps * span) + 1
+    if ntaps <= MAX_FILTER_TAPS:
+        return None
+    return (
+        f"the RRC matched filter would need {ntaps} taps at {sps:g} samples "
+        f"per symbol (span {span}; budget {MAX_FILTER_TAPS}); channelize or "
+        f"resample the input toward "
+        f"{max(2, MAX_FILTER_TAPS // (2 * span))} samples per symbol first"
+    )
 
 
 SYMBOL_SYNC_OPEN_LOOP_HINT = (
@@ -290,6 +318,9 @@ class PskDemod(Stage[CompileContext, PskDemodStep]):
         return Descriptor(
             Level.SYMBOLS, ItemType.C, Carrier.SOFT, order=int(step.order)
         )
+
+    def validate_input_sps(self, step: PskDemodStep, sps: float) -> str | None:
+        return _matched_filter_taps_problem(step.span, sps)
 
     def output_item_rate(
         self, step: PskDemodStep, in_rate: float, symbol_rate: float

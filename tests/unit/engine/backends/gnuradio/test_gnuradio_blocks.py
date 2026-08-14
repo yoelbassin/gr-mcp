@@ -52,3 +52,46 @@ def test_qam_const_rejects_unknown_order() -> None:
 def test_ctx_exposes_trellis() -> None:
     ctx = _modules()
     assert hasattr(ctx.trellis, "fsm") and hasattr(ctx.trellis, "viterbi_combined_fb")
+
+
+def test_preamble_scale_sensitivity_is_a_documented_limitation() -> None:
+    """THRESHOLD_ABSOLUTE compares against the ideal preamble's absolute
+    energy, so detection depends on input scale: measured 0 detections at
+    gain 0.1, exactly 1 (correct) at 1.0, and a flood at gain 10. Pinned so
+    a threshold-method change gets a signal: THRESHOLD_DYNAMIC is scale-
+    invariant but shifts the tag phase/timing calibration the strip lane is
+    built on (measured: mis-derotated payloads, 128+ symbols lost), so the
+    shipped contract is normalize-first - see the corr_est_cc factory note."""
+    import numpy as np
+
+    ctx = _modules()
+    rng = np.random.default_rng(0)
+    pre = np.exp(2j * np.pi * rng.random(32)).astype(np.complex64)
+    payload = np.exp(2j * np.pi * rng.random(4000)).astype(np.complex64)
+    payload[64 : 64 + 32] = pre
+    counts = []
+    for gain in (0.1, 1.0, 10.0):
+        blk = GR_BLOCKS["corr_est_cc"](
+            ctx,
+            BlockParams(
+                {
+                    "preamble_i": pre.real.astype(float).tolist(),
+                    "preamble_q": pre.imag.astype(float).tolist(),
+                    "sps": 1,
+                    "mark_delay": 0,
+                    "threshold": 0.9,
+                }
+            ),
+        )
+        gr, blocks = ctx.gr, ctx.blocks
+        tb = gr.top_block()
+        src = blocks.vector_source_c((payload * gain).tolist(), False)
+        dbg = blocks.tag_debug(gr.sizeof_gr_complex, "p")
+        dbg.set_display(False)
+        dbg.set_save_all(True)
+        tb.connect(src, blk, dbg)
+        tb.run()
+        counts.append(sum(1 for t in dbg.current_tags() if "corr_est" in str(t.key)))
+    assert counts[1] == 1, counts  # unit scale: exactly the one real preamble
+    assert counts[0] == 0, counts  # under-scale: blind (the documented cost)
+    assert counts[2] > 10, counts  # over-scale: floods (the documented cost)

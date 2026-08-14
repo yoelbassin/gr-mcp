@@ -62,7 +62,7 @@ class OokEnvelope(Stage[CompileContext, OokEnvelopeStep]):
         "sliding-window agc steps its gain mid-burst on pulsed signals and "
         "corrupts fixed-threshold slicing. accepts_amplitude and "
         "min_input_sps are conditional on loop_bw (compile-enforced): "
-        "closed-loop needs normalized amplitude and sps>=2; open-loop is "
+        "closed-loop needs normalized amplitude and sps>=4; open-loop is "
         "amplitude-agnostic down to sps=1."
     )
     from_level = Level.IQ
@@ -72,7 +72,11 @@ class OokEnvelope(Stage[CompileContext, OokEnvelopeStep]):
     # mean-mag statistic is not gain-invariant for an on/off envelope
     # (0.51/0.00/1.00), whose duty cycle sets the mean.
     accepts_amplitude = frozenset({Amplitude.PEAK_UNITY, Amplitude.RMS_UNITY})
-    min_input_sps = 2.0
+    # 4.0 for the closed loop: the envelope is a RECTANGULAR waveform, where
+    # Gardner's TED is degenerate at 2 sps (measured BER 0.480 at sps 2 and
+    # 3, 0.000 at 4 - same experiment as fsk); open-loop re-acquires per
+    # burst and genuinely works down to 1.
+    min_input_sps = 4.0
     step_model = OokEnvelopeStep
 
     def accepts_amplitude_for(

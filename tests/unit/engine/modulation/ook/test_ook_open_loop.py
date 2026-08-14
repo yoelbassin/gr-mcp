@@ -36,7 +36,7 @@ from marconi.engine.types.step import Step
 from marconi.mcp.tools import validate_modem
 
 IQ = Descriptor(Level.IQ, ItemType.C)
-_SPS = 2
+_SPS = 4  # the closed-loop floor: Gardner on a rectangular envelope needs 4
 _SAMPLE_RATE = float(_SPS)
 _SYMBOL_RATE = 1.0
 _PAYLOAD = "10110010" * 8

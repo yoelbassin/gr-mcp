@@ -49,7 +49,12 @@ class Fsk(Stage[CompileContext, FskStep]):
     from_level = Level.IQ
     to_level = Level.SYMBOLS
     family = "fsk"
-    min_input_sps = 2.0
+    # 4.0, not the Gardner-generic 2.0: the discriminator output is a
+    # RECTANGULAR waveform (no excess-bandwidth shaping), where Gardner's
+    # TED is degenerate at 2 sps - measured BER 0.480 median over 10 seeds
+    # at sps 2 AND 3 on noiseless input with status ok, 0.000 at 4. The
+    # RRC-shaped psk_demod genuinely works at 2 and keeps its floor.
+    min_input_sps = 4.0
     step_model = FskStep
 
     def emit_rx(self, b: CompileContext, step: FskStep) -> None:

@@ -528,3 +528,29 @@ def test_detects_bursts_at_every_sps_the_factory_accepts(sps: int) -> None:
     out = drive(blk, env, chunk=_FLOOR_BLOCK, out_dtype=np.float32)
     assert blk.diagnostics["bursts_flushed"] == 1
     assert float(np.max(out)) > 0.5
+
+
+def test_continuous_ook_with_a_loud_first_block_still_detects() -> None:
+    # the floor seeded from np.median of the FIRST block: any capture whose
+    # first block is >= 50% "on" (continuous OOK, Manchester chips, a capture
+    # trimmed to the burst) made the median THE SIGNAL LEVEL, the rise bar
+    # sat 4x above an envelope that never exceeds 1.0, and 12/16 clean
+    # captures decoded to ALL ZEROS with status ok and no hint
+    rng = np.random.default_rng(0)
+    bits = "".join(rng.choice(list("01"), 400))
+    chips = np.repeat(
+        np.asarray([int(b) for b in bits], np.float32), 8
+    )  # ~50% duty from sample 0
+    blk = make_burst_sampler(FAKE_GR, sps=8.0)
+    blk.eof_probe = _finality_probe(chips.size)
+    out = drive(blk, chips + 0.02, chunk=4096, out_dtype=np.float32)
+    # a continuous stream is one burst that runs to EOF: committed truncated
+    assert (
+        blk.diagnostics["bursts_flushed"] + blk.diagnostics["bursts_truncated_at_eof"]
+        >= 1
+    )
+    assert out.size > 0
+    hard = (out > 0.5).astype(np.uint8)
+    want = np.asarray([int(b) for b in bits], np.uint8)
+    n = min(hard.size, want.size)
+    assert n > 300 and float((hard[:n] != want[:n]).mean()) < 0.02

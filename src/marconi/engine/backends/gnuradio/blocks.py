@@ -482,6 +482,17 @@ GR_BLOCKS: dict[str, Callable[[_GrModules, BlockParams], Any]] = {
     "complex_to_float": lambda c, p: c.blocks.complex_to_float(1),
     "rms_cf": lambda c, p: c.blocks.rms_cf(p.f("alpha")),
     "divide_ff": lambda c, p: c.blocks.divide_ff(1),
+    # THRESHOLD_ABSOLUTE, pinned deliberately after measuring BOTH options.
+    # ABSOLUTE compares against the ideal preamble's absolute energy, so
+    # detection is scale-SENSITIVE (measured: the same threshold=0.9 spec
+    # gave 0 detections at gain 0.1, 1 correct at 1.0, 1920 at 10 - pinned
+    # in test_preamble_scale_sensitivity_is_a_documented_limitation).
+    # THRESHOLD_DYNAMIC is scale-invariant but was measured to shift the
+    # tag's phase/timing calibration the whole strip lane is built on:
+    # sym_strip's derotation came out rotated by the injected offset and the
+    # BER0 round-trips lost 128+ payload symbols. Until the strip lane is
+    # recalibrated for DYNAMIC, the operator's contract is: normalize the
+    # stream (agc) so the preamble arrives near unit power.
     "corr_est_cc": lambda c, p: c.digital.corr_est_cc(
         _complex_syms(p.floats("preamble_i"), p.floats("preamble_q")),
         p.i("sps"),

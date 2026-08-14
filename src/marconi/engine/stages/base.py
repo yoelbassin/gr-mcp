@@ -159,6 +159,16 @@ class Stage(ABC, Generic[B, S]):
         fails the compile."""
         return None
 
+    def validate_input_sps(self, step: S, sps: float) -> str | None:
+        """A stage-specific CEILING against the compiled samples-per-symbol
+        (min_input_sps covers the floor). Exists for stages whose internal
+        filter is sized by sps the caller never typed: psk_demod's RRC is
+        round(sps*span)+1 taps, so a 2.048 Msps capture of a 50 baud signal
+        asked for 450,561 taps and died on a raw GR scheduler message - from
+        a spec validate_modem had called valid. A returned message fails the
+        compile."""
+        return None
+
     def retry_hints(self, step: S, path_convs: frozenset[str]) -> list[str]:
         """Actionable retry guidance when a decode's verdict fell short of
         'decoded', owned by the stage whose parameters the retry would change

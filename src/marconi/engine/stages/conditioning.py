@@ -9,6 +9,7 @@ from pydantic import Field, StrictInt, model_validator
 from pydantic_core import PydanticCustomError
 
 from marconi.engine.compile.compile_context import CompileContext
+from marconi.engine.compile.errors import CompileError
 from marconi.engine.stages.base import Stage
 from marconi.engine.types.bounds import (
     MAX_DECIM,
@@ -64,14 +65,24 @@ class InvertStep(Step):
     conv: Literal["invert"] = "invert"
 
 
-# The transition is allowed to widen past the passband once the passband is
-# narrow — a channel this much finer than the input rate wants decimation
-# first — and channelization_problem's floor refuses the rest.
+# Taps budget: firdes sizes the FIR as roughly rate/transition, so the
+# transition may never collapse below rate/4096 (the bandwidth_hz floor in
+# channelization_problem refuses the rest).
 _MAX_TRANSITION_TAPS = 4096
 
 
-def _transition_hz(bandwidth_hz: float, rate: float) -> float:
-    return max(bandwidth_hz / 2.0, rate / _MAX_TRANSITION_TAPS)
+def _transition_hz(bandwidth_hz: float, rate: float, decim: int) -> float:
+    """Transition width that lands the stopband edge ON the decimated
+    output's Nyquist (cutoff bw/2 + transition = rate/(2*decim)). Tied to the
+    passband instead (bw/2), the stopband edge sat at bw - inside the fold-in
+    region - and energy outside the channel survived decimation attenuated by
+    only 22.5 dB at the guard's own legal boundary (measured: an out-of-band
+    tone became the PEAK of the channelized spectrum at decim=4; this formula
+    measured 67 dB on the same input). The taps floor takes over when
+    bandwidth approaches the output rate and the exact-Nyquist transition
+    collapses toward zero."""
+    exact = max((rate / decim - bandwidth_hz) / 2.0, 0.0)
+    return max(exact, rate / _MAX_TRANSITION_TAPS)
 
 
 class Channelize(Stage[CompileContext, ChannelizeStep]):
@@ -93,7 +104,7 @@ class Channelize(Stage[CompileContext, ChannelizeStep]):
             decim=step.decim,
             center=step.center_hz,
             cutoff=step.bandwidth_hz / 2.0,
-            transition=_transition_hz(step.bandwidth_hz, b.rate),
+            transition=_transition_hz(step.bandwidth_hz, b.rate, step.decim),
             rate=b.rate,
         )
 
@@ -261,6 +272,25 @@ class AgcStep(Step):
         return self
 
 
+def _iir_coeff(field: str, symbols: float, sps: float) -> float:
+    """1/(symbols*sps) as a single-pole IIR rate, which must land in (0, 1].
+    The step model cannot bound it alone - b.sps is a compile-time fact - and
+    unclamped it was a NaN factory: rms_cf at alpha 2 rings 0 -> 1.4 -> 0 and
+    at 4+ emits 50% non-finite under status ok, which symbol_sync then
+    amplified to a 3.4 GB sink write before the deadline fired. GR's own
+    blocks that DO validate (pwr_squelch) rejected it as a backend
+    construction error naming a block id - a spec error wearing the wrong
+    cause."""
+    coeff = 1.0 / (symbols * sps)
+    if coeff > 1.0:
+        raise CompileError(
+            f"{field} {symbols:g} spans under one sample at {sps:g} samples "
+            f"per symbol (per-sample rate {coeff:g} > 1); raise {field} to "
+            f"at least {1.0 / sps:g} symbols"
+        )
+    return coeff
+
+
 def _agc_feedforward(b: CompileContext, p: AgcStep) -> None:
     b.chain(
         "feedforward_agc_cc",
@@ -272,8 +302,8 @@ def _agc_feedforward(b: CompileContext, p: AgcStep) -> None:
 def _agc_feedback(b: CompileContext, p: AgcStep) -> None:
     b.chain(
         "agc2_cc",
-        attack_rate=1.0 / (p.attack_symbols * b.sps),
-        decay_rate=1.0 / (p.decay_symbols * b.sps),
+        attack_rate=_iir_coeff("attack_symbols", p.attack_symbols, b.sps),
+        decay_rate=_iir_coeff("decay_symbols", p.decay_symbols, b.sps),
         reference=p.reference,
         max_gain=p.max_gain,
     )
@@ -294,7 +324,7 @@ _RMS_FLOOR = 1e-20
 
 def _agc_power(b: CompileContext, p: AgcStep) -> None:
     src = b.require_tail()
-    alpha = 1.0 / (p.window_symbols * b.sps)
+    alpha = _iir_coeff("window_symbols", p.window_symbols, b.sps)
     c2f = b.add("complex_to_float")
     rms = b.add("rms_cf", alpha=alpha)
     b.connect(src, c2f)
@@ -442,7 +472,7 @@ class Squelch(Stage[CompileContext, SquelchStep]):
         b.chain(
             "pwr_squelch_cc",
             threshold_db=step.threshold_db,
-            alpha=1.0 / (step.alpha_symbols * b.sps),
+            alpha=_iir_coeff("alpha_symbols", step.alpha_symbols, b.sps),
             ramp=round(step.ramp_symbols * b.sps),
             gate=False,
         )
@@ -461,8 +491,16 @@ class EqualizerStep(Step):
         description="CMA adaptation rate (mu); larger converges "
         "faster and tracks worse",
     )
+    # le=4: GR's calc_soft_dec LLR table is exact to |z| ~ 8 and collapses
+    # NON-monotonically beyond (measured: LLR 5.34 at |z|=10, 0.040 at 100 -
+    # identical to 0.01), and modulus drives |y| straight to it. 4 keeps a 2x
+    # margin; hard slicing and scale-invariant stats are unaffected either
+    # way, a sum-product decoder fed the collapsed LLRs is not.
     modulus: float = Field(
-        default=1.0, description="target constant modulus the taps drive |y| toward"
+        default=1.0,
+        gt=0.0,
+        le=4.0,
+        description="target constant modulus the taps drive |y| toward",
     )
 
     @model_validator(mode="after")

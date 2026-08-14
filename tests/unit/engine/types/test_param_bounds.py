@@ -137,7 +137,6 @@ _PHYSICAL: frozenset[str] = frozenset(
         "channelize.center_hz",
         "clock_correct.ppm",
         "differential_demod.rotate",
-        "equalizer.modulus",
         "equalizer.step_size",
         "fll.loop_bw",
         "fm_demod.deviation",

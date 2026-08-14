@@ -107,3 +107,25 @@ def test_warmup_below_the_calibration_geometry_is_rejected() -> None:
     with pytest.raises(ValidationError):
         OfdmCoherentSyncStep.model_validate({**_good(), "warmup_syms": 7})
     assert OfdmCoherentSyncStep.model_validate({**_good(), "warmup_syms": 8})
+
+
+def test_negative_dc_search_is_rejected() -> None:
+    # range(-dc_search, dc_search+1) is EMPTY for a negative value, so the
+    # out-of-FFT guard inverted (accepting pilots the positive twin rejects)
+    # and _try_lock crashed on argmin of an empty sequence
+    with pytest.raises(ValidationError):
+        OfdmCoherentSyncStep.model_validate({**_good(), "dc_search": -8})
+
+
+def test_full_fft_carrier_span_is_legal() -> None:
+    # span treated kmin + n_carriers as an occupied bin; the last active
+    # carrier is kmin + n_carriers - 1, so a legal full-FFT geometry
+    # (carriers -32..31 in a 64-point FFT) was rejected by one bin
+    good = {
+        **_good(),
+        "kmin": -32,
+        "n_carriers": 64,
+        "dc_search": 0,
+        "pilot_carriers": [-24, -23, -22, -21],
+    }
+    assert OfdmCoherentSyncStep.model_validate(good).n_carriers == 64

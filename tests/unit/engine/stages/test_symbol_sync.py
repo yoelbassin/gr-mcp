@@ -160,3 +160,30 @@ def test_symbol_sync_output_carries_soft_iq() -> None:
         Descriptor(Level.IQ, ItemType.C, carrier=Carrier.HARD), SymbolSyncStep(sps=_SPS)
     )
     assert out.item_type == "c"
+
+
+def test_rrc_length_is_bounded_as_a_product() -> None:
+    # the RRC is round(sps*span)+1 taps; MAX_FILTER_TAPS bounded span ALONE,
+    # so sps=4096 x span=8192 validated into a 33,554,433-tap design
+    import pytest
+    from pydantic import ValidationError
+
+    from marconi.engine.modulation.psk.stages import SymbolSyncStep
+
+    with pytest.raises(ValidationError, match="taps"):
+        SymbolSyncStep(conv="symbol_sync", sps=4096, span=8192)
+
+
+def test_free_sps_demods_bound_their_matched_filter() -> None:
+    # psk_demod/qam_demod have no sps field - sps is rate/symbol_rate, a free
+    # caller choice - so a 2.048 Msps capture of a 50 baud signal asked for a
+    # 450,561-tap RRC and died 12.6s later on a raw GR scheduler message
+    # naming a block id, from a spec validate_modem called valid
+    from marconi.engine.stages.registry import stage_registry
+
+    for name, order in (("psk_demod", 4), ("qam_demod", 16)):
+        stage = stage_registry()[name]
+        step = stage.step_model.model_validate({"conv": name, "order": order})
+        msg = stage.validate_input_sps(step, 40_960.0)
+        assert msg is not None and "taps" in msg, name
+        assert stage.validate_input_sps(step, 8.0) is None, name

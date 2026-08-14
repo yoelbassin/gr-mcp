@@ -120,3 +120,19 @@ def test_equalizer_rejects_invalid_params() -> None:
     ):
         with pytest.raises(ValidationError):
             model.model_validate(bad)
+
+
+def test_modulus_is_capped_at_the_soft_decoder_linear_range() -> None:
+    # GR's calc_soft_dec is exact to |z| ~ 8 and collapses NON-MONOTONICALLY
+    # beyond (measured: LLR 5.34 at |z|=10, 0.04 at |z|=100 - identical to
+    # |z|=0.01), and equalizer.modulus drives |y| straight to it. 4 keeps a
+    # 2x margin; hard slicing and scale-invariant stats are unaffected either
+    # way, a sum-product LDPC fed the collapsed LLRs is not.
+    import pytest
+    from pydantic import ValidationError
+
+    from marconi.engine.stages.conditioning import EqualizerStep
+
+    with pytest.raises(ValidationError):
+        EqualizerStep(conv="equalizer", modulus=100.0)
+    assert EqualizerStep(conv="equalizer", modulus=4.0).modulus == 4.0

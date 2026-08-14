@@ -309,7 +309,9 @@ class OfdmCoherentSyncStep(Step):
     n_frame_syms: StrictInt
     n_carriers: StrictInt
     kmin: StrictInt
-    dc_search: StrictInt
+    # ge=0: range(-dc_search, dc_search+1) is EMPTY for a negative value, so
+    # the out-of-FFT guard inverted and _try_lock crashed on an empty argmin
+    dc_search: StrictInt = Field(ge=0)
     # ge=8: LOCK_MIN_RATIO_DEFAULT's noise calibration only holds from 8
     # warmup symbols up (see primitives.py) - below it the ratio's noise
     # distribution rises over the bar and pure AWGN locks
@@ -330,7 +332,10 @@ class OfdmCoherentSyncStep(Step):
     def _geometry(self) -> "OfdmCoherentSyncStep":
         n = sum(self.pilot_lens)
         dc0 = self.fft_len // 2
-        span = [self.kmin, self.kmin + self.n_carriers]
+        # the last ACTIVE carrier is kmin + n_carriers - 1; treating the
+        # one-past-the-end index as occupied rejected a legal full-FFT
+        # geometry (carriers -32..31 in a 64-point FFT) by one bin
+        span = [self.kmin, self.kmin + self.n_carriers - 1]
         lo = min(span + self.pilot_carriers + self.fp_carriers)
         hi = max(span + self.pilot_carriers + self.fp_carriers)
         checks = {
