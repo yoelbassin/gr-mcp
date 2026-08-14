@@ -63,10 +63,15 @@ class Tier(StrEnum):
 _TIERS: dict[QualityMetric, Tier] = {
     QualityMetric.SYNC_MATCHES: Tier.DECODE,
     QualityMetric.WORD_VALIDITY: Tier.DECODE,
-    # the pilot-lattice score measures the equalizer's consistency on the
-    # decoded lattice itself; the CP-correlation ratio below is a peak found
-    # BEFORE any symbol decision - this file's own tier rule ("a detector
-    # firing says nothing about the symbols decoded after it")
+    # the pilot-lattice score correlates warmup-buffer pilot ratios against
+    # the KNOWN transmitted pilot values on the hypothesized lattice —
+    # agreement with known symbols is a decode-grade claim (the sync-word
+    # rule) even though it is measured pre-lock, as a running max over
+    # acquisition attempts; that selection is priced by the producer, whose
+    # published LOCK_SCORE_MIN floor grows with the attempt count. The
+    # CP-correlation ratio below is an energy peak with no known-value
+    # check — this file's own tier rule ("a detector firing says nothing
+    # about the symbols decoded after it")
     QualityMetric.OFDM_PILOT_SCORE: Tier.DECODE,
     QualityMetric.PEAK_DOMINANCE: Tier.DECODE,
     QualityMetric.SOFT_CONFIDENCE: Tier.DECODE,
@@ -104,7 +109,10 @@ class QualityReport(BaseModel):
     # byte-identical, so no sequence of runs could converge. margin ranks
     # runs of the same path family; it is NOT a verdict (aliased decisions
     # rank high - see the subharmonic pin) and is None when the stream is
-    # untestable (discrete/saturated/absent).
+    # untestable (discrete/saturated/absent). An arm joins only from a lane
+    # that passes the polarity/whiteness gates its evidence path demands; a
+    # degenerate (one-sided/unwhitened) stream ranks at 0.0, below every
+    # gate-passing run.
     margin: float | None = None
 
 
@@ -660,12 +668,26 @@ def _lane_stats(x: npt.NDArray[np.float32], mask: npt.NDArray[np.bool_]) -> _Sof
     mag_mean = float(mag.mean())
     mag_spread = float(mag.std())
     signs = np.sign(x)
+    # The raw lagged sign mean looked like correlation and measures bias
+    # squared: iid 75/25 decisions read ~0.24 at every lag, unchanged by
+    # shuffling the stream, and froze whitened=False on an honest decode.
+    # Centering subtracts the lane's sign mean squared (p=0.75 covariance:
+    # -0.008..0.002); normalizing by the sign variance keeps a symbol-doubled
+    # 95/5-biased stream (m=0.9) at its balanced twin's ~0.5, where the bare
+    # covariance 0.5*(1-m^2) ~ 0.095 slips under the 0.15 bar and a
+    # wrong-rate decode mints a positive (bias under ~92% never splits the
+    # two: 90/10 measures 0.18 bare, still refused). Within the 0.02
+    # polarity floor the variance is >= 0.078, so the division never runs
+    # degenerate where the gates can pass.
+    m = float(np.mean(signs[mask]))
+    var = 1.0 - m * m
     worst_corr = 0.0
     k_ess = 1.0
     for lag in range(1, _SOFT_WHITENESS_LAGS + 1):
         pair = mask[lag:] & mask[:-lag]
         if pair.any():
-            corr = float(np.mean((signs[lag:] * signs[:-lag])[pair]))
+            raw = float(np.mean((signs[lag:] * signs[:-lag])[pair]))
+            corr = (raw - m * m) / var if var > 0.0 else 0.0
             worst_corr = max(worst_corr, abs(corr))
             k_ess += 2.0 * max(corr, 0.0)
     fit = fit_levels(xl)
@@ -781,7 +803,6 @@ def _soft_reading(
             ),
             None,
         )
-    x = x[finite]
     # An exact 0.0 is an erasure, not a measurement: depuncture scatters them
     # from its null_source and a hard gate emits them over silence. Scoring
     # them INVERTED the verdict on punctured paths — the erasure spike at 0
@@ -791,9 +812,12 @@ def _soft_reading(
     x = x[x != 0.0]
     if x.size < _SOFT_MIN_ITEMS:
         return [], None, None
+    # an all-False mask is unreachable here (every item is nonzero and
+    # windowed_power squares in float64, so no power underflows to 0.0 and the
+    # 0.35*p90 threshold sits under the max; probed across denormal floors,
+    # spikes and 2000 randomized nonzero streams) — the size gate below is the
+    # only empty-mask consumer this path needs
     active = _active_mask(x)
-    if not active.any():
-        return _emit_soft(0.0, Assessment.NEGATIVE, decode_grade), None, 0.0
     if int(active.sum()) < _SOFT_MIN_ITEMS:
         return [], None, None
     # The polarity gate inside _positive_value is why a constant or one-sided
@@ -823,7 +847,15 @@ def _soft_reading(
         and (structured or lane.fit.separation >= _SOFT_MULTILEVEL_SEPARATION)
         else 0.0
     )
-    margin = float(min(max(lane.ratio, sep), _SOFT_VALUE_CAP))
+    # an arm joins the margin only when the lane passes the gates its
+    # evidence path demands: ungated, the degenerate shapes the gates exist
+    # to reject OUTRANKED genuine decodes on the documented objective
+    # (measured: DC one-sided 41.6, stuck alternator 39.9, all-positive
+    # ladder 20.1 vs genuine 6.6 — a margin-driven frequency-offset sweep
+    # converged to maximal offset). A gate-failing stream ranks at 0.0:
+    # testable and measured, so not None, just below every passing run.
+    gated = lane.both_polarities and lane.whitened
+    margin = float(min(max(lane.ratio, sep), _SOFT_VALUE_CAP)) if gated else 0.0
     value = _positive_value(lane)
     if value is not None:
         return (
@@ -842,12 +874,18 @@ def _soft_reading(
         return [], None, margin
     rest = ~active
     if int(rest.sum()) >= _SOFT_MIN_ITEMS:
-        rescue = _rescue_value(_lane_stats(x, rest))
+        complement = _lane_stats(x, rest)
+        rescue = _rescue_value(complement)
         if rescue is not None:
+            # the complement's statistic joins the margin under the same
+            # gate rule as the active lane's arms; a rescue from the
+            # structured arm with degenerate polarity/whiteness still
+            # withholds the negative but ranks nothing
+            joins = complement.both_polarities and complement.whitened
             return (
                 [],
                 _SOFT_INTERFERER_CAVEAT.format(kept_pct=100.0 * lane.size / x.size),
-                float(min(max(lane.ratio, rescue), _SOFT_VALUE_CAP)),
+                float(min(max(margin, rescue if joins else 0.0), _SOFT_VALUE_CAP)),
             )
     return (
         _emit_soft(

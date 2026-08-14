@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
@@ -16,7 +17,26 @@ from marconi.engine.backends.gnuradio.embedded.lifecycle import (
 )
 from marconi.engine.modulation.ofdm.primitives import carrier_bin_problem
 
-_LOCK_MIN_SCORE = 0.35  # calibrated: synthetic lattice locks ~0.9, noise ~0.1
+# per-ATTEMPT calibration: synthetic lattice ~0.9, noise ~0.1
+_LOCK_MIN_SCORE = 0.35
+# The lock search is a selection: _try_lock slides once per ingested symbol
+# and best-score is a running max, so a fixed per-attempt floor is crossed by
+# pure noise given enough attempts (measured, suite geometry, den=48: 1/10
+# seeds by 60 symbols, 10/10 by 500, median false lock ~350 — minting a
+# decode-grade "decoded" from noise). The effective floor therefore grows
+# with the attempt count A: bar(A) = sqrt(ln(n_frame_syms * A^2 / alpha) /
+# den), den the attempt's smallest per-phi pilot-pair mass — per phi the
+# score is |sum of den unit phasors|/den, tail P(> s) = exp(-s^2 * den) —
+# which bounds attempt i's false-cross odds by alpha/i^2, summing to
+# <= 1.65*alpha over ANY run length. alpha=0.01 puts bar(1)=0.353 at the
+# calibrated per-attempt floor for den=48 and holds the null over 8000 noise
+# symbols (10 seeds, worst score-minus-bar -0.100, best selection max 0.488
+# at attempt 1978), while a clean lattice's first aligned attempt measures
+# 0.999 (0.943 at 10 dB SNR) — headroom for ~1e9 (~9e7) noise attempts. The
+# measured cost: a 0-dB lattice (score ~0.45) locks only within its first ~6
+# attempts, where the old fixed floor admitted it at any time — and admitted
+# the noise with it.
+_LOCK_EV_ALPHA = 0.01
 
 
 @dataclass(frozen=True)
@@ -171,6 +191,9 @@ class PilotLatticeCore:
             "frames_emitted": 0,
         }
         self._best_score = 0.0
+        # attempts persist across relocks like best-score does: the quality
+        # judgment is over every attempt the run ever made
+        self._attempts = 0
         self.reset_lock()
 
     def reset_lock(self) -> None:
@@ -234,11 +257,14 @@ class PilotLatticeCore:
         for j, k in enumerate(fp_carriers):
             pil[:, j] = xp[:, k + g.dc0 + delta] * np.conj(fp_vals[j])
         theta = float(np.angle(np.sum(pil[1:] * np.conj(pil[:-1]))))
-        phi, score = self._estimate_phi(xp, delta)
+        phi, score, den = self._estimate_phi(xp, delta)
+        self._attempts += 1
+        floor = self._lock_floor(den)
         self._best_score = max(self._best_score, score)
         self.diagnostics[DiagnosticKey.LOCK_SCORE_BEST] = self._best_score
-        self.diagnostics[DiagnosticKey.LOCK_SCORE_MIN] = float(g.lock_min_score)
-        if score < g.lock_min_score:
+        self.diagnostics[DiagnosticKey.LOCK_SCORE_MIN] = floor
+        self.diagnostics["lock_attempts"] = self._attempts
+        if score < floor:
             return
         self._delta, self._theta, self._phi = delta, theta, phi
         self._emit_bins = g.emit + g.dc0 + delta
@@ -251,12 +277,19 @@ class PilotLatticeCore:
         for m in range(g.warmup_syms):
             self._gather_nodes(m, self._vecs[m])
 
+    def _lock_floor(self, den: float) -> float:
+        g = self.geom
+        trials = g.n_frame_syms * self._attempts * self._attempts
+        bar = math.sqrt(math.log(trials / _LOCK_EV_ALPHA) / max(den, 1.0))
+        return max(g.lock_min_score, bar)
+
     def _estimate_phi(
         self, xp: npt.NDArray[np.complex128], delta: int
-    ) -> tuple[int, float]:
+    ) -> tuple[int, float, float]:
         g = self.geom
         pilot_sets, pilot_vals = g.lattice.pilot_sets, g.lattice.pilot_vals
         best_phi, best = 0, -1.0
+        den_min = math.inf
         for phi in range(g.n_frame_syms):
             fsyms = (np.arange(g.warmup_syms) - phi) % g.n_frame_syms
             num, den = 0j, 0.0
@@ -277,9 +310,11 @@ class PilotLatticeCore:
                 num += complex(np.sum(ratio * np.conj(pred)))
                 den += len(ks)
             score = abs(num) / max(den, 1.0)
+            if den > 0.0:
+                den_min = min(den_min, den)
             if score > best:
                 best, best_phi = score, phi
-        return best_phi, best
+        return best_phi, best, den_min if math.isfinite(den_min) else 1.0
 
     def _gather_nodes(self, m: int, vec: npt.NDArray[np.complex128]) -> None:
         g = self.geom

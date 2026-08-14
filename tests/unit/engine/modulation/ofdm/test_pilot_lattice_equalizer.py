@@ -90,6 +90,62 @@ def test_noise_never_locks_or_emits() -> None:
     assert blk.diagnostics["locks"] == 0
 
 
+def _noise_spectra(seed: int, n_syms: int) -> np.ndarray:
+    # per-symbol draws (real then imag), matching the measured-null probe's
+    # order so its seeds reproduce here
+    rng = np.random.default_rng(seed)
+    return np.stack(
+        [
+            (
+                rng.standard_normal(_lattice.FFT_LEN)
+                + 1j * rng.standard_normal(_lattice.FFT_LEN)
+            )
+            / np.sqrt(2)
+            for _ in range(n_syms)
+        ]
+    ).astype(np.complex64)
+
+
+def test_long_noise_capture_never_locks_and_reads_negative() -> None:
+    # The lock search is a SELECTION: _try_lock slides once per symbol and
+    # best-score is a running max, so against the fixed per-attempt 0.35
+    # floor pure noise crossed in 10/10 seeds by 500 symbols (median false
+    # lock ~350; this seed at 341) and minted a decode-grade positive. The
+    # published floor must price the attempts it maxed over.
+    from marconi.engine.backends.base import Diagnostic, DiagnosticKey
+    from marconi.engine.quality import lock_evidence
+
+    blk = make_pilot_lattice_equalizer(FAKE_GR, **_lattice.eq_params())
+    out = drive(blk, _noise_spectra(1000, 600), chunk=6, out_dtype=np.complex64)
+    assert blk.diagnostics["locks"] == 0
+    assert out.size == 0
+    rows = [
+        Diagnostic(block="eq[0]", key=str(k), value=float(blk.diagnostics[k]))
+        for k in (DiagnosticKey.LOCK_SCORE_BEST, DiagnosticKey.LOCK_SCORE_MIN)
+    ]
+    ev = lock_evidence(rows)
+    assert [(e.metric, e.assessment) for e in ev] == [("ofdm_pilot_score", "negative")]
+
+
+def test_signal_after_a_long_noise_lead_still_locks() -> None:
+    # the headroom the corrected floor spends: after ~490 noise attempts the
+    # bar sits at ~0.62 for this geometry, and a clean lattice's first
+    # aligned attempt scores ~0.999 (0.943 at 10 dB SNR) — a noise lead long
+    # enough for the OLD floor to false-lock in must not cost the real lock.
+    # best > 0.6 splits the outcomes: a noise lock freezes best at its
+    # crossing (~0.36-0.41; selection max measured <= 0.49 at 2000 attempts),
+    # a genuine lock carries >= ~0.75 even from a part-noise warmup window.
+    from marconi.engine.backends.base import DiagnosticKey
+
+    _, sig = _lattice.make_spectra(40, start_fs=2, theta=0.01, seed=3)
+    spec = np.concatenate([_noise_spectra(1001, 500), sig.astype(np.complex64)])
+    blk = make_pilot_lattice_equalizer(FAKE_GR, **_lattice.eq_params())
+    out = drive(blk, spec, chunk=5, out_dtype=np.complex64)
+    assert blk.diagnostics["locks"] == 1
+    assert float(blk.diagnostics[DiagnosticKey.LOCK_SCORE_BEST]) > 0.6
+    assert out.size > 0
+
+
 def test_lock_min_score_param_gates_acquisition() -> None:
     # the synthetic-calibrated 0.35 gate is a caller param: an unreachable
     # threshold (score is a correlation <= 1) refuses to lock a clean signal.
@@ -193,6 +249,8 @@ def test_lock_statistic_reaches_the_quality_verdict() -> None:
     assert [(e.metric, e.assessment) for e in evidence] == [
         ("ofdm_pilot_score", "positive")
     ]
-    # decode grade: the score is measured on the decoded lattice itself,
-    # unlike cp_symbol_sync's pre-decision timing peak
+    # decode grade: the score checks agreement with the KNOWN transmitted
+    # pilot values (pre-lock, a selection over attempts priced by the
+    # published LOCK_SCORE_MIN floor), unlike cp_symbol_sync's timing peak,
+    # which checks against nothing known
     assert evidence[0].tier == "decode"

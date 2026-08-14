@@ -388,6 +388,83 @@ def test_erasures_do_not_cost_a_genuine_decode_its_positive(tmp_path: Path) -> N
     assert [e.assessment for e in ev] == ["positive"]
 
 
+def test_polarity_biased_iid_decisions_are_positive(tmp_path: Path) -> None:
+    # 75/25-biased but INDEPENDENT decisions (a legitimate zero-heavy
+    # payload): the uncentered sign statistic read the bias squared (~0.24,
+    # flat across lags, invariant under shuffling the stream) as lag
+    # correlation and withheld the positive forever; the centered covariance
+    # of the same stream sits at ~0
+    rng = np.random.default_rng(7)
+    signs = rng.choice([2.0, -2.0], size=8000, p=[0.75, 0.25])
+    ev = soft_evidence(_llr_file(tmp_path, signs + rng.normal(0.0, 0.2, 8000)))
+    assert [e.assessment for e in ev] == ["positive"]
+
+
+def test_biased_oversampled_decisions_stay_suppressed(tmp_path: Path) -> None:
+    # the guard the centering must not lose: symbol-doubled (wrong-rate)
+    # decisions with a 95/5 bias (sign mean m = 0.9, within the 0.02
+    # polarity floor). Normalizing the covariance by the sign variance
+    # (1 - m^2) keeps this at its balanced twin's ~0.5; the bare covariance
+    # is 0.5*(1 - m^2) ~ 0.095 — under the 0.15 bar — and a wrong-rate
+    # decode would mint a positive. Bias past ~92% is where the two
+    # statistics part; below it both refuse (90/10 measures 0.18 bare).
+    rng = np.random.default_rng(8)
+    base = rng.choice([2.0, -2.0], size=4000, p=[0.95, 0.05])
+    x = np.repeat(base, 2) + rng.normal(0.0, 0.2, 8000)
+    assert soft_evidence(_llr_file(tmp_path, x)) == []
+
+
+def test_degenerate_shapes_rank_at_zero_never_over_a_decode(tmp_path: Path) -> None:
+    # the margin shipped ungated by the polarity/whiteness gates: a DC
+    # one-sided stream measured margin 41.6, a stuck alternator 39.9, an
+    # all-positive ladder 20.1 — every one above a genuine decode's 6.6 on
+    # the documented objective function. An arm joins the margin only when
+    # the lane passes the gates its evidence path demands; a gate-failing
+    # stream ranks at 0.0 (testable and measured, so not None — just below
+    # every passing run, noise included at ~1.32).
+    rng = np.random.default_rng(42)
+    n = 8000
+
+    def margin_of(x: np.ndarray, name: str) -> float:
+        p = tmp_path / f"{name}.f32"
+        write_llrs(p, x.astype(np.float32))
+        _, _, margin = quality._soft_reading(p)
+        assert margin is not None
+        return margin
+
+    genuine = margin_of(rng.choice([-2.0, 2.0], n) + rng.normal(0, 0.3, n), "genuine")
+    degenerates = {
+        "dc_one_sided": 5.0 + rng.normal(0, 0.12, n),
+        "stuck_alternator": np.tile([2.0, -2.0], n // 2) + rng.normal(0, 0.05, n),
+        "all_positive_ladder": rng.choice([1.0, 2.0, 3.0, 4.0], n)
+        + rng.normal(0, 0.05, n),
+    }
+    for name, x in degenerates.items():
+        m = margin_of(x, name)
+        assert m == 0.0, (name, m)
+        assert genuine > m
+
+
+def test_margin_sweep_converges_to_the_gate_passing_run(tmp_path: Path) -> None:
+    # the sweep-exploit shape: a discriminator's growing frequency offset
+    # turns rails into a one-sided blob. The offset runs' margins measured
+    # 6.6/16.5/33.1 against the correct run's 3.3 with EMPTY evidence, so
+    # "keep the run with the higher margin" converged to MAXIMAL offset.
+    rng = np.random.default_rng(42)
+    n = 8000
+    margins: dict[float, float] = {}
+    for off in (0.0, 2.0, 5.0, 10.0):
+        x = rng.choice([-1.0, 1.0], n) * max(1.0 - off / 2.0, 0.0) + off
+        x = x + rng.normal(0, 0.3, n)
+        p = tmp_path / f"off_{off}.f32"
+        write_llrs(p, x.astype(np.float32))
+        _, _, margin = quality._soft_reading(p)
+        assert margin is not None
+        margins[off] = margin
+    correct = margins.pop(0.0)
+    assert all(correct > m for m in margins.values()), (correct, margins)
+
+
 def test_margin_ranks_runs_the_verdict_cannot_separate(tmp_path: Path) -> None:
     # the dogfood's central failure: a BER-0.0000 run and a BER-0.45 run both
     # returned "uncertain" with empty evidence, byte-identical, so no
