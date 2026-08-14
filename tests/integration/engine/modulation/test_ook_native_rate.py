@@ -21,6 +21,7 @@ from marconi.engine.io.bitfile import read_bits
 from marconi.engine.io.source import SourceSlice
 from marconi.engine.modulation.ook.stages import OokEnvelopeStep
 from marconi.engine.run import run_rx
+from marconi.engine.stages.conditioning import ResampleStep
 from marconi.engine.stages.general import SliceStep
 from marconi.engine.stages.registry import stage_registry
 from marconi.engine.types.descriptor import Descriptor
@@ -40,6 +41,7 @@ _STO = 0.2  # see test_native_rate_open_loop_recovers_every_burst_at_ber0
 _LEAD = 6_000
 _GAP = 1_200
 _TRAIL = 6_000
+_CONDITION_DECIM = 4  # oversample factor the resample-conditioned test undoes
 
 
 def _pulse_pair_burst(payload: str, phase: int) -> np.ndarray:
@@ -110,6 +112,58 @@ def test_final_burst_flushes_on_an_unpadded_capture(tmp_path: Path) -> None:
     want = _chip_string(_PAYLOAD)
     found = "".join(str(bit) for bit in bits)
     assert found.count(want) == len(_PHASES), found.count(want)
+
+
+def test_final_burst_flushes_through_a_resample_conditioned_chain(
+    tmp_path: Path,
+) -> None:
+    # same unpadded capture, oversampled and conditioned back down by
+    # resample(1/_CONDITION_DECIM): rational_resampler holds a polyphase tail
+    # back, so the count that proves finality is NOT emitted//decim. Sizing the
+    # probe by the rate ratio alone leaves eof_final permanently unreachable and
+    # the final burst dies inside the sampler under status=ok.
+    ensure_worker_warm()
+    rng = np.random.default_rng(_SEED)
+    stream = [_ambient(_LEAD, rng)]
+    for phase in _PHASES[:-1]:
+        stream.append(_pulse_pair_burst(_PAYLOAD, phase))
+        stream.append(_ambient(_GAP, rng))
+    stream.append(_pulse_pair_burst(_PAYLOAD, 0))
+    env = np.repeat(np.concatenate(stream), _CONDITION_DECIM)
+    cap = tmp_path / "oversampled.cf32"
+    env.astype(np.complex64).tofile(cap)
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    path: list[Step] = [
+        ResampleStep(interpolation=1, decimation=_CONDITION_DECIM),
+        OokEnvelopeStep(loop_bw=0.0),
+        SliceStep(),
+    ]
+    r = run_rx(
+        Modem(symbol_rate=_SYMBOL_RATE, path=path),
+        stage_registry(),
+        sample_rate=_SAMPLE_RATE * _CONDITION_DECIM,
+        start=IQ,
+        workdir=run_dir,
+        source=SourceSlice(path=cap),
+    )
+    assert r.status == "ok", r
+    assert r.bitstream is not None
+    truncated = r.diagnostic("burst_sampler_0", "bursts_truncated_at_eof")
+    assert truncated is not None and truncated.count is not None
+    assert truncated.count >= 1
+    sampler = next(c for c in r.census if c.kind == "burst_sampler")
+    assert sampler.items_out == sampler.items_in
+    # The resampler keeps its last ntaps input samples as filter history and
+    # never emits them (measured: 34 output items fewer than the ratio
+    # promises at decim 4), so the closing chips of a burst that runs to EOF
+    # physically never reach the demod - what the flush restores is every
+    # burst up to that, which an expected_items understated the other way
+    # would corrupt by committing mid-stream.
+    bits = read_bits(r.bitstream.path)
+    want = _chip_string(_PAYLOAD)
+    found = "".join(str(bit) for bit in bits)
+    assert found.count(want) >= len(_PHASES) - 1, found.count(want)
 
 
 def test_native_rate_open_loop_recovers_every_burst_at_ber0(tmp_path: Path) -> None:

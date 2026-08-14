@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import multiprocessing
 import threading
+from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any
 
 from marconi.engine.backends.base import BackendError
@@ -24,16 +26,17 @@ def _wire_eof_probe(pipeline: GrPipeline, instances: dict[str, Any]) -> None:
     ``emitted`` is what the source actually feeds the graph — the file item
     count clipped by the source's own offset/length slice, NOT the raw file
     size (a sliced run stops the source early, so file size never proves
-    finality). Compiler-built pipelines (terminal_sink marked) get an exact
-    ``expected_items = emitted // decim`` for any block whose whole path back
-    to the source is single-edged with non-increasing integer-ratio rate tags
-    — ratio 1 included, so the plain complex_to_mag -> burst_sampler shape
-    flushes its final burst; compiler tags come from the rate model and can
-    only overstate a wire's rate, which withholds, never truncates early.
-    Hand-built IR (no terminal mark) keeps the conservative last-edge rule:
-    decim >= 2 only, since its tags carry no such guarantee. Anything else —
-    interpolation in the path, a fork, unknown rates — gets None, which can
-    only withhold a tail at EOF, never truncate one early."""
+    finality). Compiler-built pipelines (terminal_sink marked) get an
+    ``expected_items`` composed hop by hop down the path back to the source,
+    each hop asked what its own kind actually delivers — a rate ratio alone is
+    not the count, since a filter that keeps a tail back hands on fewer items
+    than the ratio promises. The path must be single-edged with non-increasing
+    integer-ratio rate tags — ratio 1 included, so the plain complex_to_mag ->
+    burst_sampler shape flushes its final burst. Hand-built IR (no terminal
+    mark) keeps the conservative last-edge rule: decim >= 2 only, since its
+    tags carry no such guarantee. Anything else — interpolation in the path, a
+    fork, unknown rates, a hop whose delivered count cannot be derived — gets
+    None, which can only withhold a tail at EOF, never truncate one early."""
     sources = [
         b
         for b in pipeline.blocks
@@ -59,9 +62,7 @@ def _wire_eof_probe(pipeline: GrPipeline, instances: dict[str, Any]) -> None:
             if into[0].src_block == spec.id:
                 expected = emitted  # source-adjacent: read counter proves finality
             elif pipeline.terminal_sink is not None:
-                decim = _integer_decim_path(pipeline, spec.id, bid)
-                if decim is not None:
-                    expected = emitted // decim
+                expected = _delivered_items(pipeline, instances, spec.id, bid, emitted)
             else:
                 # Hand-built IR carries no rate-model guarantee: finality only
                 # when the last edge's tag is an exact integer DECIMATION
@@ -77,15 +78,73 @@ def _wire_eof_probe(pipeline: GrPipeline, instances: dict[str, Any]) -> None:
         blk.eof_probe = EofProbe(src, emitted, expected)
 
 
-def _integer_decim_path(pipeline: GrPipeline, src_id: str, bid: str) -> int | None:
-    """Net integer decimation from the file source to ``bid`` along a unique
-    single-input path whose rate tags never increase and step by integer
-    ratios (ratio 1 allowed). None when any hop forks, lacks a tag, or lands
-    off-grid — interpolation anywhere upstream disqualifies, because a
-    composed interp/decim chain's true delivered count drifts off the
-    net-ratio arithmetic (floor composition), and an understated expected
-    would flush early."""
-    decim = 1
+@dataclass(frozen=True)
+class _Hop:
+    kind: str
+    instance: Any
+    decim: int
+
+
+def _exact_delivery(hop: _Hop, items: int) -> int | None:
+    return items // hop.decim
+
+
+def _resampler_delivery(hop: _Hop, items: int) -> int | None:
+    taps = getattr(hop.instance, "taps", None)
+    if taps is None:
+        return None
+    # rational_resampler_ccf keeps a polyphase tail back: GR reduces the
+    # interp/decim ratio, and at reduced interp 1 the block consumes exactly
+    # decim items per output while forecasting decim + ntaps - 1, so it stops
+    # one whole output short of the naive floor. Measured exact on GR 3.10.12
+    # over 724 (decim, N) pairs — decim 1..32, N swept densely across the
+    # ntaps knee and out to 65537, plus reducible interp/decim (2/4, 2/6,
+    # 3/12, 4/8). ntaps is read off the CONSTRUCTED block because the taps are
+    # auto-designed from the ratio (decim 4 -> 131, decim 10 -> 329). REFUTED,
+    # do not re-open: floor((items - ntaps) / decim) + 1 overshoots by 1-2 at
+    # every decim above 1. Overstating this count leaves eof_final permanently
+    # unreachable and the tail is lost under status=ok; understating it flushes
+    # a block's withheld tail before its last samples have arrived.
+    ntaps = len(taps())
+    return max(0, (items - ntaps + 1) // hop.decim - 1)
+
+
+_DELIVERED: dict[str, Callable[[_Hop, int], int | None]] = {
+    "rational_resampler_ccf": _resampler_delivery,
+}
+
+
+def _delivered_items(
+    pipeline: GrPipeline,
+    instances: dict[str, Any],
+    src_id: str,
+    bid: str,
+    emitted: int,
+) -> int | None:
+    hops = _integer_decim_path(pipeline, instances, src_id, bid)
+    if hops is None:
+        return None
+    items = emitted
+    for hop in hops:
+        delivered = _DELIVERED.get(hop.kind, _exact_delivery)(hop, items)
+        if delivered is None:
+            return None
+        items = delivered
+    return items
+
+
+def _integer_decim_path(
+    pipeline: GrPipeline, instances: dict[str, Any], src_id: str, bid: str
+) -> list[_Hop] | None:
+    """The blocks between the file source and ``bid``, source-first, each
+    carrying the integer rate step it performs, along a unique single-input
+    path whose rate tags never increase and step by integer ratios (ratio 1
+    allowed). None when any hop forks, lacks a tag, or lands off-grid —
+    interpolation anywhere upstream disqualifies, because a composed
+    interp/decim chain's true delivered count drifts off the net-ratio
+    arithmetic (floor composition), and an understated expected would flush
+    early."""
+    hops: list[_Hop] = []
     cur = bid
     while True:
         into = [c for c in pipeline.connections if c.dst_block == cur]
@@ -104,9 +163,16 @@ def _integer_decim_path(pipeline: GrPipeline, src_id: str, bid: str) -> int | No
         step_i = round(step)
         if step_i < 1 or abs(step - step_i) > 1e-6:
             return None
-        decim *= step_i
+        hops.append(
+            _Hop(
+                kind=pipeline.block(prev).kind,
+                instance=instances.get(prev),
+                decim=step_i,
+            )
+        )
         if prev == src_id:
-            return decim
+            hops.reverse()
+            return hops
         cur = prev
 
 

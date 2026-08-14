@@ -1,15 +1,22 @@
 """_wire_eof_probe: sizing a consenting block's finality from the source
 slice and the compiler rate. Stubbed instances (a source exposing item size,
-a consenting block exposing eof_probe) keep this off GR - the arithmetic is
-the unit under test, not the scheduler."""
+a consenting block exposing eof_probe) keep most of this off GR - the
+arithmetic is the unit under test, not the scheduler. The resampler cases are
+the exception: their whole claim is that the wired count matches what the live
+scheduler hands the block, so they run a real graph."""
 
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+import numpy as np
+import pytest
+
 from marconi.engine.backends.gnuradio.build import _wire_eof_probe
+from marconi.engine.backends.gnuradio.runner import GnuRadioBackend
 from marconi.engine.compile.ir import GrBlock, GrConnection, GrPipeline
 from marconi.engine.types.params import ParamValue
 
@@ -164,6 +171,93 @@ def test_marked_interpolated_path_stays_unsized(tmp_path: Path) -> None:
     )
     probe = _wire(tmp_path, _marked(pipe), src)
     assert probe.expected_items is None
+
+
+_RESAMPLED_ITEMS = 10_000
+
+
+def _run_off_thread(tb: Any, timeout: float = 30.0) -> None:
+    done = threading.Event()
+    err: list[BaseException] = []
+
+    def _t() -> None:
+        try:
+            tb.run()
+        except BaseException as e:  # noqa: BLE001
+            err.append(e)
+        finally:
+            done.set()
+
+    threading.Thread(target=_t, daemon=True).start()
+    if not done.wait(timeout):
+        tb.stop()
+        tb.wait()
+        raise TimeoutError("flowgraph timed out")
+    if err:
+        raise err[0]
+
+
+def _resampled_pipeline(cap: Path, out: Path, decim: int) -> GrPipeline:
+    rate = _SR / decim
+    return GrPipeline(
+        name="resampled",
+        sample_rate=_SR,
+        terminal_sink="snk",
+        blocks=[
+            GrBlock(
+                id="src",
+                kind="iq_file_source",
+                params={"path": str(cap)},
+                sample_rate=_SR,
+            ),
+            GrBlock(
+                id="rs",
+                kind="rational_resampler_ccf",
+                params={"interpolation": 1, "decimation": decim},
+                sample_rate=_SR,
+            ),
+            GrBlock(id="mag", kind="complex_to_mag", sample_rate=rate),
+            GrBlock(
+                id="bs", kind="burst_sampler", params={"sps": 2.0}, sample_rate=rate
+            ),
+            GrBlock(
+                id="snk",
+                kind="soft_bits_file_sink",
+                params={"path": str(out)},
+                sample_rate=rate,
+            ),
+        ],
+        connections=[
+            GrConnection(src_block="src", dst_block="rs"),
+            GrConnection(src_block="rs", dst_block="mag"),
+            GrConnection(src_block="mag", dst_block="bs"),
+            GrConnection(src_block="bs", dst_block="snk"),
+        ],
+    )
+
+
+@pytest.mark.parametrize("decim", [4, 10])
+def test_resampled_path_is_sized_to_what_the_resampler_delivers(
+    tmp_path: Path, decim: int
+) -> None:
+    # rational_resampler_ccf keeps a polyphase tail back, so it hands the
+    # downstream chain FEWER than emitted//decim items; sizing the probe by the
+    # rate ratio alone leaves expected_items forever out of reach and eof_final
+    # never fires. Truth here is the live scheduler's own count.
+    rng = np.random.default_rng(0)
+    iq = (
+        rng.standard_normal(_RESAMPLED_ITEMS)
+        + 1j * rng.standard_normal(_RESAMPLED_ITEMS)
+    ).astype(np.complex64)
+    cap = tmp_path / "in.cf32"
+    iq.tofile(cap)
+    pipe = _resampled_pipeline(cap, tmp_path / "out.f32", decim)
+    tb = GnuRadioBackend().instantiate(pipe)
+    bs = tb._py_instances["bs"]
+    _run_off_thread(tb)
+    read = bs.nitems_read(0)
+    assert read > 0  # a graph that never ran would make the equality vacuous
+    assert bs.eof_probe.expected_items == read
 
 
 def test_source_adjacent_block_keeps_direct_behavior(tmp_path: Path) -> None:

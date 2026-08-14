@@ -143,8 +143,9 @@ class EofProbe:
     already-written ones may still be in flight through upstream buffers, so
     it licenses only actions that stay correct if more input arrives (e.g.
     releasing whole-window margins early). ``expected_items`` (build.py wires it:
-    the source's emitted count carried through a single-edged, integer-ratio
-    decimation path — ratio 1 included) makes nitems_read reaching it prove
+    the source's emitted count composed hop by hop down a single-edged,
+    integer-ratio decimation path — ratio 1 included, each hop asked what its
+    own block kind delivers) makes nitems_read reaching it prove
     every sample is already in the block's hands — true finality, safe
     for irreversible steps like padding out a filter tail. nitems_written is
     a monotonic counter safe to read cross-thread; a stale read only delays
