@@ -139,6 +139,9 @@ class RunResult(BaseModel):
     # in pipeline order, so the row where items_out falls to zero is the stage
     # that consumed the signal — the gradient a parameter search needs
     census: list[BlockCensus] = []
+    # drops the SDR driver reported on the worker's stderr: nonzero means the
+    # stream is time-spliced even though the run delivered every item
+    overflow_events: int = 0
 
 
 class Backend(ABC):

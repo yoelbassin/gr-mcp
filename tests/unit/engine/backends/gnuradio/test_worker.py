@@ -360,6 +360,48 @@ def test_exception_between_start_and_join_does_not_orphan_child(
                 proc.join()
 
 
+def _overflowing_worker(payload_json: str, conn: Any, capture_path: str) -> None:
+    Path(capture_path).write_text("gr::soapy driver started\nsOsO\n")
+    conn.send(RunResult(status=RunStatus.OK).model_dump_json())
+    conn.close()
+
+
+def _quiet_worker(payload_json: str, conn: Any, capture_path: str) -> None:
+    Path(capture_path).write_text("vmcircbuf :info: sysv_shm is not available\n")
+    conn.send(RunResult(status=RunStatus.OK).model_dump_json())
+    conn.close()
+
+
+def test_driver_overflow_markers_reach_the_result_before_the_log_is_unlinked() -> None:
+    """The runner deletes the capture log in a finally, so a drop the driver
+    reported on stderr is gone the moment the run returns unless it is counted
+    first — an overflowing capture reported ok and contiguous."""
+    ensure_worker_warm()
+    dropped = _run_in_subprocess("{}", timeout=30.0, target=_overflowing_worker)
+    assert dropped.status == "ok"
+    assert dropped.overflow_events == 2
+    clean = _run_in_subprocess("{}", timeout=30.0, target=_quiet_worker)
+    assert clean.status == "ok"
+    assert clean.overflow_events == 0
+
+
+def test_overflow_scan_counts_one_event_per_marker() -> None:
+    """gr-soapy prints "sO" per RX overflow and keeps streaming, back-to-back
+    with no delimiter when they repeat."""
+    log = "gr::soapy :info: streaming\nsOsOsO\ndone\n"
+    assert worker_mod.count_overflow_events(log) == 3
+    assert worker_mod.count_overflow_events("sO\n") == 1
+    assert worker_mod.count_overflow_events("") == 0
+    assert worker_mod.count_overflow_events("nothing dropped here\n") == 0
+
+
+def test_overflow_scan_does_not_count_the_marker_inside_a_word() -> None:
+    # "isOpen" carries the two marker characters; a bare text.count("sO")
+    # turned an ordinary driver log line into a phantom drop
+    assert worker_mod.count_overflow_events("SoapySDR isOpen returned true\n") == 0
+    assert worker_mod.count_overflow_events("isOpen\nsO\nisOpen\n") == 1
+
+
 def test_result_pipe_outranks_timeout_kill() -> None:
     """A worker that reported ok but lingered in GR teardown past the deadline
     is killed — its completed result (and artifacts) must survive."""

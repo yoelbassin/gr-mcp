@@ -50,6 +50,7 @@ class CaptureResult(Payload):
     num_samples: int
     duration_s: float
     levels: CaptureLevels
+    overflow_events: int = 0
     warnings: list[str] = []
     error: str | None = None
 
@@ -128,6 +129,18 @@ def _level_warnings(levels: CaptureLevels) -> list[str]:
             "gain_db or check the antenna/frequency"
         )
     return warnings
+
+
+def _overflow_warnings(events: int) -> list[str]:
+    if events <= 0:
+        return []
+    return [
+        f"overflow_events {events}: the SDR driver dropped buffers and spliced "
+        "the gaps out, so the file is NOT contiguous in time even though the "
+        "sample count is complete — durations, burst spacing and any timing "
+        "measured across a gap are wrong. Lower sample_rate, shorten "
+        "duration_s, or free the machine, then re-capture"
+    ]
 
 
 def build_capture_pipeline(
@@ -289,6 +302,11 @@ def capture_iq(
         num_samples=num_samples,
         duration_s=round(num_samples / rate, 3),
         levels=levels,
-        warnings=[*settled.warnings, *_level_warnings(levels)],
+        overflow_events=result.overflow_events,
+        warnings=[
+            *settled.warnings,
+            *_level_warnings(levels),
+            *_overflow_warnings(result.overflow_events),
+        ],
         error=result.error,
     )

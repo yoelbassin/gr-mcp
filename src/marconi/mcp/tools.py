@@ -565,7 +565,13 @@ def capture_tool(
     belongs in the modem spec, and characterization (modulation, symbol
     rate, bursts) is survey's job on the returned path. status
     "error"/"timeout" with a path present is a partial capture whose samples
-    are real and usable. Iterate on ONE capture while forming hypotheses
+    are real and usable. "overflow_events" counts the buffer drops the SDR
+    driver reported: > 0 — even with status "ok" — means the host could not
+    keep up and the recording is TIME-SPLICED, complete in sample count but
+    discontinuous, so duration, burst spacing and any timing measured across
+    a gap are unreliable; lower sample_rate or shorten duration_s and
+    re-capture (a warnings entry repeats the count). 0 is the driver
+    reporting no drops. Iterate on ONE capture while forming hypotheses
     (same bits every run); re-capture only when you want fresh RF. Captures
     persist under ./marconi-runs/ until you remove them."""
     with discarded_if_unused(new_run_dir("capture")) as run_dir:

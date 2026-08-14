@@ -36,6 +36,21 @@ _SCHED_ABORT = re.compile(
 )
 
 
+# The SoapySDR RX overflow marker, verified against gr-soapy 3.10: the source
+# block's overflow handler writes the two characters "sO" to stderr per dropped
+# buffer and keeps streaming, so the run still delivers every requested item
+# with the dropped span spliced out — the marker is the only evidence the
+# recording is discontinuous in time. Repeats arrive back-to-back with no
+# delimiter ("sOsOsO"), and they are ordinary letters in a log full of words:
+# a bare text.count("sO") also counts the pair inside "isOpen", so each RUN is
+# matched at word boundaries and its markers counted within.
+_RX_OVERFLOW = re.compile(r"(?<![A-Za-z])(?:sO)+(?![A-Za-z])")
+
+
+def count_overflow_events(captured: str) -> int:
+    return sum(len(m.group()) // 2 for m in _RX_OVERFLOW.finditer(captured))
+
+
 def sink_paths(pipeline: GrPipeline) -> list[str]:
     return [
         str(b.params["path"])

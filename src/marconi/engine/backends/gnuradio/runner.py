@@ -14,6 +14,7 @@ from typing import Any
 from marconi.engine.backends.base import Backend, RunResult
 from marconi.engine.backends.gnuradio.build import build_top_block
 from marconi.engine.backends.gnuradio.worker import (
+    count_overflow_events,
     run_pipeline_worker,
     sink_paths,
 )
@@ -70,12 +71,11 @@ def ensure_worker_warm() -> None:
     _warmed = True
 
 
-def _read_tail(path: str) -> str:
+def _read_capture(path: str) -> str:
     try:
-        text = Path(path).read_text(errors="replace")
+        return Path(path).read_text(errors="replace")
     except OSError:
         return ""
-    return text[-_TAIL_CHARS:].strip()
 
 
 def _resolve_result(
@@ -165,7 +165,14 @@ def _run_in_subprocess(
             if payload is None:
                 payload = _receive_payload(recv, 0.0)
         recv.close()
-        return _resolve_result(timed_out, payload, proc.exitcode, _read_tail(cap_path))
+        # the log is unlinked in the finally below, so everything the run has
+        # to say about the driver must be read out of it here
+        captured = _read_capture(cap_path)
+        result = _resolve_result(
+            timed_out, payload, proc.exitcode, captured[-_TAIL_CHARS:].strip()
+        )
+        drops = count_overflow_events(captured)
+        return replace(result, overflow_events=drops) if drops else result
     finally:
         try:
             os.unlink(cap_path)
