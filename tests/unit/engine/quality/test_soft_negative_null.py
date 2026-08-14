@@ -197,6 +197,53 @@ def test_dip_significance_bar_is_load_bearing(tmp_path: Path) -> None:
     assert not any(e.assessment is Assessment.NEGATIVE for e in ev)
 
 
+@pytest.mark.parametrize("seed", [0, 1, 2])
+def test_interfered_mary_stream_is_not_reinverted(tmp_path: Path, seed: int) -> None:
+    # the composition hole: the structure rule's regime (moderate-BER 4-PAM,
+    # uncertain alone) plus the interferer scenario. The active lane is the
+    # interferer (not structured) and the complement sits below the positive
+    # bars (ratio ~1.15) but IS structured (dip z ~ +14) — each rule deferred
+    # to the other and the false negative slipped between; margin re-inverted
+    # under pure noise. A structured complement must rescue, and its
+    # separation is the run's real decision margin.
+    rng = np.random.default_rng(seed)
+    x = np.concatenate([_pam4_llrs(29_000, 0.7, rng), rng.normal(0.0, 30.0, 7_000)])
+    assert float(quality._active_mask(x.astype(np.float32)).mean()) < 0.2
+    path = _llr_file(tmp_path, f"mary_interfered_{seed}", x)
+    ev = soft_evidence(path)
+    assert not any(e.assessment is Assessment.NEGATIVE for e in ev)
+    report = _soft_only_report(path)
+    assert report.verdict is not Verdict.NO_SIGNAL
+    assert "interferer" in report.rationale
+    # complement separation ~3.0 joins the margin; pure noise sits at ~1.32
+    assert report.margin is not None and report.margin > 2.0
+
+
+def test_doubled_mary_llrs_are_rescued_at_production_length(tmp_path: Path) -> None:
+    # a symbol-doubled (oversampled) genuine 4-PAM stream pays the k_ess
+    # deflation like repeated noise does; at the full 65536-item sample the
+    # dip is still significant (measured z >= +10.1 over 5 seeds)
+    rng = np.random.default_rng(0)
+    base = _pam4_llrs(16_384, 0.7, rng)
+    ev = soft_evidence(_llr_file(tmp_path, "doubled_long", np.repeat(base, 2)))
+    assert not any(e.assessment is Assessment.NEGATIVE for e in ev)
+
+
+def test_doubled_mary_short_stream_is_a_documented_blind_spot(
+    tmp_path: Path,
+) -> None:
+    # measured edge: at 16k items the doubled stream's deflated dip z spans
+    # +2.9..+5.7 across seeds — this seed sits at +2.9, under the bar, and
+    # reads negative. k_ess cannot tell repeated items from repetitive
+    # content, and undoing the deflation would let x4-repeated noise
+    # (z +4.6 unscaled) through. Pinned so a future k_ess change gets a
+    # signal, not because the behavior is desirable.
+    rng = np.random.default_rng(3)
+    base = _pam4_llrs(4_000, 0.7, rng)
+    ev = soft_evidence(_llr_file(tmp_path, "doubled_short", np.repeat(base, 2)))
+    assert [e.assessment for e in ev] == [Assessment.NEGATIVE]
+
+
 @pytest.mark.parametrize("sigma", [0.5, 0.6, 0.7])
 def test_below_positive_bar_mary_band_is_uncertain(
     tmp_path: Path, sigma: float

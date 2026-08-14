@@ -465,10 +465,17 @@ _SOFT_MULTILEVEL_SEPARATION = 4.0
 # from the bands' own counts. Measured z: 8 unimodal families (Gaussian,
 # Laplace, t3, x2/x4-repeated, DC-shifted, variance-mixed, uniform) x 300
 # seeds x n in {2k,4k,8k,65k} max +2.58; a dead 4-PAM demod's LLR-transformed
-# noise maxes -0.81 (the max-log formula imprints kinks, not dips); the
-# BER-0.057 stream sits at +5.0 (16k items) to +13 (65k). Lower and sampling
-# flukes in noise read uncertain forever; higher and the decodable M-ary
-# stream reads no_signal — the inversion this bar exists to prevent.
+# noise — the only demod transform measured — maxes -0.81 (the max-log
+# formula imprints kinks, not dips); the BER-0.057 stream sits at +5.0 (16k
+# items) to +13 (65k). Lower and sampling flukes in noise read uncertain
+# forever; higher and the decodable M-ary stream reads no_signal — the
+# inversion this bar exists to prevent. k_ess cannot tell repeated ITEMS
+# from repetitive CONTENT, so a correlated genuine stream pays the same
+# deflation: the same 4-PAM stream symbol-doubled measures z +2.9..+5.7 at
+# 16k items (some seeds read negative — the pinned blind spot in
+# test_soft_negative_null) and +10 at 65536, where the full sample decides;
+# undoing the deflation instead would put x4-repeated noise (+4.6 unscaled)
+# over this bar.
 _SOFT_DIP_MIN_Z = 4.0
 
 # |x| mean/std bars on a demodulated stream. The ratio alone cannot reject a
@@ -546,8 +553,9 @@ _SOFT_ACTIVE_FRACTION = 0.35
 _SOFT_INTERFERER_CAVEAT = (
     "soft negative withheld: the activity gate kept the high-power "
     "{kept_pct:.0f}% of the stream, which reads as noise, while the "
-    "discarded lower-power span carries confident decisions — a strong "
-    "interferer can own a power gate; excise or filter it and rerun"
+    "discarded lower-power span carries a decodable shape (confident "
+    "decisions or a multi-level eye) — a strong interferer can own a power "
+    "gate; excise or filter it and rerun"
 )
 
 
@@ -636,6 +644,18 @@ def _dip_z(xl: npt.NDArray[np.float32], fit: LevelFit, k_ess: float) -> float:
 
 def _lane_stats(x: npt.NDArray[np.float32], mask: npt.NDArray[np.bool_]) -> _SoftLane:
     xl = x[mask]
+    if xl.size == 0:
+        return _SoftLane(
+            size=0,
+            distinct=0,
+            mag_mean=0.0,
+            mag_spread=0.0,
+            ratio=0.0,
+            both_polarities=False,
+            whitened=False,
+            fit=fit_levels(xl),
+            dip_z=float("-inf"),
+        )
     mag = np.abs(xl)
     mag_mean = float(mag.mean())
     mag_spread = float(mag.std())
@@ -680,16 +700,30 @@ def _positive_value(lane: _SoftLane) -> float | None:
     return None
 
 
-def _rescues_negative(lane: _SoftLane) -> bool:
-    """The discarded complement rebuts a negative only as a full positive
-    would read: enough items, genuinely continuous confidences, and past the
-    positive bars — a slicer's decisions or a saturated span cannot."""
-    return (
-        lane.size >= _SOFT_MIN_ITEMS
-        and lane.distinct >= _SOFT_MIN_DISTINCT
-        and lane.mag_spread > _SOFT_MIN_DISPERSION * lane.mag_mean
-        and _positive_value(lane) is not None
-    )
+def _rescue_value(lane: _SoftLane) -> float | None:
+    """The discarded complement rebuts a negative when it carries either of
+    the readings the active lane itself would have been excused for: a full
+    positive, or measurable multi-level structure (the same dip significance
+    the structure rule accepts — demanding the positive bars here while the
+    structure rule waives them let a moderate-BER M-ary stream plus an
+    appended interferer read no_signal, each rule deferring to the other).
+    Enough items and genuinely continuous confidences are required either
+    way — a slicer's decisions or a saturated span rebut nothing. Returns
+    the statistic that then joins the margin: without it a garbage-bearing
+    capture's margin describes only the interferer, and a parameter sweep
+    over that capture is blind."""
+    if (
+        lane.size < _SOFT_MIN_ITEMS
+        or lane.distinct < _SOFT_MIN_DISTINCT
+        or lane.mag_spread <= _SOFT_MIN_DISPERSION * lane.mag_mean
+    ):
+        return None
+    value = _positive_value(lane)
+    if value is not None:
+        return value
+    if lane.fit.order > 2 and lane.dip_z >= _SOFT_DIP_MIN_Z:
+        return lane.fit.separation
+    return None
 
 
 def _emit_soft(
@@ -807,12 +841,14 @@ def _soft_reading(
         # ratio sits below the binary bar): no evidence, margin still ranks
         return [], None, margin
     rest = ~active
-    if int(rest.sum()) >= _SOFT_MIN_ITEMS and _rescues_negative(_lane_stats(x, rest)):
-        return (
-            [],
-            _SOFT_INTERFERER_CAVEAT.format(kept_pct=100.0 * lane.size / x.size),
-            margin,
-        )
+    if int(rest.sum()) >= _SOFT_MIN_ITEMS:
+        rescue = _rescue_value(_lane_stats(x, rest))
+        if rescue is not None:
+            return (
+                [],
+                _SOFT_INTERFERER_CAVEAT.format(kept_pct=100.0 * lane.size / x.size),
+                float(min(max(lane.ratio, rescue), _SOFT_VALUE_CAP)),
+            )
     return (
         _emit_soft(
             float(min(lane.ratio, _SOFT_VALUE_CAP)), Assessment.NEGATIVE, decode_grade
