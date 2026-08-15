@@ -313,3 +313,55 @@ def test_signal_half_its_bandwidth_off_channel_is_flagged() -> None:
     occupied = 30_000.0
     c = _carrier(_psk(4, foff=occupied / 2.0), _FS, occupied, occupied / 2.0)
     assert c.off_center
+
+
+def _tilted_wideband(
+    n: int = 1 << 16, tilt_db: float = 20.0
+) -> npt.NDArray[np.complex64]:
+    """A wide, flat, noise-like emitter centred at DC with a gain tilt across
+    its band — an OFDM ensemble through a sloping front end. Built in the
+    frequency domain from the definition: flat magnitude over the occupied
+    bins, random phase, then a linear-in-dB ramp across those bins."""
+    r = np.random.default_rng(4)
+    occupied = n // 3  # a band well inside +-fs/2, centred on bin 0
+    spec = np.zeros(n, dtype=complex)
+    idx = np.arange(-occupied // 2, occupied // 2)
+    # tilt_db is the total POWER swing across the band; amplitude is its half
+    # in dB, so a 20 dB swing drags the power-weighted centroid ~0.29 of the
+    # bandwidth off the midpoint — the ratio the off-air DAB capture showed.
+    ramp = 10 ** (tilt_db * (idx / (occupied / 2)) / 40.0)
+    spec[idx] = ramp * np.exp(1j * 2 * np.pi * r.random(idx.size))
+    out: npt.NDArray[np.complex64] = np.fft.ifft(spec).astype(np.complex64)
+    return out / np.float32(np.sqrt(np.mean(np.abs(out) ** 2)))
+
+
+def test_a_tilted_wideband_emitter_is_not_reported_off_center() -> None:
+    """The DAB Block 12B case: the emitter sits ON channel, but the
+    power-weighted centroid is dragged toward the loud side of the tilt. The
+    result used to carry off_center=True and an offset 0.28 of the band away
+    from the occupied midpoint the SAME result published, with nothing
+    reconciling the two — so an operator re-tuned a correctly tuned capture."""
+    x = _tilted_wideband()
+    fs = 2_048_000.0
+    spec = np.abs(np.fft.fftshift(np.fft.fft(x))) ** 2
+    freqs = np.fft.fftshift(np.fft.fftfreq(x.size, 1 / fs))
+    centroid = float((freqs * spec).sum() / spec.sum())
+    occupied_bw = fs / 3
+    # the tilt really does drag the centroid off the (zero) band midpoint
+    assert abs(centroid) > 0.15 * occupied_bw
+
+    stats = _carrier(x, fs, occupied_bw, centroid, 0.0)
+    assert stats.method == "spectral_centroid"
+    assert not stats.off_center
+    assert stats.offset_ambiguous
+    assert abs(stats.offset_hz) < 0.15 * occupied_bw
+
+
+def test_a_genuinely_offset_narrowband_carrier_still_reads_off_center() -> None:
+    """The control: the fix must not blunt the real off-channel case. Here the
+    centroid and the band midpoint AGREE, so nothing is overridden."""
+    off = 300_000.0
+    stats = _carrier(_psk(4, foff=off), _FS, 60_000.0, off, off)
+    assert stats.off_center
+    assert not stats.offset_ambiguous
+    assert abs(stats.offset_hz - off) < 5_000.0

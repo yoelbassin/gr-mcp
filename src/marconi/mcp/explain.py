@@ -92,13 +92,28 @@ method is "mpsk" (a clean order-M line, de-aliased against the spectrum
 centroid and interpolated) or "spectral_centroid" (the robust fallback — but
 with more than one emitter in the slice the centroid BLENDS them, so check the
 spectrum block before trusting it as a single carrier's offset).
-offset_ambiguous is true when the M-fold offset candidates could not be told
-apart and the centroid was reported instead.
+offset_ambiguous is true for either of two reasons: the M-fold offset
+candidates could not be told apart and the centroid was reported instead, or
+the centroid disagreed with the occupied band it came from (below).
 
 off_center is true when the offset is a large fraction of the occupied
 bandwidth: the signal sits off-channel, so a demod that assumes a carrier at DC
 will miss. Re-run with center_hz=offset_hz. A known tuning error becomes
 ppm = offset_hz / tuned_hz * 1e6.
+
+The centroid is POWER-WEIGHTED, so a wide flat emitter carrying a gain tilt
+across its band pulls it toward the loud side — far from where the emitter
+actually sits. When method is "spectral_centroid" and the centroid lands more
+than ~15% of the occupied bandwidth from the midpoint of occupied_lo_hz and
+occupied_hi_hz, that midpoint is reported as offset_hz instead and
+offset_ambiguous goes true: the two estimators disagree, and the tilt-immune
+one wins. Measured on an off-air multicarrier ensemble (1.5 MHz wide, tuned
+dead centre, ~7 dB of in-band tilt): the centroid read +458 kHz against a
++60 kHz band midpoint, and off_center claimed the capture was mistuned when it
+was not. The spectrum block still publishes the raw centroid as
+center_offset_hz, so both
+numbers remain readable — an offset_ambiguous carrier block is telling you to
+prefer the spectrum block's band edges over any single carrier figure.
 
 psk_order (4 or 8, else null) is an M-fold PHASE-SYMMETRY line, claimed when
 its score jumps clear of the order below it. It is NOT a modulation label:

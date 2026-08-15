@@ -83,6 +83,13 @@ _STAGGER_TOL_BINS = 6.0
 # Off the analyzed band's centre by a meaningful fraction of the occupied
 # bandwidth: the default demod (carrier at DC) will miss, so surface it.
 _OFF_CENTER_FRAC = 0.15
+# How far the power-weighted centroid may sit from the occupied band's own
+# midpoint before it stops being usable as a position estimate, as a fraction
+# of the occupied bandwidth. An off-air 1.5 MHz flat multicarrier block, tuned
+# dead centre and carrying a ~7 dB in-band tilt, disagreed by 0.28 of the band;
+# a clean single carrier disagrees by ~0. Lower this and an ordinarily
+# asymmetric spectrum starts reporting itself ambiguous.
+_CENTROID_BAND_DISAGREE_FRAC = 0.15
 # Occupied span reaching past this fraction of the rate means the band wraps
 # +-fs/2: every coarse anchor is meaningless there, so the offset is flagged
 # ambiguous instead of dealiased confidently wrong (measured: +499 kHz
@@ -237,6 +244,7 @@ def _carrier(
     sample_rate: float,
     occupied_bw_hz: float,
     anchor_hz: float,
+    band_mid_hz: float = 0.0,
     band_edge_wrap: bool = False,
 ) -> CarrierStats:
     xb = _bounded(x)
@@ -278,6 +286,20 @@ def _carrier(
     method: Literal["mpsk", "spectral_centroid"] = (
         "mpsk" if order is not None and not ambiguous else "spectral_centroid"
     )
+    # The centroid is POWER-WEIGHTED, so a gain tilt across a wide flat emitter
+    # drags it far from where the emitter actually sits, and off_center then
+    # tells the operator to re-tune a correctly tuned capture. Measured on an
+    # off-air multicarrier ensemble (1.536 MHz occupied, centred at DC): a ~7 dB
+    # tilt put the centroid at +458 kHz while the occupied band's midpoint sat at
+    # +60 kHz — two numbers in one result, 400 kHz apart, with nothing
+    # reconciling them. An mpsk line IS the carrier and keeps deciding for
+    # itself; a centroid that disagrees with the band it came from does not.
+    if (
+        method == "spectral_centroid"
+        and occupied_bw_hz > 0
+        and abs(offset - band_mid_hz) > _CENTROID_BAND_DISAGREE_FRAC * occupied_bw_hz
+    ):
+        offset, ambiguous = band_mid_hz, True
     off_center = occupied_bw_hz > 0 and abs(offset) > _OFF_CENTER_FRAC * occupied_bw_hz
     return CarrierStats(
         offset_hz=round(offset, 1),
@@ -1020,6 +1042,7 @@ def survey_iq(
             sample_rate,
             spectrum.occupied_bw_hz,
             spectrum.center_offset_hz,
+            0.5 * (spectrum.occupied_lo_hz + spectrum.occupied_hi_hz),
             band_edge_wrap,
         ),
         envelope=_envelope(x),
