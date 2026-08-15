@@ -148,14 +148,20 @@ def _element_int(name: str, v: float | int) -> int:
     return int(f)
 
 
-def _complex_syms(i: list[float], q: list[float]) -> list[complex]:
+def _complex_syms(name: str, i: list[float], q: list[float]) -> list[complex]:
+    if len(i) != len(q):
+        # zip() truncates to the shorter axis: a short q silently shrank the
+        # constellation, and shrank a correlator preamble whose mark_delay
+        # GR then re-calibrated under the caller
+        raise BackendError(
+            f"{name}_i and {name}_q must be the same length, "
+            f"got {len(i)} and {len(q)}"
+        )
     if len(i) < 2:
         # constellation_calcdist over a single point decodes EVERY symbol to
         # index 0 - a silent all-zeros decode, not an error; and a 1-point
         # preamble correlates with everything
-        raise BackendError(
-            f"points need at least 2 constellation entries, got {len(i)}"
-        )
+        raise BackendError(f"{name} needs at least 2 entries, got {len(i)}")
     return [complex(a, b) for a, b in zip(i, q)]
 
 
@@ -242,7 +248,7 @@ def _const_explicit(c: _GrModules, p: BlockParams) -> Any:
     levels, imaginary part zero) as well as any 2-D layout the named schemes
     don't offer. Points are POWER_NORMALIZED, so a consumer must present its
     input at unit RMS."""
-    points = _complex_syms(p.floats("points_i"), p.floats("points_q"))
+    points = _complex_syms("points", p.floats("points_i"), p.floats("points_q"))
     con = c.digital.constellation_calcdist(points, [], 1, 1)
     con.normalize(c.digital.constellation.POWER_NORMALIZATION)
     return con
@@ -500,7 +506,7 @@ GR_BLOCKS: dict[str, Callable[[_GrModules, BlockParams], Any]] = {
     # recalibrated for DYNAMIC, the operator's contract is: normalize the
     # stream (agc) so the preamble arrives near unit power.
     "corr_est_cc": lambda c, p: c.digital.corr_est_cc(
-        _complex_syms(p.floats("preamble_i"), p.floats("preamble_q")),
+        _complex_syms("preamble", p.floats("preamble_i"), p.floats("preamble_q")),
         p.i("sps"),
         p.i("mark_delay"),
         p.f("threshold"),

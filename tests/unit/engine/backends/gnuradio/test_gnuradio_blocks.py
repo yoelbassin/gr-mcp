@@ -95,3 +95,28 @@ def test_preamble_scale_sensitivity_is_a_documented_limitation() -> None:
     assert counts[1] == 1, counts  # unit scale: exactly the one real preamble
     assert counts[0] == 0, counts  # under-scale: blind (the documented cost)
     assert counts[2] > 10, counts  # over-scale: floods (the documented cost)
+
+
+def test_correlator_rejects_a_truncated_preamble_axis() -> None:
+    """The IR-direct path skips the pydantic equal-length guard, and zip()
+    truncates: an 8-sample preamble_i against a 4-sample preamble_q built a
+    4-symbol correlator that GR then re-calibrated ("mark delay set to 3"),
+    so the detection tag landed at the wrong phase instead of failing."""
+    import numpy as np
+
+    ctx = _modules()
+    rng = np.random.default_rng(4)
+    pre = np.exp(2j * np.pi * rng.random(8))
+    with pytest.raises(BackendError, match="preamble"):
+        GR_BLOCKS["corr_est_cc"](
+            ctx,
+            BlockParams(
+                {
+                    "preamble_i": pre.real.astype(float).tolist(),
+                    "preamble_q": pre.imag.astype(float).tolist()[:4],
+                    "sps": 1,
+                    "mark_delay": 4,
+                    "threshold": 0.9,
+                }
+            ),
+        )

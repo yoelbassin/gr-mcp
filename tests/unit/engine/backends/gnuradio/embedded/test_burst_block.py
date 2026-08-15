@@ -19,6 +19,8 @@ from helpers._fakegr import FAKE_GR, drive
 
 from marconi.engine.backends.gnuradio.embedded.burst import (
     _FLOOR_BLOCK,
+    BurstGeometry,
+    BurstSamplerCore,
     make_burst_sampler,
 )
 
@@ -429,10 +431,11 @@ def test_native_sps_one_deterministic_across_runs() -> None:
 def test_output_grid_is_globally_continuous(sps: int) -> None:
     # The emission grid is ONE global chip index that never resets at a burst
     # boundary, so the total chip count depends only on the input length, not
-    # on how many bursts split it: exactly input_len // stride, with zero
-    # per-burst slack. (The per-burst grid this replaced re-emitted a pre-pad
-    # lead and re-anchored the cursor every flush, inserting ~1 chip per burst
-    # boundary - this asserts that insertion is gone.)
+    # on how many bursts split it: one chip per grid position round(k*stride)
+    # below input_len, with zero per-burst slack. (The per-burst grid this
+    # replaced re-emitted a pre-pad lead and re-anchored the cursor every
+    # flush, inserting ~1 chip per burst boundary - this asserts that
+    # insertion is gone.)
     rng = np.random.default_rng(1234)
     parts = [_noise(3000, rng)]
     for phase in (0, 1, 0):
@@ -441,12 +444,27 @@ def test_output_grid_is_globally_continuous(sps: int) -> None:
     env = np.concatenate(parts).astype(np.float32)
     # pad the trailing idle so every input sample is processed (no sub-block
     # _pending remainder) and the last burst has confirmed complete (no
-    # withheld tail): both preconditions for an exact input_len // stride count
+    # withheld tail): both preconditions for an exact count
     total = ((env.size // _FLOOR_BLOCK) + 1) * _FLOOR_BLOCK
     env = np.concatenate([env, _noise(total - env.size, rng)]).astype(np.float32)
     assert env.size % _FLOOR_BLOCK == 0
     out = _run_block(env, float(sps))
-    assert len(out) == env.size // sps
+    assert len(out) == -(-env.size // sps)
+
+
+@pytest.mark.parametrize("n,sps", [(4003, 4), (4097, 2), (2048, 2)])
+def test_chip_count_covers_every_grid_slot_below_the_input_length(
+    n: int, sps: int
+) -> None:
+    # A length that is not a multiple of the stride is the only one that tells
+    # floor from ceil apart: the last grid slot still lands strictly below
+    # input_len and is still owed a chip. The padded-to-a-multiple case above
+    # cannot see the difference.
+    rng = np.random.default_rng(n)
+    core = BurstSamplerCore(BurstGeometry.build(sps=float(sps)))
+    core.process_block(_noise(n, rng))
+    core.finish()
+    assert core.out.size == -(-n // sps), (core.out.size, n, sps)
 
 
 def test_frame_straddling_burst_boundary_survives() -> None:

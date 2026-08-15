@@ -19,10 +19,11 @@ feedback loop, no volk in-block), so identical input yields identical
 chips - the adaptive loop this replaces was the suite's nondeterminism
 amplifier. Decimation runs on ONE global chip grid: chip k draws from input
 sample round(k*stride) (plus the burst's phase offset), a monotonic index
-that never resets at a burst boundary, so the emitted count is exactly
-input_len // stride with no per-burst slack. Only two things vary per burst -
-the sampling PHASE (which sub-sample within each chip window is taken,
-variance-max acquired) and the NORMALIZATION scale; the chip index stays
+that never resets at a burst boundary, so the emitted count is one chip per
+grid position round(k*stride) landing strictly below input_len - at integer
+stride, ceil(input_len / stride) - with no per-burst slack. Only two things
+vary per burst - the sampling PHASE (which sub-sample within each chip window
+is taken, variance-max acquired) and the NORMALIZATION scale; the chip index stays
 global, which is what stops a burst boundary from inserting a chip and
 slipping the downstream chip-pair grid mid-frame. At true EOF the block
 COMMITS a burst the capture truncated mid-transmission (finish(), counted in

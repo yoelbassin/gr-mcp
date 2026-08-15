@@ -83,5 +83,17 @@ def test_explicit_constellation_needs_two_points() -> None:
     from marconi.engine.backends.gnuradio.blocks import _complex_syms
 
     with pytest.raises(BackendError, match="points"):
-        _complex_syms([1.0], [0.0])
-    assert _complex_syms([1.0, -1.0], [0.0, 0.0]) == [(1 + 0j), (-1 + 0j)]
+        _complex_syms("points", [1.0], [0.0])
+    assert _complex_syms("points", [1.0, -1.0], [0.0, 0.0]) == [(1 + 0j), (-1 + 0j)]
+
+
+def test_explicit_constellation_rejects_mismatched_axes() -> None:
+    # zip() truncates to the shorter axis, so a 3-point I list against a
+    # 2-point Q list silently built a 2-point constellation (and a short
+    # correlator preamble, whose mark_delay calibration then drifts)
+    from marconi.engine.backends.gnuradio.blocks import _complex_syms
+
+    with pytest.raises(BackendError, match="points_i and points_q"):
+        _complex_syms("points", [1.0, -1.0, 0.5], [0.0, 0.0])
+    with pytest.raises(BackendError, match="got 2 and 3"):
+        _complex_syms("points", [1.0, -1.0], [0.0, 0.0, 0.5])

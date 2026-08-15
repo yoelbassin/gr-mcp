@@ -382,3 +382,69 @@ def test_emits_symbols_at_every_sps_the_factory_accepts(sps: int) -> None:
     x = _shaped_qpsk(60, sps, tau=0.25, seed=3)
     out = _drive(x, sps, chunk=1 << 13)
     assert np.count_nonzero(out) > out.size // 2
+
+
+def _awgn(n: int, seed: int) -> npt.NDArray[np.complex64]:
+    rng = np.random.default_rng(seed)
+    return (0.1 * (rng.standard_normal(n) + 1j * rng.standard_normal(n))).astype(
+        np.complex64
+    )
+
+
+def _counts(core: OerderMeyrCore) -> dict[str, int]:
+    return {k: int(v) for k, v in core.diagnostics.items() if isinstance(v, int)}
+
+
+def test_a_zeroed_region_is_not_counted_as_a_truncated_burst() -> None:
+    # cold start on pure AWGN: the peak seeds from the noise itself, so the
+    # noise reads "active" and is buffered. At EOF the clock-line gate zeros
+    # it - that is a proven NON-burst, and counting it in
+    # bursts_truncated_at_eof reports a capture that lost a transmission it
+    # never carried. Length sits between gate_min (256 syms) and max_region
+    # (512 syms) so finish() is the first flush of the region.
+    core = OerderMeyrCore(OerderMeyrGeometry.build(sps=8, span=11, alpha=0.35))
+    core.process_block(_awgn(3000, seed=7))
+    core.finish()
+    d = _counts(core)
+    assert d["regions_zeroed"] >= 1, d
+    assert d["bursts_flushed"] == 0, d
+    assert d["bursts_truncated_at_eof"] == 0, d
+
+
+def test_a_zeroed_region_is_not_counted_as_a_capped_region() -> None:
+    # the same non-burst, long enough to hit the max_region cap first:
+    # regions_capped must count committed chunks, not zero-fill.
+    core = OerderMeyrCore(OerderMeyrGeometry.build(sps=8, span=11, alpha=0.35))
+    n = _MAX_REGION_SYMS * 8 + 2048
+    for i in range(0, n, 1024):
+        core.process_block(_awgn(1024, seed=100 + i))
+    core.finish()
+    d = _counts(core)
+    assert d["regions_zeroed"] >= 1, d
+    assert d["bursts_flushed"] == 0, d
+    assert d["regions_capped"] == 0, d
+
+
+def test_a_real_capped_burst_still_counts() -> None:
+    # the counters stay live for the case they exist for: a continuous
+    # signal committed on the length cap, and a real burst cut off by EOF.
+    mf = _matched(_bursty(1, 2000, 0, sto=0.3, sfo_ppm=0.0, snr=25))
+    core = OerderMeyrCore(OerderMeyrGeometry.build(sps=_BURST_SPS, span=11, alpha=0.35))
+    for i in range(0, mf.size - mf.size % 1024, 1024):
+        core.process_block(mf[i : i + 1024].astype(np.complex64))
+    assert _counts(core)["regions_capped"] >= 1, _counts(core)
+    core.finish()
+    assert _counts(core)["bursts_truncated_at_eof"] == 1, _counts(core)
+
+
+@pytest.mark.parametrize("n,sps", [(4003, 4), (10, 4), (4097, 8), (2048, 8)])
+def test_emits_one_symbol_per_grid_slot_below_the_input_length(
+    n: int, sps: int
+) -> None:
+    # the documented count contract: one output per global grid slot m*stride
+    # strictly below input_len, i.e. ceil(input_len / stride) - NOT the floor.
+    # Non-multiple lengths are the only ones that tell the two apart.
+    core = OerderMeyrCore(OerderMeyrGeometry.build(sps=sps, span=11, alpha=0.35))
+    core.process_block(_awgn(n, seed=n))
+    core.finish()
+    assert core.out.size == -(-n // sps), (core.out.size, n, sps)

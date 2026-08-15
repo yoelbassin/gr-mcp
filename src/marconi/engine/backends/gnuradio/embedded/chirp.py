@@ -126,7 +126,7 @@ def _sfd_sync(
         return None
     _, dn_bin = _fine_peak(signal, x, grid, up=False)
     offset = (dn_bin - grid.bins) if dn_bin > grid.bins / 2 else dn_bin
-    x += int(round(offset / grid.zero_pad))
+    x += int(round(offset * grid.oversample / grid.zero_pad))
     up_h, _ = _fine_peak(signal, x - sn, grid)
     dn_h, _ = _fine_peak(signal, x - sn, grid, up=False)
     sfd_syms = sfd_symbols if up_h > dn_h else sfd_symbols - 1

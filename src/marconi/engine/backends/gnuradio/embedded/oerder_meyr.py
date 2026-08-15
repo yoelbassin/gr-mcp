@@ -13,10 +13,11 @@ m*stride that never resets at a burst boundary, and every grid position is
 emitted exactly once — idle spans, pre-burst instants, and the confirmed-
 quiet fall tail as literal zeros (an unambiguous "nothing here" that no
 downstream statistic, e.g. a differential decode straddling a burst edge,
-can mistake for a constellation point) — so the output count is exactly
-input_len // stride. Chunk-independent: fixed internal blocks, no feedback
-loop, no volk in-block. Unfinished tails are withheld until the finality
-probe proves EOF (suite convention: sims pad).
+can mistake for a constellation point) — so the output count is one per
+grid slot m*stride landing strictly below input_len, i.e.
+ceil(input_len / stride). Chunk-independent: fixed internal blocks, no
+feedback loop, no volk in-block. Unfinished tails are withheld until the
+finality probe proves EOF (suite convention: sims pad).
 
 A region that never falls (a continuous transmission; in a ratio-1 chain
 nothing announces its end) commits a chunk every _MAX_REGION_SYMS and keeps
@@ -364,10 +365,9 @@ class OerderMeyrCore:
         lo = excl * stride
         return estimate_tau(seg[lo : seg.size - lo], stride)
 
-    def _zeroed(self, bases: npt.NDArray[np.int64], reason: str) -> bool:
+    def _zeroed(self, bases: npt.NDArray[np.int64], reason: str) -> None:
         bump(self.diagnostics, reason)
         self.out.push(np.zeros(bases.size, np.complex64))
-        return True
 
     def _is_noise(self, seg: npt.NDArray[np.complex64]) -> str | None:
         """Which zeroing rule this buffered region falls under, if any. A long
@@ -410,7 +410,8 @@ class OerderMeyrCore:
             return False
         noise = self._is_noise(seg)
         if noise is not None:
-            return self._zeroed(bases, noise)
+            self._zeroed(bases, noise)
+            return False
         bump(self.diagnostics, "bursts_flushed")
         tau = self._burst_tau(seg)
         # bases[0]-s is the first owned symbol's nominal local offset; a

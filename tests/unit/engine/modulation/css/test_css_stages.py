@@ -347,6 +347,31 @@ def test_sfd_sync_pending_vs_miss() -> None:
         chirp._sfd_sync(long_up, 0, grid, (pl + 6) * sn, 2.25)
 
 
+@pytest.mark.parametrize("os_", [1, 2, 4])
+def test_sfd_sync_snaps_to_the_injected_sample_offset(os_: int) -> None:
+    """The SFD refinement reads a fold-bin offset and converts it to samples.
+    A D-sample window misalignment shows up as D*zero_pad/oversample fold
+    bins, so the inverse carries the oversample factor - without it the snap
+    lands short by D*(1 - 1/oversample) (measured -32 of 64 at oversample 2,
+    -48 of 64 at 4), and only the joint estimator's residual STO hid it."""
+    from marconi.engine.backends.gnuradio.embedded import chirp
+
+    sf, zp, pl, sfd = 7, 4, 8, 2.25
+    grid = chirp._Grid(sf, os_, zp)
+    sn = grid.sample_num
+    # one spare up-chirp in front so slicing (sn - d) leaves pl WHOLE
+    # up-chirps starting at sample d; the sync's window grid starts at 0
+    full = synth.chirp_preamble(
+        sf=sf, oversample=os_, preamble_len=pl + 1, sfd_symbols=4
+    )
+    for d in (0, sn // 16, sn // 8, sn // 4):
+        sig = np.asarray(full[sn - d :], dtype=np.complex64)
+        want = d + pl * sn + int(round(sfd * sn))
+        got = chirp._sfd_sync(sig, 0, grid, (pl + 6) * sn, sfd)
+        assert got is not None
+        assert abs(got - want) <= 1, (os_, d, got, want)
+
+
 def test_preamble_end_pending_vs_miss() -> None:
     # the no-SFD analog of _sfd_sync: anchor on the first window that departs
     # the base-chirp bin, with the same pending/found/miss trichotomy
