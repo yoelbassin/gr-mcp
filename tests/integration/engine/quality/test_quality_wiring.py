@@ -127,6 +127,11 @@ def test_a_multilevel_eye_earns_the_positive_that_noise_cannot(tmp_path: Path) -
 
     noise = _bare_demod_quality(make_noise_capture(tmp_path), tmp_path / "rx_noise")
     assert not [e for e in noise.evidence if e.assessment == "positive"], noise
+    # A CHARACTERIZATION of what a demod-only path can say today, not a decision
+    # that it should: signal and noise landing on the same verdict is the whole
+    # reason the e2e gate had to move to the positive. A stage that gives this
+    # path a decode-grade tap SHOULD split these two, and this line is then the
+    # thing to change -- do not read it as a rule that they must match.
     assert good.verdict == noise.verdict == "uncertain", (good, noise)
 
 
