@@ -30,32 +30,48 @@ find_gr_python() {
     return 1
 }
 
-bootstrap() {
-    log "first run: setting up $VENV"
+create_venv() {
     PY="$(find_gr_python)" || die "no Python with GNU Radio found. Install \
 GNU Radio 3.10 (macOS: 'brew install gnuradio'; Debian/Ubuntu: 'apt install \
 gnuradio') or point MARCONI_PYTHON at an interpreter that can 'import gnuradio'."
     log "using $PY"
     if command -v uv >/dev/null 2>&1; then
         uv venv --system-site-packages --python "$PY" "$VENV" >&2
-        uv pip install --python "$VENV/bin/python" -e "$ROOT[mcp]" >&2
     else
         "$PY" -m venv --system-site-packages "$VENV" >&2
+    fi
+}
+
+# Creating the venv and installing into it are separate because the refresh
+# below runs only when the venv ALREADY exists, and `uv venv` refuses a
+# directory that exists rather than reusing it - merging these back makes
+# every refresh exit non-zero, which the MCP client reports as a bare
+# CONNECTION_CLOSED. The venv is also frequently the checkout's own dev
+# environment, so a refresh must never recreate it.
+install_deps() {
+    if command -v uv >/dev/null 2>&1; then
+        uv pip install --python "$VENV/bin/python" -e "$ROOT[mcp]" >&2
+    else
         "$VENV/bin/python" -m pip install -e "$ROOT[mcp]" >&2
     fi
     cp "$ROOT/pyproject.toml" "$VENV/.marconi-pyproject-stamp"
 }
 
-# Re-bootstrap when pyproject changed: the install is editable, so source
+# Reinstall when pyproject changed: the install is editable, so source
 # changes arrive free but NEW DEPENDENCIES do not - after a plugin update
-# they ImportError'd inside a tool call with nothing pointing here.
-if [ -x "$VENV/bin/marconi-mcp" ]; then
-    if ! cmp -s "$ROOT/pyproject.toml" "$VENV/.marconi-pyproject-stamp"; then
-        log "pyproject.toml changed since install: refreshing dependencies"
-        bootstrap
-    fi
-else
-    bootstrap
+# they ImportError'd inside a tool call with nothing pointing here. A missing
+# stamp counts as changed: a venv built by anything other than this script
+# (`uv sync`, a hand-rolled `uv venv --clear`) has marconi's deps unverified.
+if [ ! -d "$VENV" ]; then
+    log "first run: setting up $VENV"
+    create_venv
+    install_deps
+elif [ ! -x "$VENV/bin/marconi-mcp" ]; then
+    log "$VENV has no marconi install: installing"
+    install_deps
+elif ! cmp -s "$ROOT/pyproject.toml" "$VENV/.marconi-pyproject-stamp"; then
+    log "pyproject.toml changed since install: refreshing dependencies"
+    install_deps
 fi
 
 # Print the REAL import failure: discarding it and guessing at the cause
