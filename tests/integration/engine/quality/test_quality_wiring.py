@@ -3,10 +3,15 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
-from integration.engine.quality._capture import make_clean_capture
+from integration.engine.quality._capture import (
+    make_clean_capture,
+    make_multilevel_capture,
+    make_noise_capture,
+)
 
 from marconi.engine.io.source import SourceSlice
 from marconi.engine.modulation.fsk.stages import FskStep, MfskSoftDemapStep
+from marconi.engine.quality import _SOFT_MULTILEVEL_SEPARATION, QualityReport
 from marconi.engine.run import run_rx
 from marconi.engine.stages.general import SliceStep
 from marconi.engine.stages.registry import stage_registry
@@ -81,6 +86,48 @@ def test_hard_slice_of_bare_demod_is_signal_present_not_decoded(
     # loop_bw=0 -- the recovery a bursty/short capture needs.
     assert not any("polarity may be inverted" in h for h in res.hints)
     assert any("loop_bw" in h for h in res.hints), res.hints
+
+
+def _bare_demod_quality(iq: Path, work: Path) -> QualityReport:
+    work.mkdir()
+    res = run_rx(
+        Modem(symbol_rate=_SYM, path=[FskStep(deviation=_DEV)]),
+        stage_registry(),
+        sample_rate=_SR,
+        start=IQ,
+        workdir=work,
+        source=SourceSlice(path=iq),
+    )
+    assert res.status == "ok", res
+    assert res.quality is not None
+    return res.quality
+
+
+def test_a_multilevel_eye_earns_the_positive_that_noise_cannot(tmp_path: Path) -> None:
+    """The reading the off-air DMR gate rides on, in reach of the suite: a bare
+    discriminator over a 4-level FM capture must earn a soft_eye POSITIVE at or
+    above the multilevel separation bar, and the same front end over noise must
+    earn nothing.
+
+    The absence of a negative proves nothing here and is why that gate's old
+    assertion could not fail: at symbols grade _emit_soft drops the negative
+    (a correct decode of a bursty capture reads below the noise floor), and no
+    other producer is reachable from a demod-only path — sync/word-validity
+    need stages this path does not have. So both runs read "uncertain", noise
+    included, and only the POSITIVE separates them.
+
+    Measured through these two captures: the 4-level eye scores separation
+    18.0, while noise forced to a 4-level fit reaches 3.20 (margin 1.56, no
+    evidence) — the 4.0 bar sits between them."""
+    good = _bare_demod_quality(make_multilevel_capture(tmp_path), tmp_path / "rx_4lvl")
+    eye = [e for e in good.evidence if e.metric == "soft_eye"]
+    assert eye and all(e.assessment == "positive" for e in eye), good
+    assert all(e.value >= _SOFT_MULTILEVEL_SEPARATION for e in eye), good
+    assert good.margin is not None and good.margin >= _SOFT_MULTILEVEL_SEPARATION
+
+    noise = _bare_demod_quality(make_noise_capture(tmp_path), tmp_path / "rx_noise")
+    assert not [e for e in noise.evidence if e.assessment == "positive"], noise
+    assert good.verdict == noise.verdict == "uncertain", (good, noise)
 
 
 def test_non_ok_result_has_no_quality(tmp_path: Path) -> None:

@@ -2,7 +2,13 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from helpers._dsp import AlignmentNotFound, channel, resolved_ser_hard
+from helpers._dsp import (
+    AlignmentNotFound,
+    PayloadTruncated,
+    channel,
+    resolved_ser,
+    resolved_ser_hard,
+)
 
 
 def _iq_file(tmp_path: Path, n: int = 2048) -> Path:
@@ -63,9 +69,53 @@ def test_channel_sfo_effective_changes_length(tmp_path: Path) -> None:
     assert len(np.fromfile(out, dtype=np.complex64)) == 2049
 
 
-def test_resolved_ser_rejects_max_shift_at_or_below_settle() -> None:
-    from helpers._dsp import resolved_ser
+def _bpsk_stream(n: int, seed: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    pts = np.array([-1 + 0j, 1 + 0j])
+    tsi = np.random.default_rng(seed).integers(0, 2, n)
+    return pts[tsi], tsi, pts
 
+
+def test_resolved_ser_refuses_a_silently_truncated_payload() -> None:
+    """The laundering the tx-relative floor exists to stop: a PERFECT decode of
+    50 of 4096 payload symbols scored SER 0.0 under the old rx-relative floor,
+    so a path that dropped 99% of its payload read as flawless."""
+    full, tsi, pts = _bpsk_stream(4096, 0)
+    rx = np.concatenate([np.zeros(64, dtype=complex), full])
+    assert resolved_ser(rx, tsi, pts, M=2) == 0.0
+    with pytest.raises(PayloadTruncated, match="payload, not the alignment"):
+        resolved_ser(rx[: 64 + 50], tsi, pts, M=2)
+
+
+def test_resolved_ser_hard_refuses_a_silently_truncated_payload() -> None:
+    pts = _qam16_points()
+    rng = np.random.default_rng(4)
+    tsi = rng.integers(0, 16, 6000)
+    rx = np.concatenate([rng.integers(0, 16, 1500), tsi])
+    assert resolved_ser_hard(rx, tsi, pts, settle=1500) == 0.0
+    with pytest.raises(PayloadTruncated, match="payload, not the alignment"):
+        resolved_ser_hard(rx[: 1500 + 50], tsi, pts, settle=1500)
+
+
+def test_the_overlap_floor_still_admits_a_real_streaming_tail_loss() -> None:
+    """The other half of the bar: real paths lose a tail to group delay (every
+    consumer of these oracles measures 0.9973-0.9995 payload coverage), so a
+    floor that refused those would be a gate nothing could pass. A stream cut
+    to 80% of the reachable payload still scores."""
+    full, tsi, pts = _bpsk_stream(4096, 5)
+    keep = int(0.80 * 4096)
+    rx = np.concatenate([np.zeros(64, dtype=complex), full[:keep]])
+    assert resolved_ser(rx, tsi, pts, M=2) == 0.0
+
+
+def test_aligned_ber_names_truncation_rather_than_lost_alignment() -> None:
+    from helpers._dsp import aligned_ber
+
+    tx = np.random.default_rng(6).integers(0, 2, 4096).astype(np.uint8)
+    with pytest.raises(PayloadTruncated, match="payload, not the alignment"):
+        aligned_ber(tx[:50], tx)
+
+
+def test_resolved_ser_rejects_max_shift_at_or_below_settle() -> None:
     rx = np.zeros(64, dtype=np.complex64)
     tx = np.zeros(64, dtype=int)
     pts = np.array([1 + 0j, -1 + 0j])

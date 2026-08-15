@@ -48,6 +48,35 @@ def test_cpfsk_envelope_is_constant_and_phase_continuous() -> None:
     assert step.max() < np.pi / 2, step.max()
 
 
+def test_fm_levels_holds_each_level_at_its_own_tone() -> None:
+    """The M-ary generalisation of the cpfsk property: level L is held at
+    L * deviation Hz for its whole symbol, on a constant envelope."""
+    levels = np.array([-3.0, -1.0, 3.0, 1.0, -1.0, 3.0, -3.0, 1.0])
+    sps, dev, rate = 16, 500.0, 16000.0
+    x = synth.fm_levels(levels, sps=sps, deviation=dev, sample_rate=rate)
+    assert x.size == levels.size * sps
+    f = _inst_freq(x, rate)
+    centres = f[sps // 2 :: sps][: levels.size]
+    assert np.allclose(centres, levels * dev, rtol=1e-6), (centres, levels * dev)
+    # the tone is held across the symbol, not just at its centre: every sample
+    # strictly inside a symbol carries it, and only the boundaries transition
+    interior = f[: (levels.size - 1) * sps].reshape(-1, sps)[:, :-1]
+    assert np.allclose(interior, (levels[:-1] * dev)[:, None], rtol=1e-6)
+    assert np.allclose(np.abs(x), 1.0, atol=1e-6)
+    step = np.abs(np.angle(x[1:] * np.conj(x[:-1])))
+    assert step.max() < np.pi / 2, step.max()
+
+
+def test_fm_levels_on_an_antipodal_sequence_is_cpfsk() -> None:
+    bits = _RNG.integers(0, 2, 128).astype(np.uint8)
+    sps, dev, rate = 8, 400.0, 8000.0
+    got = synth.fm_levels(
+        2.0 * bits.astype(np.float64) - 1.0, sps=sps, deviation=dev, sample_rate=rate
+    )
+    want = synth.cpfsk(bits, sps=sps, deviation=dev, sample_rate=rate)
+    assert np.array_equal(got, want)
+
+
 def test_msk_is_cpfsk_at_modulation_index_one_half() -> None:
     bits = _RNG.integers(0, 2, 64).astype(np.uint8)
     sps, rs, rate = 8, 1200.0, 9600.0

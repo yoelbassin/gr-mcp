@@ -13,6 +13,38 @@ class AlignmentNotFound(Exception):
     pass
 
 
+class PayloadTruncated(AlignmentNotFound):
+    """The rx stream is too short to be scored at all — a different diagnosis
+    from "the DSP never locked", and the one an overlap-scoring oracle hides."""
+
+
+# Every oracle here scores the OVERLAP it finds, so an rx-relative floor scores
+# whatever survived and calls it the decode: measured on this helper, a perfect
+# BPSK stream truncated to 50 of 4096 payload symbols returned SER 0.0, as did
+# 50 of 6000 hard 16-QAM indices — a path that lost 99% of its payload
+# certified as flawless. The floor is therefore tx-relative, at the same 3/4
+# aligned_ber carries. Coverage across every consumer of the two SER oracles
+# (psk/qam round-trips, fll, symbol_sync, multipath equalizer, amplitude
+# invariance — 30 calls) measures 0.9973-0.9995 of the reachable payload, so
+# 3/4 holds with wide margin while bounding the laundering at 25%.
+def _overlap_floor(n_rx: int, n_tx: int, settle: int) -> int:
+    reach = n_tx - settle
+    if reach <= 0:
+        raise ValueError(
+            f"settle={settle} discards the whole {n_tx}-symbol reference: "
+            "there is nothing left to score against"
+        )
+    floor = (3 * reach) // 4
+    if n_rx < floor:
+        raise PayloadTruncated(
+            f"rx carries {n_rx} symbols against the {reach} reachable after "
+            f"settle={settle} ({n_rx / reach:.1%}): scoring only the overlap "
+            "reads a truncated decode as a perfect one - what is missing is "
+            "the payload, not the alignment"
+        )
+    return floor
+
+
 def channel(
     iq_path: Path,
     out_path: Path,
@@ -136,14 +168,15 @@ def resolved_ser(
             "settle, so realignment needs a shift past it - a smaller "
             "max_shift reads a clean decode as random"
         )
+    rx_sym = rx_sym[settle:]
+    floor = _overlap_floor(len(rx_sym), len(tx_sym_idx), settle)
     best = 1.0
     roots = np.exp(2j * np.pi * np.arange(M) / M)
-    rx_sym = rx_sym[settle:]
     for r in roots:
         rs = nearest_syms(rx_sym * r, points)
         for shift in range(min(max_shift, len(tx_sym_idx)) + 1):
             n = min(len(rs), len(tx_sym_idx) - shift)
-            if n < len(rs) // 2:
+            if n < floor:
                 break
             ser = float(np.mean(rs[:n] != tx_sym_idx[shift : shift + n]))
             best = min(best, ser)
@@ -183,13 +216,14 @@ def resolved_ser_hard(
             "max_shift reads a clean decode as random"
         )
     ms = settle + 700 if max_shift is None else max_shift
+    floor = _overlap_floor(len(rx), len(tx), settle)
     best = 1.0
     for r in (1, 1j, -1, -1j):
         relabel = nearest_syms(pts * r, pts)  # index i under a rotation by r
         ri = relabel[rx]
         for shift in range(min(ms, len(tx)) + 1):
             n = min(len(ri), len(tx) - shift)
-            if n < len(ri) // 2:
+            if n < floor:
                 break
             best = min(best, float(np.mean(ri[:n] != tx[shift : shift + n])))
             if best == 0.0:
@@ -241,6 +275,13 @@ def aligned_ber(rx: np.ndarray, tx: np.ndarray, max_shift: int = 256) -> float:
     rx = np.asarray(rx, dtype=np.uint8)
     tx = np.asarray(tx, dtype=np.uint8)
     floor = (3 * len(tx)) // 4
+    if min(len(rx), len(tx)) < floor:
+        raise PayloadTruncated(
+            f"rx carries {len(rx)} bits against a {len(tx)}-bit reference "
+            f"({len(rx) / max(len(tx), 1):.1%}): no shift can reach the "
+            "overlap floor, so nothing was scored - what is missing is the "
+            "payload, not the alignment"
+        )
     best = 1.0
     # (lead, lag) = (rx, tx): rx delayed; (tx, rx): rx advanced (negative lag).
     for lead, lag in ((rx, tx), (tx, rx)):

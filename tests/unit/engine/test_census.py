@@ -11,7 +11,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
-import pytest
 from helpers import _synth as synth
 
 from marconi.engine.backends.base import RunResult
@@ -33,6 +32,13 @@ IQ = Descriptor(Level.IQ, ItemType.C)
 IQ_NORMALIZED = Descriptor(Level.IQ, ItemType.C, amplitude=Amplitude.PEAK_UNITY)
 _SR, _SYM, _NBITS = 8.0, 1.0, 4096
 _QPSK = PskOrder.QPSK
+# Fraction of an upstream block's output its downstream must have read by EOF.
+# Measured on this chain: 1.0 everywhere but symbol_sync_cc, which ends holding
+# 31 of 16384 items (0.9981) -- the rrc history it never gets to consume. The
+# floor sits at 0.98 so a longer filter (a full 89-tap history is 0.54% here)
+# cannot false-fail it, while the failures it exists to catch -- a halved or
+# mis-ported read counter, a chain that stalled mid-stream -- miss by ~50%.
+_DRAIN_FLOOR = 0.98
 
 
 def _run(path: list[Step], src: Path, snk: Path) -> RunResult:
@@ -191,13 +197,30 @@ def test_a_run_that_produces_output_stays_ok(tmp_path: Path) -> None:
     assert res.stalled_at is None
 
 
-@pytest.mark.parametrize("kind", ["iq_file_source", "rrc_filter_ccf"])
-def test_counts_are_non_negative(kind: str, tmp_path: Path) -> None:
+def test_adjacent_blocks_conserve_the_stream(tmp_path: Path) -> None:
+    """items_out is pinned exactly above; items_in was pinned by nothing but
+    "is not None" -- its only other gate asserted non-negativity, which GR's
+    unsigned counters satisfy by construction, so it could not fail on any run
+    this backend can produce. What IS contingent: a row's items_in must measure
+    the same stream its upstream's items_out does. No block reads more than the
+    block feeding it wrote, and a clean run at EOF leaves only a filter's
+    history unread -- measured over 3 identical runs of this chain, every pair
+    conserves exactly except symbol_sync_cc, which ends holding 31 of rrc's
+    16384 items (99.81%). A read counter scaled by an item size, taken from the
+    wrong port, or harvested off the wrong block fails here and nowhere else in
+    this file: every other assertion keys on items_out."""
     ensure_worker_warm()
     res = _run(
         [PskDemodStep(order=_QPSK)],
         _signal(tmp_path),
         tmp_path / "out.cf32",
     )
-    row = next(c for c in res.census if c.kind == kind)
-    assert all(v is None or v >= 0 for v in (row.items_in, row.items_out))
+    assert res.status == "ok"
+    for up, down in zip(res.census, res.census[1:]):
+        wrote, read = up.items_out, down.items_in
+        assert wrote is not None and read is not None, (up, down)
+        assert read <= wrote, f"{down.kind} read {read} of the {wrote} {up.kind} wrote"
+        assert read >= _DRAIN_FLOOR * wrote, (
+            f"{down.kind} left {wrote - read} of {up.kind}'s {wrote} items "
+            "unread: the stream stopped moving mid-chain"
+        )
