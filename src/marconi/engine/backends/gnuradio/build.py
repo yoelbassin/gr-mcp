@@ -32,11 +32,14 @@ def _wire_eof_probe(pipeline: GrPipeline, instances: dict[str, Any]) -> None:
     not the count, since a filter that keeps a tail back hands on fewer items
     than the ratio promises. The path must be single-edged with non-increasing
     integer-ratio rate tags — ratio 1 included, so the plain complex_to_mag ->
-    burst_sampler shape flushes its final burst. Hand-built IR (no terminal
-    mark) keeps the conservative last-edge rule: decim >= 2 only, since its
-    tags carry no such guarantee. Anything else — interpolation in the path, a
-    fork, unknown rates, a hop whose delivered count cannot be derived — gets
-    None, which can only withhold a tail at EOF, never truncate one early."""
+    burst_sampler shape flushes its final burst; compiler tags come from the
+    rate model and can only OVERSTATE a wire's rate, which is what keeps a
+    derived count from ever UNDERSTATING and flushing a withheld margin early.
+    Hand-built IR (no terminal mark) keeps the conservative last-edge rule:
+    decim >= 2 only, since its tags carry no such guarantee. Anything else —
+    interpolation in the path, a fork, unknown rates, a hop whose delivered
+    count cannot be derived — gets None, which can only withhold a tail at EOF,
+    never truncate one early."""
     sources = [
         b
         for b in pipeline.blocks

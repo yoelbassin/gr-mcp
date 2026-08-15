@@ -138,6 +138,44 @@ def test_coding_primitives_surface_is_minimal() -> None:
     }
 
 
+def _frame_geometry_files() -> list[Path]:
+    """Where a frame's or a codeword's size would be written down if it ever
+    got written down: the frame/codeword algebra and the compiler that checks
+    a codeword against the wire carrying it."""
+    files = [_SRC / "engine/modulation/coding/stages.py"]
+    files += sorted((_SRC / "engine/compile").glob("*.py"))
+    missing = [p for p in files if not p.exists()]
+    assert not missing, f"frame-geometry surface moved: {missing}"
+    return files
+
+
+def test_the_frame_geometry_surface_names_no_concrete_sizes() -> None:
+    """A four-digit size on THIS surface can only have come from one protocol's
+    frame. The tiling rule's rationale once read "an off-air lane hands the tail
+    12384 LLRs holding four 3096-LLR codewords" — a rule that is protocol
+    agnostic, justified by numbers that are not. Those figures belong to the
+    test that gates the rule (tests/unit/engine/compile/test_frame_contract.py),
+    which is free to hold them.
+
+    Scoped deliberately, not swept tree-wide: src carries ~50 four-digit numbers
+    in comments and every one is the measured-constant provenance CLAUDE.md
+    protects (poll cadences, Viterbi state tables, page caps), so a tree-wide
+    numeric gate is all false positive. Nothing on this surface has any reason
+    to name a size."""
+    offenders: list[str] = []
+    for path in _frame_geometry_files():
+        for lineno, line in enumerate(path.read_text().splitlines(), 1):
+            m = re.search(r"\b\d{4,}\b", line)
+            if m:
+                rel = path.relative_to(_SRC)
+                offenders.append(f"{rel}:{lineno}: {m.group(0)} in {line.strip()!r}")
+    assert not offenders, (
+        "concrete frame/codeword sizes on the frame-geometry surface:\n"
+        + "\n".join(offenders)
+        + "\nThe rule is agnostic; move the figure to the test that gates it."
+    )
+
+
 @pytest.mark.parametrize(
     "path",
     [

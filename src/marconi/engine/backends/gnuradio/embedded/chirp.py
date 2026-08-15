@@ -127,8 +127,15 @@ def _sfd_sync(
     _, dn_bin = _fine_peak(signal, x, grid, up=False)
     offset = (dn_bin - grid.bins) if dn_bin > grid.bins / 2 else dn_bin
     x += int(round(offset * grid.oversample / grid.zero_pad))
-    up_h, _ = _fine_peak(signal, x - sn, grid)
-    dn_h, _ = _fine_peak(signal, x - sn, grid, up=False)
+    # A buffer opening inside the SFD snaps BACKWARD past sample 0, where a
+    # negative slice start reads from the end of the array and the dechirp dies
+    # on an empty window. Clamping the READ, not x: x is the timing estimate,
+    # and clamping it instead was measured to push payload_start late by the
+    # whole backward snap (up to half a symbol), while the clamped read lands
+    # the same up-vs-down verdict and payload_start stays sample-exact.
+    edge = max(0, x - sn)
+    up_h, _ = _fine_peak(signal, edge, grid)
+    dn_h, _ = _fine_peak(signal, edge, grid, up=False)
     sfd_syms = sfd_symbols if up_h > dn_h else sfd_symbols - 1
     return x + int(round(sfd_syms * sn))
 

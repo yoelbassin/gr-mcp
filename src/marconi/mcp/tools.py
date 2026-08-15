@@ -591,8 +591,8 @@ def capture_tool(
     keep up and the recording is TIME-SPLICED, complete in sample count but
     discontinuous, so duration, burst spacing and any timing measured across
     a gap are unreliable; lower sample_rate or shorten duration_s and
-    re-capture (a warnings entry repeats the count). 0 is the driver
-    reporting no drops. Iterate on ONE capture while forming hypotheses
+    re-capture (a warnings entry repeats the count). 0 means no drops were
+    reported. Iterate on ONE capture while forming hypotheses
     (same bits every run); re-capture only when you want fresh RF. Captures
     persist there until you remove them.
 

@@ -202,6 +202,11 @@ MAX_RS_PARITY_SYMBOLS = 256
 # (RS(255,223) = 8160) and ~8x above the widest GF(2^12) code in real use.
 # Raising it raises the worst-case deadline overshoot by the same factor.
 MAX_RS_WORK = 1 << 21
+# The slower of the two rates above, and the one the cap was derived from. The
+# refusal that quotes this cap prices a spec the agent has to narrow: at the
+# uncorrectable 4.5 M it would quote a wait 1.7x shorter than the wait the cap
+# itself was set against, so the two surfaces read one number.
+RS_CORRECTING_UNITS_PER_S = 2.7e6
 
 # A sync correlation costs one full stream pass PER PATTERN BIT (and the
 # diversity null costs up to another 64): measured 14.7 s for a 65,536-bit

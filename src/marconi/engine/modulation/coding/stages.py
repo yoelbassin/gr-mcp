@@ -28,8 +28,7 @@ def _codeword_frame_error(
     in_desc: Descriptor, codeword: int, decodes: str
 ) -> str | None:
     """A framed stream carries as many codewords as fit: an OFDM frame's cells
-    decode to a whole burst of them (an off-air lane hands the tail 12384 LLRs
-    holding four 3096-LLR codewords). Alignment needs the codeword to TILE the
+    decode to a whole burst of them. Alignment needs the codeword to TILE the
     frame, not to equal it — equality was written when the only producer of a
     frame pinned exactly one codeword, and it refuses every OFDM composition."""
     frame = in_desc.frame_len

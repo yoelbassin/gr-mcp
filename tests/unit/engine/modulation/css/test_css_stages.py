@@ -372,6 +372,33 @@ def test_sfd_sync_snaps_to_the_injected_sample_offset(os_: int) -> None:
         assert abs(got - want) <= 1, (os_, d, got, want)
 
 
+@pytest.mark.parametrize("os_", [1, 2, 4])
+def test_sfd_sync_refines_when_the_snap_reaches_behind_the_buffer(os_: int) -> None:
+    """The snap is SIGNED. A buffer that opens d samples INSIDE the SFD reads a
+    negative fold-bin offset, so the window the SFD's leading edge is read back
+    from starts at -d. numpy resolves a negative slice start from the END of the
+    array, the read came back EMPTY, and the refinement died on a raw broadcast
+    ValueError - which hunt() then swallowed as the documented "no SFD within
+    the preamble span" refusal, a different fact entirely. Scaling the snap by
+    oversample widened that reach oversample-fold: a quarter-symbol slip at
+    os 4 is 128 samples where it used to be 32."""
+    from marconi.engine.backends.gnuradio.embedded import chirp
+
+    sf, zp, pl, sfd = 7, 4, 8, 4.0
+    grid = chirp._Grid(sf, os_, zp)
+    sn = grid.sample_num
+    full = synth.chirp_preamble(sf=sf, oversample=os_, preamble_len=pl, sfd_symbols=sfd)
+    for d in (sn // 16, sn // 8, sn // 4):
+        sig = np.asarray(full[pl * sn + d :], dtype=np.complex64)
+        got = chirp._sfd_sync(sig, 0, grid, (pl + 6) * sn, sfd)
+        assert got is not None
+        # the SFD opens d samples before the buffer, so payload starts d early
+        assert got == int(round(sfd * sn)) - d, (os_, d, got)
+        # ... which is only reachable through the formerly-crashing region:
+        # the look-back index the refinement read is exactly -d
+        assert got - int(round((sfd - 1) * sn)) - sn < 0
+
+
 def test_preamble_end_pending_vs_miss() -> None:
     # the no-SFD analog of _sfd_sync: anchor on the first window that departs
     # the base-chirp bin, with the same pending/found/miss trichotomy

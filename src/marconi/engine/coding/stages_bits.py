@@ -14,6 +14,7 @@ from marconi.engine.types.bounds import (
     MAX_RS_PARITY_SYMBOLS,
     MAX_RS_WORK,
     MAX_SYNC_PATTERN_BITS,
+    RS_CORRECTING_UNITS_PER_S,
     check_match_tolerance,
 )
 from marconi.engine.types.descriptor import Carrier
@@ -599,13 +600,14 @@ class RsCodeStep(Step):
             raise PydanticCustomError(
                 "value_error",
                 "n*(n-k) = {work} symbol operations per word; {cap} is the "
-                "ceiling. A pure-Python Reed-Solomon decode runs ~4.5M of them "
-                "per second, so this spec spends ~{seconds} s inside a single "
-                "word, which no run deadline can interrupt. Narrow n or n-k",
+                "ceiling. A pure-Python Reed-Solomon decode runs ~2.7M of them "
+                "per second once it corrects, so this spec spends ~{seconds} s "
+                "inside a single word, which no run deadline can interrupt. "
+                "Narrow n or n-k",
                 {
                     "work": work,
                     "cap": MAX_RS_WORK,
-                    "seconds": f"{work / 4.5e6:.1f}",
+                    "seconds": f"{work / RS_CORRECTING_UNITS_PER_S:.1f}",
                 },
             )
         if self.n > (1 << self.symbol_bits) - 1:
