@@ -20,6 +20,14 @@ build/
 # untracked on exactly one machine while its e2e gates skipped green in CI.
 /artifacts/
 /artifacts
+# tests/artifacts once held COMMITTED slices, which is why the lesson above
+# reads as a bug: back then an ignored asset meant a gate skipping green over
+# nothing. It is ignored deliberately now, and the difference that makes that
+# safe is tests/assets.toml — an asset absent from a fetcher-resolved tree is
+# a named unresolved asset, not silence. 21 MB of the 24 MB a clone
+# transferred was these two captures.
+/tests/artifacts/
+/tests/artifacts
 # Superpowers working scaffolding (ephemeral plans/notes; lasting facts live in docs/)
 /docs/superpowers/
 /docs/superpowers
