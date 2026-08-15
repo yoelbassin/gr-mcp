@@ -35,6 +35,7 @@ from marconi.engine.modulation.coding.stages import (  # noqa: E402
     FecStep,
     HardenStep,
     LdpcStep,
+    LlrInvertStep,
     PolarStep,
     SyncAlignStep,
 )
@@ -136,6 +137,7 @@ VALID_STEPS: dict[str, Step] = {
     "fm_demod": FmDemodStep(deviation=1000.0),
     "fsk": FskStep(deviation=1000.0),
     "harden": HardenStep(),
+    "llr_invert": LlrInvertStep(),
     "invert": InvertStep(),
     "m_slice": MSliceStep(thresholds=[0.0], levels=[0, 1]),
     "mark_frame": MarkFrameStep(),

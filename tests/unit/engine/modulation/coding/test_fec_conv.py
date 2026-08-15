@@ -311,3 +311,73 @@ def test_fec_k_confusion_with_constraint_length_is_named_in_the_error() -> None:
     msg = str(exc.value)
     assert "constraint length" in msg
     assert "input bits per step" in msg
+
+
+def test_llr_invert_rescues_a_reversed_bit_sense_before_fec(tmp_path: Path) -> None:
+    """A demap whose bit sense is opposite the protocol's. The flip must happen
+    in the SOFT lane: hardening first to reach `differential` throws away the
+    confidences the Viterbi runs on, and the complement of a codeword is not a
+    codeword, so the uncorrected stream decodes to noise (the control below)."""
+    from marconi.engine.modulation.coding.stages import LlrInvertStep
+    from marconi.engine.run import run_rx
+    from marconi.engine.types.models import Symbolstream
+
+    ensure_worker_warm()
+    from gnuradio import blocks as gb
+    from gnuradio import gr, trellis
+
+    rate_inv, polys, frame_bits, tail = 2, [0o133, 0o171], 200, 6
+    rng = np.random.default_rng(21)
+    info = rng.integers(0, 2, frame_bits).astype(np.uint8)
+    bits = np.concatenate([info, np.zeros(tail, np.uint8)])
+    fsm = trellis.fsm(1, rate_inv, polys)
+
+    class Enc(gr.top_block):
+        def __init__(self, data: npt.NDArray[np.uint8]) -> None:
+            gr.top_block.__init__(self)
+            self.snk = gb.vector_sink_b()
+            self.connect(
+                gb.vector_source_b(list(map(int, data)), False),
+                trellis.encoder_bb(fsm, 0),
+                self.snk,
+            )
+
+    e = Enc(bits)
+    e.run()
+    syms = np.array(e.snk.data(), np.int64)
+    soft = np.empty(syms.size * rate_inv, np.float32)
+    for i, s in enumerate(syms):
+        for d in range(rate_inv):
+            soft[i * rate_inv + d] = 1.0 - 2 * ((s >> (rate_inv - 1 - d)) & 1)
+    # the reversed-sense demap: every LLR carries the opposite bit
+    src = tmp_path / "reversed.f32"
+    (-soft).tofile(src)
+
+    fec = FecStep(
+        scheme="cc",
+        rate_inv=rate_inv,
+        polys=list(polys),
+        frame_bits=frame_bits,
+        tail=tail,
+    )
+
+    def decode(path: list[Any], name: str) -> npt.NDArray[np.uint8]:
+        res = run_rx(
+            Modem(name=name, symbol_rate=1.0, path=path),
+            stage_registry(),
+            sample_rate=1.0,
+            start=Descriptor(Level.BITS, ItemType.F, Carrier.SOFT),
+            workdir=tmp_path / name,
+            input_stream=Symbolstream(
+                path=src, num_symbols=int(soft.size), item_type=ItemType.F
+            ),
+        )
+        assert res.status == "ok", res
+        assert res.bitstream is not None
+        return read_bits(res.bitstream.path)[:frame_bits]
+
+    (tmp_path / "fixed").mkdir()
+    (tmp_path / "raw").mkdir()
+    assert np.array_equal(decode([LlrInvertStep(), fec], "fixed"), info)
+    # the mutation guard: without the flip the same stream does NOT decode
+    assert not np.array_equal(decode([fec], "raw"), info)

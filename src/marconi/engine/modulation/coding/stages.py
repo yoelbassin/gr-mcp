@@ -190,6 +190,41 @@ class Harden(Stage[CompileContext, HardenStep]):
         )
 
 
+class LlrInvertStep(Step):
+    conv: Literal["llr_invert"] = "llr_invert"
+
+
+class LlrInvert(Stage[CompileContext, LlrInvertStep]):
+    """Soft-lane polarity flip, BITS->BITS soft. `differential` and `invert`
+    already cancel a polarity error in the hard-bit and IQ lanes; the soft lane
+    had no such stage, so the only way to correct a demap whose bit sense was
+    opposite the protocol's was to harden first — throwing away the very
+    confidences a soft decoder runs on — or to rewrite the demap's
+    constellation."""
+
+    name = "llr_invert"
+    description = (
+        "Invert soft-bit polarity: negate every LLR, swapping bit 0 and bit 1 "
+        "while each decision KEEPS its confidence magnitude. The soft-lane "
+        "counterpart to `differential` (hard bits) and `invert` (IQ), for a "
+        "demap whose bit sense is opposite the protocol's. Hardening first to "
+        "reach `differential` would discard exactly the per-bit confidence a "
+        "downstream fec/ldpc/polar decode runs on. Note this is NOT a no-op "
+        "ahead of FEC: the bitwise complement of a codeword is generally not "
+        "itself a codeword, so the wrong polarity decodes to noise rather "
+        "than to inverted data."
+    )
+    from_level = Level.BITS
+    to_level = Level.BITS
+    family = "coding"
+    step_model = LlrInvertStep
+    accepts_item_type = ItemType.F
+    accepts_carrier = Carrier.SOFT
+
+    def emit_rx(self, b: CompileContext, step: LlrInvertStep) -> None:
+        b.chain_llr_flip()
+
+
 class SyncAlignStep(Step):
     conv: Literal["sync_align"] = "sync_align"
     access_code: str
@@ -562,6 +597,7 @@ CODING_STAGES: tuple[type[Stage[CompileContext, Any]], ...] = (
     Fec,
     Harden,
     Ldpc,
+    LlrInvert,
     Polar,
     SyncAlign,
 )

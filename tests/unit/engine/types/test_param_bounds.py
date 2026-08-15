@@ -54,6 +54,7 @@ _BASE: dict[str, dict[str, object]] = {
     "fm_demod": {"deviation": 5000.0},
     "fsk": {"deviation": 1200.0},
     "harden": {},
+    "llr_invert": {},
     "invert": {},
     "ldpc": {"block_size": 4, "check_nodes": [[0, 1]]},
     "m_slice": {"thresholds": [0.0], "levels": [0, 1]},
