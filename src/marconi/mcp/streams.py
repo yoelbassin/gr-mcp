@@ -175,6 +175,15 @@ class RealStats(StatsHeader):
     max: float
     mean: float
     std: float
+    # Sampled items that are EXACTLY 0.0, ABSENT when none are. Unlike the
+    # non-finite count these are kept in every statistic below — 0.0 is a legal
+    # value, not corruption — but on a bits-level LLR stream it is an ERASURE,
+    # carrying no decision at all, and depuncture mints them by design. Silence
+    # here read as a clean bimodal fit on a stream that was 40% erasures: the
+    # zeros pull mean toward 0, inflate the middle histogram bin, and hand
+    # kmeans a third mode, so a 50/50 stream fit two lopsided clusters. The
+    # count is what tells a level fit from an erasure fraction.
+    zero_items: int | None = None
     histogram: Histogram
     centers: list[float] | None = None
     cluster_counts: list[int] | None = None
@@ -191,6 +200,10 @@ class ConstellationStats(StatsHeader):
     constant_modulus_ratio: float | None
     magnitude_histogram: Histogram
     phase_histogram: Histogram
+    # exactly-zero cells, ABSENT when none: a squelched or zero-padded span
+    # drags mean_magnitude down and constant_modulus_ratio up, which reads as
+    # a false lock on a signal that was merely gated. See RealStats.zero_items.
+    zero_items: int | None = None
     evm: float | None = None
     clusters: list[ConstellationCluster] | None = None
 
@@ -604,9 +617,13 @@ def _real_stats(
     header: dict[str, object], sample: npt.NDArray[Any], clusters: int, bins: int
 ) -> RealStats:
     x = _finite(header, sample, np.float64)
+    zeros = int((x == 0.0).sum())
     stats = RealStats.model_validate(
         {
             **header,
+            # absent, not null, when there are none: the omission rule reserves
+            # an explicit null for "measured and undefined"
+            **({"zero_items": zeros} if zeros else {}),
             "sampled_items": int(x.size),
             "min": wire_float(float(x.min())),
             "max": wire_float(float(x.max())),
@@ -659,6 +676,7 @@ def _constellation_stats(
     stats = ConstellationStats.build(
         **header,
         sampled_items=int(z.size),
+        zero_items=int((z == 0).sum()) or None,
         mean_magnitude=wire_float(mean_mag),
         std_magnitude=wire_float(float(mag.std())),
         constant_modulus_ratio=(

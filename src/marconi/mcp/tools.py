@@ -397,7 +397,16 @@ def stream_stats(
     — only when some were found — non_finite_items, the NaN/inf samples
     EXCLUDED from every statistic below it; a non-zero count means the
     numbers describe a subset, so check the run that wrote the stream, and
-    a "histogram" {start, step, counts} over the 0.5..99.5 percentile range
+    — again only when some were found — zero_items, the samples that are
+    EXACTLY 0.0. Those are KEPT in every statistic (0.0 is a legal value,
+    not corruption), but at bits level an LLR of 0.0 is an ERASURE carrying
+    no decision, and depuncture mints them by design: read zero_items
+    BEFORE the centers, because a large erasure fraction pulls mean toward
+    0, fattens the middle histogram bin and hands the fit a mode that is
+    not a modulation level — a stream whose non-zero decisions split 50/50
+    can still return two lopsided clusters. Subtract them before reading
+    the fit as a level ladder. Then a "histogram" {start, step, counts}
+    over the 0.5..99.5 percentile range
     — bin i's center is start + i*step. clusters=K (1..16) also fits up to K
     levels: sorted "centers" with matching "cluster_counts". "centers" is
     paste-ready for mfsk_soft_demap only when K itself is a power of two (2,

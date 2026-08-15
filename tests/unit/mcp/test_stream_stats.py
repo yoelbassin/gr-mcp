@@ -220,3 +220,25 @@ def test_a_clean_stream_carries_no_non_finite_key(tmp_path: Path) -> None:
     x = np.full(1000, 1.5, np.float32)
     out = stream_stats(_f32(tmp_path, x), item_type=None, clusters=0, bins=8)
     assert "non_finite_items" not in out
+
+
+def test_erasure_mass_is_reported_and_absent_when_none(tmp_path: Path) -> None:
+    """An LLR stream that is 40% erasures reads as a clean bimodal fit unless
+    the zero mass is on the wire: the decisions here split exactly 50/50, but
+    the zeros give kmeans a third mode and the reported clusters go lopsided.
+    zero_items is what lets the reader tell a level ladder from an erasure
+    fraction. Modelled on a real depuncture output."""
+    rng = np.random.default_rng(3)
+    decisions = rng.choice([-1.0, 1.0], size=6000)
+    x = np.concatenate([decisions, np.zeros(4000)])
+    rng.shuffle(x)
+    out = stream_stats(_f32(tmp_path, x), item_type=None, clusters=2, bins=41)
+    assert out["zero_items"] == 4000
+    # the honesty this buys: the fit is NOT a 50/50 read of the decisions
+    counts = cast("list[int]", out["cluster_counts"])
+    assert min(counts) / max(counts) < 0.9
+
+    clean = stream_stats(
+        _f32(tmp_path, decisions, "clean.f32"), item_type=None, clusters=2, bins=41
+    )
+    assert "zero_items" not in clean
