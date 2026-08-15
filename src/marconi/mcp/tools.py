@@ -243,8 +243,8 @@ def run_rx_tool(
     trace: bool = False,
     timeout: float = 180.0,
 ) -> dict[str, object]:
-    """Decode: run a modem spec over an IQ capture (or an existing bit/symbol
-    stream for coding-only paths) and return the full pipeline result.
+    """Decode: run a modem spec over an IQ capture (or an existing
+    bit/symbol/soft stream) and return the full pipeline result.
 
     Pass exactly one of capture_path (raw IQ; capture_dtype cf32/ci16/ci8/cu8;
     a non-cf32 capture converts into a shared cache keyed by capture_path AND
@@ -252,9 +252,14 @@ def run_rx_tool(
     capture_offset/capture_samples pair converts once; the cache is evicted
     least-recently-used against a disk budget, so sweeping many slices costs
     conversion time again, never unbounded disk) or input_path (+
-    input_item_type b/s/f, optional input_level). capture_offset/
-    capture_samples (complex samples; 0 samples = to EOF) decode a bounded
-    slice while streaming — the answer to a capture too large for one run.
+    input_item_type b/s/f, optional input_level) to re-enter a path at an
+    existing stream — including a soft "f" LLR stream at input_level="bits",
+    which is how you iterate a depuncture/fec/deinterleave tail over one
+    demod's output without re-running the front end. The path may open on any
+    stage whose input contract the stream satisfies, coding or DSP.
+    capture_offset/capture_samples (complex samples; 0 samples = to EOF)
+    decode a bounded slice while streaming — the answer to a capture too large
+    for one run.
 
     trace=True taps every GR-segment stage's output to its own sidecar and adds
     a "trace" list, so one run shows WHERE a path breaks. Trace a windowed

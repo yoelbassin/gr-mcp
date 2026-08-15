@@ -14,7 +14,7 @@ from marconi.engine.types.params import ParamValue
 # the compiler that emits them and the backend that recognises them read it.
 _IO_BLOCKS: dict[ItemType, tuple[str | None, str]] = {
     ItemType.C: ("iq_file_source", "iq_file_sink"),
-    ItemType.S: (None, "symbols_file_sink"),
+    ItemType.S: ("symbols_file_source", "symbols_file_sink"),
     ItemType.B: ("bits_file_source", "bits_file_sink"),
     ItemType.F: ("soft_bits_file_source", "soft_bits_file_sink"),
 }

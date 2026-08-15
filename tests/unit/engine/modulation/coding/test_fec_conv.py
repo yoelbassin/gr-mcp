@@ -230,3 +230,72 @@ def test_fec_conv_rate_two_thirds_k2(tmp_path: Path) -> None:
     r = GnuRadioBackend().run_pipeline(pipe, timeout=30.0)
     assert r.status == "ok", r
     assert np.array_equal(read_bits(snk)[:frame_bits], info)
+
+
+def test_soft_llr_stream_reenters_a_fec_tail_through_run_rx(tmp_path: Path) -> None:
+    """The claim run_rx's docstring makes: an "f" stream at input_level="bits"
+    re-enters a depuncture/fec tail without re-running the front end.
+
+    fec/depuncture are GR-lane stages, so this path has a GR segment; the entry
+    gate used to refuse any stream there, which left every soft-decision FEC
+    tail reachable only by decoding the capture again from IQ.
+    """
+    from marconi.engine.run import run_rx
+    from marconi.engine.types.models import Symbolstream
+
+    ensure_worker_warm()
+    from gnuradio import blocks as gb
+    from gnuradio import gr, trellis
+
+    rate_inv, polys, frame_bits, tail = 2, [0o133, 0o171], 200, 6
+    rng = np.random.default_rng(7)
+    info = rng.integers(0, 2, frame_bits).astype(np.uint8)
+    bits = np.concatenate([info, np.zeros(tail, np.uint8)])
+    fsm = trellis.fsm(1, rate_inv, polys)
+
+    class Enc(gr.top_block):
+        def __init__(self, data: npt.NDArray[np.uint8]) -> None:
+            gr.top_block.__init__(self)
+            self.snk = gb.vector_sink_b()
+            self.connect(
+                gb.vector_source_b(list(map(int, data)), False),
+                trellis.encoder_bb(fsm, 0),
+                self.snk,
+            )
+
+    e = Enc(bits)
+    e.run()
+    syms = np.array(e.snk.data(), np.int64)
+    soft = np.empty(syms.size * rate_inv, np.float32)
+    for i, s in enumerate(syms):
+        for d in range(rate_inv):
+            soft[i * rate_inv + d] = 1.0 - 2 * ((s >> (rate_inv - 1 - d)) & 1)
+    src = tmp_path / "llr.f32"
+    soft.tofile(src)
+
+    modem = Modem(
+        name="fec-reentry",
+        symbol_rate=1.0,
+        path=[
+            FecStep(
+                scheme="cc",
+                rate_inv=rate_inv,
+                polys=list(polys),
+                frame_bits=frame_bits,
+                tail=tail,
+            )
+        ],
+    )
+    res = run_rx(
+        modem,
+        stage_registry(),
+        sample_rate=1.0,
+        start=Descriptor(Level.BITS, ItemType.F, Carrier.SOFT),
+        workdir=tmp_path,
+        input_stream=Symbolstream(
+            path=src, num_symbols=int(soft.size), item_type=ItemType.F
+        ),
+    )
+    assert res.status == "ok", res
+    assert res.bitstream is not None
+    assert np.array_equal(read_bits(res.bitstream.path)[:frame_bits], info)

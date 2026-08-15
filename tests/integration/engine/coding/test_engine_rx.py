@@ -379,7 +379,7 @@ def test_nonfinite_soft_symbol_input_is_an_error(tmp_path: Path) -> None:
 
 
 def test_pure_coding_path_without_input_stream_is_an_error(tmp_path: Path) -> None:
-    with pytest.raises(CompileError, match="input_stream"):
+    with pytest.raises(CompileError, match="no input"):
         run_rx(
             _sync_word_modem(),
             stage_registry(),
@@ -389,15 +389,42 @@ def test_pure_coding_path_without_input_stream_is_an_error(tmp_path: Path) -> No
         )
 
 
-def test_gr_segment_with_input_stream_is_an_error(tmp_path: Path) -> None:
-    with pytest.raises(CompileError, match="starts with a coding stage"):
+def test_input_stream_feeds_a_gr_segment(tmp_path: Path) -> None:
+    """An existing stream may open a path whose leading stages are GR blocks:
+    the GR segment sources that file instead of a capture. This is not a corner
+    case — depuncture/fec/deinterleave/polar/ldpc are all GR-lane stages, so
+    refusing it made every soft-LLR FEC path unreachable through input_stream,
+    which is the one entry a coding-only re-run has."""
+    ensure_worker_warm()
+    p = _flag_soft_symbols(tmp_path)
+    stream = Symbolstream(
+        path=p, num_symbols=int(_FLAG_BITS.size), item_type=ItemType.F
+    )
+    res = run_rx(
+        _gr_modem(),
+        stage_registry(),
+        sample_rate=1.0,
+        start=SOFT_SYMBOLS,
+        workdir=tmp_path,
+        input_stream=stream,
+    )
+    assert res.status == "ok", res
+    assert res.bitstream is not None
+    assert np.array_equal(read_bits(res.bitstream.path), _FLAG_BITS)
+    # the coding tail ran on what GR wrote, not on the input file
+    assert res.windows == [11]
+
+
+def test_capture_and_input_stream_together_is_an_error(tmp_path: Path) -> None:
+    with pytest.raises(CompileError, match="not both"):
         run_rx(
             _gr_modem(),
             stage_registry(),
             sample_rate=1.0,
             start=SOFT_SYMBOLS,
             workdir=tmp_path,
-            input_stream=_flag_stream(tmp_path),
+            source=SourceSlice(path=_flag_soft_symbols(tmp_path)),
+            input_stream=_soft_symbolstream(tmp_path, marks=[]),
         )
 
 

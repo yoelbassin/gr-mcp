@@ -351,6 +351,13 @@ GR_BLOCKS: dict[str, Callable[[_GrModules, BlockParams], Any]] = {
     ),
     # symbols are hard integer symbol indices (int16) — the wire type of the
     # symbol-terminating verticals (CSS peak_decision, m_slice)
+    "symbols_file_source": lambda c, p: c.blocks.file_source(
+        c.gr.sizeof_short,
+        p.s("path"),
+        bool(p.b("repeat", False)),
+        p.i("offset", 0),
+        p.i("length", 0),
+    ),
     "symbols_file_sink": lambda c, p: c.blocks.file_sink(
         c.gr.sizeof_short, p.s("path"), False
     ),

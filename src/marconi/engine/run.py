@@ -47,6 +47,7 @@ from marconi.engine.types.models import (
     Softstream,
     Symbolstream,
 )
+from marconi.engine.types.params import ParamValue
 from marconi.engine.types.step import stage_label
 from marconi.wire import replace
 
@@ -452,8 +453,26 @@ def _soft_tap(
     return None
 
 
+def _source_io(
+    source: SourceSlice | None, input_stream: Bitstream | Symbolstream | None
+) -> dict[str, ParamValue]:
+    """Params for the GR segment's one file source. A path opening on a
+    signal-processing stage reads the capture; one opening on a soft-decision
+    coding block reads the stream file instead. That second case is not exotic:
+    depuncture/fec/deinterleave/polar/ldpc are GR-lane stages, so EVERY
+    soft-LLR FEC path has a GR segment and would otherwise have no way to be
+    fed an existing stream."""
+    if source is not None:
+        return source.to_params()
+    if input_stream is not None:
+        return {"path": str(input_stream.path)}
+    return {}
+
+
 def _validate_entry(
-    cp: CompiledPipeline, input_stream: Bitstream | Symbolstream | None
+    cp: CompiledPipeline,
+    input_stream: Bitstream | Symbolstream | None,
+    source: SourceSlice | None = None,
 ) -> None:
     if cp.final.level is Level.AUDIO:
         raise CompileError(
@@ -461,35 +480,41 @@ def _validate_entry(
             "continue the path with a demodulation stage (for audio output "
             "use compile_modem and run the backend directly)"
         )
-    if cp.gr is not None and input_stream is not None:
+    if source is not None and input_stream is not None:
         raise CompileError(
-            "this path starts with a signal-processing stage, so it must be "
-            "fed an IQ capture; an existing bit/symbol stream only enters a "
-            "path that starts with a coding stage. Pass the capture instead "
-            "of the stream, or drop the leading stages"
+            "pass an IQ capture or an existing bit/symbol stream, not both — "
+            "the pipeline has one file source and they would both claim it"
         )
-    if cp.gr is None and input_stream is None:
+    if source is None and input_stream is None:
         raise CompileError(
-            "this modem's path starts with a coding stage, so no GR "
-            "segment writes the seam file; supply input_stream"
+            "no input: pass an IQ capture for a path that starts at a "
+            "signal-processing stage, or a bit/symbol stream for one that "
+            "starts at a coding stage"
         )
-    if isinstance(input_stream, Bitstream) and cp.boundary.item_type is not ItemType.B:
+    if input_stream is None:
+        return
+    # The ENTRY boundary, not cp.boundary: cp.boundary is the coding seam, which
+    # equals the entry only for an all-coding path. A soft stream feeding
+    # depuncture->fec enters a GR segment, and validating it against the seam
+    # compared it to the bits the Viterbi emits instead of the LLRs it consumes.
+    entry = cp.boundaries[0]
+    if isinstance(input_stream, Bitstream) and entry.item_type is not ItemType.B:
         raise CompileError(
             f"input_stream is a Bitstream (item_type 'b') but the entry "
-            f"boundary is item_type {cp.boundary.item_type.value!r}"
+            f"boundary is item_type {entry.item_type.value!r}"
         )
     if isinstance(input_stream, Symbolstream):
-        if cp.boundary.item_type not in (ItemType.S, ItemType.F):
+        if entry.item_type not in (ItemType.S, ItemType.F):
             raise CompileError(
                 f"input_stream is a Symbolstream (item_type "
                 f"{input_stream.item_type!r}) but the entry boundary is "
-                f"item_type {cp.boundary.item_type.value!r}"
+                f"item_type {entry.item_type.value!r}"
             )
-        if input_stream.item_type != cp.boundary.item_type.value:
+        if input_stream.item_type != entry.item_type.value:
             raise CompileError(
                 f"input_stream item_type {input_stream.item_type!r} does "
                 "not match the entry boundary item_type "
-                f"{cp.boundary.item_type.value!r}"
+                f"{entry.item_type.value!r}"
             )
 
 
@@ -535,13 +560,13 @@ def run_rx(
             registry,
             sample_rate=sample_rate,
             start=start,
-            source_io=source.to_params() if source is not None else {},
+            source_io=_source_io(source, input_stream),
             sink_io={"path": str(seam)},
             name=modem.name,
             quality_tap=True,
             trace_dir=trace_dir,
         )
-        _validate_entry(cp, input_stream)
+        _validate_entry(cp, input_stream, source)
         flagged = _reject_nonfinite(cp, start, source, input_stream)
         if flagged is not None:
             return flagged
@@ -550,7 +575,11 @@ def run_rx(
             return seg.failed
         marks = seg.marks
         entry_path = seam
-        if input_stream is not None:
+        # Only a path with NO GR segment hands the coding lane the input file
+        # itself. When the GR segment consumed that file, the coding tail reads
+        # what GR wrote, and the stream's own marks index the CONSUMED file, not
+        # the seam — carrying them across would offset them into the wrong basis.
+        if input_stream is not None and cp.gr is None:
             entry_path = input_stream.path
             if isinstance(input_stream, Symbolstream):
                 marks = list(input_stream.marks)
