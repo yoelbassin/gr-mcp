@@ -30,6 +30,7 @@ class Topic(StrEnum):
     SURVEY_ENVELOPE = "survey.envelope"
     SURVEY_SYMBOL_RATE = "survey.symbol_rate"
     SURVEY_INST_FREQ = "survey.inst_freq"
+    SURVEY_MULTICARRIER = "survey.multicarrier"
     SURVEY_BURSTS = "survey.bursts"
     RUN_RX_LEVELS = "run_rx.levels"
     RUN_RX_RESULT = "run_rx.result"
@@ -52,6 +53,9 @@ _SUMMARY: dict[Topic, str] = {
     ),
     Topic.SURVEY_INST_FREQ: (
         "peaks_hz tone resolution, why spread_hz is ONE-SIDED, mirrored IQ"
+    ),
+    Topic.SURVEY_MULTICARRIER: (
+        "blind OFDM geometry: what fft_len pins exactly and what it does not"
     ),
     Topic.SURVEY_BURSTS: "mapping a segment back onto the capture to re-decode it",
     Topic.RUN_RX_LEVELS: (
@@ -208,6 +212,37 @@ through run_rx and let stream_stats cluster tightness decide.
 Some capture chains mirror IQ spectrally. If a constant-envelope signal's
 fsk/msk demod reads no_signal, prepend the invert stage and retry before ruling
 out frequency modulation.
+""",
+    Topic.SURVEY_MULTICARRIER: """
+ABSENT unless a cyclic prefix was found, and that absence is itself the
+answer: a single-carrier signal has no CP structure to measure. Do not read a
+missing block as "not measured".
+
+An OFDM symbol repeats the tail of its useful part as its prefix, so the sample
+autocorrelation carries a line at lag = fft_len that nothing in a
+single-carrier signal produces. That line is sharp, so fft_len and
+subcarrier_spacing_hz are EXACT.
+
+cp_len, symbol_len and symbol_rate_hz are not. They come from the period of the
+CP-product envelope, whose autocorrelation peak is as broad as the prefix that
+makes it — measured off-air on a 504/2552 geometry, eleven consecutive lags sat
+within 0.0007 of each other and the argmax landed a sample out. Treat them as
+accurate to a few samples, and settle the remainder with
+ofdm_frame_sync_probe: its cp_corr is sharp exactly where this is flat (0.99 at
+the right cp_len against 0.20 one guess away), so a +-4 sweep converges in a
+handful of calls.
+
+cp_correlation is cp_len / symbol_len, the height of that line, and is the
+independent check on the pair: if the reported cp_len over symbol_len is far
+from it, the period estimate is the part that slipped. peak_ratio is the line
+over the median of its own search band with the line's neighbourhood excised —
+a null that does not contain the thing it judges.
+
+The symbol_rate block is single-carrier cyclostationary and has nothing to say
+here: it reports eye_confirmed false on OFDM, with candidates that are
+artifacts of the frame cadence. symbol_rate_hz in THIS block is the OFDM symbol
+rate (1 / symbol_len), which is not a subcarrier symbol rate and not what a
+single-carrier demod means by the term.
 """,
     Topic.SURVEY_BURSTS: """
 Activity segments, duty_cycle, and dominant_period_samples from burst spacing

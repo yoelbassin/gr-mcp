@@ -482,6 +482,16 @@ def survey(
     "symbol_rate" — candidates_hz with strengths and eye_openness (same index),
                     eye_confirmed, search band, clock_resolution_hz.
     "inst_freq"   — frequency histogram, tone peaks_hz, spread_hz.
+    "multicarrier" — ABSENT unless a cyclic prefix is found, which is itself
+                    the OFDM/single-carrier answer. fft_len, cp_len,
+                    symbol_len, subcarrier_spacing_hz, symbol_rate_hz,
+                    cp_correlation (= cp_len/symbol_len) and peak_ratio over
+                    its own search band. fft_len and the spacing are exact;
+                    cp_len/symbol_len are good to a few samples — settle them
+                    with ofdm_frame_sync_probe, whose cp_corr is sharp where
+                    this is flat. NOTE the symbol_rate block is single-carrier
+                    cyclostationary and reports eye_confirmed false on OFDM;
+                    this block is where a multicarrier signal answers.
     "bursts"      — segments, duty_cycle, dominant_period_samples,
                     capture_scale.
 

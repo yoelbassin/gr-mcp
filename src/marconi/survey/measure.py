@@ -48,6 +48,29 @@ class SpectrumStats(Payload):
     occupied_hi_hz: float
 
 
+class MulticarrierStats(Payload):
+    """A cyclic-prefix geometry read straight off the samples. Present only
+    when the CP self-correlation stands clear of its own search band; a
+    single-carrier signal has no such structure and the block is absent.
+
+    fft_len (and so subcarrier_spacing_hz) is exact — it is the lag of a
+    single sharp autocorrelation line. cp_len and symbol_len are NOT: they
+    come from the period of the CP-product envelope, whose autocorrelation
+    peak is as broad as the prefix itself (measured off-air on a 504/2552
+    geometry: the lags 2546..2556 span 0.0007 of correlation, and the argmax
+    landed one sample low). Treat them as a starting point accurate to a few
+    samples and settle the last of it with ofdm_frame_sync_probe, whose
+    cp_corr is sharp exactly where this is flat."""
+
+    fft_len: int
+    cp_len: int
+    symbol_len: int
+    subcarrier_spacing_hz: float
+    symbol_rate_hz: float
+    cp_correlation: float
+    peak_ratio: float
+
+
 class PhaseConcentration(Payload):
     order_2: float
     order_4: float
@@ -102,6 +125,17 @@ _BAND_EDGE_FRAC = 0.45
 _CADENCE_FLOOR_HARMONICS = 4.0
 # Cap the record length for carrier M-th-power FFT analysis.
 _CARRIER_MAX_SAMPLES = 1 << 20
+# Blind cyclic-prefix search bounds. 64 is the narrowest useful len in service
+# and 8192 the widest; the ratio bar is the CP line over the MEDIAN of the same
+# lag band with the line's own neighbourhood excised, and the absolute floor
+# stops a flat autocorrelation from electing whichever lag happened to be
+# largest. A CP line reads cp_len/symbol_len (measured off-air on a 1.5 MHz
+# multicarrier block: 0.197 for a 504/2552 geometry, ~24x its band median);
+# a single-carrier signal produces no line at all.
+_MC_MIN_FFT = 64
+_MC_MAX_FFT = 8192
+_MC_MIN_CORR = 0.02
+_MC_PEAK_RATIO = 3.0
 
 
 def _downsample(a: npt.NDArray[np.float64], cap: int) -> npt.NDArray[np.float64]:
@@ -180,6 +214,95 @@ def _spectrum(x: npt.NDArray[np.complex64], sample_rate: float) -> SpectrumStats
 
 def _bounded(x: npt.NDArray[np.complex64]) -> npt.NDArray[np.complex64]:
     return x[:_CARRIER_MAX_SAMPLES] if x.size > _CARRIER_MAX_SAMPLES else x
+
+
+def _autocorr(x: npt.NDArray[np.complexfloating[Any, Any]], max_lag: int) -> Any:
+    """|R(lag)| / R(0) for lag 0..max_lag, mean removed. FFT-based: a direct
+    sweep over thousands of candidate lags is what makes blind CP search look
+    expensive, and it is not."""
+    z = x - x.mean()
+    n = 1 << int(np.ceil(np.log2(z.size + max_lag + 1)))
+    f = np.fft.fft(z, n)
+    r = np.fft.ifft(np.abs(f) ** 2)[: max_lag + 1]
+    r0 = float(np.abs(r[0])) or 1.0
+    return np.abs(r) / r0
+
+
+def _movavg(a: Any, width: int) -> Any:
+    w = max(3, int(width)) | 1
+    return np.convolve(
+        np.pad(a, (w // 2, w // 2), mode="edge"), np.ones(w) / w, "valid"
+    )
+
+
+def _multicarrier(
+    x: npt.NDArray[np.complex64], sample_rate: float
+) -> MulticarrierStats | None:
+    """Blind OFDM geometry from the cyclic prefix alone.
+
+    An OFDM symbol repeats the tail of its useful part as its prefix, so the
+    sample autocorrelation carries a line at lag = fft_len whose height is
+    cp_len / symbol_len and which NOTHING in a single-carrier signal produces.
+    That fixes fft_len. The product x[t] * conj(x[t + fft_len]) is then large
+    only while a prefix overlaps its copy, so its magnitude is periodic at the
+    SYMBOL period, and one more autocorrelation fixes symbol_len — hence
+    cp_len, the subcarrier spacing and the symbol rate.
+
+    Without this the geometry could only be guessed and then confirmed with
+    ofdm_frame_sync_probe, which requires the whole answer as input.
+    """
+    z = _bounded(x)
+    max_lag = min(_MC_MAX_FFT, z.size // 8)
+    if max_lag <= _MC_MIN_FFT:
+        return None
+    ac = _autocorr(z, max_lag)
+    band = ac[_MC_MIN_FFT : max_lag + 1]
+    if band.size < 8:
+        return None
+    fft_len = int(_MC_MIN_FFT + int(np.argmax(band)))
+    peak = float(ac[fft_len])
+    # The null is the search band with a neighbourhood of the peak REMOVED:
+    # a bar computed from data still containing the line it judges is the
+    # recurring defect here, and a wide CP line inflates its own floor.
+    guard = max(4, fft_len // 16)
+    mask = np.ones(band.size, dtype=bool)
+    lo = max(0, fft_len - _MC_MIN_FFT - guard)
+    mask[lo : fft_len - _MC_MIN_FFT + guard + 1] = False
+    floor = float(np.median(band[mask])) if mask.any() else 0.0
+    ratio = peak / floor if floor > 0 else 0.0
+    if peak < _MC_MIN_CORR or ratio < _MC_PEAK_RATIO:
+        return None
+    # symbol period: |x[t] conj(x[t+N])| rides high only across a prefix, so it
+    # is periodic at symbol_len. Search lags strictly past fft_len — cp_len is
+    # positive — and no further than 2*fft_len, since no deployed guard
+    # interval reaches the useful length.
+    prod = z[:-fft_len] * np.conj(z[fft_len:])
+    # Smoothing scaled to the geometry, never a fixed window: too short and the
+    # product's sample-to-sample noise wins, too long and it blurs a prefix
+    # narrower than itself. fft_len/16 held every geometry from 256 to 2048 to
+    # within 3 samples; a fixed 64 missed a 256-point one by 6.
+    env = windowed_power(prod.astype(np.complex64), max(4, fft_len // 16))
+    sym_ac = _autocorr(env.astype(np.complex128), 2 * fft_len)
+    lags = sym_ac[fft_len + 1 : 2 * fft_len + 1]
+    if lags.size == 0:
+        return None
+    # The period is a BUMP on a broad decaying pedestal, not the largest value:
+    # the pedestal is highest at the short-lag end of the search band, so a
+    # plain argmax elected lag fft_len+1 (cp_len 1) on every geometry whose
+    # prefix was small next to its useful part. Detrend, then take the bump.
+    symbol_len = int(fft_len + 1 + int(np.argmax(lags - _movavg(lags, fft_len // 4))))
+    cp_len = symbol_len - fft_len
+    if cp_len <= 0:
+        return None
+    return MulticarrierStats(
+        fft_len=fft_len,
+        cp_len=cp_len,
+        symbol_len=symbol_len,
+        subcarrier_spacing_hz=_sig(sample_rate / fft_len),
+        symbol_rate_hz=_sig(sample_rate / symbol_len),
+        cp_correlation=_sig(peak),
+        peak_ratio=_sig(ratio),
+    )
 
 
 def _mpsk_line(
@@ -974,6 +1097,8 @@ class SurveyResult(Payload):
     symbol_rate: SymbolRateStats
     inst_freq: InstFreqStats
     bursts: BurstStats
+    # absent unless a cyclic-prefix geometry was actually found
+    multicarrier: MulticarrierStats | None = None
 
     def for_capture(self, *, offset_samples: int, decim: int) -> "SurveyResult":
         return replace(
@@ -1031,7 +1156,9 @@ def survey_iq(
     spectrum = _spectrum(x, sample_rate)
     edge = _BAND_EDGE_FRAC * sample_rate
     band_edge_wrap = spectrum.occupied_hi_hz > edge or spectrum.occupied_lo_hz < -edge
-    return SurveyResult(
+    # build(), not the constructor: a signal with no cyclic prefix must OMIT
+    # the multicarrier block, not ship an explicit null for it
+    return SurveyResult.build(
         sample_rate=sample_rate,
         span_samples=window.span,
         analyzed_samples=window.analyzed,
@@ -1049,4 +1176,5 @@ def survey_iq(
         symbol_rate=_symbol_rate(x, sample_rate, lo, hi),
         inst_freq=_inst_freq(x, sample_rate),
         bursts=bursts,
+        multicarrier=_multicarrier(x, sample_rate),
     )
