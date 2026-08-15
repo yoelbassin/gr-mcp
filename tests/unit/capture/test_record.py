@@ -1,14 +1,21 @@
 from __future__ import annotations
 
+import multiprocessing
+import shutil
 import time
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
 
 import numpy as np
 import pytest
 from helpers._capture import (
+    LATE_BUDGET_S,
     SNAPPED_RATE,
     WEDGED_SECONDS,
     crashing_probe,
+    exiting_probe,
+    late_probe,
     refusing_probe,
     snapping_probe,
     stub_probe,
@@ -19,6 +26,7 @@ from helpers._deadline import deadline_expiring_after
 from marconi.capture import CaptureError
 from marconi.capture import record as record_mod
 from marconi.capture.record import (
+    _BYTES_PER_SAMPLE,
     CaptureLevels,
     CaptureResult,
     DeviceReadback,
@@ -30,6 +38,7 @@ from marconi.capture.record import (
 )
 from marconi.deadline import RunTimeout, set_deadline
 from marconi.engine.backends.base import RunResult
+from marconi.engine.backends.gnuradio.runner import ensure_worker_warm, worker_context
 from marconi.engine.compile.ir import GrPipeline
 from marconi.engine.types.enums import RunStatus
 from marconi.errors import classify_error
@@ -151,7 +160,9 @@ class _StubDriver:
     """Stands in for the SDR run: writes the samples the flowgraph would have
     written and reports what the driver said about the outcome and about
     dropped buffers. A run that ends in TIMEOUT or ERROR still leaves whatever
-    the file sink had written — the partial capture the tool documents."""
+    the file sink had written — the partial capture the tool documents. The
+    timeouts it was handed are kept: what bounds the graph is a composition,
+    not a constant."""
 
     def __init__(
         self,
@@ -164,8 +175,10 @@ class _StubDriver:
         self._status = status
         self._samples = samples
         self._error = error
+        self.timeouts: list[float] = []
 
     def run_pipeline(self, pipeline: GrPipeline, timeout: float = 30.0) -> RunResult:
+        self.timeouts.append(timeout)
         path = Path(str(pipeline.block("sink").params["path"]))
         artifacts: list[str] = []
         if self._samples:
@@ -185,6 +198,21 @@ def _drive_capture(
     monkeypatch.setattr(record_mod, "_probe_device", stub_probe)
     monkeypatch.setattr(record_mod, "GnuRadioBackend", lambda: driver)
     return monkeypatch
+
+
+def _track_probe_children(monkeypatch: pytest.MonkeyPatch) -> list[Any]:
+    """Every process the probe starts, so a test can ask what became of it."""
+    ctx = worker_context()
+    started: list[Any] = []
+    real_process = ctx.Process  # type: ignore[attr-defined]
+
+    def _tracking(*args: Any, **kwargs: Any) -> Any:
+        proc = real_process(*args, **kwargs)
+        started.append(proc)
+        return proc
+
+    monkeypatch.setattr(ctx, "Process", _tracking)
+    return started
 
 
 def _stub_capture(
@@ -260,6 +288,7 @@ def test_a_wedged_probe_is_killed_and_the_call_answers_on_the_clock(
     probe runs in a child now, and the bound is on the parent's clock."""
     _drive_capture(monkeypatch, _StubDriver())
     monkeypatch.setattr(record_mod, "_probe_device", wedged_probe)
+    spawned = _track_probe_children(monkeypatch)
     start = time.monotonic()
     with set_deadline(2.0), pytest.raises(RunTimeout) as excinfo:
         capture_iq(tmp_path / "iq.cf32", center_hz=100e6, duration_s=0.01)
@@ -267,6 +296,13 @@ def test_a_wedged_probe_is_killed_and_the_call_answers_on_the_clock(
     assert elapsed < WEDGED_SECONDS / 2, f"probe ran unbounded for {elapsed:.1f}s"
     assert classify_error(excinfo.value)[0] == "deadline_exceeded"
     assert "device" in str(excinfo.value).lower()
+    # answering on the clock is half of it: the call cannot return while the
+    # wedged child keeps the radio, so the child is dead before the raise
+    (child,) = spawned
+    assert child.pid is not None
+    assert not child.is_alive(), "the wedged probe outlived the call it bounded"
+    assert child.exitcode is not None
+    assert multiprocessing.active_children() == []
 
 
 def test_the_devices_readback_crosses_back_from_the_probes_child(
@@ -326,6 +362,86 @@ def test_the_probe_budget_is_the_runs_remaining_deadline(
     elapsed = time.monotonic() - start
     assert "spent before" in str(excinfo.value)
     assert elapsed < 5.0, f"a spent deadline still opened a device for {elapsed:.1f}s"
+
+
+def test_a_probe_that_answers_just_past_its_budget_is_used_or_timed_out(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The window between the budget expiring and the child being reaped: the
+    answer is already in the pipe there, and reading the exit code instead
+    threw it away and called a clean exit a driver crash."""
+    ensure_worker_warm()
+    monkeypatch.setattr(record_mod, "_probe_device", late_probe)
+    try:
+        with set_deadline(LATE_BUDGET_S):
+            got = record_mod._probe_within("", 2.048e6, 100e6, 0.0)
+    except RunTimeout as expired:
+        assert "did not answer" in str(expired)
+    else:
+        assert got == DeviceReadback(sample_rate=2.048e6, center_hz=100e6)
+
+
+def test_a_probe_that_exits_cleanly_without_answering_is_not_called_a_crash(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Exit code 0 is the one code that is not a death: reporting "the driver
+    took the process down with it" for it sends the operator after hardware
+    that is fine."""
+    _drive_capture(monkeypatch, _StubDriver())
+    monkeypatch.setattr(record_mod, "_probe_device", exiting_probe)
+    with pytest.raises(CaptureError) as excinfo:
+        capture_iq(tmp_path / "iq.cf32", center_hz=100e6, duration_s=0.01)
+    message = str(excinfo.value)
+    assert "exited without" in message
+    assert "took the process down" not in message
+    assert "exitcode=0" not in message
+
+
+def test_the_run_timeout_is_whichever_of_the_two_is_smaller(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The graph gets the recording's own cap, or what the call has left —
+    otherwise a tool timeout stops at the probe and the run overruns it."""
+    driver = _StubDriver()
+    _drive_capture(monkeypatch, driver)
+    capture_iq(tmp_path / "iq.cf32", center_hz=100e6, duration_s=0.01)
+    with set_deadline(3.0):
+        capture_iq(tmp_path / "iq.cf32", center_hz=100e6, duration_s=0.01)
+    untimed, tight = driver.timeouts
+    assert untimed == pytest.approx(
+        record_mod._SETTLE_S + 0.01 + record_mod._TIMEOUT_MARGIN_S
+    )
+    assert 0.0 < tight <= 3.0
+
+
+def test_the_free_space_bar_is_the_bytes_the_recording_needs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The bar itself, on any host: 2048 complex samples need 16384 bytes, and
+    one byte short of that is a refusal."""
+    needed = 2048 * _BYTES_PER_SAMPLE
+
+    def _with_free(free: int) -> None:
+        monkeypatch.setattr(
+            shutil,
+            "disk_usage",
+            lambda path: SimpleNamespace(total=free, used=0, free=free),
+        )
+
+    _drive_capture(monkeypatch, _StubDriver())
+    _with_free(needed - 1)
+    with pytest.raises(CaptureError, match="free"):
+        capture_iq(
+            tmp_path / "iq.cf32",
+            center_hz=100e6,
+            sample_rate=2.048e6,
+            duration_s=0.001,
+        )
+    _with_free(needed)
+    cap = capture_iq(
+        tmp_path / "iq.cf32", center_hz=100e6, sample_rate=2.048e6, duration_s=0.001
+    )
+    assert cap.num_samples == 2048
 
 
 def test_the_probe_cap_only_ever_tightens(

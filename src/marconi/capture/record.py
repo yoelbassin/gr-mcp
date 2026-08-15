@@ -60,10 +60,11 @@ _PROBE_REAP_S = 0.25
 # reason): every sample is 8 bytes to disk. check_sample_rate alone (finite,
 # > 0) accepted 1e12 — _reconcile returned it verbatim and the compiler turned
 # it into a 3.000e+14-item head block, 2183 TiB, with a clean status. 1 Gsps is
-# 8 GB/s sustained, an order above NVMe write and two above USB3/10GbE, so no
-# host can record past this whatever a radio claims, and the widest streaming
-# SDRs deliver well under it. Realistic requests are bounded by the free-space
-# preflight below; this catches the typo'd or fabricated number.
+# 8 GB/s of sustained write — past what a PCIe 4 NVMe drive sustains, ~6x a
+# 10GbE link and ~13x USB3 gen1, which are the buses SDRs actually stream over,
+# so no host can record past this whatever a radio claims. Realistic requests
+# are bounded by the free-space preflight below; this catches the typo'd or
+# fabricated number.
 _MAX_SAMPLE_RATE = 1e9
 
 
@@ -282,8 +283,8 @@ ProbeFn = Callable[[str, float, float, float], DeviceReadback | None]
 
 
 class _ProbeOutcome(BaseModel):
-    """What the probe child reports back. error_type is the driver-side
-    exception's class, or None when the failure is the mechanism's own."""
+    """error_type is the driver-side exception's class, or None when the
+    failure is the mechanism's own."""
 
     readback: DeviceReadback | None = None
     error: str | None = None
@@ -321,11 +322,22 @@ def _run_probe_child(
         proc.start()
         send.close()
         payload = receive_payload(recv, budget)
+        if payload is None:
+            proc.join(_PROBE_REAP_S)
+            # drain before reading the exit code, the way the flowgraph path
+            # does after its kill: a probe that answered as its budget ran out
+            # leaves the readback in the pipe and exits 0, and reaping first
+            # threw that answer away to report the clean exit as a death
+            payload = receive_payload(recv, 0.0)
         if payload is not None:
             return _ProbeOutcome.model_validate_json(payload)
-        proc.join(_PROBE_REAP_S)
         if proc.exitcode is None:
             return None
+        if proc.exitcode == 0:
+            return _ProbeOutcome(
+                error=f"the SDR probe (device={device!r}) exited without saying "
+                "what the radio answered"
+            )
         return _ProbeOutcome(
             error=f"the SDR probe process died (exitcode={proc.exitcode}) "
             f"without reporting (device={device!r}) — the driver took the "
