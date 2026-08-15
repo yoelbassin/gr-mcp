@@ -1,13 +1,22 @@
 from __future__ import annotations
 
 import math
+import shutil
+from collections.abc import Callable
+from multiprocessing.connection import Connection
 from pathlib import Path
 from typing import Protocol
 
 import numpy as np
 from pydantic import BaseModel
 
-from marconi.engine.backends.gnuradio.runner import GnuRadioBackend
+from marconi.deadline import RunTimeout, check_deadline, remaining
+from marconi.engine.backends.gnuradio.runner import (
+    GnuRadioBackend,
+    reap_process,
+    receive_payload,
+    worker_context,
+)
 from marconi.engine.compile.ir import GrBlock, GrConnection, GrPipeline
 from marconi.engine.types.bounds import check_sample_rate
 from marconi.engine.types.enums import CaptureDtype, RunStatus
@@ -22,6 +31,40 @@ _LEVELS_MAX_SAMPLES = 1 << 22
 _CLIP_THRESHOLD = 0.99
 _CLIP_WARN_FRACTION = 0.01
 _RMS_DEAD = 1e-3
+_BYTES_PER_SAMPLE = 8
+_GIB = float(1 << 30)
+
+# Enumerate, open and tune are blocking driver calls with no poll inside them,
+# so this is a bound on a CHILD PROCESS rather than a cooperative check: a 6 s
+# block measured 6.01 s even inside set_deadline(0.1), because check_deadline
+# cannot reach a C call. The cap has to clear the slowest LEGITIMATE open, not
+# the local negative — enumerate+open with nothing attached measured 6.4 ms
+# cold and 0.1 ms warm here (macOS, SoapySDR 0.8), while a UHD device loads
+# firmware on first open and a SoapyRemote one opens over the network, both
+# seconds. Lower and a slow-but-working radio is refused mid-open; higher and a
+# wedged one is that much dead wait. The call's own timeout composes over this:
+# the probe gets whichever is smaller. The bound costs one forkserver child,
+# measured 250-260 ms round trip (fork, import, enumerate, pipe) when warm.
+_PROBE_TIMEOUT_S = 20.0
+
+# How long a probe that answered nothing is given to report an exit code, which
+# is the only thing separating a driver that crashed its process from one still
+# inside the call. It is spent PAST a deadline that is already gone, so it is
+# also the call's worst-case overshoot: a 2 s budget measured 3.02 s at 1.0 s
+# here and 2.27 s at this value, while a child that called _exit is still
+# collected every time.
+_PROBE_REAP_S = 0.25
+
+# sample_rate sizes the WRITE here, unlike at every other tool entry where a
+# wrong rate is cheap (bounds.py leaves physical quantities unbounded for that
+# reason): every sample is 8 bytes to disk. check_sample_rate alone (finite,
+# > 0) accepted 1e12 — _reconcile returned it verbatim and the compiler turned
+# it into a 3.000e+14-item head block, 2183 TiB, with a clean status. 1 Gsps is
+# 8 GB/s sustained, an order above NVMe write and two above USB3/10GbE, so no
+# host can record past this whatever a radio claims, and the widest streaming
+# SDRs deliver well under it. Realistic requests are bounded by the free-space
+# preflight below; this catches the typo'd or fabricated number.
+_MAX_SAMPLE_RATE = 1e9
 
 
 class CaptureError(Exception):
@@ -235,6 +278,128 @@ def _probe_device(
         dev.close()
 
 
+ProbeFn = Callable[[str, float, float, float], DeviceReadback | None]
+
+
+class _ProbeOutcome(BaseModel):
+    """What the probe child reports back. error_type is the driver-side
+    exception's class, or None when the failure is the mechanism's own."""
+
+    readback: DeviceReadback | None = None
+    error: str | None = None
+    error_type: str | None = None
+
+
+def _probe_child(
+    probe: ProbeFn,
+    device: str,
+    sample_rate: float,
+    center_hz: float,
+    ppm: float,
+    send: Connection,
+) -> None:
+    try:
+        outcome = _ProbeOutcome(readback=probe(device, sample_rate, center_hz, ppm))
+    except Exception as exc:
+        outcome = _ProbeOutcome(
+            error=str(exc) or type(exc).__name__, error_type=type(exc).__name__
+        )
+    send.send(outcome.model_dump_json())
+
+
+def _run_probe_child(
+    budget: float, device: str, sample_rate: float, center_hz: float, ppm: float
+) -> _ProbeOutcome | None:
+    """None when the child never answered — it is still inside the driver."""
+    ctx = worker_context()
+    recv, send = ctx.Pipe(duplex=False)
+    proc = ctx.Process(  # type: ignore[attr-defined]
+        target=_probe_child,
+        args=(_probe_device, device, sample_rate, center_hz, ppm, send),
+    )
+    try:
+        proc.start()
+        send.close()
+        payload = receive_payload(recv, budget)
+        if payload is not None:
+            return _ProbeOutcome.model_validate_json(payload)
+        proc.join(_PROBE_REAP_S)
+        if proc.exitcode is None:
+            return None
+        return _ProbeOutcome(
+            error=f"the SDR probe process died (exitcode={proc.exitcode}) "
+            f"without reporting (device={device!r}) — the driver took the "
+            "process down with it"
+        )
+    finally:
+        reap_process(proc)
+        send.close()
+        recv.close()
+
+
+def _probe_within(
+    device: str, sample_rate: float, center_hz: float, ppm: float
+) -> DeviceReadback | None:
+    budget = min(_PROBE_TIMEOUT_S, remaining())
+    if budget <= 0.0:
+        raise RunTimeout(
+            "the call's timeout was spent before the SDR could be probed — "
+            "raise timeout"
+        )
+    outcome = _run_probe_child(budget, device, sample_rate, center_hz, ppm)
+    if outcome is None:
+        raise RunTimeout(
+            f"the SDR (device={device!r}) did not answer enumerate/open/tune "
+            f"within {budget:.3g} s and its probe was killed — the radio or its "
+            "driver is wedged: replug it, close whatever else is holding it, "
+            f"or name another device. capture waits at most {_PROBE_TIMEOUT_S:g} s "
+            "for a radio to answer and timeout only lowers that, so a longer "
+            "timeout will not open this one"
+        )
+    if outcome.error is not None:
+        driver_side = outcome.error_type not in (None, CaptureError.__name__)
+        raise CaptureError(
+            f"{outcome.error_type}: {outcome.error}" if driver_side else outcome.error
+        )
+    return outcome.readback
+
+
+def _check_free_space(
+    out_path: Path, *, num_samples: int, duration_s: float, sample_rate: float
+) -> None:
+    needed = num_samples * _BYTES_PER_SAMPLE
+    free = shutil.disk_usage(out_path.parent).free
+    if needed <= free:
+        return
+    fits_s = free / (sample_rate * _BYTES_PER_SAMPLE)
+    raise CaptureError(
+        f"this capture needs {needed / _GIB:.1f} GiB (duration_s {duration_s:g} s "
+        f"x sample_rate {sample_rate:g} Hz x {_BYTES_PER_SAMPLE} bytes per complex "
+        f"sample) and {out_path.parent} has {free / _GIB:.1f} GiB free — lower "
+        f"duration_s below {fits_s:.1f} s at this rate, lower sample_rate, or "
+        "free space"
+    )
+
+
+def capture_budget_s(duration_s: float, timeout: float | None) -> float:
+    """The wall-clock budget the whole call runs under. None derives it from
+    the recording, which is the one part whose length the caller already
+    stated: a fixed default like the other tools' would kill a legal 300 s
+    capture."""
+    recording = _SETTLE_S + duration_s
+    if timeout is None:
+        return recording + _PROBE_TIMEOUT_S + _TIMEOUT_MARGIN_S
+    if not math.isfinite(timeout):
+        raise ValueError(f"timeout must be a finite number of seconds, got {timeout!r}")
+    if timeout <= recording:
+        raise ValueError(
+            f"timeout {timeout:g} s cannot cover a duration_s {duration_s:g} s "
+            f"recording and its {_SETTLE_S:g} s settle transient — raise timeout "
+            f"above {recording:g} s, or lower duration_s"
+        )
+    return timeout
+
+
 # A recording has no "decoded nothing" outcome: a graph that wrote no samples
 # raises below, so EMPTY folds into ERROR. Keyed by the enum and checked for
 # completeness at import, so a new RunStatus member cannot reach this bridge as
@@ -265,6 +430,13 @@ def capture_iq(
     # check and reached the device as setSampleRate(nan) - and bounds.py
     # exists for exactly this ("non-finite is the one that bit")
     check_sample_rate(sample_rate)
+    if sample_rate > _MAX_SAMPLE_RATE:
+        raise ValueError(
+            f"sample_rate {sample_rate:g} exceeds {_MAX_SAMPLE_RATE:g} Hz — at "
+            f"{_BYTES_PER_SAMPLE} bytes per complex sample that is "
+            f"{_MAX_SAMPLE_RATE * _BYTES_PER_SAMPLE / 1e9:g} GB/s of sustained "
+            "write, past any host bus or disk, and past every streaming SDR"
+        )
     for name, value in (("center_hz", center_hz), ("ppm", ppm)):
         if not math.isfinite(value):
             raise ValueError(f"{name} must be finite, got {value!r}")
@@ -272,9 +444,16 @@ def capture_iq(
         raise ValueError(f"gain_db must be finite, got {gain_db!r}")
     if not 0 < duration_s <= _MAX_DURATION_S:
         raise ValueError(f"duration_s must be in (0, {_MAX_DURATION_S:g}]")
-    probe = _probe_device(device, sample_rate, center_hz, ppm)
+    probe = _probe_within(device, sample_rate, center_hz, ppm)
     settled = _reconcile(sample_rate, center_hz, probe)
     rate, freq = settled.sample_rate, settled.center_hz
+    requested_samples = round(duration_s * rate)
+    _check_free_space(
+        out_path,
+        num_samples=requested_samples,
+        duration_s=duration_s,
+        sample_rate=rate,
+    )
     pipeline = build_capture_pipeline(
         out_path=out_path,
         device=device,
@@ -283,10 +462,12 @@ def capture_iq(
         gain_db=gain_db,
         ppm=ppm,
         settle_samples=round(_SETTLE_S * rate),
-        num_samples=round(duration_s * rate),
+        num_samples=requested_samples,
     )
+    check_deadline()
     result = GnuRadioBackend().run_pipeline(
-        pipeline, timeout=_SETTLE_S + duration_s + _TIMEOUT_MARGIN_S
+        pipeline,
+        timeout=min(_SETTLE_S + duration_s + _TIMEOUT_MARGIN_S, remaining()),
     )
     num_samples = out_path.stat().st_size // 8 if out_path.is_file() else 0
     if num_samples == 0:

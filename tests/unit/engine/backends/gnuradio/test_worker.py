@@ -321,7 +321,7 @@ def _slow_worker(payload_json: str, conn: Any, capture_path: str) -> None:
 def test_exception_between_start_and_join_does_not_orphan_child(
     monkeypatch: Any,
 ) -> None:
-    """An exception escaping `_receive_payload` (KeyboardInterrupt, MemoryError -
+    """An exception escaping `receive_payload` (KeyboardInterrupt, MemoryError -
     anything not EOFError/OSError) used to skip the join/kill sequence entirely
     and escape with the non-daemon flowgraph child still running (probed).
     The exception path must reap the child before re-raising."""
@@ -339,7 +339,7 @@ def test_exception_between_start_and_join_does_not_orphan_child(
     def _boom(recv: Connection, timeout: float) -> str | None:
         raise RuntimeError("simulated async exception during recv.poll")
 
-    monkeypatch.setattr(runner_mod, "_receive_payload", _boom)
+    monkeypatch.setattr(runner_mod, "receive_payload", _boom)
 
     try:
         with pytest.raises(RuntimeError, match="simulated async exception"):

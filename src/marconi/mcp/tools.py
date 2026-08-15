@@ -7,7 +7,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from marconi.capture import capture_iq
+from marconi.capture import capture_budget_s, capture_iq
 from marconi.deadline import set_deadline
 from marconi.engine.compile.compiler import compile_pipeline
 from marconi.engine.compile.errors import CompileError
@@ -557,6 +557,7 @@ def capture_tool(
     gain_db: float | None = None,
     ppm: float = 0.0,
     device: str = "",
+    timeout: float | None = None,
 ) -> dict[str, object]:
     """Record a bounded raw-IQ capture from an attached SDR into a .cf32
     file — the live-hardware entry to the survey → validate_modem → run_rx
@@ -593,8 +594,18 @@ def capture_tool(
     re-capture (a warnings entry repeats the count). 0 is the driver
     reporting no drops. Iterate on ONE capture while forming hypotheses
     (same bits every run); re-capture only when you want fresh RF. Captures
-    persist there until you remove them."""
-    with discarded_if_unused(new_run_dir("capture")) as run_dir:
+    persist there until you remove them.
+
+    timeout is a hard wall-clock cap on the whole call — probing the radio,
+    settling and recording. It only TIGHTENS: the default is derived from
+    duration_s, a value above it changes nothing, and one that cannot cover
+    duration_s and the settle is refused. A radio that never answers
+    enumerate/open/tune is killed and raises [deadline_exceeded] rather than
+    hanging the call — capture waits at most 20 s for a radio to answer. A
+    sample_rate no host could write, or a recording that would not fit the
+    free disk, is refused before recording starts."""
+    budget = capture_budget_s(duration_s, timeout)
+    with set_deadline(budget), discarded_if_unused(new_run_dir("capture")) as run_dir:
         result = capture_iq(
             run_dir / "iq.cf32",
             center_hz=center_hz,

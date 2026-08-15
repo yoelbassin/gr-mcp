@@ -44,6 +44,13 @@ _CTX = _make_context()
 _warmed = False
 
 
+def worker_context() -> BaseContext:
+    """The one process context in the tree. Capture's device probe is bounded
+    the same way a flowgraph is — by killing a child — and a second context
+    would start a second forkserver daemon, paying the gnuradio preload twice."""
+    return _CTX
+
+
 def _warmup_noop() -> None:
     pass
 
@@ -98,7 +105,7 @@ def _resolve_result(
     )
 
 
-def _receive_payload(recv: Connection, timeout: float) -> str | None:
+def receive_payload(recv: Connection, timeout: float) -> str | None:
     """Drain the pipe before reaping the worker: a result past the OS pipe
     buffer blocks the worker in send until the parent reads, so join-first
     turns every large successful run into a timeout. A frame truncated by a
@@ -111,10 +118,10 @@ def _receive_payload(recv: Connection, timeout: float) -> str | None:
     return None
 
 
-def _force_reap(proc: Any) -> None:
-    """Mirrors the normal path's terminate/grace/kill sequence for the
-    exception path: a raise between start() and join() must not leave the
-    non-daemon flowgraph child running as an orphan (probed)."""
+def reap_process(proc: Any) -> None:
+    """The terminate/grace/kill sequence the normal path runs inline, for every
+    other exit from a started child: a raise between start() and join() must
+    not leave the non-daemon child running as an orphan (probed)."""
     if proc.pid is None:
         return
     if proc.is_alive():
@@ -141,9 +148,9 @@ def _run_in_subprocess(
         try:
             proc.start()
             send.close()
-            payload = _receive_payload(recv, timeout)
+            payload = receive_payload(recv, timeout)
         except BaseException:
-            _force_reap(proc)
+            reap_process(proc)
             send.close()
             recv.close()
             raise
@@ -163,7 +170,7 @@ def _run_in_subprocess(
                 proc.kill()
                 proc.join()
             if payload is None:
-                payload = _receive_payload(recv, 0.0)
+                payload = receive_payload(recv, 0.0)
         recv.close()
         # the log is unlinked in the finally below, so everything the run has
         # to say about the driver must be read out of it here

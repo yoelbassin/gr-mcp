@@ -1,13 +1,18 @@
 from __future__ import annotations
 
+import inspect
+import time
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 import pytest
+from helpers._capture import WEDGED_SECONDS, wedged_probe
 
+from marconi.capture import record as record_mod
 from marconi.deadline import RunTimeout, bounded, set_deadline
-from marconi.mcp.tools import run_rx_tool, validate_modem
+from marconi.errors import classify_error
+from marconi.mcp.tools import TOOLS, capture_tool, run_rx_tool, validate_modem
 from marconi.mcp.workspace import discarded_if_unused, new_run_dir
 
 # a (15,11) Hamming-like shape asking for 2-error correction: the validator
@@ -68,6 +73,48 @@ def test_run_rx_parses_the_spec_inside_its_own_deadline(
             input_item_type=None,
             timeout=0.0,
         )
+
+
+def test_every_tool_that_can_block_takes_a_timeout() -> None:
+    """capture was the one tool with a hang path and the only blocking tool
+    with no timeout at all: siblings offered 60/180/180 and it offered
+    nothing, so an agent had no way to bound a wedged radio."""
+    for name in ("validate_modem", "run_rx", "survey", "capture"):
+        params = inspect.signature(TOOLS[name]).parameters
+        assert "timeout" in params, name
+
+
+def test_capture_bounds_a_wedged_radio_and_says_so(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The docstring's timeout paragraph, driven: a device that never answers
+    is killed and reported as a deadline, not waited on."""
+    doc = capture_tool.__doc__ or ""
+    assert "timeout" in doc and "deadline_exceeded" in doc
+    # the cap the prose quotes is the constant enforcing it, not a number that
+    # can drift away from it
+    assert f"{record_mod._PROBE_TIMEOUT_S:g} s" in doc
+    monkeypatch.setenv("MARCONI_WORKSPACE", str(tmp_path))
+    monkeypatch.setattr(record_mod, "_probe_device", wedged_probe)
+    start = time.monotonic()
+    with pytest.raises(RunTimeout) as excinfo:
+        capture_tool(center_hz=100e6, duration_s=0.01, timeout=2.0)
+    elapsed = time.monotonic() - start
+    assert elapsed < WEDGED_SECONDS / 2, f"capture ran unbounded for {elapsed:.1f}s"
+    assert classify_error(excinfo.value)[0] == "deadline_exceeded"
+
+
+def test_capture_refuses_a_timeout_that_cannot_cover_the_recording(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A cap below the recording it is capping is a spec error the caller can
+    retype, not a run to start and kill."""
+    monkeypatch.setenv("MARCONI_WORKSPACE", str(tmp_path))
+    with pytest.raises(ValueError) as excinfo:
+        capture_tool(center_hz=100e6, duration_s=5.0, timeout=1.0)
+    code, message = classify_error(excinfo.value)
+    assert code == "invalid_argument"
+    assert "timeout" in message and "duration_s" in message
 
 
 def test_failed_run_leaves_no_empty_run_dir(
