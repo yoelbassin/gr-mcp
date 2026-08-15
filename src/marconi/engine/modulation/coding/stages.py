@@ -260,7 +260,16 @@ class FecStep(Step):
     polys: list[int] = Field(min_length=1)
     frame_bits: StrictInt = Field(ge=1, le=MAX_FRAME_ITEMS)
     tail: StrictInt = Field(default=0, ge=0, le=MAX_FRAME_ITEMS)
-    k: StrictInt = Field(default=1, ge=1, le=MAX_OVERSAMPLE)
+    k: StrictInt = Field(
+        default=1,
+        ge=1,
+        le=MAX_OVERSAMPLE,
+        description=(
+            "Trellis INPUT BITS PER STEP — 1 for every ordinary rate-1/n "
+            "convolutional code. This is NOT the datasheet's constraint "
+            "length K: K is implied by the widest poly's bit width."
+        ),
+    )
 
     @model_validator(mode="after")
     def _ok(self) -> "FecStep":
@@ -271,10 +280,21 @@ class FecStep(Step):
                 {"scheme": self.scheme, "known": ", ".join(sorted(_FEC_EMIT))},
             )
         if len(self.polys) != self.k * self.rate_inv:
+            # Naming the K confusion in the message is the fix for the one way
+            # this is reached in practice: a datasheet says "constraint length
+            # 7", k gets 7, and the demand jumps to 7*rate_inv polys.
             raise PydanticCustomError(
                 "value_error",
-                "need k*rate_inv={want} polys, got {have}",
-                {"want": self.k * self.rate_inv, "have": len(self.polys)},
+                "need k*rate_inv={want} polys, got {have}. k is the trellis "
+                "input bits per step (k=1 for an ordinary rate-1/{rate_inv} "
+                "code), NOT the datasheet's constraint length K — K comes "
+                "from the poly width, so a K=7 rate-1/{rate_inv} code is k=1 "
+                "with {rate_inv} seven-bit polys",
+                {
+                    "want": self.k * self.rate_inv,
+                    "have": len(self.polys),
+                    "rate_inv": self.rate_inv,
+                },
             )
         if self.frame_bits % self.k or self.tail % self.k:
             raise PydanticCustomError(
@@ -328,8 +348,12 @@ class Fec(Stage[CompileContext, FecStep]):
     name = "fec"
     description = (
         "Convolutional (Viterbi) decode of soft LLRs: scheme='cc' with "
-        "polys/rate_inv/k from the protocol datasheet; frame_bits per window. "
-        "Depuncture first when the code is punctured."
+        "polys and rate_inv from the protocol datasheet; frame_bits per "
+        "window. `k` is the trellis input bits per step and is 1 for every "
+        "ordinary rate-1/n code — it is NOT the datasheet's constraint "
+        "length K, which the poly width already carries (a K=7 rate-1/2 "
+        "code is k=1, rate_inv=2, two 7-bit polys). Depuncture first when "
+        "the code is punctured."
     )
     from_level = Level.BITS
     to_level = Level.BITS

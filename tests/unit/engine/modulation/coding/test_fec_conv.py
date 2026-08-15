@@ -299,3 +299,15 @@ def test_soft_llr_stream_reenters_a_fec_tail_through_run_rx(tmp_path: Path) -> N
     assert res.status == "ok", res
     assert res.bitstream is not None
     assert np.array_equal(read_bits(res.bitstream.path)[:frame_bits], info)
+
+
+def test_fec_k_confusion_with_constraint_length_is_named_in_the_error() -> None:
+    """Passing the datasheet's K=7 as k is THE way this validator is reached;
+    the message has to say so, or the reader adds 26 polys instead of 1."""
+    with pytest.raises(ValidationError) as exc:
+        Fec().step_model.model_validate(
+            {**_CC_PARAMS, "k": 7, "rate_inv": 4, "polys": [0o133, 0o171, 0o145, 0o133]}
+        )
+    msg = str(exc.value)
+    assert "constraint length" in msg
+    assert "input bits per step" in msg
