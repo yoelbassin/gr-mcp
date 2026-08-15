@@ -79,9 +79,20 @@ class OfdmFrameSyncProbe(Stage[CompileContext, OfdmFrameSyncProbeStep]):
 
     name = "ofdm_frame_sync_probe"
     description = (
-        "Observability probe: reports OFDM frame-sync candidates (null/CP "
-        "correlation) without demodulating - for measuring geometry before "
-        "committing to a demod spec."
+        "Observability probe: TESTS one OFDM geometry against a capture "
+        "without demodulating, for confirming fft_len/cp_len/null_len/"
+        "frame_len before committing to a demod spec. Reports four "
+        "diagnostics: `cp_corr`, the normalized cyclic-prefix correlation at "
+        "the assumed fft_len/cp_len and the figure that actually discriminates "
+        "— a matching geometry lands near 1 and a wrong fft_len or cp_len "
+        "collapses toward 0 (measured off-air: 0.99 correct vs 0.20 at a wrong "
+        "cp_len and 0.001 at a wrong fft_len); `frames_found`, whole frames "
+        "located; `null_offset`, where the first null symbol sits in the "
+        "slice; and `resync_drift_max`, how far a later null strayed from what "
+        "frame_len predicted, which is how a wrong frame_len or a sample-clock "
+        "error shows itself. Note frames_found alone does NOT confirm a "
+        "geometry — the null search finds the frame cadence whatever fft_len "
+        "and cp_len say, so read cp_corr."
     )
     from_level = Level.IQ
     to_level = Level.IQ

@@ -9,6 +9,7 @@ import numpy.typing as npt
 from marconi.engine.backends.gnuradio.embedded.lifecycle import (
     Diagnostics,
     OutQueue,
+    bump,
     forecast_drain,
 )
 from marconi.engine.modulation.ofdm import primitives as prim
@@ -96,11 +97,34 @@ class OfdmFrameSyncCore:
         self.out = OutQueue(np.complex64)
         # post-run value = usefuls of the open frame the stream ended short
         # of; the atomic-frame drop at EOF made visible
-        self.diagnostics: Diagnostics = {"truncated_frame_items": 0}
+        self.diagnostics: Diagnostics = {"truncated_frame_items": 0, "frames_found": 0}
         self._buf = np.empty(0, dtype=np.complex64)
         self._base: int | None = None
         self._emitted = False
         self._detect_len = geom.null_len + geom.usefuls_len
+        self._consumed = 0
+        self._drift_max = 0
+
+    def _measure_cp_corr(self, base: int) -> None:
+        """Normalized cyclic-prefix correlation over one frame at the ASSUMED
+        (fft_len, cp_len): each symbol's prefix against the tail of its own
+        useful part. This is the number that tells a right geometry from a
+        wrong one — a matching cp_len lands high (channel-limited), a wrong one
+        falls to the ~1/sqrt(cp_len) floor of unrelated samples — and without
+        it the probe reported frames whether or not its geometry was real."""
+        g = self.geom
+        num = 0j
+        den = 0.0
+        for m in range(g.data_syms + 1):
+            s = base + m * g.sym_len
+            if s + g.fft_len + g.cp_len > self._buf.size:
+                break
+            cp = self._buf[s : s + g.cp_len]
+            tail = self._buf[s + g.fft_len : s + g.fft_len + g.cp_len]
+            num += complex(np.vdot(tail, cp))
+            den += float(np.linalg.norm(cp)) * float(np.linalg.norm(tail))
+        if den > 0.0:
+            self.diagnostics["cp_corr"] = float(abs(num) / den)
 
     def usefuls_ready(self) -> bool:
         return (
@@ -153,6 +177,11 @@ class OfdmFrameSyncCore:
                     self._detect_len += g.frame_len
                 else:
                     self._buf = self._buf[g.frame_len :]
+                    self._consumed += g.frame_len
+        if self._base is not None and "null_offset" not in self.diagnostics:
+            # where the first null landed, in samples from the start of the
+            # slice: the anchor every geometry hypothesis is measured against
+            self.diagnostics["null_offset"] = self._consumed + self._base
 
     def _emit_frames(self) -> None:
         """A frame's usefuls emit once buffered — that alone flushes the final
@@ -165,17 +194,28 @@ class OfdmFrameSyncCore:
             if not self._emitted:
                 if self._base + g.usefuls_len > self._buf.size:
                     return
+                if not self.diagnostics["frames_found"]:
+                    self._measure_cp_corr(self._base)
                 self.out.push(self._frame_usefuls(self._base))
+                bump(self.diagnostics, "frames_found")
                 self._emitted = True
             if self._base + g.frame_len + g.max_corr > self._buf.size:
                 return
+            predicted = self._base + g.frame_len
             nb = _resync_base(
                 self._buf,
-                self._base + g.frame_len,
+                predicted,
                 null_len=g.null_len,
                 tol=g.tol,
                 max_corr=g.max_corr,
             )
+            # how far the next null sat from where frame_len predicted it: a
+            # frame_len that is wrong (or a sample-clock error) shows up here
+            # as a drift that grows frame over frame, and nothing else in the
+            # result distinguishes that from a clean lock.
+            self._drift_max = max(self._drift_max, abs(nb - predicted))
+            self.diagnostics["resync_drift_max"] = self._drift_max
+            self._consumed += nb
             self._buf = self._buf[nb:]
             self._base = 0
             self._emitted = False
