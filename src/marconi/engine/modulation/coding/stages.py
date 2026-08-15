@@ -20,7 +20,7 @@ from marconi.engine.types.bounds import (
 from marconi.engine.types.descriptor import Carrier, Descriptor
 from marconi.engine.types.enums import ItemType
 from marconi.engine.types.levels import Level
-from marconi.engine.types.perm import check_block_permutation
+from marconi.engine.types.perm import IndexList, check_block_permutation
 from marconi.engine.types.step import Step
 
 
@@ -44,7 +44,7 @@ def _codeword_frame_error(
 
 class DeinterleaveStep(Step):
     conv: Literal["deinterleave"] = "deinterleave"
-    perm: list[int]
+    perm: IndexList
 
     @model_validator(mode="after")
     def _permutes(self) -> "DeinterleaveStep":
@@ -90,7 +90,7 @@ class Deinterleave(Stage[CompileContext, DeinterleaveStep]):
 
 class DepunctureStep(Step):
     conv: Literal["depuncture"] = "depuncture"
-    keep_mask: list[int]
+    keep_mask: IndexList
 
     @model_validator(mode="after")
     def _keeps_something(self) -> "DepunctureStep":
@@ -420,8 +420,8 @@ class PolarStep(Step):
     conv: Literal["polar"] = "polar"
     block_size: StrictInt = Field(ge=2, le=MAX_FRAME_ITEMS)
     info_bits: StrictInt = Field(ge=1)
-    frozen_positions: list[int]
-    frozen_values: list[int]
+    frozen_positions: IndexList
+    frozen_values: IndexList
     # the decoder holds list_size full candidate paths at once
     list_size: StrictInt = Field(default=1, ge=1, le=MAX_LIST_SIZE)
 

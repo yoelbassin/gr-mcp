@@ -20,7 +20,7 @@ from marconi.engine.types.bounds import (
 from marconi.engine.types.descriptor import Carrier
 from marconi.engine.types.enums import DecodeMode, EmitMode, ItemType
 from marconi.engine.types.levels import Level
-from marconi.engine.types.perm import check_gather_indices
+from marconi.engine.types.perm import IndexList, check_gather_indices
 from marconi.engine.types.step import Step
 
 if TYPE_CHECKING:
@@ -473,7 +473,7 @@ class BlockCode(CodingStage[BlockCodeStep]):
 
 class PermuteStep(Step):
     conv: Literal["permute"] = "permute"
-    perm: list[int] = Field(min_length=1)
+    perm: IndexList = Field(min_length=1)
 
     @model_validator(mode="after")
     def _gathers(self) -> "PermuteStep":

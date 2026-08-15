@@ -17,7 +17,7 @@ from marconi.engine.types.bounds import MAX_DELAY_ITEMS, MAX_FRAME_ITEMS
 from marconi.engine.types.descriptor import Carrier, Descriptor
 from marconi.engine.types.enums import ItemType, PskOrder
 from marconi.engine.types.levels import Level
-from marconi.engine.types.perm import check_block_permutation
+from marconi.engine.types.perm import IndexList, check_block_permutation
 from marconi.engine.types.step import Step
 
 
@@ -126,7 +126,7 @@ class OfdmDemodStep(Step):
     frame_len: StrictInt = Field(le=MAX_FRAME_ITEMS)
     data_syms: StrictInt
     n_carriers: StrictInt
-    bin_perm: list[int]
+    bin_perm: IndexList
 
     @model_validator(mode="after")
     def _geometry(self) -> "OfdmDemodStep":
@@ -383,11 +383,11 @@ class OfdmCoherentSyncStep(Step):
     # warmup symbols up (see primitives.py) - below it the ratio's noise
     # distribution rises over the bar and pure AWGN locks
     warmup_syms: StrictInt = Field(ge=8, le=MAX_FRAME_ITEMS)
-    pilot_lens: list[int]
-    pilot_carriers: list[int]
+    pilot_lens: IndexList
+    pilot_carriers: IndexList
     pilot_i: list[float]
     pilot_q: list[float]
-    fp_carriers: list[int]
+    fp_carriers: IndexList
     fp_i: list[float]
     fp_q: list[float]
     # gt=0.0: zero clears every significance bar (ratio < 0.0 is never true,
@@ -595,7 +595,7 @@ class SoftDemap(Stage[CompileContext, SoftDemapStep]):
 
 class CellSelectStep(Step):
     conv: Literal["cell_select"] = "cell_select"
-    select_perm: list[int]
+    select_perm: IndexList
     keep: StrictInt = Field(ge=1)
 
     @model_validator(mode="after")

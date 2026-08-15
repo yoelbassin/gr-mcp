@@ -54,6 +54,7 @@ class SpecEnvelope(Payload):
     symbol_rate: str
     path: str
     unknown_params: str
+    index_lists: str
 
 
 class Envelope(Payload):
@@ -73,6 +74,20 @@ ENVELOPE = Envelope(
         # stated once here rather than as an additionalProperties:false line in
         # every per-stage schema, where it was identical and pure repetition
         unknown_params="rejected: every stage takes only the params in its schema",
+        # An index list is the largest thing a spec carries and the agent has
+        # to type it: one real multicarrier spec needed ~8200 literal ints, and
+        # a 3096-entry mask was miscounted by hand twice. Stated once here,
+        # since it applies to every int-list param rather than to any one stage.
+        index_lists=(
+            "any int-list param (perm, keep_mask, bin_perm, table, ...) may be "
+            "written literally OR compactly as {'range': [start, stop, step]}, "
+            "{'repeat': <list>, 'times': n}, {'concat': [<list>, ...]}, nested "
+            "freely, and a list may mix literal ints with those forms. A "
+            "puncturing mask or a strided de-interleave is a few tokens this "
+            "way instead of thousands, and its length becomes arithmetic "
+            "rather than something to count by hand. Expansion happens before "
+            "validation, so the same rules apply either way."
+        ),
     ),
     levels={lv.value: gloss for lv, gloss in _LEVEL_GLOSS.items()},
     item_types={t.value: gloss for t, gloss in _ITEM_GLOSS.items()},
