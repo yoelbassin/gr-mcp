@@ -317,3 +317,44 @@ def test_segments_accumulation_is_bounded(tmp_path: Path) -> None:
     res = survey_iq(_write(tmp_path, x), _FS)
     assert len(res.bursts.segments) <= 512
     assert res.bursts.count > 512  # the count is still the truth
+
+
+def _framed_noise(n: int, period: int, null_len: int, seed: int = 5) -> np.ndarray:
+    """A continuous noise-like emitter (an OFDM ensemble) that goes quiet for
+    null_len samples once per period. Never falls to the noise floor otherwise,
+    which is exactly why the floor-referenced burst bar cannot see the gaps."""
+    rng = np.random.default_rng(seed)
+    x = (rng.normal(0, 1, n) + 1j * rng.normal(0, 1, n)).astype(np.complex64)
+    for s in range(0, n - null_len, period):
+        x[s : s + null_len] *= np.complex64(0.001)
+    return x
+
+
+def test_a_periodic_null_in_an_always_on_emitter_reports_its_period(
+    tmp_path: Path,
+) -> None:
+    """The DAB frame null: a 1.3 ms gap every 96 ms in a signal 25 dB over the
+    floor. The burst bar is referenced to the noise floor, which this emitter
+    never touches, so it reported count 0, duty 0.0 and no period whatsoever —
+    and that null IS the frame marker a decode has to find."""
+    period, null_len = 196608, 2656
+    x = _framed_noise(1 << 21, period, null_len)
+    res = survey_iq(_write(tmp_path, x), _FS)
+    assert res.bursts.dropout_period_samples is not None
+    assert abs(res.bursts.dropout_period_samples - period) < 0.01 * period
+    # and the emitter is no longer reported as dead air
+    assert res.bursts.duty_cycle > 0.9
+
+
+def test_irregular_fading_dips_do_not_fabricate_a_period(tmp_path: Path) -> None:
+    """The mutation guard, and the reason the bar is REGULARITY: a Rayleigh
+    channel dips deep and often, but at random spacings. Same dip depth and a
+    comparable dip count as the framed case above — only the cadence differs."""
+    rng = np.random.default_rng(9)
+    n = 1 << 21
+    x = (rng.normal(0, 1, n) + 1j * rng.normal(0, 1, n)).astype(np.complex64)
+    starts = np.sort(rng.choice(n - 3000, size=n // 196608 + 8, replace=False))
+    for s in starts:
+        x[s : s + 2656] *= np.complex64(0.001)
+    res = survey_iq(_write(tmp_path, x), _FS)
+    assert res.bursts.dropout_period_samples is None

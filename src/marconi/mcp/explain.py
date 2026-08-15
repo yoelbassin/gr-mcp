@@ -262,6 +262,20 @@ amplitude-modulated emitter (QAM/OOK envelope) can
 still read duty 0.0 — its envelope minima are indistinguishable from a quiet
 band at sample scale — so read duty with the spectrum block, not alone.
 
+dropout_period_samples is the other half of that story, and is ABSENT unless
+found: the period of a REGULAR gap in an emitter that never leaves the air —
+a frame null rather than a burst gap. The activity bar is referenced to the
+noise floor, so a signal that never falls to it hides its gaps from the bar
+completely; this pass is referenced to the slice's own typical power instead
+and reports the cadence, which is usually the frame period a decode needs
+(measured off-air on a 96 ms-framed multicarrier broadcast: 196605 samples
+against a true 196608, from a
+capture whose burst block read count 0, duty 0.0, no period at all). The bar
+is REGULARITY of the spacings, not the depth of the dips: a Rayleigh channel
+dips just as deep and reports nothing, because its dips scatter and a frame
+null repeats to the sample. When both this and dominant_period_samples appear
+they corroborate — one is burst spacing, the other dropout spacing.
+
 segments is capped at 512 with a segments_total count and NO sidecar —
 re-window with capture_offset/capture_samples to inspect a busier span, which
 is the answer a truncated list should push toward anyway.

@@ -493,7 +493,10 @@ def survey(
                     cyclostationary and reports eye_confirmed false on OFDM;
                     this block is where a multicarrier signal answers.
     "bursts"      — segments, duty_cycle, dominant_period_samples,
-                    capture_scale.
+                    capture_scale, and (only when found)
+                    dropout_period_samples: the cadence of a REGULAR gap in an
+                    emitter that never leaves the air — a frame null, which
+                    the noise-floor-referenced activity bar cannot see at all.
 
     FOUR READINGS THAT MISLEAD IF TAKEN AT FACE VALUE — read the section named
     before concluding anything from them:

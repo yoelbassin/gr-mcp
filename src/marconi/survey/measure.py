@@ -897,6 +897,20 @@ _CARRIER_SHAPE_MIN = 0.3
 
 
 _MAX_INLINE_SEGMENTS = 512
+# A dropout is a stretch whose smoothed power sits below this fraction of the
+# slice's own typical in-band power. Well under the ~0.25 a Rayleigh envelope
+# reaches on its ordinary deep fades, so ordinary fading does not mint gaps.
+_DROPOUT_FRAC = 0.05
+# ...and the spacings must be a METRONOME to be reported: median absolute
+# deviation over median, across at least _DROPOUT_MIN_GAPS of them. A frame
+# null repeats to the sample (a 96 ms broadcast frame: 196608 every time, MAD 0); fading
+# dips scatter, and this is the whole discriminator between the two. The bar
+# is computed from the SPACINGS, never from the dip depths that found them.
+_DROPOUT_REGULARITY = 0.02
+_DROPOUT_MIN_GAPS = 3
+# ...and they must be dropouts IN something, not an idle band with occasional
+# energy: past this the slice is mostly gap and the burst pass owns the answer.
+_DROPOUT_MAX_FRACTION = 0.25
 
 
 class CaptureScale(Payload):
@@ -919,6 +933,13 @@ class BurstStats(Payload):
     count: int
     duty_cycle: float
     dominant_period_samples: int | None
+    # Period of a REGULAR dropout cadence in an emitter that never leaves the
+    # air — a frame null, not a burst gap — ABSENT unless one was found. The
+    # burst bar is referenced to the noise floor, which a signal that never
+    # falls to it hides from completely: an off-air multicarrier ensemble 25 dB up,
+    # with a 1.3 ms null every 96 ms, reported count 0, duty 0.0 and no period
+    # at all, and that null is exactly the frame marker a decode needs.
+    dropout_period_samples: int | None = None
     segments: list[tuple[int, int]]
     segments_total: int | None = None
     capture_scale: CaptureScale | None = None
@@ -934,6 +955,7 @@ class BurstStats(Payload):
             count=self.count,
             duty_cycle=self.duty_cycle,
             dominant_period_samples=self.dominant_period_samples,
+            dropout_period_samples=self.dropout_period_samples,
             segments=list(self.segments[:_MAX_INLINE_SEGMENTS]),
             # the retained list is itself capped now, so truncation is
             # count vs shipped, never the length of what was held in memory
@@ -991,6 +1013,10 @@ def _probe_stats(block: npt.NDArray[np.complex64]) -> _ProbeStats:
 class _ActivityReference:
     threshold: float
     continuous_duty: float | None
+    # the slice's own typical in-band power, the reference a DROPOUT is
+    # measured against (the noise floor cannot see a gap in a signal that
+    # never drops to it)
+    typical: float = 0.0
 
 
 def _activity_reference(path: Path, offset: int, length: int) -> _ActivityReference:
@@ -1022,7 +1048,9 @@ def _activity_reference(path: Path, offset: int, length: int) -> _ActivityRefere
         else None
     )
     return _ActivityReference(
-        threshold=_SURVEY_BURST_RATIO * floor, continuous_duty=continuous_duty
+        threshold=_SURVEY_BURST_RATIO * floor,
+        continuous_duty=continuous_duty,
+        typical=typical,
     )
 
 
@@ -1048,8 +1076,14 @@ def _bursts(path: Path, offset: int, length: int) -> BurstStats:
         if len(segs) < _MAX_INLINE_SEGMENTS:
             segs.append((seg[0], seg[1] - seg[0]))
 
+    gap_thr = _DROPOUT_FRAC * ref.typical
+    gap_starts: list[int] = []
+    gap_total = 0
+    gap_pending: list[int] | None = None
+
     for block in iter_iq(path, offset, length):
-        mask = _smooth_power(block) > thr
+        power = _smooth_power(block)
+        mask = power > thr
         active_total += int(mask.sum())
         for s, e in _find_runs(mask):
             gs, ge = pos + s, pos + e
@@ -1059,9 +1093,22 @@ def _bursts(path: Path, offset: int, length: int) -> BurstStats:
                 if pending is not None:
                     commit(pending)
                 pending = [gs, ge]
+        if gap_thr > 0.0:
+            for s, e in _find_runs(power < gap_thr):
+                gs, ge = pos + s, pos + e
+                if gap_pending is not None and gs - gap_pending[1] <= 1:
+                    gap_pending[1] = ge
+                else:
+                    if gap_pending is not None:
+                        gap_starts.append(gap_pending[0])
+                        gap_total += gap_pending[1] - gap_pending[0]
+                    gap_pending = [gs, ge]
         pos += int(block.size)
     if pending is not None:
         commit(pending)
+    if gap_pending is not None:
+        gap_starts.append(gap_pending[0])
+        gap_total += gap_pending[1] - gap_pending[0]
     starts = [s for s, _ in segs]
     deltas = np.diff(starts)
     dom = int(np.median(deltas)) if deltas.size else None
@@ -1072,12 +1119,39 @@ def _bursts(path: Path, offset: int, length: int) -> BurstStats:
         # whole time, not absent — "always on" and "never on" both stream zero
         # bursts, and only this distinction separates them.
         duty = _sig(ref.continuous_duty)
+    # Measured whatever the burst pass did: when bursts were found it
+    # corroborates their cadence, and when they were not it is the only thing
+    # that can see the emitter at all.
+    dropout = _dropout_period(gap_starts, gap_total, pos)
+    if dropout is not None and count == 0:
+        # A regular dropout cadence is positive proof the emitter is ON — the
+        # gaps are gaps IN something. Reported duty had been 0.0 on a multicarrier
+        # ensemble 25 dB over the floor, because a Rayleigh envelope fails the
+        # carrier-shape gate above and nothing else could see the frame nulls.
+        duty = _sig(1.0 - gap_total / pos) if pos else duty
     return BurstStats(
         count=count,
         duty_cycle=duty,
         dominant_period_samples=dom,
+        dropout_period_samples=dropout,
         segments=segs,
     )
+
+
+def _dropout_period(starts: list[int], gap_total: int, span: int) -> int | None:
+    """The period of a REGULAR dropout cadence in an always-on emitter — a
+    frame null — or None. The regularity bar is what separates a metronome
+    from deep fading, and it is computed from the spacings alone."""
+    if len(starts) < _DROPOUT_MIN_GAPS or span <= 0:
+        return None
+    if gap_total > _DROPOUT_MAX_FRACTION * span:
+        return None
+    deltas = np.diff(np.asarray(starts, dtype=np.float64))
+    med = float(np.median(deltas))
+    if med <= 0.0:
+        return None
+    mad = float(np.median(np.abs(deltas - med)))
+    return int(med) if mad / med <= _DROPOUT_REGULARITY else None
 
 
 class SurveyResult(Payload):
