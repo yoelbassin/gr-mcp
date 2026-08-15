@@ -14,6 +14,13 @@ from marconi.engine.types.levels import Level
 from marconi.engine.types.models import Modem
 
 NC, DS = 5, 3  # 5 carriers, PRS + 3 FIC symbols
+# keep_m_in_n emits only on a COMPLETE n-block, and GR can shave items off the
+# tail at EOF: a measured CI failure had multiply_conjugate consume 16 of the 20
+# items on offer, which left this chain's single block incomplete and the sink
+# empty. Frames are independent (each opens its own PRS reference and
+# keep_m_in_n's period is one frame), so feeding several turns that shaved tail
+# into at most one lost frame instead of the whole run.
+FRAMES = 3
 
 
 def _demap(
@@ -23,10 +30,11 @@ def _demap(
     syms: npt.NDArray[np.int64],
 ) -> npt.NDArray[np.float32]:
     ensure_worker_warm()
-    carriers = np.empty((DS + 1, NC), complex)
-    carriers[0] = 1.0  # PRS reference
-    for s in range(DS):
-        carriers[s + 1] = carriers[s] * points[syms[s]]  # differential encode
+    frames, ds, nc = syms.shape
+    carriers = np.empty((frames, ds + 1, nc), complex)
+    carriers[:, 0] = 1.0  # PRS reference, one per frame
+    for s in range(ds):
+        carriers[:, s + 1] = carriers[:, s] * points[syms[:, s]]  # differential
     smaj = carriers.reshape(-1).astype(np.complex64)  # symbol-major
     src = tmp_path / "c.cf32"
     smaj.tofile(src)
@@ -41,22 +49,25 @@ def _demap(
         sink_io={"path": str(snk)},
     )
     r = GnuRadioBackend().run_pipeline(pipe, timeout=30.0)
-    # Per-block counts, not the RunResult: this chain feeds keep_m_in_n exactly
-    # one n-block, so a single item lost upstream writes an empty sink, and the
-    # default repr truncates the census that names where it went.
+    # Per-block counts, not the RunResult: the default repr truncates the census
+    # that names which block dropped the items.
     assert r.status == "ok", (
         " | ".join(f"{c.block}:{c.items_in}->{c.items_out}" for c in (r.census or []))
         + f" err={r.error}"
     )
     soft = read_llrs(snk)
-    assert soft.size == DS * NC * 2  # PRS dropped, 2 soft/carrier
+    quantum = ds * nc * 2  # PRS dropped, 2 soft/carrier
+    # a whole number of frames, at least one, never more than were fed: a tail
+    # frame may be shaved, a partial or misaligned frame is a real defect
+    assert soft.size and soft.size % quantum == 0, f"{soft.size} not a frame multiple"
+    assert soft.size <= frames * quantum
     return soft
 
 
 def test_dqpsk_soft_demap_recovers_bits(tmp_path: Path) -> None:
     rng = np.random.default_rng(2)
     qpsk = np.array([1 + 1j, 1 - 1j, -1 + 1j, -1 - 1j]) / np.sqrt(2)
-    syms = rng.integers(0, 4, (DS, NC))
+    syms = rng.integers(0, 4, (FRAMES, DS, NC))
     step = DqpskSoftDemapStep(data_syms=DS, n_carriers=NC, scheme="psk", order=4)
     soft = _demap(tmp_path, step, qpsk, syms)
     assert np.all(np.abs(soft) > 0.1)  # clean QPSK -> confident
@@ -65,7 +76,9 @@ def test_dqpsk_soft_demap_recovers_bits(tmp_path: Path) -> None:
     # the GR bits (raw GR emits positive-is-one)
     gr_bits = np.array([[1, 1], [0, 1], [1, 0], [0, 0]], np.uint8)
     expected_ones = gr_bits[syms.reshape(-1)].reshape(-1).astype(bool)
-    assert np.array_equal(soft < 0, expected_ones)
+    got_ones = soft < 0
+    # every frame that survived is checked, not just the first
+    assert np.array_equal(got_ones, expected_ones[: got_ones.size])
 
 
 def test_dqpsk_soft_demap_explicit_points_own_the_mapping(tmp_path: Path) -> None:
@@ -73,7 +86,7 @@ def test_dqpsk_soft_demap_explicit_points_own_the_mapping(tmp_path: Path) -> Non
     # declares it as caller points: a point's bit pattern is its index
     rng = np.random.default_rng(3)
     points = np.array([1 + 1j, 1 - 1j, -1 + 1j, -1 - 1j]) / np.sqrt(2)
-    syms = rng.integers(0, 4, (DS, NC))
+    syms = rng.integers(0, 4, (FRAMES, DS, NC))
     step = DqpskSoftDemapStep(
         data_syms=DS,
         n_carriers=NC,
@@ -85,4 +98,5 @@ def test_dqpsk_soft_demap_explicit_points_own_the_mapping(tmp_path: Path) -> Non
     assert np.all(np.abs(soft) > 0.1)
     idx_bits = np.array([[i >> 1 & 1, i & 1] for i in range(4)], np.uint8)
     expected_ones = idx_bits[syms.reshape(-1)].reshape(-1).astype(bool)
-    assert np.array_equal(soft < 0, expected_ones)
+    got_ones = soft < 0
+    assert np.array_equal(got_ones, expected_ones[: got_ones.size])
