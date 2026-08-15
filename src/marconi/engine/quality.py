@@ -116,14 +116,28 @@ class QualityReport(BaseModel):
     margin: float | None = None
 
 
-def verdict_from(evidence: Sequence[QualityEvidence]) -> tuple[Verdict, str]:
+def verdict_from(
+    evidence: Sequence[QualityEvidence], *, soft_stream: bool = False
+) -> tuple[Verdict, str]:
     positives = [e for e in evidence if e.assessment is Assessment.POSITIVE]
     negatives = [e for e in evidence if e.assessment is Assessment.NEGATIVE]
     if not evidence:
+        # "no soft stream" is a claim about the RESULT, and the result ships
+        # soft_stream beside this sentence with a margin computed from it. A
+        # reader who believes the rationale stops looking for the stream they
+        # were handed. Say which of the two it is: absent, or present and
+        # short of the bar.
+        soft_note = (
+            "a soft stream that earned no evidence — its decisions did not "
+            "clear the gates a decode claim needs, so rank it by margin "
+            "rather than trusting it"
+            if soft_stream
+            else "no soft stream"
+        )
         return Verdict.UNCERTAIN, (
-            "path produces no checkable evidence (no sync matches beyond "
-            "chance, no soft stream, no validating decoder); bits out does "
-            "not mean signal in"
+            f"path produces no checkable evidence (no sync matches beyond "
+            f"chance, {soft_note}, no validating decoder); bits out does "
+            f"not mean signal in"
         )
     # Only evidence of the same grade can rebut a negative. A DETECTION
     # positive says a signal is PRESENT, which is not a claim about the decode
@@ -924,7 +938,7 @@ def assess_quality(
         + dominance_evidence(diagnostics)
         + soft
     )
-    verdict, rationale = verdict_from(evidence)
+    verdict, rationale = verdict_from(evidence, soft_stream=soft_stream is not None)
     if caveat is not None:
         # rides the rationale the tool docstring already sends the agent to,
         # rather than a new wire field every clean run would pay tokens for.

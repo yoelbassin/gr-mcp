@@ -488,3 +488,17 @@ def test_margin_ranks_runs_the_verdict_cannot_separate(tmp_path: Path) -> None:
     write_llrs(p, rng.choice([-1.0, 1.0], 4000).astype(np.float32))
     _, _, margin = quality._soft_reading(p)
     assert margin is None
+
+
+def test_an_unconvincing_soft_stream_is_not_reported_as_absent() -> None:
+    """The DAB FIC demap case: a real soft stream that clears no evidence gate
+    and raises no caveat, so the no-evidence sentence ships verbatim. The
+    result carries soft_stream AND a margin computed from it beside that
+    sentence, so "no soft stream" contradicted its own payload and sent the
+    reader looking for something they had already been handed."""
+    _, present = quality.verdict_from([], soft_stream=True)
+    assert "no soft stream" not in present
+    assert "earned no evidence" in present
+
+    _, absent = quality.verdict_from([], soft_stream=False)
+    assert "no soft stream" in absent
